@@ -1,12 +1,12 @@
 [book]
-title = "Patches Manual — v0.5.0"
+title = "Patches Manual — v0.5.1"
 authors = ["Vulpus Labs"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/poetix/patches"
-edit-url-template = "https://github.com/poetix/patches/edit/main/docs/src/{path}"
+git-repository-url = "https://github.com/Vulpus-Labs/patches"
+edit-url-template = "https://github.com/Vulpus-Labs/patches/edit/main/docs/src/{path}"
 
 [output.pandoc]
 
