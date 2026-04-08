@@ -41,3 +41,26 @@ module mix : StereoMixer(channels: 3) {
     level[2]: 0.5, pan[2]:  0.7
 }
 ```
+
+### At-block shorthand
+
+The `@` block groups parameters for the same index, avoiding repetition:
+
+```patches
+module mix : StereoMixer(channels: 3) {
+    @0: { level: 0.8, pan:  0.0 },
+    @1: { level: 0.5, pan: -0.7 },
+    @2: { level: 0.5, pan:  0.7 }
+}
+```
+
+When the arity declares named aliases (`channels: [drums, bass, lead]`),
+you can use alias-based indexing:
+
+```patches
+module mix : StereoMixer(channels: [drums, bass, lead]) {
+    @drums: { level: 0.8 },
+    @bass:  { level: 0.6 },
+    @lead:  { level: 0.7, pan: 0.3 }
+}
+```

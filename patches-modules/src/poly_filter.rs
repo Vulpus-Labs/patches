@@ -13,13 +13,34 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// Polyphonic resonant lowpass filter (biquad, Transposed Direct Form II).
 ///
 /// Each of the 16 voices processes the corresponding channel of the poly
-/// audio input through an independent biquad state. When `cutoff_cv` or
-/// `resonance_cv` are connected, per-voice effective parameters are computed
-/// every [`COEFF_UPDATE_INTERVAL`] samples and interpolated between updates.
-/// When neither CV input is connected a single static coefficient set is
-/// shared across all voices.
+/// audio input through an independent biquad state. Registered as `"PolyLowpass"`.
 ///
-/// Registered under the name `"PolyLowpass"`.
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Audio signal to filter per voice |
+/// | `voct` | poly | V/oct offset added to cutoff per voice |
+/// | `fm` | poly | FM sweep per voice |
+/// | `resonance_cv` | poly | Additive offset for normalised resonance per voice |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Filtered signal per voice |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0 -- 12.0 | `6.0` | Base cutoff as V/oct above C0 |
+/// | `resonance` | float | 0.0 -- 1.0 | `0.0` | Resonance (0 = Butterworth, 1 = max) |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
+///
+/// When neither `voct`, `fm`, nor `resonance_cv` is connected, a single static
+/// coefficient set is shared across all voices. When CV inputs are connected,
+/// per-voice coefficients are computed periodically and interpolated between updates.
 pub struct PolyResonantLowpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -168,10 +189,33 @@ impl PeriodicUpdate for PolyResonantLowpass {
 
 // ── PolyResonantHighpass ──────────────────────────────────────────────────
 
-/// Polyphonic resonant highpass filter. Identical layout to
-/// [`PolyResonantLowpass`]; uses `compute_biquad_highpass` for coefficients.
+/// Polyphonic resonant highpass filter (biquad, Transposed Direct Form II).
 ///
-/// Registered under the name `"PolyHighpass"`.
+/// Same port layout, parameter ranges, and CV semantics as [`PolyResonantLowpass`];
+/// differs only in the coefficient formula. Registered as `"PolyHighpass"`.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Audio signal to filter per voice |
+/// | `voct` | poly | V/oct offset added to cutoff per voice |
+/// | `fm` | poly | FM sweep per voice |
+/// | `resonance_cv` | poly | Additive offset for normalised resonance per voice |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Filtered signal per voice |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0 -- 12.0 | `6.0` | Base cutoff as V/oct above C0 |
+/// | `resonance` | float | 0.0 -- 1.0 | `0.0` | Resonance (0 = Butterworth, 1 = max) |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
 pub struct PolyResonantHighpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -320,13 +364,33 @@ impl PeriodicUpdate for PolyResonantHighpass {
 
 // ── PolyResonantBandpass ──────────────────────────────────────────────────
 
-/// Polyphonic resonant bandpass filter (constant 0 dB peak gain).
+/// Polyphonic resonant bandpass filter (biquad, constant 0 dB peak gain).
 ///
-/// Parameters use `center`/`bandwidth_q` matching the mono `ResonantBandpass`.
-/// The second CV input port is named `"resonance_cv"` in the descriptor
-/// (consistent with the mono convention) and modulates `bandwidth_q` additively.
+/// Registered as `"PolyBandpass"`. The `resonance_cv` port modulates
+/// `bandwidth_q` additively (matching the mono `ResonantBandpass` convention).
 ///
-/// Registered under the name `"PolyBandpass"`.
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Audio signal to filter per voice |
+/// | `voct` | poly | V/oct offset added to centre frequency per voice |
+/// | `fm` | poly | FM sweep per voice |
+/// | `resonance_cv` | poly | Additive offset for `bandwidth_q` per voice |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Filtered signal per voice |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `center` | float | -2.0 -- 12.0 | `6.0` | Centre frequency as V/oct above C0 |
+/// | `bandwidth_q` | float | 0.1 -- 20.0 | `1.0` | Filter Q; higher values narrow the passband |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
 pub struct PolyResonantBandpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

@@ -1,5 +1,9 @@
 # Dynamics
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `Limiter` — Lookahead peak limiter
 
 Transparent peak limiter with true lookahead. The `attack_ms` parameter

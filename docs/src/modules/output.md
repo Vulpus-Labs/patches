@@ -1,5 +1,9 @@
 # Audio output
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `AudioOut` — Stereo audio output
 
 Sends signals to the left and right channels of the system audio output.

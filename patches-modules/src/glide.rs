@@ -8,11 +8,25 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 ///
 /// Smooths V/OCT pitch values using a one-pole low-pass filter. Because V/OCT
 /// is a log-frequency scale (1 V/OCT = 1 octave), interpolating linearly in
-/// V/OCT space gives perceptually linear (constant-ratio) glide. The glide
-/// time is set via the `"glide_ms"` parameter.
+/// V/OCT space gives perceptually linear (constant-ratio) glide.
 ///
-/// Constructed via the Module v2 protocol: `describe` → `prepare` →
-/// `update_validated_parameters`.
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | V/OCT pitch signal |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Smoothed V/OCT pitch |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `glide_ms` | float | 0.0--10000.0 | `100.0` | Glide time in milliseconds |
 pub struct Glide {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

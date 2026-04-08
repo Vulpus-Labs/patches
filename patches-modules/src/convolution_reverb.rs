@@ -1,9 +1,44 @@
 //! Convolution reverb module.
 //!
 //! Uses uniform partitioned overlap-save convolution running on a dedicated
-//! processing thread. Input/output transport between the audio thread and the
-//! processor uses a `SlotDeck` `OverlapBuffer` with `overlap_factor = 1` (no
-//! windowing) — the convolver handles its own overlap internally.
+//! processing thread. Defines [`ConvolutionReverb`] (mono) and
+//! [`StereoConvReverb`] (stereo).
+//!
+//! # Inputs (ConvolutionReverb / mono)
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in` | mono | Audio input |
+//! | `mix` | mono | Dry/wet CV (0--1 added to parameter) |
+//!
+//! # Outputs (ConvolutionReverb / mono)
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out` | mono | Audio output |
+//!
+//! # Inputs (StereoConvReverb / stereo)
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in_left` | mono | Left audio input |
+//! | `in_right` | mono | Right audio input |
+//! | `mix` | mono | Dry/wet CV (0--1 added to parameter) |
+//!
+//! # Outputs (StereoConvReverb / stereo)
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out_left` | mono | Left audio output |
+//! | `out_right` | mono | Right audio output |
+//!
+//! # Parameters (both variants)
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `mix` | float | 0.0--1.0 | `1.0` | Dry/wet mix |
+//! | `ir` | enum | room/hall/plate/file | `room` | Impulse response variant |
+//! | `path` | str | -- | `""` | File path for `ir: file` variant |
 //!
 //! # Real-time safety
 //!
@@ -13,22 +48,6 @@
 //! For parameter updates to surviving modules ([`update_validated_parameters`]),
 //! an [`IrLoader`] background thread handles the heavy work. The audio thread
 //! only stashes a request and polls for results in [`periodic_update`].
-//!
-//! # Ports
-//!
-//! | Direction | Name  | Kind | Description                          |
-//! |-----------|-------|------|--------------------------------------|
-//! | In        | `in`  | Mono | Audio input                          |
-//! | In        | `mix` | Mono | Dry/wet CV (0–1 added to parameter)  |
-//! | Out       | `out` | Mono | Audio output                         |
-//!
-//! # Parameters
-//!
-//! | Name   | Type   | Range   | Default | Description                          |
-//! |--------|--------|---------|---------|--------------------------------------|
-//! | `mix`  | Float  | 0 .. 1  | 1.0     | Dry/wet mix                          |
-//! | `ir`   | Enum   | 0 .. 3  | 0       | Impulse response variant             |
-//! | `path` | String | —       | ""      | File path for `ir: file` variant     |
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -467,6 +486,9 @@ fn ir_loader_main(
 // Module: ConvolutionReverb (Mono)
 // ---------------------------------------------------------------------------
 
+/// Mono convolution reverb.
+///
+/// See [module-level documentation](self) for port and parameter tables.
 pub struct ConvolutionReverb {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -747,28 +769,12 @@ impl PeriodicUpdate for ConvolutionReverb {
 // StereoConvReverb
 // ===========================================================================
 
-/// Stereo convolution reverb — two independent convolvers (L/R) sharing
+/// Stereo convolution reverb -- two independent convolvers (L/R) sharing
 /// parameters. Stereo impulse files use left/right channels directly; mono
 /// impulse files duplicate to both channels. Synthetic IRs use decorrelated
 /// noise per channel for natural stereo width.
 ///
-/// # Ports
-///
-/// | Direction | Name    | Kind | Description                          |
-/// |-----------|---------|------|--------------------------------------|
-/// | In        | `in_l`  | Mono | Left audio input                     |
-/// | In        | `in_r`  | Mono | Right audio input                    |
-/// | In        | `mix`   | Mono | Dry/wet CV (0–1 added to parameter)  |
-/// | Out       | `out_l` | Mono | Left audio output                    |
-/// | Out       | `out_r` | Mono | Right audio output                   |
-///
-/// # Parameters
-///
-/// | Name   | Type   | Range   | Default | Description                      |
-/// |--------|--------|---------|---------|----------------------------------|
-/// | `mix`  | Float  | 0 .. 1  | 1.0     | Dry/wet mix                      |
-/// | `ir`   | Enum   | 0 .. 3  | 0       | Impulse response variant         |
-/// | `path` | String | —       | ""      | File path for `ir: file` variant |
+/// See [module-level documentation](self) for port and parameter tables.
 pub struct StereoConvReverb {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

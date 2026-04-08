@@ -4,11 +4,11 @@ use patches_core::{
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
-/// Analog ring modulator based on Julian Parker's diode-bridge model
-/// (DAFx-11, "A Simple Digital Model of the Diode-Based Ring-Modulator").
+/// Analog ring modulator based on Julian Parker's diode-bridge model.
 ///
-/// The circuit is emulated as two diode blocks driven by the carrier in
-/// opposite polarity, with the outputs subtracted:
+/// Based on the DAFx-11 paper "A Simple Digital Model of the Diode-Based
+/// Ring-Modulator". The circuit is emulated as two diode blocks driven by
+/// the carrier in opposite polarity, with the outputs subtracted:
 ///
 /// ```text
 /// out = DiodeBlock(signal + carrier×0.5)
@@ -23,23 +23,28 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 ///
 /// where `diode` is zero for negative inputs and applies a polynomial
 /// fit to the diode I–V curve followed by a tanh soft-clip for positive
-/// inputs. The `drive` parameter (in dB) sets the operating point on the
-/// diode curve: low drive keeps the signal in the quasi-linear region
+/// inputs. The `drive` parameter sets the operating point on the diode
+/// curve: low drive keeps the signal in the quasi-linear region
 /// (near-ideal multiplication), higher drive introduces harmonic coloring.
 ///
-/// ## Port layout
+/// # Inputs
 ///
-/// | Port       | Kind | Description               |
-/// |------------|------|---------------------------|
-/// | `signal/0` | Mono | Audio signal to modulate  |
-/// | `carrier/0`| Mono | Carrier / modulator signal |
-/// | `out/0`    | Mono | Ring-modulated output      |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `signal` | mono | Audio signal to modulate |
+/// | `carrier` | mono | Carrier / modulator signal |
 ///
-/// ## Parameters
+/// # Outputs
 ///
-/// | Name    | Range (dB)  | Default | Description            |
-/// |---------|-------------|---------|------------------------|
-/// | `drive` | [0.2, 20.0] | 1.0     | Diode operating point  |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Ring-modulated output |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `drive` | float | 0.2--20.0 | `1.0` | Diode operating point |
 pub struct RingMod {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

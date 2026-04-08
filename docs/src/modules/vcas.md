@@ -1,5 +1,9 @@
 # Amplifiers & VCAs
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `Vca` — Mono voltage-controlled amplifier
 
 Multiplies an audio signal by a control signal.

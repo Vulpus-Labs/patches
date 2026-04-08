@@ -9,24 +9,29 @@ use patches_dsp::{SvfKernel, svf_f, q_to_damp};
 
 /// State Variable Filter (Chamberlin topology) with simultaneous LP, HP, and BP outputs.
 ///
-/// **Port layout**
+/// # Inputs
 ///
-/// | Index | Name        | Direction | Description                                    |
-/// |-------|-------------|-----------|------------------------------------------------|
-/// | 0     | `in`        | input     | Audio signal to filter                         |
-/// | 1     | `voct`      | input     | V/oct offset added to cutoff (1.0 = +1 octave) |
-/// | 2     | `fm`        | input     | FM sweep: ±1 sweeps ±2 octaves around cutoff   |
-/// | 3     | `q_cv`      | input     | Additive Q offset; clamped to [0, 1]           |
-/// | 0     | `lowpass`   | output    | Lowpass output                                 |
-/// | 1     | `highpass`  | output    | Highpass output                                |
-/// | 2     | `bandpass`  | output    | Bandpass output                                |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Audio signal to filter |
+/// | `voct` | mono | V/oct offset added to cutoff (1.0 = +1 octave) |
+/// | `fm` | mono | FM sweep: +/-1 sweeps +/-2 octaves around cutoff |
+/// | `q_cv` | mono | Additive Q offset; clamped to [0, 1] |
 ///
-/// **Parameters**
+/// # Outputs
 ///
-/// | Name     | Range          | Default | Description                               |
-/// |----------|----------------|---------|-------------------------------------------|
-/// | `cutoff` | −2–12 (V/oct)  | 6.0     | Base cutoff as V/oct above C0             |
-/// | `q`      | 0.0–1.0        | 0.0     | Resonance (0 = flat/Butterworth, 1 = max) |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `lowpass` | mono | Lowpass output |
+/// | `highpass` | mono | Highpass output |
+/// | `bandpass` | mono | Bandpass output |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0--12.0 (V/oct) | `6.0` | Base cutoff as V/oct above C0 |
+/// | `q` | float | 0.0--1.0 | `0.0` | Resonance (0 = flat/Butterworth, 1 = max) |
 ///
 /// When `voct`, `fm`, and `q_cv` are all disconnected the filter coefficients
 /// are computed once per parameter change (static path). When any CV is

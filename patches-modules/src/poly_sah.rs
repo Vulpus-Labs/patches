@@ -4,8 +4,23 @@ use patches_core::{
 };
 use patches_core::parameter_map::ParameterMap;
 
-/// Polyphonic sample-and-hold. On each rising edge of the mono `trig` (threshold 0.5),
-/// all 16 voice values from `in` are latched and held on `out`.
+/// Polyphonic sample-and-hold.
+///
+/// On each rising edge of the mono `trig` (threshold 0.5), all 16 voice
+/// values from `in` are latched and held on `out`.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Signal to sample (per-voice) |
+/// | `trig` | mono | Trigger input (rising edge at 0.5 threshold) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Held sample values (per-voice) |
 pub struct PolySah {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

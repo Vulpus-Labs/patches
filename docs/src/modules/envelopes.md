@@ -1,5 +1,9 @@
 # Envelopes
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `Adsr` — Mono ADSR envelope
 
 A standard Attack-Decay-Sustain-Release envelope generator.

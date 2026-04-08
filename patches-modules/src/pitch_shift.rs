@@ -2,26 +2,31 @@
 //!
 //! Uses WOLA (weighted overlap-add) with a phase-vocoder pitch shifter running
 //! on a dedicated processing thread. Parameters and CV values propagate to the
-//! processing thread via shared atomics — no mutex, no allocation on the audio
+//! processing thread via shared atomics -- no mutex, no allocation on the audio
 //! thread.
 //!
-//! # Ports
+//! # Inputs
 //!
-//! | Direction | Name   | Kind | Description                          |
-//! |-----------|--------|------|--------------------------------------|
-//! | In        | `in`   | Mono | Audio input                          |
-//! | In        | `pitch`| Mono | Pitch CV ([-1,1] → [-12,12] semitones) |
-//! | In        | `mix`  | Mono | Dry/wet CV (added to parameter, clamped 0–1) |
-//! | Out       | `out`  | Mono | Audio output                         |
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in` | mono | Audio input |
+//! | `pitch` | mono | Pitch CV ([-1,1] maps to [-12,12] semitones) |
+//! | `mix` | mono | Dry/wet CV (added to parameter, clamped 0--1) |
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out` | mono | Audio output |
 //!
 //! # Parameters
 //!
-//! | Name       | Type  | Range       | Default | Description                    |
-//! |------------|-------|-------------|---------|--------------------------------|
-//! | `semitones`| Float | -24 .. 24   | 0.0     | Base pitch shift in semitones  |
-//! | `mix`      | Float |  0 .. 1     | 1.0     | Dry/wet mix                    |
-//! | `formants` | Bool  |             | false   | Preserve formant envelope      |
-//! | `mono`     | Bool  |             | false   | Mono mode (region-based shift) |
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `semitones` | float | -24.0--24.0 | `0.0` | Base pitch shift in semitones |
+//! | `mix` | float | 0.0--1.0 | `1.0` | Dry/wet mix |
+//! | `formants` | bool | -- | `false` | Preserve formant envelope |
+//! | `mono` | bool | -- | `false` | Mono mode (region-based shift) |
 
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;

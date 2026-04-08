@@ -18,6 +18,32 @@ const DRIFT_PERIOD: u8 = 64;
 /// All share the same phase; only connected outputs are computed each sample.
 /// The `frequency` parameter is a V/OCT offset from C0 (≈ 16.35 Hz):
 /// `0.0` → C0, `1.0` → C1, `4.0` → C4 (middle C). Applied before any `voct` CV.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `voct` | mono | V/oct pitch CV added to base frequency |
+/// | `fm` | mono | Frequency modulation input |
+/// | `pulse_width_cv` | mono | Pulse width modulation for the square output |
+/// | `phase_mod` | mono | Phase modulation offset applied to all waveforms |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `sine` | mono | Sine waveform |
+/// | `triangle` | mono | Triangle waveform |
+/// | `sawtooth` | mono | Sawtooth waveform (PolyBLEP anti-aliased) |
+/// | `square` | mono | Square waveform (PolyBLEP anti-aliased, PWM via `pulse_width_cv`) |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `frequency` | float | -4.0 -- 12.0 | `0.0` | Base pitch as V/oct offset from C0 |
+/// | `fm_type` | enum | linear, logarithmic | `linear` | FM modulation mode |
+/// | `drift` | float | 0.0 -- 1.0 | `0.0` | Pitch drift amount (per-instance random walk + global drift) |
 pub struct Oscillator {
     instance_id: InstanceId,
     phase_acc: MonoPhaseAccumulator,

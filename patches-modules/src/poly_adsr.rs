@@ -10,16 +10,27 @@ use patches_dsp::AdsrCore;
 /// Maintains one envelope state machine per voice. Shared ADSR parameters apply to all
 /// voices. Each voice is driven by its own trigger/gate channel from the poly inputs.
 ///
-/// ## Input ports
-/// | Index | Name      | Kind |
-/// |-------|-----------|------|
-/// | 0     | `trigger` | Poly |
-/// | 1     | `gate`    | Poly |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `out` | Poly |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `trigger` | poly | Rising edge starts Attack phase per voice |
+/// | `gate` | poly | Held high to sustain; release to enter Release phase per voice |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Envelope level in [0.0, 1.0] per voice |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `attack` | float | 0.001 -- 10.0 | `0.01` | Attack time in seconds |
+/// | `decay` | float | 0.001 -- 10.0 | `0.1` | Decay time in seconds |
+/// | `sustain` | float | 0.0 -- 1.0 | `0.7` | Sustain level |
+/// | `release` | float | 0.001 -- 10.0 | `0.3` | Release time in seconds |
 pub struct PolyAdsr {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

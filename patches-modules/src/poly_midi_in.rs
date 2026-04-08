@@ -29,15 +29,16 @@ impl Voice {
 /// note-on arrives and all voices are occupied the most-recently-allocated voice is
 /// stolen (LIFO). Releasing a note deactivates the corresponding voice.
 ///
-/// ## Output ports
+/// # Outputs
 ///
-/// | Index | Name      | Kind | Signal                                                |
-/// |-------|-----------|------|-------------------------------------------------------|
-/// | 0     | `voct`    | Poly | V/oct pitch per voice (MIDI 0 = 0 V, 1/12 V/semitone)|
-/// | 1     | `trigger` | Poly | 1.0 for one sample after each note-on, then 0.0       |
-/// | 2     | `gate`    | Poly | 1.0 while the note for that voice is physically held  |
-/// | 3     | `mod`     | Mono | CC 1 (mod wheel) normalised to [0.0, 1.0]             |
-/// | 4     | `pitch`   | Mono | Pitchbend normalised to [-1.0, 1.0]                   |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `voct` | poly | V/oct pitch per voice (MIDI note 0 = 0 V, 1/12 V per semitone) |
+/// | `trigger` | poly | 1.0 for one sample after each note-on, then 0.0 |
+/// | `gate` | poly | 1.0 while the note for that voice is physically held |
+/// | `velocity` | poly | Note-on velocity per voice normalised to \[0.0, 1.0\] |
+/// | `mod` | mono | CC 1 (mod wheel) normalised to \[0.0, 1.0\] |
+/// | `pitch` | mono | Pitchbend normalised to \[-1.0, 1.0\] |
 pub struct PolyMidiIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

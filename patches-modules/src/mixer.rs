@@ -1,13 +1,15 @@
-//! Mixer modules: `Mixer`, `StereoMixer`, `PolyMixer`, `StereoPolyMixer`.
+//! Mixer modules: [`Mixer`], [`StereoMixer`], [`PolyMixer`], [`StereoPolyMixer`].
 //!
 //! All four share the same channel-count-driven shape (`ModuleShape::channels`)
 //! and mute/solo semantics: if any channel is soloed, only soloed channels that
 //! are not muted contribute to the output. Mute wins over solo.
 //!
 //! Pan law (stereo variants): linear equal-gain.
-//! `left_gain  = (1 − pan) × 0.5`
-//! `right_gain = (1 + pan) × 0.5`
-//! At centre (pan = 0) both gains are 0.5 (−6 dBFS per side).
+//! `left_gain  = (1 - pan) * 0.5`
+//! `right_gain = (1 + pan) * 0.5`
+//! At centre (pan = 0) both gains are 0.5 (-6 dBFS per side).
+//!
+//! See each struct's documentation for port and parameter tables.
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -39,24 +41,34 @@ fn get_bool(params: &ParameterMap, name: &str, index: usize, default: bool) -> b
 
 /// Mono N-channel mixer with per-channel level, send A/B, mute, and solo.
 ///
-/// ## Port layout (N = `channels`)
+/// # Inputs
 ///
-/// ### Inputs
-/// | Name          | Indices  | Kind | Description                   |
-/// |---------------|----------|------|-------------------------------|
-/// | `in`          | 0..N−1   | Mono | Per-channel audio input       |
-/// | `level_cv`    | 0..N−1   | Mono | Additive CV for level         |
-/// | `send_a_cv`   | 0..N−1   | Mono | Additive CV for send A amount |
-/// | `send_b_cv`   | 0..N−1   | Mono | Additive CV for send B amount |
-/// | `return_a`    | 0        | Mono | Return from send A effects    |
-/// | `return_b`    | 0        | Mono | Return from send B effects    |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | mono | Per-channel audio input (i in 0..N-1, N = channels) |
+/// | `level_cv[i]` | mono | Additive CV for level (i in 0..N-1, N = channels) |
+/// | `send_a_cv[i]` | mono | Additive CV for send A amount (i in 0..N-1, N = channels) |
+/// | `send_b_cv[i]` | mono | Additive CV for send B amount (i in 0..N-1, N = channels) |
+/// | `return_a` | mono | Return from send A effects |
+/// | `return_b` | mono | Return from send B effects |
 ///
-/// ### Parameters (per channel i)
-/// `level/i` [0,1]=1.0, `send_a/i` [0,1]=0.0, `send_b/i` [0,1]=0.0,
-/// `mute/i` bool=false, `solo/i` bool=false.
+/// # Outputs
 ///
-/// ### Outputs
-/// `out/0`, `send_a/0`, `send_b/0` (all Mono).
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Mixed output |
+/// | `send_a` | mono | Send A bus output |
+/// | `send_b` | mono | Send B bus output |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `level[i]` | float | 0.0--1.0 | `1.0` | Channel level (per channel) |
+/// | `send_a[i]` | float | 0.0--1.0 | `0.0` | Send A amount (per channel) |
+/// | `send_b[i]` | float | 0.0--1.0 | `0.0` | Send B amount (per channel) |
+/// | `mute[i]` | bool | -- | `false` | Mute channel (per channel) |
+/// | `solo[i]` | bool | -- | `false` | Solo channel (per channel) |
 pub struct Mixer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -195,20 +207,44 @@ impl Module for Mixer {
 
 /// Stereo N-channel mixer with per-channel level, pan, send A/B, mute, and solo.
 ///
-/// ## Port layout (N = `channels`)
-///
-/// ### Inputs
-/// `in/0..N-1`, `level_cv/0..N-1`, `pan_cv/0..N-1`,
-/// `send_a_cv/0..N-1`, `send_b_cv/0..N-1` (all Mono).
-/// Fixed: `return_a_left/0`, `return_a_right/0`,
-///        `return_b_left/0`, `return_b_right/0`.
-///
-/// ### Outputs
-/// `out_left/0`, `out_right/0`, `send_a_left/0`, `send_a_right/0`,
-/// `send_b_left/0`, `send_b_right/0` (all Mono).
-///
-/// Pan law: linear equal-gain (`left = (1−pan)/2`, `right = (1+pan)/2`).
+/// Pan law: linear equal-gain (`left = (1-pan)/2`, `right = (1+pan)/2`).
 /// Send buses are post-pan and post-level.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | mono | Per-channel audio input (i in 0..N-1, N = channels) |
+/// | `level_cv[i]` | mono | Additive CV for level (i in 0..N-1, N = channels) |
+/// | `pan_cv[i]` | mono | Additive CV for pan (i in 0..N-1, N = channels) |
+/// | `send_a_cv[i]` | mono | Additive CV for send A amount (i in 0..N-1, N = channels) |
+/// | `send_b_cv[i]` | mono | Additive CV for send B amount (i in 0..N-1, N = channels) |
+/// | `return_a_left` | mono | Left return from send A effects |
+/// | `return_a_right` | mono | Right return from send A effects |
+/// | `return_b_left` | mono | Left return from send B effects |
+/// | `return_b_right` | mono | Right return from send B effects |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out_left` | mono | Left mixed output |
+/// | `out_right` | mono | Right mixed output |
+/// | `send_a_left` | mono | Left send A bus output |
+/// | `send_a_right` | mono | Right send A bus output |
+/// | `send_b_left` | mono | Left send B bus output |
+/// | `send_b_right` | mono | Right send B bus output |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `level[i]` | float | 0.0--1.0 | `1.0` | Channel level (per channel) |
+/// | `pan[i]` | float | -1.0--1.0 | `0.0` | Stereo pan position (per channel) |
+/// | `send_a[i]` | float | 0.0--1.0 | `0.0` | Send A amount (per channel) |
+/// | `send_b[i]` | float | 0.0--1.0 | `0.0` | Send B amount (per channel) |
+/// | `mute[i]` | bool | -- | `false` | Mute channel (per channel) |
+/// | `solo[i]` | bool | -- | `false` | Solo channel (per channel) |
 pub struct StereoMixer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -393,19 +429,26 @@ impl Module for StereoMixer {
 
 /// Poly N-channel mixer with per-channel level, mute, and solo.
 ///
-/// ## Port layout (N = `channels`)
+/// # Inputs
 ///
-/// ### Inputs
-/// | Name       | Indices | Kind | Description                   |
-/// |------------|---------|------|-------------------------------|
-/// | `in`       | 0..N−1  | Poly | Per-channel poly audio input  |
-/// | `level_cv` | 0..N−1  | Mono | Additive CV for level         |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | poly | Per-channel poly audio input (i in 0..N-1, N = channels) |
+/// | `level_cv[i]` | mono | Additive CV for level (i in 0..N-1, N = channels) |
 ///
-/// ### Parameters (per channel i)
-/// `level/i` [0,1]=1.0, `mute/i` bool=false, `solo/i` bool=false.
+/// # Outputs
 ///
-/// ### Outputs
-/// `out/0` (Poly) — per-voice sum of active channels.
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Per-voice sum of active channels |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `level[i]` | float | 0.0--1.0 | `1.0` | Channel level (per channel) |
+/// | `mute[i]` | bool | -- | `false` | Mute channel (per channel) |
+/// | `solo[i]` | bool | -- | `false` | Solo channel (per channel) |
 pub struct PolyMixer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -498,19 +541,31 @@ impl Module for PolyMixer {
 
 /// Stereo poly N-channel mixer with per-channel level, pan, mute, and solo.
 ///
-/// ## Port layout (N = `channels`)
-///
-/// ### Inputs
-/// | Name       | Indices | Kind | Description                  |
-/// |------------|---------|------|------------------------------|
-/// | `in`       | 0..N−1  | Poly | Per-channel poly audio input |
-/// | `level_cv` | 0..N−1  | Mono | Additive CV for level        |
-/// | `pan_cv`   | 0..N−1  | Mono | Additive CV for pan          |
-///
-/// ### Outputs
-/// `out_left/0`, `out_right/0` (both Poly).
-///
 /// Pan law: linear equal-gain (same as `StereoMixer`).
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | poly | Per-channel poly audio input (i in 0..N-1, N = channels) |
+/// | `level_cv[i]` | mono | Additive CV for level (i in 0..N-1, N = channels) |
+/// | `pan_cv[i]` | mono | Additive CV for pan (i in 0..N-1, N = channels) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out_left` | poly | Left per-voice sum of active channels |
+/// | `out_right` | poly | Right per-voice sum of active channels |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `level[i]` | float | 0.0--1.0 | `1.0` | Channel level (per channel) |
+/// | `pan[i]` | float | -1.0--1.0 | `0.0` | Stereo pan position (per channel) |
+/// | `mute[i]` | bool | -- | `false` | Mute channel (per channel) |
+/// | `solo[i]` | bool | -- | `false` | Solo channel (per channel) |
 pub struct StereoPolyMixer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

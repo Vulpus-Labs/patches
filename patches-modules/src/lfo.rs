@@ -13,9 +13,35 @@ use patches_dsp::xorshift64;
 /// Mode controls polarity: bipolar ([-1, 1]), unipolar_positive ([0, 1]),
 /// or unipolar_negative ([-1, 0]).
 ///
-/// The `sync` input resets the phase to 0 on each rising edge (transition from ≤ 0 to > 0).
+/// The `sync` input resets the phase to 0 on each rising edge (transition from <= 0 to > 0).
 /// The `rate_cv` input adds an offset in Hz to the base `rate` parameter; the result is
 /// clamped to [0.001, 40.0] Hz before use.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `sync` | mono | Rising-edge sync resets phase to 0 |
+/// | `rate_cv` | mono | Additive rate offset in Hz |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `sine` | mono | Sine waveform |
+/// | `triangle` | mono | Triangle waveform |
+/// | `saw_up` | mono | Rising sawtooth waveform |
+/// | `saw_down` | mono | Falling sawtooth waveform |
+/// | `square` | mono | Square waveform (50% duty) |
+/// | `random` | mono | Sample-and-hold random value (updates once per cycle) |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `rate` | float | 0.01 -- 20.0 | `1.0` | Oscillation rate in Hz |
+/// | `phase_offset` | float | 0.0 -- 1.0 | `0.0` | Fixed phase offset as fraction of a cycle |
+/// | `mode` | enum | bipolar, unipolar_positive, unipolar_negative | `bipolar` | Output polarity mode |
 pub struct Lfo {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

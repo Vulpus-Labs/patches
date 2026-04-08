@@ -6,10 +6,29 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
 /// Polyphonic V/OCT pitch offset: applies the same fixed interval to all voices.
 ///
-/// Output[v] = input[v] + octave + semitones/12 + cents/1200
-///
+/// Output[v] = input[v] + octave + semitones/12 + cents/1200.
 /// All three parameters are independent and additive. Setting all to zero
 /// passes the signal through unchanged.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | V/OCT pitch signal (per-voice) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Offset V/OCT pitch (per-voice) |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `octave` | int | -8--8 | `0` | Octave offset |
+/// | `semi` | int | -12--12 | `0` | Semitone offset |
+/// | `cent` | int | -100--100 | `0` | Cent offset |
 pub struct PolyTuner {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

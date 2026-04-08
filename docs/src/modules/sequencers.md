@@ -1,5 +1,9 @@
 # Sequencers & clocks
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `Clock` — Tempo-locked trigger generator
 
 Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable

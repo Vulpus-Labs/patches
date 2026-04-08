@@ -58,23 +58,23 @@ impl NoteStack {
     }
 }
 
+/// Monophonic MIDI-to-CV converter with last-note priority.
+///
 /// Translates MIDI note and controller messages from a monophonic keyboard
-/// into CV-style outputs.
+/// into CV-style outputs. Uses a last-note-priority stack: pressing a new key
+/// updates pitch immediately; releasing the top key falls back to the
+/// previously held key (if any) without re-triggering.
 ///
-/// Uses a last-note-priority stack: pressing a new key updates pitch
-/// immediately; releasing the top key falls back to the previously held key
-/// (if any) without re-triggering.
+/// # Outputs
 ///
-/// ## Output ports
-///
-/// | Index | Name      | Signal                                                              |
-/// |-------|-----------|---------------------------------------------------------------------|
-/// | 0     | `voct`    | V/oct pitch; MIDI note 0 = C0 = 0 V, 1/12 V per semitone          |
-/// | 1     | `trigger` | 1.0 for one sample after each note-on, then 0.0                    |
-/// | 2     | `gate`    | 1.0 while any note is held or sustain (CC 64) is active            |
-/// | 3     | `mod`     | CC 1 (mod wheel) normalised to [0.0, 1.0]                          |
-/// | 4     | `pitch`   | Pitchbend normalised to [-1.0, 1.0]                                 |
-/// | 5     | `velocity`| Last note-on velocity normalised to [0.0, 1.0]                      |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `voct` | mono | V/oct pitch (MIDI note 0 = 0 V, 1/12 V per semitone) |
+/// | `trigger` | mono | 1.0 for one sample after each note-on, then 0.0 |
+/// | `gate` | mono | 1.0 while any note is held or sustain (CC 64) is active |
+/// | `mod` | mono | CC 1 (mod wheel) normalised to \[0.0, 1.0\] |
+/// | `pitch` | mono | Pitchbend normalised to \[-1.0, 1.0\] |
+/// | `velocity` | mono | Last note-on velocity normalised to \[0.0, 1.0\] |
 pub struct MonoMidiIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

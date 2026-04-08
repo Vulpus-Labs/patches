@@ -7,11 +7,19 @@ use patches_core::parameter_map::ParameterMap;
 /// Sums a configurable number of input signals into a single output.
 ///
 /// The number of inputs is determined by `ModuleShape::channels` at build time.
-/// All inputs are summed with no normalisation:
-/// `output = in/0 + in/1 + … + in/(size-1)`.
+/// All inputs are summed with no normalisation.
 ///
-/// Constructed via the Module v2 protocol: `describe` → `prepare` →
-/// `update_validated_parameters`.
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | mono | Signal input (i = 0..channels-1) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Sum of all `in` ports |
 pub struct Sum {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

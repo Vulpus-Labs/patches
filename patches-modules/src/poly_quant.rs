@@ -5,8 +5,31 @@ use patches_core::{
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use crate::quant_util::{parse_notes, quantise_note};
 
-/// Polyphonic v/oct quantiser. Applies the same quantisation logic as `Quant`
+/// Polyphonic V/OCT quantiser.
+///
+/// Applies the same quantisation logic as [`Quant`](crate::quant::Quant)
 /// independently to each of 16 voices. Always free-running.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | V/OCT pitch signal (per-voice) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Quantised V/OCT pitch (per-voice) |
+/// | `trig_out` | poly | One-sample pulse on pitch change (per-voice) |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `notes` | str array | up to 12 entries | `["0"]` | Semitone values in the scale |
+/// | `centre` | float | -4.0--4.0 | `0.0` | Offset added before quantisation |
+/// | `scale` | float | -4.0--4.0 | `1.0` | Multiplier applied to input before quantisation |
 pub struct PolyQuant {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

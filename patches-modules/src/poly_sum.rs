@@ -7,18 +7,20 @@ use patches_core::parameter_map::ParameterMap;
 /// Polyphonic sum: sums N poly inputs into one poly output, per-voice.
 ///
 /// The number of inputs is set by `ModuleShape::channels` at build time.
-/// For each voice channel `i`: `out[i] = in/0[i] + in/1[i] + … + in/(N-1)[i]`.
+/// For each voice `v`: `out[v] = in[0][v] + in[1][v] + ... + in[N-1][v]`.
 /// No normalisation is applied.
 ///
-/// ## Input ports (N = `channels`)
-/// | Index | Name | Kind |
-/// |-------|------|------|
-/// | 0…N-1 | `in` | Poly |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `out` | Poly |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in[i]` | poly | Signal input (i = 0..channels-1) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Per-voice sum of all `in` ports |
 pub struct PolySum {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

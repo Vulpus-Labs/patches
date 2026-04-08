@@ -18,21 +18,31 @@ const DRIFT_PERIOD: u8 = 64;
 /// All voices are driven by the `voct` poly input; channel `i` controls voice `i`.
 /// Outputs four poly waveforms; only connected outputs are computed each sample.
 ///
-/// ## Input ports
-/// | Index | Name          | Kind |
-/// |-------|---------------|------|
-/// | 0     | `voct`        | Poly |
-/// | 1     | `fm`          | Poly |
-/// | 2     | `pulse_width_cv` | Poly |
-/// | 3     | `phase_mod`   | Poly |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name       | Kind |
-/// |-------|------------|------|
-/// | 0     | `sine`     | Poly |
-/// | 1     | `triangle` | Poly |
-/// | 2     | `sawtooth` | Poly |
-/// | 3     | `square`   | Poly |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `voct` | poly | V/oct pitch CV per voice |
+/// | `fm` | poly | Frequency modulation input per voice |
+/// | `pulse_width_cv` | poly | Pulse width modulation for the square output per voice |
+/// | `phase_mod` | poly | Phase modulation offset applied to all waveforms per voice |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `sine` | poly | Sine waveform |
+/// | `triangle` | poly | Triangle waveform |
+/// | `sawtooth` | poly | Sawtooth waveform (PolyBLEP anti-aliased) |
+/// | `square` | poly | Square waveform (PolyBLEP anti-aliased, PWM via `pulse_width_cv`) |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `frequency` | float | -4.0 -- 12.0 | `0.0` | Base pitch as V/oct offset from C0 |
+/// | `fm_type` | enum | linear, logarithmic | `linear` | FM modulation mode |
+/// | `drift` | float | 0.0 -- 1.0 | `0.0` | Pitch drift amount (per-voice random walk + global drift) |
 pub struct PolyOsc {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

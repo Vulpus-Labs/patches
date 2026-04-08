@@ -7,12 +7,30 @@ use patches_dsp::AdsrCore;
 
 /// An ADSR envelope generator.
 ///
-/// Input ports:
-///   inputs[0] — trigger (rising edge starts Attack)
-///   inputs[1] — gate    (held high keeps Sustain; releasing transitions to Release)
+/// Trigger rising edge starts the Attack phase. Gate held high sustains at the
+/// sustain level; releasing gate transitions to Release. Output is always in [0.0, 1.0].
 ///
-/// Output ports:
-///   outputs[0] — out (envelope level, always in [0.0, 1.0])
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `trigger` | mono | Rising edge starts Attack phase |
+/// | `gate` | mono | Held high to sustain; release to enter Release phase |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Envelope level in [0.0, 1.0] |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `attack` | float | 0.001 -- 10.0 | `0.01` | Attack time in seconds |
+/// | `decay` | float | 0.001 -- 10.0 | `0.1` | Decay time in seconds |
+/// | `sustain` | float | 0.0 -- 1.0 | `0.7` | Sustain level |
+/// | `release` | float | 0.001 -- 10.0 | `0.3` | Release time in seconds |
 pub struct Adsr {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

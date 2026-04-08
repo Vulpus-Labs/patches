@@ -5,9 +5,33 @@ use patches_core::{
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use crate::quant_util::{parse_notes, quantise_note};
 
-/// Mono v/oct quantiser. Snaps a continuous v/oct signal to the nearest note in
-/// a user-supplied semitone set and applies `out = centre + (quantised_voct * scale)`.
-/// Emits a one-sample pulse on `trig_out` whenever the quantised pitch changes.
+/// Mono V/OCT quantiser.
+///
+/// Snaps a continuous V/OCT signal to the nearest note in a user-supplied
+/// semitone set. The input is transformed as `centre + in * scale` before
+/// quantisation. Emits a one-sample pulse on `trig_out` whenever the
+/// quantised pitch changes.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | V/OCT pitch signal |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Quantised V/OCT pitch |
+/// | `trig_out` | mono | One-sample pulse on pitch change |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `notes` | str array | up to 12 entries | `["0"]` | Semitone values in the scale |
+/// | `centre` | float | -4.0--4.0 | `0.0` | Offset added before quantisation |
+/// | `scale` | float | -4.0--4.0 | `1.0` | Multiplier applied to input before quantisation |
 pub struct Quant {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

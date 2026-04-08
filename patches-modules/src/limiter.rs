@@ -1,5 +1,27 @@
 //! Lookahead peak limiter with inter-sample peak detection.
 //!
+//! # Inputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in` | mono | Audio input |
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out` | mono | Limited audio output |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `threshold` | float | 0.0--2.0 | `0.9` | Limiting threshold |
+//! | `attack_ms` | float | 0.1--50.0 | `2.0` | Attack / lookahead time in ms |
+//! | `release_ms` | float | 1.0--5000.0 | `100.0` | Release time in ms |
+//!
+//! # Algorithm
+//!
 //! For each base-rate sample at time `t`, the detector computes the peak
 //! amplitude over the window `[t-L .. t]` (`L = lookahead_samples`, derived
 //! from `attack_ms`) and uses it to derive the gain applied to `x[t-L]` when
@@ -7,20 +29,18 @@
 //! `attack_ms` of lead time before each transient.
 //!
 //! Inter-sample peaks (peaks that fall between base-rate samples) are caught by
-//! running the input through a `HalfbandInterpolator` at 2× rate before pushing
+//! running the input through a `HalfbandInterpolator` at 2x rate before pushing
 //! to the peak window.  No downsampling occurs; the oversampled path is
 //! detector-only.
 //!
 //! `dry_delay` and `peak_window` are pre-allocated for `MAX_ATTACK_MS` at
 //! `prepare` time so no allocation ever occurs on the audio thread.
 //!
-//! # Signal chain (per base-rate sample)
-//!
 //! ```text
 //! input at time t
-//!   ├── dry_delay.push(input)
-//!   │
-//!   └── interpolator.process(input) → [over_a, over_b]
+//!   |-- dry_delay.push(input)
+//!   |
+//!   +-- interpolator.process(input) -> [over_a, over_b]
 //!         peak_window.push(|over_a|)
 //!         peak_window.push(|over_b|)
 //!         peak = peak_window.peak()   // window = 2*(L+1) oversampled samples = [t-L .. t]

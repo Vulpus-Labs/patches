@@ -1,5 +1,9 @@
 # Filters
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 All filter modules implement a resonant biquad (Transposed Direct Form II).
 
 > **Note:** The legacy `Filter` module name is no longer supported. Use

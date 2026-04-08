@@ -4,8 +4,23 @@ use patches_core::{
 };
 use patches_core::parameter_map::ParameterMap;
 
-/// Mono sample-and-hold. Latches `in` on each rising edge of `trig` (threshold 0.5)
-/// and holds the value on `out` until the next trigger.
+/// Mono sample-and-hold.
+///
+/// Latches `in` on each rising edge of `trig` (threshold 0.5) and holds
+/// the value on `out` until the next trigger.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Signal to sample |
+/// | `trig` | mono | Trigger input (rising edge at 0.5 threshold) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Held sample value |
 pub struct Sah {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

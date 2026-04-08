@@ -92,16 +92,32 @@ fn parse_step(s: &str) -> Result<Step, ParseStepError> {
 
 /// A step sequencer that advances one step per rising edge on the `clock` input.
 ///
-/// Input ports (all at index 0 since each name is unique):
-///   inputs[0] — clock
-///   inputs[1] — start
-///   inputs[2] — stop
-///   inputs[3] — reset
+/// Steps are specified as an array of note strings. Note format: letter + optional
+/// accidental (`#`/`b`) + octave digit (e.g. `C3`, `D#1`, `Bb2`). Use `-` for a
+/// rest (gate low, pitch holds) and `_` for a tie (gate stays high, no retrigger).
 ///
-/// Output ports:
-///   outputs[0] — pitch  (V/OCT, C0=0.0)
-///   outputs[1] — trigger (1.0 on the clock-advance sample, 0.0 otherwise)
-///   outputs[2] — gate    (1.0 while a note or tie is active)
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `clock` | mono | Rising edge advances to the next step |
+/// | `start` | mono | Rising edge starts playback |
+/// | `stop` | mono | Rising edge stops playback (gate drops) |
+/// | `reset` | mono | Rising edge resets the step index to 0 |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `pitch` | mono | V/oct pitch (C0 = 0.0) |
+/// | `trigger` | mono | 1.0 on the clock-advance sample, then 0.0 |
+/// | `gate` | mono | 1.0 while a note or tie is active |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `steps` | str\[\] | — | `[]` | Array of step strings (e.g. `C3`, `D#1`, `-`, `_`) |
 pub struct Seq {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

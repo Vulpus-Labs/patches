@@ -87,33 +87,36 @@ pub(crate) fn compute_biquad_bandpass(center_hz: f32, bandwidth_q: f32, sample_r
 
 /// Resonant lowpass filter (biquad, Transposed Direct Form II).
 ///
-/// **Port layout**
+/// # Inputs
 ///
-/// | Index | Name            | Direction | Description                                         |
-/// |-------|-----------------|-----------|-----------------------------------------------------|
-/// | 0     | `in`            | input     | Audio signal to filter                              |
-/// | 1     | `voct`          | input     | V/oct offset added to cutoff (1.0 = +1 octave)      |
-/// | 2     | `fm`            | input     | FM sweep: ±1 sweeps ±2 octaves around cutoff        |
-/// | 3     | `resonance_cv`  | input     | Additive offset for normalised resonance            |
-/// | 0     | `out`           | output    | Filtered signal                                     |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Audio signal to filter |
+/// | `voct` | mono | V/oct offset added to cutoff (1.0 = +1 octave) |
+/// | `fm` | mono | FM sweep: +/-1 sweeps +/-2 octaves around cutoff |
+/// | `resonance_cv` | mono | Additive offset for normalised resonance |
 ///
-/// **Parameters**
+/// # Outputs
 ///
-/// | Name        | Range        | Default | Description                             |
-/// |-------------|--------------|---------|-----------------------------------------|
-/// | `cutoff`    | −2–12 (V/oct) | 6.0    | Base cutoff as V/oct above C0; C4 = 4.0, C6 ≈ 1 kHz |
-/// | `resonance` | 0.0–1.0       | 0.0    | Resonance (0 = Butterworth, 1 = max)    |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Filtered signal |
 ///
-/// **Connectivity optimisation**
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0 -- 12.0 | `6.0` | Base cutoff as V/oct above C0 |
+/// | `resonance` | float | 0.0 -- 1.0 | `0.0` | Resonance (0 = Butterworth, 1 = max) |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
+///
+/// # Connectivity optimisation
 ///
 /// When neither `voct`, `fm`, nor `resonance_cv` is connected the module
 /// computes biquad coefficients once per parameter change and runs a
-/// zero-overhead static-coefficient path in `process`. When one or both CV
-/// inputs are connected coefficients are recomputed every
-/// [`COEFF_UPDATE_INTERVAL`] samples using the live CV values, and linearly
-/// interpolated sample-by-sample between updates. This avoids per-sample
-/// trigonometric evaluation while keeping changes smooth enough that no
-/// audible zipper artefacts are introduced at LFO or envelope modulation rates.
+/// zero-overhead static-coefficient path in `process`. When one or more CV
+/// inputs are connected, coefficients are recomputed periodically using the
+/// live CV values and linearly interpolated sample-by-sample between updates.
 pub struct ResonantLowpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -265,9 +268,31 @@ impl PeriodicUpdate for ResonantLowpass {
 
 /// Resonant highpass filter (biquad, Transposed Direct Form II).
 ///
-/// Identical port layout, parameter ranges, and CV semantics to
-/// [`ResonantLowpass`]; differs only in the coefficient formula
-/// (`compute_biquad_highpass`).
+/// Same port layout, parameter ranges, and CV semantics as [`ResonantLowpass`];
+/// differs only in the coefficient formula (`compute_biquad_highpass`).
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Audio signal to filter |
+/// | `voct` | mono | V/oct offset added to cutoff (1.0 = +1 octave) |
+/// | `fm` | mono | FM sweep: +/-1 sweeps +/-2 octaves around cutoff |
+/// | `resonance_cv` | mono | Additive offset for normalised resonance |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Filtered signal |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0 -- 12.0 | `6.0` | Base cutoff as V/oct above C0 |
+/// | `resonance` | float | 0.0 -- 1.0 | `0.0` | Resonance (0 = Butterworth, 1 = max) |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
 pub struct ResonantHighpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -403,23 +428,28 @@ impl PeriodicUpdate for ResonantHighpass {
 
 /// Resonant bandpass filter (biquad, Transposed Direct Form II, constant 0 dB peak gain).
 ///
-/// **Port layout**
+/// # Inputs
 ///
-/// | Index | Name           | Direction | Description                              |
-/// |-------|----------------|-----------|------------------------------------------|
-/// | 0     | `in`           | input     | Audio signal to filter                   |
-/// | 1     | `voct`         | input     | V/oct offset added to centre frequency (1.0 = +1 octave) |
-/// | 2     | `fm`           | input     | FM sweep: ±1 sweeps ±2 octaves around centre              |
-/// | 3     | `resonance_cv` | input     | Additive offset for `bandwidth_q`                         |
-/// | 0     | `out`          | output    | Filtered signal                          |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Audio signal to filter |
+/// | `voct` | mono | V/oct offset added to centre frequency (1.0 = +1 octave) |
+/// | `fm` | mono | FM sweep: +/-1 sweeps +/-2 octaves around centre |
+/// | `resonance_cv` | mono | Additive offset for `bandwidth_q` |
 ///
-/// **Parameters**
+/// # Outputs
 ///
-/// | Name          | Range       | Default | Description                                     |
-/// |---------------|-------------|---------|-------------------------------------------------|
-/// | `center`      | −2–12 (V/oct) | 6.0   | Centre frequency as V/oct above C0; C4 = 4.0, C6 ≈ 1 kHz |
-/// | `bandwidth_q` | 0.1–20.0    | 1.0     | Filter Q; higher values narrow the passband     |
-/// | `saturate`    | bool        | false   | Apply `fast_tanh` saturation in the feedback    |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Filtered signal |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `center` | float | -2.0 -- 12.0 | `6.0` | Centre frequency as V/oct above C0 |
+/// | `bandwidth_q` | float | 0.1 -- 20.0 | `1.0` | Filter Q; higher values narrow the passband |
+/// | `saturate` | bool | | `false` | Apply tanh saturation in the feedback path |
 pub struct ResonantBandpass {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

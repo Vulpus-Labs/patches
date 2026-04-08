@@ -3,6 +3,36 @@
 //! An 8-line FDN with Hadamard mixing matrix, per-line high-shelf absorption
 //! (MonoBiquad), Thiran all-pass interpolation for LFO-modulated delay reads,
 //! and stereo output via orthogonal output gain vectors.
+//!
+//! Defines [`FdnReverb`] (stereo in/out).
+//!
+//! # Inputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in_left` | mono | Left audio input |
+//! | `in_right` | mono | Right audio input |
+//! | `size_cv` | mono | Additive CV for size |
+//! | `brightness_cv` | mono | Additive CV for brightness |
+//! | `pre_delay_cv` | mono | Additive CV for pre-delay |
+//! | `mix_cv` | mono | Additive CV for dry/wet mix |
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out_left` | mono | Left reverb output |
+//! | `out_right` | mono | Right reverb output |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `size` | float | 0.0--1.0 | `0.5` | Room size |
+//! | `brightness` | float | 0.0--1.0 | `0.5` | High-frequency damping |
+//! | `pre_delay` | float | 0.0--1.0 | `0.0` | Pre-delay amount |
+//! | `mix` | float | 0.0--1.0 | `1.0` | Dry/wet mix |
+//! | `character` | enum | plate/room/chamber/hall/cathedral | `hall` | Reverb archetype |
 
 use std::f32::consts::TAU;
 
@@ -215,6 +245,8 @@ const MAX_PRE_DELAY_SECS: f32 = 0.080; // 80 ms
 
 /// Stereo FDN reverb with 8 delay lines, Hadamard mixing, per-line high-shelf
 /// absorption, and Thiran all-pass interpolation for LFO-modulated reads.
+///
+/// See [module-level documentation](self).
 pub struct FdnReverb {
     instance_id:  InstanceId,
     descriptor:   ModuleDescriptor,

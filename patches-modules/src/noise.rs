@@ -9,14 +9,14 @@ use patches_dsp::{xorshift64, PinkFilter, BrownFilter};
 
 /// Generates four noise colours simultaneously. Only connected outputs are computed.
 ///
-/// ## Noise colours
+/// # Outputs
 ///
-/// | Output  | Spectrum | Description                                      |
-/// |---------|----------|--------------------------------------------------|
-/// | `white` | flat     | Uncorrelated samples; equal energy per Hz band.  |
-/// | `pink`  | 1/f      | −3 dB/octave roll-off; equal energy per octave.  |
-/// | `brown` | 1/f²     | −6 dB/octave; random-walk integration of white.  |
-/// | `red`   | 1/f³     | −9 dB/octave; integration of the brown signal.   |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `white` | mono | Flat spectrum — uncorrelated samples, equal energy per Hz band |
+/// | `pink` | mono | 1/f spectrum — −3 dB/octave roll-off, equal energy per octave |
+/// | `brown` | mono | 1/f² spectrum — −6 dB/octave, random-walk integration of white |
+/// | `red` | mono | 1/f³ spectrum — −9 dB/octave, integration of the brown signal |
 ///
 /// Pink noise uses a 3-pole IIR approximation (Voss–McCartney / Kellett's method).
 /// Brown and red use a leaky-integrator random-walk clamped to `[−1, 1]`.
@@ -115,12 +115,14 @@ impl Module for Noise {
 /// Each voice has its own PRNG and filter state, seeded from the instance ID so
 /// voices are uncorrelated across instances. Only connected outputs are computed.
 ///
-/// | Output  | Spectrum | Description                                     |
-/// |---------|----------|-------------------------------------------------|
-/// | `white` | flat     | Uncorrelated per-voice white noise.             |
-/// | `pink`  | 1/f      | Per-voice 3-pole IIR pink noise.                |
-/// | `brown` | 1/f²     | Per-voice leaky random-walk.                    |
-/// | `red`   | 1/f³     | Per-voice integration of the brown output.      |
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `white` | poly | Flat spectrum — uncorrelated per-voice white noise |
+/// | `pink` | poly | 1/f spectrum — per-voice 3-pole IIR pink noise |
+/// | `brown` | poly | 1/f² spectrum — per-voice leaky random-walk |
+/// | `red` | poly | 1/f³ spectrum — per-voice integration of the brown output |
 pub struct PolyNoise {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

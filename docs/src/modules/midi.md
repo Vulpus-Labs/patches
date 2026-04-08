@@ -1,5 +1,9 @@
 # MIDI input
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 MIDI modules consume from the first available system MIDI input port. Connect
 your device before starting the player.
 

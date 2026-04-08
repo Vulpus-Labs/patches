@@ -10,15 +10,17 @@ use patches_core::parameter_map::ParameterMap;
 /// No normalisation is applied; callers should scale the output (e.g. via cable
 /// scale or a downstream VCA) to avoid clipping with many active voices.
 ///
-/// ## Input ports
-/// | Index | Name | Kind |
-/// |-------|------|------|
-/// | 0     | `in` | Poly |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `out` | Mono |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Polyphonic signal to sum |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Sum of all voice channels |
 pub struct PolyToMono {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

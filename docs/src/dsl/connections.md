@@ -8,6 +8,17 @@ osc.sine -> out.in_left
 
 Reads the `sine` output of `osc` and writes it to the `in_left` input of `out`.
 
+## Backward connections
+
+Inside templates, `<-` connects from right to left — useful for wiring
+boundary ports:
+
+```patches
+$.audio <- vca.out
+```
+
+This is equivalent to `vca.out -> $.audio`.
+
 ## Scaled connection
 
 ```patches
@@ -26,6 +37,19 @@ Useful values:
 | `0.5` | attenuate by half |
 | `-1.0` | invert (phase flip) |
 | `0.1` | strong attenuation (e.g. audio → FM input) |
+
+Backward arrows support scales too: `<-[0.5]-`.
+
+Inside templates, the scale can be a parameter reference:
+
+```patches
+template attenuated(gain: float = 0.5) {
+    in: input
+    out: output
+
+    $.output <-[<gain>]- $.input
+}
+```
 
 ## Multiple connections to one input
 

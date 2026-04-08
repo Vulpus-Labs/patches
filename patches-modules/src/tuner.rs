@@ -4,13 +4,31 @@ use patches_core::{
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
-/// Offsets a V/OCT pitch signal by a fixed interval expressed as octaves,
-/// semitones, and cents.
+/// Offsets a V/OCT pitch signal by a fixed interval.
 ///
-/// Output = input + octave + semitones/12 + cents/1200
-///
+/// Output = input + octave + semitones/12 + cents/1200.
 /// All three parameters are independent and additive. Setting all to zero
 /// passes the signal through unchanged.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | V/OCT pitch signal |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | Offset V/OCT pitch |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `octave` | int | -8--8 | `0` | Octave offset |
+/// | `semi` | int | -12--12 | `0` | Semitone offset |
+/// | `cent` | int | -100--100 | `0` | Cent offset |
 pub struct Tuner {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

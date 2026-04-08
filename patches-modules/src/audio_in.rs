@@ -5,13 +5,20 @@ use patches_core::{
 };
 use patches_core::parameter_map::ParameterMap;
 
-/// A passive stereo source node that reads from the audio input backplane.
+/// Stereo audio input from the hardware backplane.
 ///
-/// `AudioIn` reads the `AUDIO_IN_L` and `AUDIO_IN_R` backplane slots (written
-/// by the audio callback from the hardware input device) and exposes them as
-/// connectable mono outputs.  This is the mirror of [`AudioOut`](super::AudioOut).
+/// Reads the `AUDIO_IN_L` and `AUDIO_IN_R` backplane slots (written by the
+/// audio callback from the hardware input device) and exposes them as
+/// connectable mono outputs. This is the mirror of [`AudioOut`](super::AudioOut).
 ///
 /// `AudioIn` does not call any audio API; it knows nothing about the backend.
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out_left` | mono | Left channel from the hardware audio input |
+/// | `out_right` | mono | Right channel from the hardware audio input |
 pub struct AudioIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

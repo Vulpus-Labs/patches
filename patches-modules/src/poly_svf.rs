@@ -12,24 +12,29 @@ use patches_dsp::{PolySvfKernel, svf_f, q_to_damp};
 /// Processes 16 independent voices in parallel, producing simultaneous
 /// lowpass, highpass, and bandpass outputs per voice.
 ///
-/// **Port layout**
+/// # Inputs
 ///
-/// | Index | Name        | Direction | Description                                    |
-/// |-------|-------------|-----------|------------------------------------------------|
-/// | 0     | `in`        | input     | Poly audio input                               |
-/// | 1     | `voct`      | input     | Per-voice V/oct offset added to cutoff         |
-/// | 2     | `fm`        | input     | FM sweep: ±1 sweeps ±2 octaves around cutoff   |
-/// | 3     | `q_cv`      | input     | Per-voice additive Q offset; clamped to [0, 1] |
-/// | 0     | `lowpass`   | output    | Per-voice lowpass output                       |
-/// | 1     | `highpass`  | output    | Per-voice highpass output                      |
-/// | 2     | `bandpass`  | output    | Per-voice bandpass output                      |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Poly audio input |
+/// | `voct` | poly | Per-voice V/oct offset added to cutoff |
+/// | `fm` | poly | FM sweep: +/-1 sweeps +/-2 octaves around cutoff |
+/// | `q_cv` | poly | Per-voice additive Q offset; clamped to [0, 1] |
 ///
-/// **Parameters**
+/// # Outputs
 ///
-/// | Name     | Range         | Default | Description                               |
-/// |----------|---------------|---------|-------------------------------------------|
-/// | `cutoff` | −2–12 (V/oct) | 6.0     | Base cutoff as V/oct above C0             |
-/// | `q`      | 0.0–1.0       | 0.0     | Resonance (0 = flat/Butterworth, 1 = max) |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `lowpass` | poly | Per-voice lowpass output |
+/// | `highpass` | poly | Per-voice highpass output |
+/// | `bandpass` | poly | Per-voice bandpass output |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cutoff` | float | -2.0--12.0 (V/oct) | `6.0` | Base cutoff as V/oct above C0 |
+/// | `q` | float | 0.0--1.0 | `0.0` | Resonance (0 = flat/Butterworth, 1 = max) |
 pub struct PolySvf {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

@@ -5,13 +5,20 @@ use patches_core::{
 };
 use patches_core::parameter_map::ParameterMap;
 
-/// A passive stereo sink node.
+/// Stereo audio output to the hardware backplane.
 ///
-/// `AudioOut` receives left and right audio samples via its two input ports and
-/// writes them to the `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots each tick.
+/// Receives left and right audio samples via its two input ports and writes
+/// them to the `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots each tick.
 /// The audio callback reads those slots directly after each `tick()` call.
 ///
 /// `AudioOut` does not call any audio API; it knows nothing about the backend.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in_left` | mono | Left channel to send to the hardware audio output |
+/// | `in_right` | mono | Right channel to send to the hardware audio output |
 pub struct AudioOut {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

@@ -2,40 +2,44 @@
 //!
 //! Two [`DelayBuffer`]s (L and R, each 4 s) share a single set of read taps.
 //! Each tap carries independent pan, gain, tone, drive, and feedback parameters.
-//! The `pingpong` flag per tap cross-routes feedback: L feedback → R buffer
-//! and R feedback → L buffer.
+//! The `pingpong` flag per tap cross-routes feedback: L feedback to R buffer
+//! and R feedback to L buffer.
 //!
-//! ## Port layout (`N = shape.channels`)
+//! # Inputs
 //!
-//! ### Inputs
-//! | Name         | Indices | Kind | Description                     |
-//! |--------------|---------|------|---------------------------------|
-//! | `in_l`       | 0       | Mono | Left audio input                |
-//! | `in_r`       | 0       | Mono | Right audio input               |
-//! | `drywet_cv`  | 0       | Mono | Additive CV for dry/wet         |
-//! | `delay_cv`   | 0..N−1  | Mono | Additive CV for delay time      |
-//! | `gain_cv`    | 0..N−1  | Mono | Additive CV for tap gain        |
-//! | `fb_cv`      | 0..N−1  | Mono | Additive CV for feedback amount |
-//! | `pan_cv`     | 0..N−1  | Mono | Additive CV for pan             |
-//! | `return_l`   | 0..N−1  | Mono | Pre-gain L return per tap       |
-//! | `return_r`   | 0..N−1  | Mono | Pre-gain R return per tap       |
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in_left` | mono | Left audio input |
+//! | `in_right` | mono | Right audio input |
+//! | `drywet_cv` | mono | Additive CV for dry/wet |
+//! | `delay_cv[i]` | mono | Additive CV for delay time (i in 0..N-1, N = channels) |
+//! | `gain_cv[i]` | mono | Additive CV for tap gain (i in 0..N-1, N = channels) |
+//! | `fb_cv[i]` | mono | Additive CV for feedback amount (i in 0..N-1, N = channels) |
+//! | `pan_cv[i]` | mono | Additive CV for pan (i in 0..N-1, N = channels) |
+//! | `return_left[i]` | mono | Pre-gain L return per tap (i in 0..N-1, N = channels) |
+//! | `return_right[i]` | mono | Pre-gain R return per tap (i in 0..N-1, N = channels) |
 //!
-//! ### Outputs
-//! | Name     | Indices | Kind | Description                     |
-//! |----------|---------|------|---------------------------------|
-//! | `out_l`  | 0       | Mono | Wet/dry mixed left output       |
-//! | `out_r`  | 0       | Mono | Wet/dry mixed right output      |
-//! | `send_l` | 0..N−1  | Mono | Pre-gain L tap signal per tap   |
-//! | `send_r` | 0..N−1  | Mono | Pre-gain R tap signal per tap   |
+//! # Outputs
 //!
-//! ### Parameters (global)
-//! `dry_wet` Float [0, 1] = 1.0
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out_left` | mono | Wet/dry mixed left output |
+//! | `out_right` | mono | Wet/dry mixed right output |
+//! | `send_left[i]` | mono | Pre-gain L tap signal per tap (i in 0..N-1, N = channels) |
+//! | `send_right[i]` | mono | Pre-gain R tap signal per tap (i in 0..N-1, N = channels) |
 //!
-//! ### Parameters (per tap i)
-//! `delay_ms/i` Int [0, 2000] = 500, `gain/i` Float [0, 1] = 1.0,
-//! `feedback/i` Float [0, 1] = 0.0, `tone/i` Float [0, 1] = 1.0,
-//! `drive/i` Float [0.1, 10.0] = 1.0, `pan/i` Float [−1, 1] = 0.0,
-//! `pingpong/i` Bool = false
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `dry_wet` | float | 0.0--1.0 | `1.0` | Dry/wet mix (global) |
+//! | `delay_ms[i]` | int | 0--2000 | `500` | Delay time in ms (per tap) |
+//! | `gain[i]` | float | 0.0--1.0 | `1.0` | Tap gain (per tap) |
+//! | `feedback[i]` | float | 0.0--1.0 | `0.0` | Feedback amount (per tap) |
+//! | `tone[i]` | float | 0.0--1.0 | `1.0` | Tone filter (per tap) |
+//! | `drive[i]` | float | 0.1--10.0 | `1.0` | Feedback saturation drive (per tap) |
+//! | `pan[i]` | float | -1.0--1.0 | `0.0` | Stereo pan position (per tap) |
+//! | `pingpong[i]` | bool | -- | `false` | Cross-route feedback L/R (per tap) |
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,

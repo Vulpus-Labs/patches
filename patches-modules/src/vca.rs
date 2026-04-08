@@ -6,11 +6,21 @@ use patches_core::parameter_map::ParameterMap;
 
 /// Voltage-controlled amplifier. Multiplies a signal by a control voltage.
 ///
-/// Input ports: `in/0` (signal), `cv/0` (control voltage).
-/// Output port: `out/0`.
-///
 /// No clamping is applied to the CV input; amplification above 1.0 and phase
 /// inversion with negative CV are valid use cases.
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Signal input |
+/// | `cv` | mono | Control voltage (multiplier) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | `in * cv` |
 pub struct Vca {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

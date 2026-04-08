@@ -4,22 +4,22 @@ use patches_core::{
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
-/// Converts a single MIDI CC number to a bipolar CV signal in [-1.0, 1.0].
+/// Converts a single MIDI CC number to a bipolar CV signal.
 ///
 /// Instantiate one per CC you want to map. The `cc` parameter selects which
 /// controller number (0–127) to listen to.
 ///
-/// ## Parameters
+/// # Outputs
 ///
-/// | Name | Kind | Range  | Default | Description              |
-/// |------|------|--------|---------|--------------------------|
-/// | `cc` | Int  | 0–127  | 1       | MIDI CC number to track  |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | mono | CC value mapped linearly to \[-1.0, 1.0\] |
 ///
-/// ## Output ports
+/// # Parameters
 ///
-/// | Index | Name  | Signal                                            |
-/// |-------|-------|---------------------------------------------------|
-/// | 0     | `out` | CC value mapped linearly to [-1.0, 1.0]           |
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `cc` | int | 0–127 | `1` | MIDI CC number to track |
 pub struct MidiCc {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

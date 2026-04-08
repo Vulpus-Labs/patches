@@ -9,16 +9,18 @@ use patches_core::parameter_map::ParameterMap;
 /// Multiplies each voice's signal by its corresponding CV channel.
 /// No clamping is applied; negative CV inverts phase.
 ///
-/// ## Input ports
-/// | Index | Name | Kind |
-/// |-------|------|------|
-/// | 0     | `in` | Poly |
-/// | 1     | `cv` | Poly |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `out` | Poly |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | poly | Signal input |
+/// | `cv` | poly | Control voltage (per-voice multiplier) |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | `in[v] * cv[v]` for each voice |
 pub struct PolyVca {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

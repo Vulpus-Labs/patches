@@ -9,15 +9,17 @@ use patches_core::parameter_map::ParameterMap;
 /// Reads a single mono value and writes it to every channel of a poly output,
 /// broadcasting one signal uniformly across all voices.
 ///
-/// ## Input ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `in`  | Mono |
+/// # Inputs
 ///
-/// ## Output ports
-/// | Index | Name  | Kind |
-/// |-------|-------|------|
-/// | 0     | `out` | Poly |
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `in` | mono | Signal to broadcast |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `out` | poly | Input value copied to all voices |
 pub struct MonoToPoly {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,

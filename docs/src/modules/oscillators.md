@@ -1,5 +1,9 @@
 # Oscillators
 
+> **Source of truth:** the doc comments on each module struct in
+> `patches-modules/src/` define the canonical port names, parameter
+> ranges, and behaviour. This page is kept in sync with those comments.
+
 ## `Osc` — Mono oscillator
 
 A single-voice oscillator with multiple waveform outputs.
