@@ -1,0 +1,72 @@
+================================================================================
+Error recovery: unclosed brace
+================================================================================
+
+patch {
+    module osc : Osc { frequency: 440Hz
+
+--------------------------------------------------------------------------------
+
+(ERROR
+  (ident)
+  (ident)
+  (param_entry
+    (ident)
+    (value
+      (scalar
+        (float_unit)))))
+
+================================================================================
+Error recovery: missing arrow in connection
+================================================================================
+
+patch {
+    module osc : Osc
+    module out : AudioOut
+    osc.sine out.in_left
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref
+          (module_ident (ident))
+          (port_label (ident)))
+        (arrow
+          (forward_arrow
+            (MISSING "->")))
+        (port_ref
+          (module_ident (ident))
+          (port_label (ident)))))))
+
+================================================================================
+Error recovery: incomplete module declaration
+================================================================================
+
+patch {
+    module osc :
+    module out : AudioOut
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (ERROR
+      (module_ident (ident))
+      (module_ident (ident)))))

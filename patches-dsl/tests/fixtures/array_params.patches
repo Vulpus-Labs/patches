@@ -1,0 +1,29 @@
+# Flat patch demonstrating array params and table-valued array params.
+# Seq.steps is a flat integer array (MIDI note numbers).
+# PatternSeq.pattern is an array of tables; PatternSeq is a fictional type
+# included here for grammar coverage of the table-array construct. No semantic
+# validator will reject it at parse time.
+
+patch {
+    module clock : Clock { bpm: 120.0 }
+
+    module seq : Seq(length: 8) {
+        steps: [60, 62, 64, 65, 67, 69, 71, 72]
+    }
+
+    module pat : PatternSeq(length: 4) {
+        pattern: [
+            { note: 36, velocity: 1.0, gate: 0.5 },
+            { note: 38, velocity: 0.7, gate: 0.5 },
+            { note: 40, velocity: 0.8, gate: 0.75 },
+            { note: 43, velocity: 0.6, gate: 0.25 },
+        ]
+    }
+
+    module out : AudioOut
+
+    clock.semiquaver -> seq.clock
+    clock.semiquaver -> pat.clock
+    seq.pitch        -> out.in_left
+    pat.pitch        -> out.in_right
+}

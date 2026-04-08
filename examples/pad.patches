@@ -1,0 +1,98 @@
+template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0) {
+    in: voct, fm
+    out: out
+
+    module osc0: PolyOsc { frequency: -0.006, <drift>, fm_type: logarithmic }
+    module osc1: PolyOsc { frequency: -0.0025, <drift>, fm_type: logarithmic }
+    module osc2: PolyOsc { frequency: 0.0, <drift>, fm_type: logarithmic }
+    module osc3: PolyOsc { frequency: 0.0025, <drift>, fm_type: logarithmic }
+    module osc4: PolyOsc { frequency: 0.006, <drift>, fm_type: logarithmic }
+    module sum: PolySum(channels: 5)
+    module filt: PolyLowpass { <cutoff> }
+
+    $.voct -> osc0.voct
+    $.voct -> osc1.voct
+    $.voct -> osc2.voct
+    $.voct -> osc3.voct
+    $.voct -> osc4.voct
+
+    osc0.<wave> -> sum.in[0]
+    osc1.<wave> -> sum.in[1]
+    osc2.<wave> -> sum.in[2]
+    osc3.<wave> -> sum.in[3]
+    osc4.<wave> -> sum.in[4]
+
+    sum.out -[0.2]->filt.in
+    $.voct -> filt.voct
+    $.fm -[0.015]-> osc0.fm
+    $.fm -[0.012]-> osc1.fm
+    $.fm -[0.01]-> osc2.fm
+    $.fm -[0.012]-> osc3.fm
+    $.fm -[0.015]-> osc4.fm
+
+    filt.out -> $.out
+}
+
+patch {
+
+    module midi : PolyMidiIn
+    module tuner : PolyTuner { octave: 1 }
+    module lowsaw : superosc(wave: square, cutoff: 1.0)
+    module highsaw : superosc(wave: sawtooth, cutoff: 1.0)
+    module lfo: Lfo { rate: 2.0 }
+    module mix: PolyMixer(channels: [low, high]) {
+        @low { level: 0.6 }
+        @high { level: 0.4 }
+    }
+    module adsr : PolyAdsr {
+        attack: 0.1,
+        decay: 0.4,
+        sustain: 0.5,
+        release: 0.5
+    }
+    module high_filt_adsr : PolyAdsr {
+        attack: 0.8
+        decay: 0.4
+        sustain: 0.3
+        release: 0.4
+    }
+    module high_filt : PolySvf { q: 0.3 }
+    module vca : PolyVca
+    module collapse : PolyToMono
+    module verb: StereoConvReverb  { ir: hall, mix: 0.05 }
+    module audio: AudioOut
+
+    midi.voct -> tuner.in
+    midi.voct -> lowsaw.voct
+    tuner.out -> highsaw.voct
+
+    module fan: MonoToPoly
+    lfo.sine -> fan.in
+    fan.out -> highsaw.fm
+    lowsaw.out -> mix.in[low]
+    highsaw.out -> high_filt.in
+    high_filt.lowpass -> mix.in[high]
+
+    midi.trigger -> adsr.trigger
+    midi.gate -> adsr.gate
+    adsr.out -> vca.cv
+
+    midi.trigger -> high_filt_adsr.trigger
+    midi.gate -> high_filt_adsr.gate
+    high_filt_adsr.out -> high_filt.fm
+
+    mix.out -> vca.in
+    vca.out -> collapse.in
+    module short_delay : Delay(channels: 1) { delay_ms: 20, dry_wet: 1.0 }
+    module delay : StereoDelay(channels: 1) { delay_ms: 750, feedback: 0.2, dry_wet: 0.5, pingpong: true, tone: 0.6 }
+
+    collapse.out -[0.3]-> delay.in_left
+    collapse.out -[0.3]-> short_delay.in
+    short_delay.out -> delay.in_right
+
+    delay.out_left -> verb.in_left
+    delay.out_right -> verb.in_right
+    
+    verb.out_left -> audio.in_left
+    verb.out_right -> audio.in_right
+}

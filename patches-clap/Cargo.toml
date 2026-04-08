@@ -1,0 +1,22 @@
+[package]
+name = "patches-clap"
+version = "0.1.0"
+edition = "2021"
+description = "CLAP audio plugin wrapping the Patches engine"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsp = { path = "../patches-dsp" }
+patches-dsl = { path = "../patches-dsl" }
+patches-engine = { path = "../patches-engine" }
+patches-interpreter = { path = "../patches-interpreter" }
+patches-modules = { path = "../patches-modules" }
+clap-sys = "0.5"
+rust-sugiyama = "0.4"
+rfd = "0.17"
+rtrb = "0.3"
+vizia = { git = "https://github.com/vizia/vizia", default-features = false, features = ["baseview"] }

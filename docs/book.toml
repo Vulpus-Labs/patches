@@ -1,0 +1,15 @@
+[book]
+title = "Patches Manual — v0.5.0"
+authors = ["Vulpus Labs"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/poetix/patches"
+edit-url-template = "https://github.com/poetix/patches/edit/main/docs/src/{path}"
+
+[output.pandoc]
+
+[output.pandoc.profile.pdf]
+output-file = "patches-manual.pdf"
+pdf-engine = "tectonic"

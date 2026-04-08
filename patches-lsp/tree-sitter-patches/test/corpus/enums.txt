@@ -1,0 +1,47 @@
+================================================================================
+Enum declaration
+================================================================================
+
+enum drum { kick, snare, hat }
+
+patch {
+    module osc : Osc
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (enum_decl
+    name: (ident)
+    (ident) (ident) (ident))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Enum reference in param
+================================================================================
+
+enum character { hall, room }
+
+patch {
+    module verb : FdnReverb { character: character.hall }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (enum_decl
+    name: (ident)
+    (ident) (ident))
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (param_block
+          (param_entry
+            (ident)
+            (value (scalar (enum_ref
+              enum_name: (ident)
+              member: (ident))))))))))

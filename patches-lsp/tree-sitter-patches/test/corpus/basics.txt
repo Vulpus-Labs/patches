@@ -1,0 +1,231 @@
+================================================================================
+Simple flat patch
+================================================================================
+
+patch {
+    module osc : Osc { frequency: 440Hz }
+    module out : AudioOut
+    osc.sine -> out.in_left
+    out.in_right <- osc.sine
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (param_block
+          (param_entry
+            (ident)
+            (value (scalar (float_unit)))))))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)))))))
+
+================================================================================
+Module with shape arguments
+================================================================================
+
+patch {
+    module mix : Sum(channels: 3)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (shape_block
+          (shape_arg
+            name: (ident)
+            (scalar (int_lit))))))))
+
+================================================================================
+Module with shape alias list
+================================================================================
+
+patch {
+    module del : StereoDelay(channels: [tap1, tap2])
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (shape_block
+          (shape_arg
+            name: (ident)
+            (alias_list (ident) (ident))))))))
+
+================================================================================
+Module with param block
+================================================================================
+
+patch {
+    module osc : Osc { frequency: 440.0, drift: 0.9 }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (param_block
+          (param_entry
+            (ident)
+            (value (scalar (float_lit))))
+          (param_entry
+            (ident)
+            (value (scalar (float_lit)))))))))
+
+================================================================================
+Scaled forward connection
+================================================================================
+
+patch {
+    module a : Osc
+    module b : Vca
+    a.sine -[0.5]-> b.in
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow (scale_val (scale_num))))
+        (port_ref (module_ident (ident)) (port_label (ident)))))))
+
+================================================================================
+Scaled backward connection
+================================================================================
+
+patch {
+    module a : Osc
+    module b : Vca
+    b.in <-[0.8]- a.sine
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow (scale_val (scale_num))))
+        (port_ref (module_ident (ident)) (port_label (ident)))))))
+
+================================================================================
+Negative scale (phase inversion)
+================================================================================
+
+patch {
+    module a : Osc
+    module b : Sum(channels: 1)
+    b.in[0] <-[-0.5]- a.sine
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (module_decl name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))))
+    (statement
+      (connection
+        (port_ref
+          (module_ident (ident))
+          (port_label (ident))
+          (port_index (nat)))
+        (arrow (backward_arrow (scale_val (scale_num))))
+        (port_ref (module_ident (ident)) (port_label (ident)))))))
+
+================================================================================
+Indexed port references (literal)
+================================================================================
+
+patch {
+    module mix : Sum(channels: 3)
+    module osc : Osc
+    osc.sine -> mix.in[0]
+    osc.sine -> mix.in[2]
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))))))
+
+================================================================================
+Comments
+================================================================================
+
+# This is a comment
+patch {
+    # Module comment
+    module osc : Osc
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (comment)
+  (patch
+    (comment)
+    (statement
+      (module_decl name: (ident) type: (ident)))))

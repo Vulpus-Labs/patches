@@ -1,0 +1,16 @@
+# Flat patch exercising scaled connections and indexed port references.
+# Covers: -[N]-> (forward scaled), <-[N]- (backward scaled, including negative
+# scale for phase inversion), and explicit port indices (mix.in[k]).
+
+patch {
+    module osc : Osc { frequency: 220.0 }
+    module lfo : Lfo { rate: 2.0 }
+    module mix : Sum(channels: 3)
+    module out : AudioOut
+
+    osc.sawtooth -[0.8]->  mix.in[0]
+    lfo.sine     -[0.3]->  mix.in[1]
+    mix.in[2]   <-[-0.5]-  osc.sawtooth
+    out.in_left    <- mix.out
+    out.in_right   <- mix.out
+}

@@ -1,0 +1,13 @@
+[package]
+name = "patches-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "patches_ffi"
+path = "src/lib.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-ffi-common = { path = "../patches-ffi-common" }
+libloading = "0.8"

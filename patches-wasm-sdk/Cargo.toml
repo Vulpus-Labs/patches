@@ -1,0 +1,12 @@
+[package]
+name = "patches-wasm-sdk"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "patches_wasm_sdk"
+path = "src/lib.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-ffi-common = { path = "../patches-ffi-common" }

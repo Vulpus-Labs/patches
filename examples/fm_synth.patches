@@ -1,0 +1,30 @@
+patch {
+    module kbd : PolyMidiIn
+    module vol_adsr : PolyAdsr
+    module mod_adsr : PolyAdsr { attack: 0.005, decay: 0.5, sustain: 0.0, release: 0.1 }
+    module osc_a : PolyOsc { fm_type: "linear" }
+    module osc_b : PolyOsc { frequency: 3.73 }
+    module vca: PolyVca
+    module mod_vca: PolyVca
+    module to_mono: PolyToMono
+    module out: AudioOut
+    module filter: Lowpass { cutoff: 1200.Hz, resonance: 0.0 }
+
+    kbd.trigger -> vol_adsr.trigger
+    kbd.trigger -> mod_adsr.trigger
+    kbd.gate -> vol_adsr.gate
+    kbd.gate -> mod_adsr.gate
+    kbd.voct -> osc_a.voct
+    kbd.voct -> osc_b.voct
+
+    vol_adsr.out -> vca.cv
+    osc_a.sine -> vca.in
+    vca.out -> to_mono.in
+    to_mono.out -[0.05]-> filter.in
+    filter.out -> out.in_left
+    filter.out -> out.in_right
+
+    mod_adsr.out -> mod_vca.cv
+    osc_b.sine -> mod_vca.in
+    mod_vca.out -[0.3]-> osc_a.phase_mod
+}

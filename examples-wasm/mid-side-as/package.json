@@ -1,0 +1,11 @@
+{
+  "name": "example-mid-side-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "asc assembly/index.ts --outFile build/mid_side.wasm --optimize --exportRuntime --use abort="
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.0"
+  }
+}

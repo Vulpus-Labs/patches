@@ -1,0 +1,18 @@
+[package]
+name = "patches-modules"
+version = "0.5.0"
+edition = "2021"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsp = { path = "../patches-dsp" }
+patches-io = { path = "../patches-io" }
+rtrb = "0.3"
+
+[dev-dependencies]
+patches-core = { path = "../patches-core", features = ["test-support"] }
+
+[lib]
+name = "patches_modules"
+path = "src/lib.rs"
+doctest = false

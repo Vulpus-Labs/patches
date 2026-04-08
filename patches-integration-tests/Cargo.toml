@@ -1,0 +1,18 @@
+[package]
+name = "patches-integration-tests"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+patches-core = { path = "../patches-core", features = ["test-support"] }
+patches-engine = { path = "../patches-engine" }
+rtrb = "0.3"
+
+[dev-dependencies]
+patches-modules = { path = "../patches-modules" }
+patches-dsl = { path = "../patches-dsl" }
+patches-interpreter = { path = "../patches-interpreter" }

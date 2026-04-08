@@ -1,0 +1,130 @@
+# pentatonic_sah.patches — random pentatonic melody via sample-and-hold noise
+#
+# A Clock drives a Sah that snapshots white noise on each quaver tick. The held
+# voltage is immediately quantised to the major pentatonic scale (C D E G A)
+# spanning two octaves around C4. Each time the quantised pitch changes the
+# Quant module emits a one-sample trig_out pulse, which fires an Adsr envelope
+# with no gate input — giving a pure Attack/Decay transient (sustain = 0).
+# The envelope shapes a Vca over the oscillator output. A hall reverb adds space.
+#
+# Signal flow:
+#
+#   clock.quaver ──────────────────────────────────┐
+#                                                  ▼
+#   noise.white ──► sah.in              sah.trig ◄─┘
+#                        └──► quant.in
+#                                  ├──► (voct out) ──► osc.voct
+#                                  └──► trig_out  ──► env.trigger
+#
+#   osc.sine ──► vca.in
+#   env.out  ──► vca.cv
+#
+#   vca.out ──► verb ──► out
+#
+# Hot-reload tips:
+#   - Slow the clock (bpm: 60) for a sparse, meditative feel.
+#   - Widen the pitch range with scale: 2.0 (adds a third octave).
+#   - Try scale: -1.0 for an inverted / descending tendency.
+#   - Change notes to ["0","3","5","7","10"] for a minor pentatonic.
+#   - Lengthen env decay (0.5–1.2) for longer, overlapping notes.
+#   - Shorten env decay (0.04–0.08) for a pizzicato character.
+#   - Swap osc.sine for osc.triangle for a slightly warmer timbre.
+#   - Lower verb size (0.3) for a tight room; raise to 0.95 for cathedral.
+
+patch {
+    # ── Clock ─────────────────────────────────────────────────────────────────
+    # Quaver pulses at 96 BPM ≈ 3.2 notes/second on average (Quant only fires
+    # when the pitch actually changes, so repeated samples stay silent).
+    module clock : Clock { bpm: 96.0 }
+
+    # ── Noise source and sample-and-hold ──────────────────────────────────────
+    module noise : Noise
+    module sah   : Sah
+
+    # ── Quantiser: major pentatonic C D E G A across two octaves around C4 ───
+    # centre: 4.0 shifts the base to C4 (voct 4.0); the ±3 oct noise range
+    # means the melody spans roughly C1–C7.
+    module quant : Quant {
+        notes:  ["0", "2", "4", "7", "9"],
+        centre: 4.0,
+        scale:  3.0
+    }
+
+    # ── Oscillator ────────────────────────────────────────────────────────────
+    module osc : Osc { drift: 0.8, fm_type: logarithmic }
+
+    # ── Amplitude envelope: A/D only (sustain = 0, gate not connected) ────────
+    # trigger fires on each new quantised pitch; no gate means the envelope
+    # runs Attack → Decay → done with no sustain or release tail.
+    module env : Adsr {
+        attack:  0.02,
+        decay:   0.2,
+        sustain: 0.0,
+        release: 0.001
+    }
+
+    # ── VCA ───────────────────────────────────────────────────────────────────
+    module vca : Vca
+
+    # ── Hall reverb for space ─────────────────────────────────────────────────
+    module verb : FdnReverb {
+        size:       0.8,
+        brightness: 0.45,
+        character:  hall
+    }
+
+    # ── Output ────────────────────────────────────────────────────────────────
+    module out : AudioOut
+
+    # ── Wiring ────────────────────────────────────────────────────────────────
+
+    # Clock → SAH trigger
+    clock.quaver -> sah.trig
+
+    # Noise → SAH input
+    noise.pink -> sah.in
+
+    # SAH → quantiser
+    sah.out -> quant.in
+
+    # Quantised pitch → oscillator voct
+    quant.out -> osc.voct
+
+    module lfo : Lfo { rate: 8.0 }
+    lfo.sine -[0.02]-> osc.fm
+
+    # Pitch-change trigger → envelope (no gate connected: A/D only)
+    quant.trig_out -> env.trigger
+
+    # Oscillator → VCA → reverb → output
+    osc.sine       -> vca.in
+    env.out        -> vca.cv
+
+    module del : StereoDelay(channels: 1) {
+        delay_ms[0]: 1200,
+        feedback[0]: 0.6,
+        gain[0]: 1.0,
+        pan[0]: -1.0,
+        pingpong[0]: true
+    }
+
+    module mix : StereoMixer(channels: 1) {
+        level[0]: 0.7,
+        send_a[0]: 0.4,
+        send_b[0]: 0.4
+    }
+
+    vca.out -> mix.in[0]
+    mix.send_a_left -> verb.in_left
+    mix.send_a_right -> verb.in_right
+    mix.return_a_left <- verb.out_left
+    mix.return_a_right <- verb.out_right
+
+    mix.send_b_left -> del.in_left
+    mix.send_b_right -> del.in_right
+    mix.return_b_left <- del.out_left
+    mix.return_b_right <- del.out_right
+
+    mix.out_left  -> out.in_left
+    mix.out_right -> out.in_right
+}

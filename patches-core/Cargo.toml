@@ -1,0 +1,13 @@
+[package]
+name = "patches-core"
+version = "0.5.0"
+edition = "2021"
+
+[lib]
+name = "patches_core"
+path = "src/lib.rs"
+
+[features]
+test-support = []
+
+[dependencies]

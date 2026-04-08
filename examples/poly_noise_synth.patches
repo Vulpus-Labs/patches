@@ -1,0 +1,32 @@
+patch {
+    module kbd       : PolyMidiIn
+
+    module noise     : PolyNoise
+    module filt      : PolySvf { cutoff: C0, q: 0.97 }
+
+    module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.12,  sustain: 0.65, release: 0.4 }
+    module vca       : PolyVca
+
+    module collapse  : PolyToMono
+    module out       : AudioOut
+
+    # SVF tracks the played note; bandpass output gives a resonant pitched tone
+    kbd.voct -> filt.voct
+
+    noise.white -> filt.in
+    filt.bandpass -> vca.in
+
+    # Amplitude envelope: triggered and gated per voice
+    kbd.trigger            -> amp_env.trigger
+    kbd.gate               -> amp_env.gate
+
+    # VCA: shaped audio per voice
+    amp_env.out            -> vca.cv
+
+    # Collapse all voices to mono
+    vca.out                -> collapse.in
+
+    # Stereo output — scale down to avoid clipping with many voices
+    collapse.out  -[0.12]-> out.in_left
+    collapse.out  -[0.12]-> out.in_right
+}

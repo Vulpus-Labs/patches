@@ -1,0 +1,99 @@
+# radigue_drone.patches — Eliane Radigue-inspired sine drone with diode ring modulation
+#
+# Two pairs of sine oscillators (A and B), each tuned to C4, with drift on
+# one voice per pair to create slow organic beating. Each pair feeds a diode
+# ring modulator (ring_a, ring_b). Those two outputs then feed a final ring
+# modulator (ring_final), producing sum and difference tones.
+#
+# Cross-feedback: each ring mod output lightly FM-modulates the drifting
+# carrier of the other pair (scale 0.1), creating non-linear mutual evolution.
+#
+# Stereo mix: ring_final at centre blended with the four dry oscillators
+# spread across the stereo field.
+#
+# Signal flow:
+#
+#   osc_a1 ─────────────────► ring_a ──────────────────► ring_final ─► mix[0]
+#   osc_a2 (drift) ──────────►      └─[0.1]──► osc_b2.fm
+#
+#   osc_b1 ─────────────────► ring_b ──────────────────►             ─► mix[0]
+#   osc_b2 (drift) ──────────►      └─[0.1]──► osc_a2.fm
+#
+#   osc_a1 ──────────────────────────────────────────────────────────► mix[1] (L)
+#   osc_a2 ──────────────────────────────────────────────────────────► mix[2] (L-C)
+#   osc_b1 ──────────────────────────────────────────────────────────► mix[3] (R-C)
+#   osc_b2 ──────────────────────────────────────────────────────────► mix[4] (R)
+
+patch {
+    # ── Oscillator pair A (C4 drone) ──────────────────────────────────────────
+    module osc_a1 : Osc { frequency: 80Hz, drift: 0.9, fm_type: logarithmic }
+    module osc_a2 : Osc { frequency: 401Hz, drift: 0.9, fm_type: logarithmic }
+
+    # ── Oscillator pair B (C4 drone) ──────────────────────────────────────────
+    module osc_b1 : Osc { frequency: 319Hz, drift: 0.9, fm_type: logarithmic }
+    module osc_b2 : Osc { frequency: 241Hz, drift: 0.9, fm_type: logarithmic }
+
+    # ── Diode ring modulators ─────────────────────────────────────────────────
+    module ring_a     : RingMod { drive: 2.0 }
+    module ring_b     : RingMod { drive: 2.0 }
+    module ring_final : RingMod { drive: 2.0 }
+
+    # ── Stereo output mixer ───────────────────────────────────────────────────
+    # [0] ring_final — centre, prominent
+    # [1] osc_a1     — hard left, dry anchor
+    # [2] osc_a2     — left-centre, drifting
+    # [3] osc_b1     — right-centre, dry anchor
+    # [4] osc_b2     — hard right, drifting
+    module mix : StereoMixer(channels: 5) {
+        level[0]: 0.8,  pan[0]:  0.0, send_a[0]: 1.0,
+        level[1]: 0.4,  pan[1]: -0.8, send_a[1]: 1.0,
+        level[2]: 0.3,  pan[2]: -0.4, send_a[2]: 1.0,
+        level[3]: 0.3,  pan[3]:  0.4, send_a[3]: 1.0,
+        level[4]: 0.4,  pan[4]:  0.8, send_a[4]: 1.0
+    }
+    module out : AudioOut
+
+    # ── Pair A → ring_a ───────────────────────────────────────────────────────
+    osc_a1.sine -> ring_a.signal
+    osc_a2.sine -> ring_a.carrier
+
+    # ── Pair B → ring_b ───────────────────────────────────────────────────────
+    osc_b1.sine -> ring_b.signal
+    osc_b2.sine -> ring_b.carrier
+
+    # ── Both ring mods → final ring mod ───────────────────────────────────────
+    ring_a.out -> ring_final.signal
+    ring_b.out -> ring_final.carrier
+
+    # ── Cross-feedback: each ring mod FM-modulates the drifting carrier of the
+    #    other pair, coupling the two pairs' evolution without hard synchronisation
+    ring_a.out -[0.4]-> osc_b2.fm
+    ring_b.out -[0.2]-> osc_a2.fm
+    ring_final.out -> osc_a1.fm
+    ring_final.out -> osc_b1.fm
+
+    # ── Mixer inputs ──────────────────────────────────────────────────────────
+    ring_final.out -> mix.in[0]
+    osc_a1.sine    -> mix.in[1]
+    osc_a2.sine    -> mix.in[2]
+    osc_b1.sine    -> mix.in[3]
+    osc_b2.sine    -> mix.in[4]
+
+    module del : StereoDelay(channels: 3) {
+        delay_ms[0]: 1300,
+        delay_ms[1]: 1510,
+        delay_ms[2]: 1715,
+        feedback[0]: 0.4,
+        feedback[1]: 0.2,
+        feedback[2]: 0.4
+    }
+
+    mix.send_a_left -> del.in_left
+    mix.send_a_right -> del.in_right
+    mix.return_a_left <- del.out_left
+    mix.return_a_right <- del.out_right
+
+    # ── Stereo output (attenuated: oscillators + ring mod sum loud) ───────────
+    mix.out_left  -[0.1]-> out.in_left
+    mix.out_right -[0.1]-> out.in_right
+}

@@ -1,0 +1,45 @@
+# Two templates; filtered_voice instantiates voice within its body.
+# Proves the grammar handles template nesting at the syntactic level.
+
+template voice(attack: float = 0.01, sustain: float = 0.7) {
+    in:  voct, gate
+    out: audio
+
+    module osc : Osc
+    module env : Adsr { attack: <attack>, sustain: <sustain>, release: 0.2 }
+    module vca : Vca
+
+    osc.voct <- $.voct
+    env.gate <- $.gate
+    $.audio  <- vca.out
+
+    osc.sine -> vca.in
+    env.out  -> vca.cv
+}
+
+template filtered_voice(attack: float = 0.01, sustain: float = 0.7, cutoff: float = 6.93) {
+    in:  voct, gate
+    out: audio
+
+    module v    : voice(attack: <attack>, sustain: <sustain>)
+    module filt : Lowpass { cutoff: <cutoff> }
+
+    v.voct  <- $.voct
+    v.gate  <- $.gate
+    $.audio <- filt.out
+
+    v.audio -> filt.in
+}
+
+patch {
+    module clock : Clock { bpm: 100.0 }
+    module seq   : Seq(length: 4) { steps: ["C2", "E2", "G2", "C3"] }
+    module fv    : filtered_voice(attack: 0.02, cutoff: 6.2)
+    module out   : AudioOut
+
+    clock.semiquaver -> seq.clock
+    seq.pitch        -> fv.voct
+    seq.gate         -> fv.gate
+    out.in_left         <- fv.audio
+    out.in_right        <- fv.audio
+}

@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows binary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build patch_player
+        run: cargo build --release -p patches-player
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x86_64
+          path: target/release/patch_player.exe
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS binary (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build patch_player
+        run: cargo build --release -p patches-player --target ${{ matrix.target }}
+
+      - name: Ad-hoc sign binary
+        run: codesign --sign - target/${{ matrix.target }}/release/patch_player
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/patch_player
+          if-no-files-found: error
+
+  build-docs:
+    name: Build PDF docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mdBook and mdbook-pandoc
+        run: cargo install mdbook mdbook-pandoc --locked
+
+      - name: Install Pandoc
+        run: |
+          curl -sSL https://github.com/jgm/pandoc/releases/download/3.2/pandoc-3.2-linux-amd64.tar.gz \
+            | tar -xz --strip-components=2 --directory /usr/local/bin pandoc-3.2/bin/pandoc
+
+      - name: Install Tectonic
+        run: |
+          curl -sSL https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz --directory /usr/local/bin
+
+      - name: Build docs
+        working-directory: docs
+        run: mdbook build
+
+      - name: List build output
+        run: find docs/book -type f | sort
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-docs-pdf
+          path: docs/book/pandoc/pdf/patches-manual.pdf
+          if-no-files-found: error
+
+  package-and-release:
+    name: Package and publish release
+    needs: [build-windows, build-macos, build-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Build release packages
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION_BARE="${VERSION#v}"
+
+          # Windows zip
+          WIN_DIR="patches-${VERSION_BARE}-windows-x86_64"
+          mkdir -p "${WIN_DIR}/examples"
+          cp artifacts/release-windows-x86_64/patch_player.exe "${WIN_DIR}/"
+          cp artifacts/release-docs-pdf/patches-manual.pdf "${WIN_DIR}/"
+          cp examples/* "${WIN_DIR}/examples/"
+          zip -r "${WIN_DIR}.zip" "${WIN_DIR}"
+
+          # macOS aarch64 tarball
+          MAC_ARM_DIR="patches-${VERSION_BARE}-macos-aarch64"
+          mkdir -p "${MAC_ARM_DIR}/examples"
+          cp artifacts/release-macos-aarch64-apple-darwin/patch_player "${MAC_ARM_DIR}/"
+          chmod +x "${MAC_ARM_DIR}/patch_player"
+          cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_ARM_DIR}/"
+          cp examples/* "${MAC_ARM_DIR}/examples/"
+          tar -czf "${MAC_ARM_DIR}.tar.gz" "${MAC_ARM_DIR}"
+
+          # macOS x86_64 tarball
+          MAC_X64_DIR="patches-${VERSION_BARE}-macos-x86_64"
+          mkdir -p "${MAC_X64_DIR}/examples"
+          cp artifacts/release-macos-x86_64-apple-darwin/patch_player "${MAC_X64_DIR}/"
+          chmod +x "${MAC_X64_DIR}/patch_player"
+          cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_X64_DIR}/"
+          cp examples/* "${MAC_X64_DIR}/examples/"
+          tar -czf "${MAC_X64_DIR}.tar.gz" "${MAC_X64_DIR}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            patches-*-windows-x86_64.zip
+            patches-*-macos-aarch64.tar.gz
+            patches-*-macos-x86_64.tar.gz
+          generate_release_notes: true

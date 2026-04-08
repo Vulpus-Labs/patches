@@ -1,0 +1,13 @@
+[package]
+name = "patches-dsp"
+version = "0.5.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "patches_dsp"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+rtrb = "0.3"

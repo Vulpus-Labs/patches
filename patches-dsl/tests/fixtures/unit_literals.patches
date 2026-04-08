@@ -1,0 +1,21 @@
+patch {
+    # dB: amplitude scale factors
+    module amp1 : Gain { gain: 0dB }
+    module amp2 : Gain { gain: -6dB }
+    module amp3 : Gain { gain: -60DB }     # case-insensitive
+    module amp4 : Gain { gain: 6.0dB }    # float dB
+
+    # Hz / kHz: v/oct offset from C0
+    module osc1 : Osc { freq: 440Hz }
+    module osc2 : Osc { freq: 440.0hz }   # case-insensitive, float
+    module osc3 : Osc { freq: 4.4kHz }
+    module osc4 : Osc { freq: 4.4KHZ }    # uppercase
+
+    # Note names: v/oct offset from C0
+    module n1 : Osc { freq: C4 }
+    module n2 : Osc { freq: a4 }          # case-insensitive
+    module n3 : Osc { freq: Bb2 }
+    module n4 : Osc { freq: A#-1 }
+    module n5 : Osc { freq: f#3 }
+    module n6 : Osc { freq: C0 }          # C0 = 0.0 v/oct
+}

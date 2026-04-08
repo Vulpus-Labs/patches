@@ -1,0 +1,11 @@
+patch {
+    # ── Oscillator pair A (C4 drone) ──────────────────────────────────────────
+    module osc : Osc { frequency: 100Hz, drift: 0.9 }
+    module lfo : Lfo { rate: 0.2 }
+    module audio : AudioOut
+    module filt : Lowpass { cutoff: 500Hz }
+    lfo.triangle -[0.8]-> osc.pulse_width_cv
+    osc.square -[0.8]-> filt.in
+    filt.out -> audio.in_left
+    filt.out -> audio.in_right
+}

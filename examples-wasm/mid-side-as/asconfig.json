@@ -1,0 +1,12 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "build/mid_side.wasm",
+      "optimize": true,
+      "exportRuntime": true
+    }
+  },
+  "options": {
+    "use": "abort="
+  }
+}

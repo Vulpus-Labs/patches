@@ -1,0 +1,4 @@
+# error: bare_module — module keyword with no name or type
+patch {
+    module
+}

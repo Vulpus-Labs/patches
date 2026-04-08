@@ -1,0 +1,13 @@
+{
+  "default": true,
+  "MD013": { "tables": false },
+  "MD036": false,
+  "overrides": [
+    {
+      "files": ["docs/src/SUMMARY.md"],
+      "rules": {
+        "MD025": false
+      }
+    }
+  ]
+}

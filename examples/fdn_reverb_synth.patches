@@ -1,0 +1,53 @@
+# fdn_reverb_synth.patches — polyphonic synth with stereo FDN hall reverb
+#
+# Architecture:
+#   kbd      — PolyMidiIn: LIFO voice allocation (up to poly_voices voices)
+#   osc      — PolyOsc: one sawtooth per voice, driven by poly V/oct
+#   amp_env  — PolyAdsr: per-voice amplitude envelope (short decay, no sustain)
+#   vca      — PolyVca: shapes each voice's audio with its amplitude envelope
+#   collapse — PolyToMono: sums all poly voices to a single mono signal
+#   reverb   — FdnReverb: 8-line hall reverb; both outputs feed AudioOut stereo
+#   out      — AudioOut: stereo output
+#
+# Signal flow:
+#
+#   kbd ──voct──→ osc ──sawtooth──→ vca ──→ collapse ──→ reverb ──→ out (L+R)
+#   kbd ──trigger──→ amp_env
+#   kbd ──gate────→ amp_env
+#   amp_env ──out──→ vca.cv
+#
+# Hot-reload tips:
+#   - Raise amp_env release (try 0.5–1.5) for longer notes into the reverb tail.
+#   - Lower reverb size (try 0.2–0.4) for a smaller, tighter room.
+#   - Try character: "cathedral" for an extreme, very long tail.
+#   - Raise brightness (try 0.7–0.9) for a brighter, more present reverb.
+#   - Scale down the collapse→reverb connection (try 0.2) for a drier mix.
+
+patch {
+    module kbd      : PolyMidiIn
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr   { attack: 0.005, decay: 0.25, sustain: 0.0, release: 0.6 }
+    module vca      : PolyVca
+    module collapse : PolyToMono
+    module reverb   : FdnReverb  { character: "hall", size: 0.5, brightness: 0.6 }
+    module out      : AudioOut
+
+    # V/oct: keyboard → oscillator
+    kbd.voct       -> osc.voct
+
+    # Amplitude envelope: trigger and gate per voice
+    kbd.trigger    -> amp_env.trigger
+    kbd.gate       -> amp_env.gate
+
+    # VCA: shaped audio per voice
+    osc.sawtooth   -> vca.in
+    amp_env.out    -> vca.cv
+
+    # Collapse poly voices to mono and feed the reverb
+    vca.out        -> collapse.in
+    collapse.out  -[0.4]-> reverb.in_left
+
+    # Stereo reverb output → audio out
+    reverb.out_left  -> out.in_left
+    reverb.out_right -> out.in_right
+}

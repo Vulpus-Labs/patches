@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "patches-core",
+    "patches-dsl",
+    "patches-dsp",
+    "patches-interpreter",
+    "patches-modules",
+    "patches-io",
+    "patches-engine",
+    "patches-integration-tests",
+    "patches-player",
+    "patches-profiling",
+    "patches-clap",
+    "patches-lsp",
+    "patches-ffi",
+    "patches-ffi-common",
+    "test-plugins/gain",
+    "test-plugins/conv-reverb",
+]
+# Shelved WASM crates — excluded from build. See adr/0027-wasm-module-loading.md.
+# "patches-wasm-sdk",
+# "patches-wasm",
+# "test-plugins/gain-wasm",
+# "examples-wasm/wavefolder-rs",
+resolver = "2"
+
+[profile.release]
+debug = 1  # line-level debug info for profiling symbols

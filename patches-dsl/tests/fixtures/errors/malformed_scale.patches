@@ -1,0 +1,7 @@
+# error: malformed_scale — scale bracket not closed (-[0.5-> dest)
+patch {
+    module osc : Osc { frequency: 440.0 }
+    module out : AudioOut
+
+    osc.sine -[0.5-> out.in_left
+}

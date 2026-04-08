@@ -1,0 +1,30 @@
+# Intentionally invalid: recur_a instantiates recur_b, which instantiates recur_a.
+# This is an indirect/mutual cycle (A → B → A).
+# The expander must detect this and return an error.
+
+template recur_a(x: float = 0.0) {
+    in:  input
+    out: output
+
+    module b : recur_b(x: <x>)
+    b.input  <- $.input
+    $.output <- b.output
+}
+
+template recur_b(x: float = 0.0) {
+    in:  input
+    out: output
+
+    module a : recur_a(x: <x>)
+    a.input  <- $.input
+    $.output <- a.output
+}
+
+patch {
+    module osc : Osc
+    module r   : recur_a
+    module out : AudioOut
+
+    osc.sine -> r.input
+    out.in_left <- r.output
+}

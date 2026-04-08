@@ -1,0 +1,38 @@
+# Intentionally invalid: three-template cycle A → B → C → A.
+# The expander must detect this longer cycle and return an error.
+
+template cycle_a {
+    in:  x
+    out: y
+
+    module next : cycle_b
+    next.x <- $.x
+    $.y    <- next.y
+}
+
+template cycle_b {
+    in:  x
+    out: y
+
+    module next : cycle_c
+    next.x <- $.x
+    $.y    <- next.y
+}
+
+template cycle_c {
+    in:  x
+    out: y
+
+    module next : cycle_a
+    next.x <- $.x
+    $.y    <- next.y
+}
+
+patch {
+    module osc : Osc
+    module r   : cycle_a
+    module out : AudioOut
+
+    osc.sine -> r.x
+    out.in_left <- r.y
+}

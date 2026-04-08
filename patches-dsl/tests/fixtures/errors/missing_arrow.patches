@@ -1,0 +1,7 @@
+# error: missing_arrow — two port refs on a line with no arrow between them
+patch {
+    module osc : Osc { frequency: 440.0 }
+    module out : AudioOut
+
+    osc.sine out.in_left
+}

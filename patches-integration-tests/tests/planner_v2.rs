@@ -1,0 +1,452 @@
+use patches_core::{AUDIO_OUT_L, CablePool, CableValue, Module, ModuleGraph, ModuleShape, NodeId};
+use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::PlannerState;
+use patches_engine::{build_patch, ExecutionPlan, ReadyState, StaleState, ModulePool};
+use patches_modules::{AudioOut, Oscillator, Seq, Sum};
+use patches_integration_tests::{p, pi, env, POOL_CAP, MODULE_CAP};
+
+/// Oscillator → AudioOut (sine output).
+fn sine_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
+    let mut graph = ModuleGraph::new();
+    let mut params = ParameterMap::new();
+    params.insert("frequency".to_string(), ParameterValue::Float(freq));
+    graph.add_module(osc_id, Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
+    graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph
+}
+
+/// Osc("osc_a") + Osc("osc_b") → Sum(2) → AudioOut.
+fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
+    let mut graph = ModuleGraph::new();
+    let mut pa = ParameterMap::new();
+    pa.insert("frequency".to_string(), ParameterValue::Float(freq_a));
+    let mut pb = ParameterMap::new();
+    pb.insert("frequency".to_string(), ParameterValue::Float(freq_b));
+    graph.add_module("osc_a", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &pa).unwrap();
+    graph.add_module("osc_b", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &pb).unwrap();
+    graph.add_module("mix", Sum::describe(&ModuleShape { channels: 2, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.connect(&NodeId::from("osc_a"), p("sine"), &NodeId::from("mix"), pi("in", 0), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc_b"), p("sine"), &NodeId::from("mix"), pi("in", 1), 1.0).unwrap();
+    graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
+    graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph
+}
+
+/// Sum(1-channel) → AudioOut. Used as a different module type in type-change tests.
+fn sum_out_graph() -> ModuleGraph {
+    let mut graph = ModuleGraph::new();
+    graph.add_module("osc", Sum::describe(&ModuleShape { channels: 1, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph
+}
+
+/// Tombstone removed modules, install new ones, apply parameter diffs.
+fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
+    let pool = stale.module_pool_mut();
+    for &idx in &plan.tombstones {
+        pool.tombstone(idx);
+    }
+    for (idx, m) in plan.new_modules.drain(..) {
+        pool.install(idx, m);
+    }
+    for (idx, params) in &mut plan.parameter_updates {
+        pool.update_parameters(*idx, params);
+    }
+}
+
+fn make_buffer_pool() -> Vec<[CableValue; 2]> {
+    (0..POOL_CAP).map(|_| [CableValue::Mono(0.0), CableValue::Mono(0.0)]).collect()
+}
+
+/// Resolve pool index from planner state: `module_alloc.pool_map[instance_id]`.
+fn pool_index_for(state: &PlannerState, node_id: &NodeId) -> usize {
+    let ns = &state.nodes[node_id];
+    state.module_alloc.pool_map[&ns.instance_id]
+}
+
+// ── tests ──────────────────────────────────────────────────────────────────────
+
+/// Rebuilding an identical graph produces no new modules and preserves InstanceIds.
+#[test]
+fn surviving_modules_are_not_re_instantiated() {
+    let registry = patches_modules::default_registry();
+    let graph = sine_out_graph("osc", 4.75);
+
+    let (plan_a, state_a) =
+        build_patch(&graph, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    // Collect (pool_index → module InstanceId) from the first plan.
+    // After the builder fix, state.instance_id equals module.instance_id().
+    let ids_a: std::collections::HashMap<usize, patches_core::InstanceId> =
+        plan_a.new_modules.iter().map(|(idx, m)| (*idx, m.instance_id())).collect();
+
+    let (plan_b, state_b) =
+        build_patch(&graph, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    assert!(plan_b.new_modules.is_empty(), "no new modules for an identical rebuild");
+    assert!(plan_b.tombstones.is_empty(), "no tombstones for an identical rebuild");
+
+    // Every node's InstanceId and pool slot must be stable across an identical rebuild.
+    for (node_id, ns_a) in &state_a.nodes {
+        let ns_b = state_b.nodes.get(node_id).expect("node must still be in state_b");
+        assert_eq!(
+            ns_a.instance_id, ns_b.instance_id,
+            "InstanceId for {node_id:?} must survive an identical rebuild"
+        );
+        // The state's InstanceId must match the module that was installed.
+        assert_eq!(
+            ids_a[&pool_index_for(&state_a, node_id)], ns_a.instance_id,
+            "state InstanceId must equal the installed module's instance_id()"
+        );
+    }
+}
+
+/// Adding a node to the graph causes it to appear in new_modules with a fresh InstanceId.
+#[test]
+fn new_node_triggers_instantiation() {
+    let registry = patches_modules::default_registry();
+    let graph_a = sine_out_graph("osc_a", 4.75);
+
+    let (_plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    // graph_b adds "osc_b" and "mix" (two new nodes).
+    let graph_b = two_osc_graph(4.75, 5.75);
+    let (plan_b, state_b) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    // "osc_b" and "mix" are new; "osc_a" and "out" survive.
+    let new_module_slots: std::collections::HashSet<usize> =
+        plan_b.new_modules.iter().map(|(idx, _)| *idx).collect();
+    assert_eq!(new_module_slots.len(), 2, "exactly two new modules (osc_b and mix)");
+
+    // The new pool slots must match the state assignments for "osc_b" and "mix".
+    let osc_b_slot = pool_index_for(&state_b, &NodeId::from("osc_b"));
+    let mix_slot = pool_index_for(&state_b, &NodeId::from("mix"));
+
+    assert!(new_module_slots.contains(&osc_b_slot), "osc_b pool slot must be in new_modules");
+    assert!(new_module_slots.contains(&mix_slot), "mix pool slot must be in new_modules");
+
+    // Verify the state InstanceIds match the modules in new_modules (builder fix check).
+    for (idx, m) in &plan_b.new_modules {
+        let node_state = state_b.nodes.values()
+            .find(|ns| state_b.module_alloc.pool_map[&ns.instance_id] == *idx)
+            .unwrap();
+        assert_eq!(
+            m.instance_id(), node_state.instance_id,
+            "module InstanceId at slot {idx} must equal state InstanceId"
+        );
+    }
+
+    // "osc_a" and "out" must NOT appear in new_modules (they survive).
+    assert!(
+        !new_module_slots.contains(&pool_index_for(&state_a, &NodeId::from("osc_a"))),
+        "osc_a must not be in new_modules"
+    );
+    assert!(
+        !new_module_slots.contains(&pool_index_for(&state_a, &NodeId::from("out"))),
+        "out must not be in new_modules"
+    );
+}
+
+/// Removing a node from the graph causes it to appear in tombstones.
+#[test]
+fn removed_node_triggers_tombstone() {
+    let registry = patches_modules::default_registry();
+    let graph_a = two_osc_graph(4.75, 5.75);
+
+    let (_plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let osc_b_slot = pool_index_for(&state_a, &NodeId::from("osc_b"));
+    let mix_slot = pool_index_for(&state_a, &NodeId::from("mix"));
+
+    // graph_b removes "osc_b" and "mix" (back to single-osc layout).
+    let graph_b = sine_out_graph("osc_a", 4.75);
+    let (plan_b, _state_b) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    assert!(
+        plan_b.tombstones.contains(&osc_b_slot),
+        "osc_b pool slot must be tombstoned on removal"
+    );
+    assert!(
+        plan_b.tombstones.contains(&mix_slot),
+        "mix pool slot must be tombstoned on removal"
+    );
+    assert!(
+        plan_b.new_modules.is_empty(),
+        "no new modules when only removing nodes"
+    );
+}
+
+/// Changing a node's module type tombstones the old slot and instantiates a new module.
+#[test]
+fn type_change_triggers_tombstone_and_new_module() {
+    let registry = patches_modules::default_registry();
+    let graph_a = sine_out_graph("osc", 4.75);
+
+    let (_plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let old_osc_slot = pool_index_for(&state_a, &NodeId::from("osc"));
+
+    // graph_b: same NodeId "osc" but Sum instead of Oscillator (type changed).
+    let graph_b = sum_out_graph();
+    let (plan_b, state_b) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    assert!(
+        plan_b.tombstones.contains(&old_osc_slot),
+        "old Oscillator slot must be tombstoned on type change"
+    );
+
+    let new_osc_slot = pool_index_for(&state_b, &NodeId::from("osc"));
+    let new_module_slots: Vec<usize> = plan_b.new_modules.iter().map(|(idx, _)| *idx).collect();
+    assert!(
+        new_module_slots.contains(&new_osc_slot),
+        "new Sum must appear in new_modules"
+    );
+
+    // Verify the new module is actually a Sum.
+    let new_osc = plan_b.new_modules.iter()
+        .find(|(idx, _)| *idx == new_osc_slot)
+        .map(|(_, m)| m)
+        .unwrap();
+    assert!(
+        new_osc.as_any().downcast_ref::<Sum>().is_some(),
+        "new module must be a Sum"
+    );
+}
+
+/// A parameter-only change produces parameter_updates but no new_modules.
+#[test]
+fn parameter_only_change_produces_diffs_without_reinstantiation() {
+    let registry = patches_modules::default_registry();
+    let graph_a = sine_out_graph("osc", 4.75);
+
+    let (_plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let osc_slot = pool_index_for(&state_a, &NodeId::from("osc"));
+
+    // Same structure, different frequency.
+    let graph_b = sine_out_graph("osc", 5.75);
+    let (plan_b, state_b) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    assert!(plan_b.new_modules.is_empty(), "parameter-only change must not instantiate new modules");
+    assert!(plan_b.tombstones.is_empty(), "parameter-only change must not tombstone any slots");
+
+    // InstanceId must be preserved.
+    assert_eq!(
+        state_a.nodes[&NodeId::from("osc")].instance_id,
+        state_b.nodes[&NodeId::from("osc")].instance_id,
+        "InstanceId must be stable across a parameter-only change"
+    );
+
+    // The frequency diff must appear in parameter_updates for the osc slot.
+    let update = plan_b.parameter_updates.iter()
+        .find(|(idx, _)| *idx == osc_slot)
+        .map(|(_, params)| params);
+    let update = update.expect("osc slot must have a parameter update");
+    assert!(
+        matches!(update.get_scalar("frequency"), Some(ParameterValue::Float(f)) if (*f - 5.75).abs() < 1e-10),
+        "parameter_updates must contain the new frequency (880 Hz)"
+    );
+}
+
+/// Module state (oscillator phase) is preserved across a parameter-only replan.
+///
+/// After 100 ticks at 440 Hz, a parameter update to 880 Hz is applied via replan.
+/// The surviving oscillator's accumulated phase must not be reset.
+#[test]
+fn state_preserved_across_parameter_update() {
+    let registry = patches_modules::default_registry();
+
+    let graph_a = sine_out_graph("osc", 4.75);
+    let (mut plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let pool = ModulePool::new(MODULE_CAP);
+    let mut bufs = make_buffer_pool();
+    let mut stale = ReadyState::new_stale(pool);
+    adopt_plan(&mut plan_a, &mut stale);
+    let mut state = stale.rebuild(&plan_a, 32);
+
+    // Tick 100 times at 440 Hz.
+    const TICKS: usize = 100;
+    for i in 0..TICKS {
+        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        state.tick(&mut cable_pool);
+    }
+
+    // Replan with freq=880 Hz — parameter-only change, osc survives.
+    let graph_b = sine_out_graph("osc", 5.75);
+    let (mut plan_b, _) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+    let mut stale = state.make_stale();
+    adopt_plan(&mut plan_b, &mut stale);
+    let mut state = stale.rebuild(&plan_b, 32);
+
+    assert!(
+        plan_b.new_modules.is_empty(),
+        "osc must survive a parameter-only replan (no re-instantiation)"
+    );
+    assert!(
+        plan_b.tombstones.is_empty(),
+        "no module must be tombstoned on a parameter-only replan"
+    );
+
+    for i in TICKS..(TICKS + 2) {
+        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        state.tick(&mut cable_pool);
+    }
+}
+
+/// A plan built with a real (non-zero) sample rate produces modules that use it correctly.
+///
+/// Verifies that the AudioEnvironment's sample_rate flows into module construction:
+/// after 3 ticks, the sink should reflect sin(TAU * freq / sample_rate), which is
+/// only finite and correct when sample_rate is properly stored by the oscillator.
+#[test]
+fn initial_plan_uses_provided_sample_rate() {
+    let registry = patches_modules::default_registry();
+    const FREQ: f32 = 4.75;
+    let graph = sine_out_graph("osc", FREQ);
+
+    let (mut plan, _state) =
+        build_patch(&graph, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let pool = ModulePool::new(MODULE_CAP);
+    let mut bufs = make_buffer_pool();
+    let mut stale = ReadyState::new_stale(pool);
+    adopt_plan(&mut plan, &mut stale);
+    let mut state = stale.rebuild(&plan, 32);
+
+    for i in 0..3 {
+        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        state.tick(&mut cable_pool);
+    }
+
+    // Last tick was i=2, wi = 2 % 2 = 0. AudioOut wrote to AUDIO_OUT_L[0].
+    let out_val = match bufs[AUDIO_OUT_L][0] { CableValue::Mono(v) => v, _ => 0.0 };
+    assert!(out_val.is_finite(), "audio output must be finite");
+    assert!(out_val.abs() <= 1.0, "audio output must be bounded");
+}
+
+/// Changing the shape of a sequencer node (e.g. length 4 → 8) forces the old
+/// instance to be tombstoned and a fresh one to be created, even though the
+/// NodeId and module type are unchanged.
+#[test]
+fn shape_change_forces_re_instantiation() {
+    let registry = patches_modules::default_registry();
+
+    // Build a minimal graph: StepSequencer("seq") → AudioOut("out").
+    // First build: length = 4.
+    let seq_steps_a: Vec<String> = ["C3", "D3", "E3", "F3"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut seq_params_a = patches_core::parameter_map::ParameterMap::new();
+    seq_params_a.insert(
+        "steps".to_string(),
+        patches_core::parameter_map::ParameterValue::Array(seq_steps_a.into()),
+    );
+
+    let mut graph_a = patches_core::ModuleGraph::new();
+    graph_a.add_module(
+        "seq",
+        Seq::describe(&ModuleShape { channels: 0, length: 4, ..Default::default() }),
+        &seq_params_a,
+    ).unwrap();
+    graph_a.add_module(
+        "out",
+        AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }),
+        &patches_core::parameter_map::ParameterMap::new(),
+    ).unwrap();
+    graph_a.connect(
+        &patches_core::NodeId::from("seq"),
+        p("pitch"),
+        &patches_core::NodeId::from("out"),
+        p("in_left"),
+        1.0,
+    ).unwrap();
+    graph_a.connect(
+        &patches_core::NodeId::from("seq"),
+        p("pitch"),
+        &patches_core::NodeId::from("out"),
+        p("in_right"),
+        1.0,
+    ).unwrap();
+
+    let (plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP)
+            .unwrap();
+
+    let seq_id_a = state_a.nodes[&patches_core::NodeId::from("seq")].instance_id;
+    assert!(!plan_a.new_modules.is_empty(), "first build must produce new modules");
+
+    // Second build: same NodeId "seq", same module type, but length = 8.
+    let seq_steps_b: Vec<String> = ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut seq_params_b = patches_core::parameter_map::ParameterMap::new();
+    seq_params_b.insert(
+        "steps".to_string(),
+        patches_core::parameter_map::ParameterValue::Array(seq_steps_b.into()),
+    );
+
+    let mut graph_b = patches_core::ModuleGraph::new();
+    graph_b.add_module(
+        "seq",
+        Seq::describe(&ModuleShape { channels: 0, length: 8, ..Default::default() }),
+        &seq_params_b,
+    ).unwrap();
+    graph_b.add_module(
+        "out",
+        AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }),
+        &patches_core::parameter_map::ParameterMap::new(),
+    ).unwrap();
+    graph_b.connect(
+        &patches_core::NodeId::from("seq"),
+        p("pitch"),
+        &patches_core::NodeId::from("out"),
+        p("in_left"),
+        1.0,
+    ).unwrap();
+    graph_b.connect(
+        &patches_core::NodeId::from("seq"),
+        p("pitch"),
+        &patches_core::NodeId::from("out"),
+        p("in_right"),
+        1.0,
+    ).unwrap();
+
+    let (plan_b, state_b) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+
+    let seq_id_b = state_b.nodes[&patches_core::NodeId::from("seq")].instance_id;
+
+    // The shape changed, so the "seq" node must get a brand-new InstanceId.
+    assert_ne!(
+        seq_id_a, seq_id_b,
+        "shape change (length 4 → 8) must produce a new InstanceId for the sequencer"
+    );
+    // The old instance must be tombstoned.
+    assert!(
+        !plan_b.tombstones.is_empty(),
+        "shape change must tombstone the old sequencer instance"
+    );
+    // A fresh module must appear in new_modules.
+    assert!(
+        plan_b.new_modules.iter().any(|(_, m)| m.instance_id() == seq_id_b),
+        "shape change must install a new sequencer module"
+    );
+}

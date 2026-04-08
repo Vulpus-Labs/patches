@@ -1,0 +1,19 @@
+[package]
+name = "patches-lsp"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "patches-lsp"
+path = "src/main.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-modules = { path = "../patches-modules" }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+tree-sitter = "0.24"
+tree-sitter-language = "0.1"
+
+[build-dependencies]
+cc = "1"

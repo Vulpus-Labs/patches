@@ -1,0 +1,37 @@
+# Template with declared params and default values, instantiated twice.
+# v1: attack and sustain overridden; decay uses default.
+# v2: all defaults.
+# Demonstrates <- convention for template port bindings ($.port), -> for
+# internal wiring, and scaled template ports (-[N]-> and <-[N]-).
+
+template voice(attack: float = 0.01, decay: float = 0.1, sustain: float = 0.7) {
+    in:  voct, gate
+    out: audio
+
+    module osc : Osc
+    module env : Adsr { attack: <attack>, decay: <decay>, sustain: <sustain>, release: 0.3 }
+    module vca : Vca
+
+    osc.voct <- $.voct      # template in-port bindings  (convention: <-)
+    env.gate <- $.gate
+    $.audio  <- vca.out     # template out-port binding  (convention: <-)
+
+    osc.sine -> vca.in      # internal connections       (convention: ->)
+    env.out  -> vca.cv
+}
+
+patch {
+    module clock : Clock { bpm: 120.0 }
+    module seq   : Seq(length: 8) { steps: ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4"] }
+    module v1    : voice(attack: 0.005, sustain: 0.6)   # decay uses default
+    module v2    : voice                                  # all defaults
+    module out   : AudioOut
+
+    clock.semiquaver ->       seq.clock
+    seq.pitch        ->       v1.voct
+    seq.gate         ->       v1.gate
+    seq.pitch        -[0.5]-> v2.voct       # scaled template in-port  (->)
+    seq.gate         ->       v2.gate
+    out.in_left         <-       v1.audio
+    out.in_right        <-[0.8]- v2.audio      # scaled template out-port (<-)
+}

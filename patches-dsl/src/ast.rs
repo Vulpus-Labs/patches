@@ -1,0 +1,248 @@
+/// Byte-offset range into the source string.
+///
+/// Line/column pairs can be computed on demand from the source text; storing
+/// raw offsets keeps every node small.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// An identifier together with its source location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+// ─── Values ───────────────────────────────────────────────────────────────────
+
+/// A scalar literal or template-parameter reference.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Scalar {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    /// A quoted or unquoted string literal (not a param reference).
+    Str(String),
+    /// A `<ident>` template-parameter reference.
+    ParamRef(String),
+}
+
+/// A value that can appear in a module's initialisation param block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Scalar(Scalar),
+    Array(Vec<Value>),
+    Table(Vec<(Ident, Value)>),
+}
+
+// ─── Module declarations ──────────────────────────────────────────────────────
+
+/// The value of a `shape_arg`: either a plain scalar or an alias list.
+///
+/// An alias list `[drums, bass, guitar]` declares per-channel symbolic names for
+/// that shape dimension. The count of the list is used as the integer value of
+/// the shape parameter; the individual names become available as aliases.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShapeArgValue {
+    /// A plain scalar (int, float, param ref, etc.).
+    Scalar(Scalar),
+    /// A bracketed list of alias identifiers: `[drums, bass, guitar]`.
+    AliasList(Vec<Ident>),
+}
+
+/// One `ident: scalar` or `ident: [alias, ...]` entry inside a shape block `(...)`.
+///
+/// Shape params are always scalar ints (possibly supplied via a `<param_ref>`)
+/// or alias lists (which resolve to their count).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapeArg {
+    pub name: Ident,
+    pub value: ShapeArgValue,
+    pub span: Span,
+}
+
+/// Index on a param entry: literal `[N]`, arity wildcard `[*name]`, or alias `[name]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParamIndex {
+    /// `[N]` — set a single named index.
+    Literal(u32),
+    /// `[*name]` — expand over `0..param_env[name]`.
+    Arity(String),
+    /// `[name]` — look up the alias name in the module's alias map.
+    Alias(String),
+}
+
+/// The index in an `@`-block header: either a literal integer or an alias name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AtBlockIndex {
+    /// `@0: { ... }` — a literal index.
+    Literal(u32),
+    /// `@low: { ... }` — an alias name resolved via the alias map.
+    Alias(String),
+}
+
+/// One entry inside a param block `{...}`.
+///
+/// Can be a regular `key: value` pair, a shorthand `<ident>`, or an `@`-block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParamEntry {
+    /// `ident: value`, `ident[N]: value`, or `ident[*name]: value`.
+    KeyValue { name: Ident, index: Option<ParamIndex>, value: Value, span: Span },
+    /// `<ident>` — shorthand; expands to `ident: <ident>`.
+    Shorthand(String),
+    /// `@N: { key: value, ... }` or `@alias: { ... }` — desugars to per-key indexed entries.
+    AtBlock { index: AtBlockIndex, entries: Vec<(Ident, Value)>, span: Span },
+}
+
+/// `module <name> : <TypeName>(<shape>) { <params> }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleDecl {
+    pub name: Ident,
+    pub type_name: Ident,
+    pub shape: Vec<ShapeArg>,
+    pub params: Vec<ParamEntry>,
+    pub span: Span,
+}
+
+// ─── Connections ──────────────────────────────────────────────────────────────
+
+/// A resolved or interpolated port label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortLabel {
+    /// A concrete port name (bare identifier or quoted string literal).
+    Literal(String),
+    /// `<ident>` — resolved to a string at expansion time.
+    Param(String),
+}
+
+/// A port index in a connection reference.
+///
+/// Replaces the former `Option<u32>` to support three distinct forms:
+/// - `port[0]`    → `Literal(0)` — concrete index
+/// - `port[k]`    → `Alias("k")` — single port at computed index; resolved against alias map (or template env for legacy use)
+/// - `port[<k>]`  → `Alias("k")` — same resolution via explicit param-ref syntax
+/// - `port[*n]`   → `Arity("n")` — expand over `0..n`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortIndex {
+    /// `port[N]` — a concrete, literal index.
+    Literal(u32),
+    /// `port[k]` or `port[<k>]` — index resolved against alias map (or template env for legacy use).
+    Alias(String),
+    /// `port[*n]` — expand over `0..n`; only valid in connection use sites.
+    Arity(String),
+}
+
+/// A port reference: `<module>.<port>[<index>]`.
+///
+/// `module` is either `"$"` (template port namespace) or a module instance name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortRef {
+    pub module: String,
+    pub port: PortLabel,
+    pub index: Option<PortIndex>,
+    pub span: Span,
+}
+
+/// Direction of signal flow relative to the arrow syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Direction {
+    /// `->` or `-[N]->`
+    Forward,
+    /// `<-` or `<-[N]-`
+    Backward,
+}
+
+/// An arrow with optional scale factor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arrow {
+    pub direction: Direction,
+    /// `None` means an implicit scale of 1.0.
+    ///
+    /// Only `Scalar::Float`, `Scalar::Int`, and `Scalar::ParamRef` are
+    /// meaningful here; other variants are rejected at expansion time.
+    pub scale: Option<Scalar>,
+    pub span: Span,
+}
+
+/// `<lhs> <arrow> <rhs>`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Connection {
+    pub lhs: PortRef,
+    pub arrow: Arrow,
+    pub rhs: PortRef,
+    pub span: Span,
+}
+
+// ─── Statements ───────────────────────────────────────────────────────────────
+
+/// A statement inside a `patch` or `template` body.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    Module(ModuleDecl),
+    Connection(Connection),
+}
+
+// ─── Templates ────────────────────────────────────────────────────────────────
+
+/// The declared type of a template parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParamType {
+    Float,
+    Int,
+    Bool,
+    Str,
+}
+
+/// One `ident[arity]: type [= default]` declaration inside a template's param list.
+///
+/// `arity` is `Some("n")` for group params (`level[n]: float = 1.0`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamDecl {
+    pub name: Ident,
+    /// Optional arity annotation for group params (`level[size]: float`).
+    pub arity: Option<String>,
+    pub ty: ParamType,
+    pub default: Option<Scalar>,
+    pub span: Span,
+}
+
+/// A port group declaration inside a template's `in:` or `out:` list.
+///
+/// `arity` is `Some("n")` for variable-arity port groups (`audio[n]`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortGroupDecl {
+    pub name: Ident,
+    /// Optional arity annotation (`audio[n]` → `Some("n")`).
+    pub arity: Option<String>,
+    pub span: Span,
+}
+
+/// A named template definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Template {
+    pub name: Ident,
+    pub params: Vec<ParamDecl>,
+    pub in_ports: Vec<PortGroupDecl>,
+    pub out_ports: Vec<PortGroupDecl>,
+    pub body: Vec<Statement>,
+    pub span: Span,
+}
+
+// ─── Top-level ────────────────────────────────────────────────────────────────
+
+/// The `patch { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Patch {
+    pub body: Vec<Statement>,
+    pub span: Span,
+}
+
+/// The root of a parsed `.patches` file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct File {
+    pub templates: Vec<Template>,
+    pub patch: Patch,
+    pub span: Span,
+}

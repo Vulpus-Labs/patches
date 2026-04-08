@@ -1,0 +1,277 @@
+use crate::modules::ParameterValue;
+
+/// Trait used by the [`params!`] macro to infer [`ParameterValue`] variants from
+/// typed literals.
+///
+/// Implemented for `f32` (→ `Float`), `bool` (→ `Bool`), `&'static str` (→ `Enum`),
+/// and `i64` (→ `Int`).
+pub trait IntoParameterValue {
+    fn into_parameter_value(self) -> ParameterValue;
+}
+
+impl IntoParameterValue for f32 {
+    fn into_parameter_value(self) -> ParameterValue {
+        ParameterValue::Float(self)
+    }
+}
+
+impl IntoParameterValue for bool {
+    fn into_parameter_value(self) -> ParameterValue {
+        ParameterValue::Bool(self)
+    }
+}
+
+impl IntoParameterValue for &'static str {
+    fn into_parameter_value(self) -> ParameterValue {
+        ParameterValue::Enum(self)
+    }
+}
+
+impl IntoParameterValue for i64 {
+    fn into_parameter_value(self) -> ParameterValue {
+        ParameterValue::Int(self)
+    }
+}
+
+/// Assert that `actual` is within a relative epsilon of `expected`.
+///
+/// Tolerance scales with `max(|expected|, 1.0)` so the check is correct for values
+/// well above or below 1.0. For example, at 440 Hz the tolerance is
+/// `440 * f32::EPSILON ≈ 5.2e-5` rather than raw `f32::EPSILON ≈ 1.2e-7`.
+///
+/// Argument order follows [`assert_eq!`]: expected first, actual second.
+///
+/// # Failure message
+///
+/// Includes expected, actual, and the computed tolerance.
+#[macro_export]
+macro_rules! assert_nearly {
+    ($expected:expr, $actual:expr) => {{
+        let expected: f32 = $expected;
+        let actual: f32 = $actual;
+        let tolerance = f32::EPSILON * expected.abs().max(1.0);
+        assert!(
+            (expected - actual).abs() < tolerance,
+            "assert_nearly failed: expected {}, actual {}, tolerance {}",
+            expected,
+            actual,
+            tolerance
+        );
+    }};
+}
+
+/// Assert that `actual` is within an absolute `delta` of `expected`.
+///
+/// Use when the domain tolerance is known (e.g. ±0.5 Hz for oscillator frequency).
+///
+/// Argument order follows [`assert_eq!`]: expected first, actual second.
+///
+/// # Failure message
+///
+/// Includes expected, actual, and delta.
+#[macro_export]
+macro_rules! assert_within {
+    ($expected:expr, $actual:expr, $delta:expr) => {{
+        let expected: f32 = $expected;
+        let actual: f32 = $actual;
+        let delta: f32 = $delta;
+        assert!(
+            (expected - actual).abs() < delta,
+            "assert_within failed: expected {}, actual {}, delta {}",
+            expected,
+            actual,
+            delta
+        );
+    }};
+}
+
+/// Build a `&[(&str, ParameterValue)]` slice from `key => value` pairs.
+///
+/// The [`ParameterValue`] variant is inferred from the literal type:
+///
+/// | Literal type              | Variant                   |
+/// |---------------------------|---------------------------|
+/// | `f32` (`440.0_f32`)       | `ParameterValue::Float`   |
+/// | `bool` (`false`, `true`)  | `ParameterValue::Bool`    |
+/// | `&str` (`"linear"`)       | `ParameterValue::Enum`    |
+/// | `i64` (`1i64`)            | `ParameterValue::Int`     |
+///
+/// # Example
+///
+/// ```ignore
+/// params!["frequency" => 440.0_f32, "wave" => "sine", "active" => true]
+/// ```
+#[macro_export]
+macro_rules! params {
+    ($($key:expr => $value:expr),* $(,)?) => {
+        &[$(
+            (
+                $key,
+                $crate::test_support::macros::IntoParameterValue::into_parameter_value($value),
+            )
+        ),*]
+    };
+}
+
+/// Assert that a measured value is below a threshold (e.g. filter attenuation).
+///
+/// Use for testing that a filter suppresses a frequency band:
+/// ```ignore
+/// assert_attenuated!(peak, 0.05, "1 kHz signal through 200 Hz lowpass");
+/// ```
+#[macro_export]
+macro_rules! assert_attenuated {
+    ($value:expr, $threshold:expr) => {{
+        let value: f32 = $value;
+        let threshold: f32 = $threshold;
+        assert!(
+            value < threshold,
+            "expected attenuation (< {}), got {}",
+            threshold, value
+        );
+    }};
+    ($value:expr, $threshold:expr, $($arg:tt)+) => {{
+        let value: f32 = $value;
+        let threshold: f32 = $threshold;
+        assert!(
+            value < threshold,
+            $($arg)+
+        );
+    }};
+}
+
+/// Assert that a measured value is above a threshold (e.g. filter passthrough).
+///
+/// Use for testing that a filter passes a frequency band:
+/// ```ignore
+/// assert_passes!(peak, 0.5, "100 Hz signal through 1 kHz lowpass");
+/// ```
+#[macro_export]
+macro_rules! assert_passes {
+    ($value:expr, $threshold:expr) => {{
+        let value: f32 = $value;
+        let threshold: f32 = $threshold;
+        assert!(
+            value > threshold,
+            "expected passthrough (> {}), got {}",
+            threshold, value
+        );
+    }};
+    ($value:expr, $threshold:expr, $($arg:tt)+) => {{
+        let value: f32 = $value;
+        let threshold: f32 = $threshold;
+        assert!(
+            value > threshold,
+            $($arg)+
+        );
+    }};
+}
+
+// Re-export macros at module level so `use patches_core::test_support::assert_nearly`
+// (and similar) works without `#[macro_export]` placing them at crate root.
+pub use assert_nearly;
+pub use assert_within;
+pub use assert_attenuated;
+pub use assert_passes;
+pub use params;
+
+#[cfg(test)]
+mod tests {
+    use crate::modules::ParameterValue;
+
+    // ── assert_nearly ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn assert_nearly_passes_for_value_near_unity() {
+        // 1.0 + f32::EPSILON/2 is within 1 * f32::EPSILON of 1.0
+        let nearly_one: f32 = 1.0 + f32::EPSILON / 2.0;
+        assert_nearly!(1.0_f32, nearly_one);
+    }
+
+    #[test]
+    fn assert_nearly_passes_for_value_near_440() {
+        // Tolerance at 440 Hz is 440 * f32::EPSILON ≈ 5.2e-5.
+        // A value off by half that tolerance should pass.
+        let freq: f32 = 440.0;
+        let tolerance = f32::EPSILON * freq.abs().max(1.0);
+        let nearly_440 = freq + tolerance * 0.5;
+        assert_nearly!(freq, nearly_440);
+    }
+
+    #[test]
+    #[should_panic(expected = "assert_nearly failed")]
+    fn assert_nearly_fails_for_value_far_from_440() {
+        // Off by 1.0 Hz — far outside the relative epsilon tolerance.
+        assert_nearly!(440.0_f32, 441.0_f32);
+    }
+
+    // ── assert_within ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn assert_within_passes_just_inside_delta() {
+        // 0.5 is within delta=1.0 of 0.0
+        assert_within!(0.0_f32, 0.5_f32, 1.0_f32);
+    }
+
+    #[test]
+    #[should_panic(expected = "assert_within failed")]
+    fn assert_within_fails_at_boundary() {
+        // Difference equals delta exactly — strict < means this must fail.
+        assert_within!(0.0_f32, 1.0_f32, 1.0_f32);
+    }
+
+    #[test]
+    #[should_panic(expected = "assert_within failed")]
+    fn assert_within_fails_outside_delta() {
+        assert_within!(0.0_f32, 2.0_f32, 1.0_f32);
+    }
+
+    // ── params! ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn params_float_literal() {
+        let p = params!["frequency" => 440.0_f32];
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].0, "frequency");
+        assert_eq!(p[0].1, ParameterValue::Float(440.0));
+    }
+
+    #[test]
+    fn params_bool_literal() {
+        let p = params!["active" => false];
+        assert_eq!(p[0].1, ParameterValue::Bool(false));
+    }
+
+    #[test]
+    fn params_str_literal() {
+        let p = params!["wave" => "sine"];
+        assert_eq!(p[0].1, ParameterValue::Enum("sine"));
+    }
+
+    #[test]
+    fn params_i64_literal() {
+        let p = params!["voices" => 4i64];
+        assert_eq!(p[0].1, ParameterValue::Int(4));
+    }
+
+    #[test]
+    fn params_multiple_entries() {
+        let p = params![
+            "frequency" => 440.0_f32,
+            "wave"      => "sine",
+            "active"    => true,
+            "voices"    => 8i64,
+        ];
+        assert_eq!(p.len(), 4);
+        assert_eq!(p[0].1, ParameterValue::Float(440.0));
+        assert_eq!(p[1].1, ParameterValue::Enum("sine"));
+        assert_eq!(p[2].1, ParameterValue::Bool(true));
+        assert_eq!(p[3].1, ParameterValue::Int(8));
+    }
+
+    #[test]
+    fn params_empty() {
+        let p: &[(&str, ParameterValue)] = params![];
+        assert!(p.is_empty());
+    }
+}

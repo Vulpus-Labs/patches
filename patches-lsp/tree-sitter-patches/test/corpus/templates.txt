@@ -1,0 +1,220 @@
+================================================================================
+Template with port and param declarations
+================================================================================
+
+template voice(attack: float = 0.01, sustain: float = 0.7) {
+    in:  voct, gate
+    out: audio
+
+    module osc : Osc
+    module vca : Vca
+
+    osc.voct <- $.voct
+    $.audio  <- vca.out
+    osc.sine -> vca.in
+}
+
+patch {
+    module v : voice
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (type_name) (scalar (float_lit)))
+      (param_decl (ident) (type_name) (scalar (float_lit))))
+    (port_decls
+      (in_decl (port_group_decl (ident)) (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Nested templates
+================================================================================
+
+template inner() {
+    in:  gate
+    out: audio
+
+    module osc : Osc
+    osc.sine <- $.gate
+    $.audio  <- osc.sine
+}
+
+template outer() {
+    in:  trig
+    out: mix
+
+    module i : inner
+    i.gate <- $.trig
+    $.mix  <- i.audio
+}
+
+patch {
+    module top : outer
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls)
+    (port_decls
+      (in_decl (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (template
+    name: (ident)
+    (param_decls)
+    (port_decls
+      (in_decl (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl name: (ident) type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Template with arity port declarations
+================================================================================
+
+template bus(n: int) {
+    in:  ch[n]
+    out: mix
+
+    module m : Sum(channels: <n>)
+    m.in[*n] <- $.ch[*n]
+    $.mix    <- m.out
+}
+
+patch {
+    module b : bus(n: 4)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (type_name)))
+    (port_decls
+      (in_decl (port_group_decl (ident) (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (param_ref (param_ref_ident)))))))
+    (statement
+      (connection
+        (port_ref
+          (module_ident (ident))
+          (port_label (ident))
+          (port_index (port_index_arity (ident))))
+        (arrow (backward_arrow))
+        (port_ref
+          (module_ident)
+          (port_label (ident))
+          (port_index (port_index_arity (ident))))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))))))
+
+================================================================================
+Template with group param declaration
+================================================================================
+
+template bus(gains[n]: float = 0.5) {
+    in:  ch[n]
+    out: mix
+
+    module m : Sum(channels: <n>)
+    $.mix <- m.out
+}
+
+patch {
+    module b : bus
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (ident) (type_name) (scalar (float_lit))))
+    (port_decls
+      (in_decl (port_group_decl (ident) (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (param_ref (param_ref_ident)))))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))

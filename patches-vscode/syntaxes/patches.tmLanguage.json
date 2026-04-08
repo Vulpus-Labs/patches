@@ -1,0 +1,133 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Patches",
+  "scopeName": "source.patches",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#scaled-forward-arrow" },
+    { "include": "#scaled-backward-arrow" },
+    { "include": "#plain-arrow" },
+    { "include": "#enum-declaration" },
+    { "include": "#template-declaration" },
+    { "include": "#patch-declaration" },
+    { "include": "#module-declaration" },
+    { "include": "#port-declarations" },
+    { "include": "#param-ref" },
+    { "include": "#at-block" },
+    { "include": "#string" },
+    { "include": "#note-literal" },
+    { "include": "#unit-literal" },
+    { "include": "#number" },
+    { "include": "#boolean" },
+    { "include": "#type-name" },
+    { "include": "#dollar-ref" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.patches",
+      "match": "#.*$"
+    },
+    "scaled-forward-arrow": {
+      "match": "(-\\[)([^\\]]*)(\\]->)",
+      "captures": {
+        "1": { "name": "keyword.control.arrow.patches" },
+        "2": { "name": "constant.numeric.patches" },
+        "3": { "name": "keyword.control.arrow.patches" }
+      }
+    },
+    "scaled-backward-arrow": {
+      "match": "(<-\\[)([^\\]]*)(\\]-)",
+      "captures": {
+        "1": { "name": "keyword.control.arrow.patches" },
+        "2": { "name": "constant.numeric.patches" },
+        "3": { "name": "keyword.control.arrow.patches" }
+      }
+    },
+    "plain-arrow": {
+      "match": "->|<-",
+      "name": "keyword.control.arrow.patches"
+    },
+    "enum-declaration": {
+      "match": "\\b(enum)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.enum.patches" },
+        "2": { "name": "entity.name.type.enum.patches" }
+      }
+    },
+    "template-declaration": {
+      "match": "\\b(template)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.template.patches" },
+        "2": { "name": "entity.name.type.template.patches" }
+      }
+    },
+    "patch-declaration": {
+      "match": "\\b(patch)\\b",
+      "name": "keyword.other.patch.patches"
+    },
+    "module-declaration": {
+      "match": "\\b(module)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(:)\\s*([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "captures": {
+        "1": { "name": "keyword.other.module.patches" },
+        "2": { "name": "variable.other.module-name.patches" },
+        "3": { "name": "punctuation.separator.colon.patches" },
+        "4": { "name": "entity.name.type.module-type.patches" }
+      }
+    },
+    "port-declarations": {
+      "match": "\\b(in|out):",
+      "captures": {
+        "1": { "name": "keyword.other.port-direction.patches" }
+      }
+    },
+    "param-ref": {
+      "match": "<(?=[a-zA-Z_])([a-zA-Z_][a-zA-Z0-9_/]*)>",
+      "name": "variable.other.param-ref.patches"
+    },
+    "at-block": {
+      "match": "@([a-zA-Z0-9_][a-zA-Z0-9_-]*)\\s*:",
+      "captures": {
+        "0": { "name": "keyword.operator.at-block.patches" }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.patches",
+      "begin": "\"",
+      "end": "\""
+    },
+    "note-literal": {
+      "match": "\\b([A-Ga-g][#b]?-?\\d+)\\b",
+      "name": "constant.numeric.note.patches"
+    },
+    "unit-literal": {
+      "match": "-?\\d+(\\.\\d*)?(?i)(khz|hz|db)\\b",
+      "name": "constant.numeric.unit.patches"
+    },
+    "number": {
+      "match": "-?\\d+(\\.\\d*)?\\b",
+      "name": "constant.numeric.patches"
+    },
+    "boolean": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.patches"
+    },
+    "type-name": {
+      "match": "\\b(float|int|bool)\\b",
+      "name": "support.type.patches"
+    },
+    "dollar-ref": {
+      "match": "\\$",
+      "name": "variable.language.template-boundary.patches"
+    },
+    "punctuation": {
+      "patterns": [
+        { "match": "[{}]", "name": "punctuation.section.block.patches" },
+        { "match": "[\\[\\]]", "name": "punctuation.section.brackets.patches" },
+        { "match": "[()]", "name": "punctuation.section.parens.patches" },
+        { "match": ",", "name": "punctuation.separator.comma.patches" },
+        { "match": ":", "name": "punctuation.separator.colon.patches" }
+      ]
+    }
+  }
+}

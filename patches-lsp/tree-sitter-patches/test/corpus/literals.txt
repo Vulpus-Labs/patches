@@ -1,0 +1,321 @@
+================================================================================
+Unit literals (Hz and dB)
+================================================================================
+
+patch {
+    module amp : Gain { gain: -6dB }
+    module osc : Osc { freq: 440Hz }
+    module osc2 : Osc { freq: 4.4kHz }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (float_unit)))))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (float_unit)))))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (float_unit)))))))))
+
+================================================================================
+Note literals
+================================================================================
+
+patch {
+    module n1 : Osc { freq: C4 }
+    module n2 : Osc { freq: A#-1 }
+    module n3 : Osc { freq: Bb2 }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (note_lit)))))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (note_lit)))))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (note_lit)))))))))
+
+================================================================================
+Array params
+================================================================================
+
+patch {
+    module seq : Seq(length: 4) {
+        steps: [60, 62, 64, 65]
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))
+        (param_block
+          (param_entry
+            (ident)
+            (value
+              (array
+                (value (scalar (int_lit)))
+                (value (scalar (int_lit)))
+                (value (scalar (int_lit)))
+                (value (scalar (int_lit)))))))))))
+
+================================================================================
+Table params
+================================================================================
+
+patch {
+    module pat : PatternSeq(length: 1) {
+        pattern: [
+            { note: 36, velocity: 1.0, gate: 0.5 }
+        ]
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))
+        (param_block
+          (param_entry
+            (ident)
+            (value
+              (array
+                (value
+                  (table
+                    (table_entry (ident) (value (scalar (int_lit))))
+                    (table_entry (ident) (value (scalar (float_lit))))
+                    (table_entry (ident) (value (scalar (float_lit))))))))))))))
+
+================================================================================
+At-blocks
+================================================================================
+
+patch {
+    module del : StereoDelay(channels: [tap1, tap2]) {
+        @tap1: { delay_ms: 700, feedback: 0.3 }
+        @tap2: { delay_ms: 450, feedback: 0.3 }
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident)
+            (alias_list (ident) (ident))))
+        (param_block
+          (param_entry
+            (at_block
+              (at_block_index (ident))
+              (table
+                (table_entry (ident) (value (scalar (int_lit))))
+                (table_entry (ident) (value (scalar (float_lit)))))))
+          (param_entry
+            (at_block
+              (at_block_index (ident))
+              (table
+                (table_entry (ident) (value (scalar (int_lit))))
+                (table_entry (ident) (value (scalar (float_lit))))))))))))
+
+================================================================================
+Param references
+================================================================================
+
+template voice(attack: float = 0.01) {
+    in:  gate
+    out: audio
+
+    module env : Adsr { attack: <attack> }
+    $.audio <- env.out
+    env.gate <- $.gate
+}
+
+patch {
+    module v : voice
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (type_name) (scalar (float_lit))))
+    (port_decls
+      (in_decl (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry
+            (ident)
+            (value (scalar (param_ref (param_ref_ident))))))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Scaled arrow with param ref
+================================================================================
+
+template bus(boost: float = 1.0) {
+    in:  ch
+    out: mix
+
+    module m : Sum(channels: 1)
+    m.in[0] <- $.ch
+    $.mix <-[<boost>]- m.out
+}
+
+patch {
+    module b : bus
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (type_name) (scalar (float_lit))))
+    (port_decls
+      (in_decl (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow (scale_val (param_ref (param_ref_ident)))))
+        (port_ref (module_ident (ident)) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Shorthand param refs in param block
+================================================================================
+
+template bus(gains[n]: float = 0.5) {
+    in:  ch
+    out: mix
+
+    module cfg : GainCfg { <gains/0>, <gains/1> }
+    $.mix <- cfg.out
+    cfg.in <- $.ch
+}
+
+patch {
+    module b : bus
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (template
+    name: (ident)
+    (param_decls
+      (param_decl (ident) (ident) (type_name) (scalar (float_lit))))
+    (port_decls
+      (in_decl (port_group_decl (ident)))
+      (out_decl (port_group_decl (ident))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_ref (param_ref_ident))
+          (param_ref (param_ref_ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident (ident)) (port_label (ident)))))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (backward_arrow))
+        (port_ref (module_ident) (port_label (ident))))))
+  (patch
+    (statement
+      (module_decl name: (ident) type: (ident)))))
+
+================================================================================
+Indexed param entries
+================================================================================
+
+patch {
+    module bus : GainBus(n: 3) { gains[0]: 1.0, gains[1]: 0.3 }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (shape_block
+          (shape_arg name: (ident) (scalar (int_lit))))
+        (param_block
+          (param_entry
+            (ident) (param_index (nat))
+            (value (scalar (float_lit))))
+          (param_entry
+            (ident) (param_index (nat))
+            (value (scalar (float_lit)))))))))

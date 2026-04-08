@@ -1,0 +1,84 @@
+# pitch_shift_fifth.patches — polyphonic synth with spectral pitch-shifted fifth
+#
+# Voice architecture:
+#   kbd        — PolyMidiIn with LIFO voice stealing
+#   osc        — PolyOsc: sawtooth + square mix per voice
+#   amp_env    — PolyAdsr: per-voice amplitude envelope
+#   vca        — PolyVca: shapes each voice's audio
+#   filt_env   — PolyAdsr: per-voice filter cutoff envelope
+#   filt       — PolyLowpass: resonant lowpass filter
+#   mix        — PolySum(2): blends sawtooth + square
+#   collapse   — PolyToMono: sums all voices to mono
+#
+# Post-collapse mono effects:
+#   shifter    — PitchShift: LFO-modulated pitch shift
+#   reverb     — ConvReverb: hall impulse response
+#   out        — AudioOut: stereo output
+#
+# Signal flow:
+#
+#   kbd ──voct──→ osc ──saw──→ mix.in[0]
+#                  └──square──→ mix.in[1]
+#
+#   mix ──→ vca.in
+#   amp_env ──→ vca.cv
+#
+#   vca ──→ filt.in ──→ collapse ──→ shifter ──→ reverb ──→ out
+
+patch {
+    # ── Voice modules ──
+    module kbd       : PolyMidiIn
+    module osc       : PolyOsc
+    module mix       : PolySum(channels: 2)
+    module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.15,  sustain: 0.6,  release: 0.4 }
+    module vca       : PolyVca
+    module filt_env  : PolyAdsr   { attack: 0.15,  decay: 0.3,   sustain: 0.25, release: 0.4 }
+    module filt      : PolyLowpass { cutoff: 500.0Hz, resonance: 0.6, saturate: true }
+    module collapse  : PolyToMono
+
+    # ── Mono effects ──
+    module shifter   : PitchShift(length: 256, high_quality: true) { semitones: 7.0, mix: 0.5, mono: true }
+    module reverb : StereoConvReverb { mix: 0.3, ir: file, path: "/Users/dominicfox/src/vulpus-labs-patches/examples/RoomConcertHall.aiff" }
+
+    module out       : AudioOut
+
+    module lfo : Lfo { rate: 1.0 }
+    lfo.sine -[0.01]-> shifter.pitch
+
+    # V/oct: keyboard → oscillator
+    kbd.voct               -> osc.voct
+
+    # Oscillator mix: sawtooth (body) + square (edge)
+    osc.sawtooth   -[0.5]-> mix.in[0]
+    osc.square     -[0.5]-> mix.in[1]
+
+    # Amplitude envelope
+    kbd.trigger            -> amp_env.trigger
+    kbd.gate               -> amp_env.gate
+
+    # VCA
+    mix.out                -> vca.in
+    amp_env.out            -> vca.cv
+
+    # Filter envelope
+    kbd.trigger            -> filt_env.trigger
+    kbd.gate               -> filt_env.gate
+    filt_env.out   -[0.8]-> filt.voct
+
+    # Filter
+    vca.out                -> filt.in
+
+    # Collapse to mono
+    filt.out               -> collapse.in
+
+    # Pitch-shifted fifth
+    collapse.out           -[0.15]-> shifter.in
+
+    # Reverb
+    shifter.out            -> reverb.in_left
+    shifter.out            -> reverb.in_right
+
+    # Stereo output
+    reverb.out_left      -[0.5]-> out.in_left
+    reverb.out_right     -[0.5]-> out.in_right
+}

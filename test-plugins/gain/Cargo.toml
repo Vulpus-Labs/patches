@@ -1,0 +1,12 @@
+[package]
+name = "test-gain-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+patches-core = { path = "../../patches-core" }
+patches-ffi = { path = "../../patches-ffi" }

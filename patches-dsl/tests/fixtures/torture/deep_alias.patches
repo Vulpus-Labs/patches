@@ -1,0 +1,60 @@
+# Three-level template nesting with complete parameter name aliasing.
+# At each level, every parameter has a different name from the level above it,
+# proving that inner parameter scopes cannot bleed outward.
+#
+#   outer(tempo, size)
+#     └─ middle(speed, count)   — tempo→speed, size→count
+#           └─ inner(rate, voices)  — speed→rate, count→voices
+#                 └─ [lfo, env, vca] — concrete modules
+#
+# Scale composition: each boundary wire carries scale 0.5, so a connection
+# crossing all three levels has composed scale 1.0 × 0.5 × 0.5 × 0.5 = 0.125.
+
+template inner(rate: float = 1.0, voices: int = 2) {
+    in:  gate
+    out: audio
+
+    module lfo : Lfo { rate: <rate> }
+    module env : Adsr { attack: 0.01, decay: <rate>, sustain: 0.7, release: 0.2 }
+    module vca : Vca
+
+    lfo.sync <-[0.5]- $.gate
+    env.gate <-[0.5]- $.gate
+    vca.in              <- lfo.sine
+    vca.cv              <- env.out
+    $.audio             <- vca.out
+}
+
+template middle(speed: float = 2.0, count: int = 4) {
+    in:  trig
+    out: sig
+
+    module i    : inner(rate: <speed>, voices: <count>)
+    module filt : Lowpass { cutoff: 2000.0 }
+
+    i.gate  <-[0.5]- $.trig
+    filt.in          <- i.audio
+    $.sig            <- filt.out
+}
+
+template outer(tempo: float = 120.0, size: int = 8) {
+    in:  clock
+    out: mix
+
+    module mid : middle(speed: <tempo>, count: <size>)
+    module amp : Vca
+
+    mid.trig <-[0.5]- $.clock
+    amp.in            <- mid.sig
+    $.mix             <- amp.out
+}
+
+patch {
+    module clk : Clock { bpm: 90.0 }
+    module top : outer(tempo: 3.0, size: 4)
+    module out : AudioOut
+
+    clk.semiquaver -[1.0]-> top.clock
+    out.in_left               <- top.mix
+    out.in_right              <- top.mix
+}

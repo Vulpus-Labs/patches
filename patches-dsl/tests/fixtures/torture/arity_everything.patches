@@ -1,0 +1,92 @@
+# Arity torture: every port-index form and every group-param assignment
+# form exercised simultaneously, covering:
+#
+#   [*n]        — arity expansion (bulk template-boundary connections)
+#   [k]         — param index on a concrete module destination port
+#   [k] on $    — param index on the $ boundary source port
+#   [N]         — literal index at the call site
+#   -[<param>]-> — scale value from a scalar template param
+#
+# Group-param assignment forms (all three in one fixture):
+#   bus_b  { gains: 0.7 }             — broadcast  (scalar → all slots)
+#   bus_a  { gains: [0.8, 0.6, 0.4] } — explicit array
+#   bus_p  { gains[0]: 1.0, gains[1]: 0.3 } — per-index (slot 2 uses default)
+#
+# GainBus template:
+#   n        — int,   number of channels (required)
+#   solo     — int,   which channel to "solo" tap via [k] on $ source port
+#   boost    — float, output scale applied via param ref (default 1.0)
+#   gains[n] — float, per-channel gain stored in cfg module (default 0.5)
+
+template GainBus(n: int, solo: int = 0, boost: float = 1.0, gains[n]: float = 0.5) {
+    in:  ch[n]
+    out: mix, tap
+
+    module m   : Sum(channels: <n>)
+    module sel : Identity
+    # cfg holds the resolved gains so tests can inspect them as flat params.
+    # Shorthand <gains/0> expands to gains/0: <gains/0>, giving key "gains/0".
+    module cfg : GainCfg { <gains/0>, <gains/1>, <gains/2> }
+
+    # [*n] arity expansion: wire all n channels into the mixer
+    m.in[*n]  <- $.ch[*n]
+
+    # [solo] param index on the $ boundary source: tap one specific channel
+    sel.in    <- $.ch[solo]
+
+    # -[<boost>]-> param ref in scale
+    $.mix <-[<boost>]- m.out
+    $.tap               <- sel.out
+}
+
+# Redirector: exercises [k] param index on a concrete-module destination port.
+template Redirector(ch: int) {
+    in:  src
+    out: out
+
+    module m : Sum(channels: 4)
+    m.in[ch] <- $.src   # [ch] is a param index — selects which m.in slot
+    $.out    <- m.out
+}
+
+patch {
+    module osc0 : Osc { frequency: 110.0 }
+    module osc1 : Osc { frequency: 220.0 }
+    module osc2 : Osc { frequency: 330.0 }
+    module out  : AudioOut
+
+    # bus_b: broadcast gains — all three slots get 0.7; boost=0.9; solo=0
+    module bus_b : GainBus(n: 3, boost: 0.9, solo: 0) { gains: 0.7 }
+
+    # bus_a: explicit array gains; boost=0.5; solo=1
+    module bus_a : GainBus(n: 3, solo: 1, boost: 0.5) { gains: [0.8, 0.6, 0.4] }
+
+    # bus_p: per-index gains; slot 2 falls back to the declared default (0.5); solo=2
+    module bus_p : GainBus(n: 3, solo: 2) { gains[0]: 1.0, gains[1]: 0.3 }
+
+    # Redirectors exercising [k] param index on destination side
+    module red0 : Redirector(ch: 0)   # routes to m.in[0]
+    module red2 : Redirector(ch: 2)   # routes to m.in[2]
+
+    # Wire sources into bus_b using literal [N] indices at the call site
+    osc0.sine[0] -[1.0]-> bus_b.ch[0]
+    osc1.sine[0] -[1.0]-> bus_b.ch[1]
+    osc2.sine[0] -[1.0]-> bus_b.ch[2]
+
+    # Wire sources into bus_a
+    osc0.sine[0] -[1.0]-> bus_a.ch[0]
+    osc1.sine[0] -[1.0]-> bus_a.ch[1]
+    osc2.sine[0] -[1.0]-> bus_a.ch[2]
+
+    # Wire sources into bus_p
+    osc0.sine[0] -[1.0]-> bus_p.ch[0]
+    osc1.sine[0] -[1.0]-> bus_p.ch[1]
+    osc2.sine[0] -[1.0]-> bus_p.ch[2]
+
+    # Wire into redirectors
+    osc0.sine[0] -[1.0]-> red0.src
+    osc1.sine[0] -[1.0]-> red2.src
+
+    out.in_left  <- bus_a.mix
+    out.in_right <- bus_b.mix
+}

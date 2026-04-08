@@ -1,0 +1,17 @@
+# This file is intentionally invalid: template 'a' instantiates itself.
+
+template a {
+    in:  x
+    out: y
+
+    module inner : a
+    inner.x <- $.x
+    $.y     <- inner.y
+}
+
+patch {
+    module inst : a
+    module out  : AudioOut
+
+    out.in_left <- inst.y
+}

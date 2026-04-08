@@ -1,0 +1,108 @@
+name: Release VSIX
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-vsix:
+    name: Build VSIX (${{ matrix.vscode-target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - vscode-target: darwin-arm64
+            cargo-target: aarch64-apple-darwin
+            runner: macos-latest
+            binary: patches-lsp
+          - vscode-target: darwin-x64
+            cargo-target: x86_64-apple-darwin
+            runner: macos-13
+            binary: patches-lsp
+          - vscode-target: linux-x64
+            cargo-target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            binary: patches-lsp
+          - vscode-target: win32-x64
+            cargo-target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            binary: patches-lsp.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.cargo-target }}
+
+      - name: Install ALSA dev (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Build patches-lsp
+        run: cargo build --release -p patches-lsp --target ${{ matrix.cargo-target }}
+
+      - name: Ad-hoc sign binary (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --sign - target/${{ matrix.cargo-target }}/release/${{ matrix.binary }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Prepare extension
+        working-directory: patches-vscode
+        run: |
+          npm ci --ignore-scripts
+          npx tsc -p ./
+
+      - name: Copy LSP binary into extension
+        shell: bash
+        run: |
+          mkdir -p patches-vscode/server
+          cp target/${{ matrix.cargo-target }}/release/${{ matrix.binary }} patches-vscode/server/
+
+      - name: Package VSIX
+        working-directory: patches-vscode
+        run: npx @vscode/vsce package --target ${{ matrix.vscode-target }} -o ../
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vscode-target }}
+          path: "*.vsix"
+          if-no-files-found: error
+
+  publish-release:
+    name: Attach VSIX to GitHub Release
+    needs: [build-vsix]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: vsix-*
+
+      - name: Collect VSIX files
+        run: |
+          mkdir -p vsix-out
+          find artifacts -name '*.vsix' -exec cp {} vsix-out/ \;
+          ls -lh vsix-out/
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: vsix-out/*.vsix
+          body_path: RELEASE_NOTES.md
+          append_body: true

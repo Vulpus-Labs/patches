@@ -1,0 +1,13 @@
+[package]
+name = "patches-io"
+version = "0.5.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+patches-dsp = { path = "../patches-dsp" }
+
+[lib]
+name = "patches_io"
+path = "src/lib.rs"
+doctest = false

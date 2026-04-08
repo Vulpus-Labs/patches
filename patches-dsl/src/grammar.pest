@@ -1,0 +1,132 @@
+// ─── Whitespace and comments ─────────────────────────────────────────────────
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ "#" ~ (!"\n" ~ ANY)* }
+
+// ─── Lexical atoms ────────────────────────────────────────────────────────────
+ident      = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
+nat        = @{ ASCII_DIGIT+ }
+// float must precede int so "440.0" is not consumed as just "440"
+float_lit  = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
+int_lit    = @{ "-"? ~ ASCII_DIGIT+ }
+// Word-boundary lookahead prevents "trueish" matching as bool_lit
+bool_lit   = @{ ("true" | "false") ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+string_lit = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+// Scale number inside arrow brackets (float or int, including negatives)
+scale_num  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? }
+
+// ─── Unit-suffixed numeric literals ───────────────────────────────────────────
+// kHz before Hz to prevent "kHz" matching as just "Hz" with a dangling "k".
+unit_suffix = @{ ^"khz" | ^"hz" | ^"db" }
+// Number (possibly signed) immediately followed by a unit suffix (no whitespace).
+// The parser rejects negative/zero Hz and kHz; negative dB is valid (-6dB ≈ 0.5).
+float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix }
+
+// ─── Note name literals ───────────────────────────────────────────────────────
+// Examples: C1  Bb2  A#-1  f#3  db0  (all case-insensitive)
+// Octave is a signed integer; a word-boundary check prevents "C1foo" matching.
+note_letter     = @{ ^"a" | ^"b" | ^"c" | ^"d" | ^"e" | ^"f" | ^"g" }
+note_accidental = @{ "#" | ^"b" }
+note_octave     = @{ "-"? ~ ASCII_DIGIT+ }
+note_lit        = @{ note_letter ~ note_accidental? ~ note_octave ~ !(ASCII_ALPHANUMERIC | "_") }
+
+// `<param_ref_ident>` template-parameter reference.
+// Allows "/" so that group-param indexed keys like <level/0> are valid.
+param_ref_ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-" | "/")* }
+param_ref  = ${ "<" ~ param_ref_ident ~ ">" }
+
+// ─── Value hierarchy ──────────────────────────────────────────────────────────
+// Alternatives are ordered:
+//   float_unit before float_lit/int_lit (so "440Hz" is not consumed as "440")
+//   note_lit before ident (so "C1" is a note, not a bare string)
+//   bool_lit before ident (existing; "true"/"false" have word-boundary check)
+scalar      = { float_unit | float_lit | int_lit | bool_lit | note_lit | string_lit | param_ref | ident }
+array       = { "[" ~ (value ~ ","?)* ~ "]" }
+table_entry = { ident ~ ":" ~ value }
+table       = { "{" ~ (table_entry ~ ","?)* ~ "}" }
+value       = { table | array | scalar }
+
+// ─── Shape and param blocks ───────────────────────────────────────────────────
+// alias_list: a bracketed list of identifiers; used in shape args to declare
+// per-channel aliases.
+//   [drums, bass, guitar]  →  AliasList(["drums", "bass", "guitar"])
+alias_list  = { "[" ~ (ident ~ ","?)* ~ "]" }
+// shape_arg: either an alias list or a single scalar.
+//   channels: [drums, bass, guitar]  → ShapeArg { name:"channels", value:AliasList(...) }
+//   channels: 2                      → ShapeArg { name:"channels", value:Scalar(Int(2)) }
+//   channels: <n>                    → ShapeArg { name:"channels", value:Scalar(ParamRef("n")) }
+// alias_list must come before scalar so "[" is not consumed as an array.
+shape_arg   = { ident ~ ":" ~ (alias_list | scalar) }
+shape_block = { "(" ~ (shape_arg ~ ","?)* ~ ")" }
+
+// param_index: literal index [N], arity wildcard [*ident], or alias [ident].
+// Compound-atomic for arity to prevent whitespace between * and ident.
+param_index_arity = ${ "*" ~ ident }
+param_index       = { "[" ~ (param_index_arity | nat | ident) ~ "]" }
+
+// param_entry: supports plain, indexed [N], and arity-wildcard [*n] forms.
+//   pan: 0.0          → key "pan", no index
+//   pan[0]: -0.5      → key "pan", index Literal(0)
+//   pan[*size]: 0.0   → key "pan", index Arity("size") — expands over 0..size
+//   pan: [0.1, 0.2]   → key "pan", value Array (broadcast/array form)
+//   @0: { freq: 200.0 }        → AtBlock, index Literal(0)
+//   @low: { freq: 200.0 }      → AtBlock, index Alias("low")
+at_block_index = { nat | ident }
+at_block       = { "@" ~ at_block_index ~ ":"? ~ table }
+// param_entry rule: at_block must come before ident to ensure "@" is not parsed differently.
+param_entry = { at_block | ident ~ param_index? ~ ":" ~ value }
+// A param block item is either a shorthand `<ident>` or a regular `key: value`.
+param_block = { "{" ~ ((param_ref | param_entry) ~ ","?)* ~ "}" }
+
+// ─── Module declaration ───────────────────────────────────────────────────────
+module_decl = { "module" ~ ident ~ ":" ~ ident ~ shape_block? ~ param_block? }
+
+// ─── Port references ──────────────────────────────────────────────────────────
+// Compound-atomic: no whitespace within "mod.port[k]"
+module_ident = { "$" | ident }
+// Port index — three forms:
+//   [0]   → Literal(0)
+//   [k]   → Param("k")   (bare ident in brackets)
+//   [*n]  → Arity("n")   (* followed by ident)
+port_index_arity = ${ "*" ~ ident }
+port_index       = ${ "[" ~ (port_index_arity | nat | param_ref | ident) ~ "]" }
+// Port label: either a bare ident or a <param> reference
+port_label   = ${ param_ref | ident }
+port_ref     = ${ module_ident ~ "." ~ port_label ~ port_index? }
+
+// ─── Arrows ───────────────────────────────────────────────────────────────────
+// Compound-atomic: no whitespace inside "-[0.5]->" or "<-[0.5]-"
+// Scale value: either a numeric literal or a <param> reference
+scale_val      = ${ param_ref | scale_num }
+forward_arrow  = ${ ("-[" ~ scale_val ~ "]->") | "->" }
+backward_arrow = ${ ("<-[" ~ scale_val ~ "]-") | "<-" }
+arrow          = { forward_arrow | backward_arrow }
+
+// ─── Connections ──────────────────────────────────────────────────────────────
+connection = { port_ref ~ arrow ~ port_ref }
+
+// ─── Statements ───────────────────────────────────────────────────────────────
+statement = { module_decl | connection }
+
+// ─── Port declarations (inside templates) ────────────────────────────────────
+// Port group declarations support optional arity: `audio[n]` or plain `freq`.
+port_group_decl  = { ident ~ ("[" ~ ident ~ "]")? }
+comma_port_decls = { port_group_decl ~ ("," ~ port_group_decl)* ~ ","? }
+in_decl      = { "in:" ~ comma_port_decls }
+out_decl     = { "out:" ~ comma_port_decls }
+port_decls   = { in_decl ~ out_decl }
+
+// ─── Template parameter declarations ─────────────────────────────────────────
+type_name   = { "float" | "int" | "bool" | "str" }
+// param_decl supports optional arity: `level[size]: float = 1.0` or `freq: float`
+param_decl  = { ident ~ ("[" ~ ident ~ "]")? ~ ":" ~ type_name ~ ("=" ~ scalar)? }
+param_decls = { "(" ~ (param_decl ~ ","?)* ~ ")" }
+
+// ─── Template ─────────────────────────────────────────────────────────────────
+template = { "template" ~ ident ~ param_decls? ~ "{" ~ port_decls ~ statement* ~ "}" }
+
+// ─── Patch ────────────────────────────────────────────────────────────────────
+patch = { "patch" ~ "{" ~ statement* ~ "}" }
+
+// ─── File root ────────────────────────────────────────────────────────────────
+file = { SOI ~ template* ~ patch ~ EOI }

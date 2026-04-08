@@ -1,0 +1,59 @@
+{
+  "name": "patches-vscode",
+  "displayName": "Patches DSL",
+  "description": "Language support for the Patches audio DSL",
+  "version": "0.0.1",
+  "publisher": "vulpus-labs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "patches",
+        "aliases": [
+          "Patches",
+          "patches"
+        ],
+        "extensions": [
+          ".patches"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "patches",
+        "scopeName": "source.patches",
+        "path": "./syntaxes/patches.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Patches",
+      "properties": {
+        "patches.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the patches-lsp binary. Leave empty to use the bundled binary or PATH lookup."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,767 @@
+use std::collections::HashMap;
+use crate::audio_environment::AudioEnvironment;
+use crate::cable_pool::CablePool;
+use crate::cables::{
+    CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput,
+    POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+};
+use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue};
+use crate::COEFF_UPDATE_INTERVAL;
+use crate::modules::parameter_map::ParameterMap;
+use crate::ReceivesMidi;
+
+/// A single-module test fixture that owns the module and its cable pool, derives
+/// port-to-cable assignments from the descriptor, and exposes a named-port interface.
+///
+/// Eliminates pool sizing, `set_ports` setup, ping-pong management, and `CableValue`
+/// unwrapping from test bodies.
+///
+/// # Construction
+///
+/// ```ignore
+/// let mut h = ModuleHarness::build::<Vca>(&[]);
+/// let mut h = ModuleHarness::build::<Oscillator>(&params!["frequency" => 440.0_f32]);
+/// let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3, length: 0, ..Default::default() });
+/// let mut h = ModuleHarness::build_with_env::<Glide>(&params!["glide_ms" => 100.0_f32],
+///     AudioEnvironment { sample_rate: 22050.0, poly_voices: 16, periodic_update_interval: 32 });
+/// ```
+///
+/// All ports are marked `connected: true` by default. Use the `disconnect_*` methods
+/// to mark specific ports as disconnected before the first tick.
+pub struct ModuleHarness {
+    module: Box<dyn Module>,
+    pool: Vec<[CableValue; 2]>,
+    /// (name, index) → descriptor position for input ports.
+    /// Cable slot for input at position i = i.
+    input_idx: HashMap<(String, usize), usize>,
+    /// (name, index) → descriptor position for output ports.
+    /// Cable slot for output at position j = n_inputs + j.
+    output_idx: HashMap<(String, usize), usize>,
+    n_inputs: usize,
+    input_connected: Vec<bool>,
+    output_connected: Vec<bool>,
+    input_kinds: Vec<CableKind>,
+    output_kinds: Vec<CableKind>,
+    pub(crate) wi: usize,
+    sample_counter: u32,
+}
+
+impl ModuleHarness {
+    // ── Construction ─────────────────────────────────────────────────────────
+
+    /// Build a harness for module type `M` with the given parameters.
+    ///
+    /// Uses `AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 }` and
+    /// `ModuleShape { channels: 0, length: 0, ..Default::default() }` as defaults. All ports connected.
+    pub fn build<M: Module + 'static>(params: &[(&str, ParameterValue)]) -> Self {
+        Self::build_full::<M>(
+            params,
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            ModuleShape { channels: 0, length: 0, ..Default::default() },
+        )
+    }
+
+    /// Build a harness with a custom `ModuleShape` (needed for shape-dependent modules
+    /// such as `Sum` where `channels` controls the number of input ports).
+    pub fn build_with_shape<M: Module + 'static>(
+        params: &[(&str, ParameterValue)],
+        shape: ModuleShape,
+    ) -> Self {
+        Self::build_full::<M>(
+            params,
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            shape,
+        )
+    }
+
+    /// Build a harness with a custom `AudioEnvironment` (needed for modules that use
+    /// `sample_rate`, such as `Glide` and `Oscillator`).
+    pub fn build_with_env<M: Module + 'static>(
+        params: &[(&str, ParameterValue)],
+        env: AudioEnvironment,
+    ) -> Self {
+        Self::build_full::<M>(params, env, ModuleShape { channels: 0, length: 0, ..Default::default() })
+    }
+
+    /// Build a harness with both a custom environment and shape.
+    pub fn build_full<M: Module + 'static>(
+        params: &[(&str, ParameterValue)],
+        env: AudioEnvironment,
+        shape: ModuleShape,
+    ) -> Self {
+        let param_map: ParameterMap = params
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.clone()))
+            .collect();
+
+        let module: Box<dyn Module> = Box::new(
+            M::build(&env, &shape, &param_map, InstanceId::next())
+                .expect("ModuleHarness::build: module creation failed")
+        );
+
+        let descriptor = M::describe(&shape);
+        let n_inputs = descriptor.inputs.len();
+        let n_outputs = descriptor.outputs.len();
+
+        let mut input_idx = HashMap::new();
+        let mut input_kinds = Vec::with_capacity(n_inputs);
+        let mut input_connected = Vec::with_capacity(n_inputs);
+
+        for (i, port) in descriptor.inputs.iter().enumerate() {
+            input_idx.insert((port.name.to_string(), port.index), i);
+            input_kinds.push(port.kind.clone());
+            input_connected.push(true);
+        }
+
+        let mut output_idx = HashMap::new();
+        let mut output_kinds = Vec::with_capacity(n_outputs);
+        let mut output_connected = Vec::with_capacity(n_outputs);
+
+        for (j, port) in descriptor.outputs.iter().enumerate() {
+            output_idx.insert((port.name.to_string(), port.index), j);
+            output_kinds.push(port.kind.clone());
+            output_connected.push(true);
+        }
+
+        // Pool: reserved backplane slots occupy 0..RESERVED_SLOTS; user cables follow.
+        // User inputs occupy RESERVED_SLOTS..RESERVED_SLOTS+n_inputs;
+        // user outputs occupy RESERVED_SLOTS+n_inputs..RESERVED_SLOTS+n_inputs+n_outputs.
+        // This mirrors the real planner's slot assignment so modules that write to
+        // backplane slots (e.g. AudioOut → AUDIO_OUT_L/R) stay in-bounds.
+        let pool_size = RESERVED_SLOTS + n_inputs + n_outputs;
+        let mut pool = vec![[CableValue::Mono(0.0); 2]; pool_size];
+
+        // Poly reserved slots must hold Poly values to avoid kind-mismatch panics.
+        pool[POLY_READ_SINK]  = [CableValue::Poly([0.0; 16]); 2];
+        pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
+
+        // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
+        for (i, kind) in input_kinds.iter().enumerate() {
+            if *kind == CableKind::Poly {
+                pool[RESERVED_SLOTS + i] = [CableValue::Poly([0.0; 16]); 2];
+            }
+        }
+        for (j, kind) in output_kinds.iter().enumerate() {
+            if *kind == CableKind::Poly {
+                pool[RESERVED_SLOTS + n_inputs + j] = [CableValue::Poly([0.0; 16]); 2];
+            }
+        }
+
+        let mut harness = Self {
+            module,
+            pool,
+            input_idx,
+            output_idx,
+            n_inputs,
+            input_connected,
+            output_connected,
+            input_kinds,
+            output_kinds,
+            wi: 0,
+            sample_counter: 0,
+        };
+
+        harness.rebuild_ports();
+        harness
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────────────
+
+    /// Return a reference to the module's descriptor.
+    pub fn descriptor(&self) -> &crate::modules::ModuleDescriptor {
+        self.module.descriptor()
+    }
+
+    /// Return the module's MIDI receiver if it implements `ReceivesMidi`.
+    pub fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
+        self.module.as_midi_receiver()
+    }
+
+    /// Apply a partial parameter update, equivalent to calling
+    /// `module.update_validated_parameters` with a `ParameterMap` built from
+    /// the given slice. Used to test hot-reload / partial-update behaviour.
+    pub fn update_validated_parameters(&mut self, params: &[(&str, ParameterValue)]) {
+        let mut map = ParameterMap::new();
+        for (k, v) in params {
+            map.insert((*k).into(), v.clone());
+        }
+        self.module.update_validated_parameters(&mut map);
+    }
+
+    /// Apply a `ParameterMap` (which may contain indexed parameters) directly to the module.
+    ///
+    /// Useful for modules whose parameters are indexed (e.g. `level/0`, `solo/1`)
+    /// where `update_validated_parameters` cannot express multi-index entries.
+    pub fn update_params_map(&mut self, params: &ParameterMap) {
+        self.module.update_validated_parameters(&mut params.clone());
+    }
+
+    // ── Connectivity ─────────────────────────────────────────────────────────
+
+    /// Disconnect the input port `(name, 0)`.
+    ///
+    /// Calls `set_ports` immediately so the module observes the change before
+    /// the next `tick()`.
+    pub fn disconnect_input(&mut self, name: &str) {
+        self.disconnect_input_at(name, 0);
+    }
+
+    /// Disconnect the input port `(name, index)`.
+    pub fn disconnect_input_at(&mut self, name: &str, index: usize) {
+        let pos = self.input_pos(name, index);
+        self.input_connected[pos] = false;
+        self.rebuild_ports();
+    }
+
+    /// Disconnect the output port `(name, 0)`.
+    pub fn disconnect_output(&mut self, name: &str) {
+        self.disconnect_output_at(name, 0);
+    }
+
+    /// Disconnect the output port `(name, index)`.
+    pub fn disconnect_output_at(&mut self, name: &str, index: usize) {
+        let pos = self.output_pos(name, index);
+        self.output_connected[pos] = false;
+        self.rebuild_ports();
+    }
+
+    /// Disconnect all input ports.
+    pub fn disconnect_all_inputs(&mut self) {
+        for c in &mut self.input_connected { *c = false; }
+        self.rebuild_ports();
+    }
+
+    /// Disconnect all output ports.
+    pub fn disconnect_all_outputs(&mut self) {
+        for c in &mut self.output_connected { *c = false; }
+        self.rebuild_ports();
+    }
+
+    // ── Pool initialisation ───────────────────────────────────────────────────
+
+    /// Fill all pool slots with `value`.
+    ///
+    /// Useful for sentinel-value tests (e.g. verifying that a disconnected output
+    /// is never written by seeding it with a known non-zero value).
+    pub fn init_pool(&mut self, value: CableValue) {
+        for slot in &mut self.pool {
+            *slot = [value; 2];
+        }
+    }
+
+    // ── Mono inputs ──────────────────────────────────────────────────────────
+
+    /// Write `value` to the read slot for input `(name, 0)`.
+    ///
+    /// The module reads this value on the next `tick()`.
+    pub fn set_mono(&mut self, name: &str, value: f32) {
+        self.set_mono_at(name, 0, value);
+    }
+
+    /// Write `value` to the read slot for input `(name, index)`.
+    ///
+    /// Writes to both ping-pong slots so the value persists across multiple ticks
+    /// until `set_mono_at` is called again.
+    pub fn set_mono_at(&mut self, name: &str, index: usize, value: f32) {
+        let cable = self.input_cable(name, index);
+        self.pool[cable] = [CableValue::Mono(value); 2];
+    }
+
+    // ── Poly inputs ──────────────────────────────────────────────────────────
+
+    /// Write `value` to the read slot for poly input `(name, 0)`.
+    pub fn set_poly(&mut self, name: &str, value: [f32; 16]) {
+        self.set_poly_at(name, 0, value);
+    }
+
+    /// Write `value` to the read slot for poly input `(name, index)`.
+    ///
+    /// Writes to both ping-pong slots so the value persists across multiple ticks.
+    pub fn set_poly_at(&mut self, name: &str, index: usize, value: [f32; 16]) {
+        let cable = self.input_cable(name, index);
+        self.pool[cable] = [CableValue::Poly(value); 2];
+    }
+
+    // ── Tick ─────────────────────────────────────────────────────────────────
+
+    /// Process one sample. Returns `&mut Self` for chaining.
+    ///
+    /// Mirrors [`ExecutionPlan::tick`]: calls [`PeriodicUpdate::periodic_update`] every
+    /// [`COEFF_UPDATE_INTERVAL`] samples before the main process call.
+    pub fn tick(&mut self) -> &mut Self {
+        if self.sample_counter == 0 {
+            let pool = CablePool::new(&mut self.pool, self.wi);
+            if let Some(p) = self.module.as_periodic() {
+                p.periodic_update(&pool);
+            }
+        }
+        self.sample_counter += 1;
+        if self.sample_counter >= COEFF_UPDATE_INTERVAL {
+            self.sample_counter = 0;
+        }
+        self.module.process(&mut CablePool::new(&mut self.pool, self.wi));
+        self.wi = 1 - self.wi;
+        self
+    }
+
+    // ── Mono outputs ─────────────────────────────────────────────────────────
+
+    /// Read the mono output `(name, 0)` from the most recently completed tick.
+    ///
+    /// # Panics
+    /// Panics if the cable value is not `CableValue::Mono`.
+    pub fn read_mono(&self, name: &str) -> f32 {
+        self.read_mono_at(name, 0)
+    }
+
+    /// Read the mono output `(name, index)` from the most recently completed tick.
+    pub fn read_mono_at(&self, name: &str, index: usize) -> f32 {
+        let cable = self.output_cable(name, index);
+        match self.pool[cable][1 - self.wi] {
+            CableValue::Mono(v) => v,
+            CableValue::Poly(_) => panic!(
+                "ModuleHarness::read_mono: output '{}'/{}  is Poly, not Mono",
+                name, index
+            ),
+        }
+    }
+
+    /// Run `ticks` samples and collect the named mono output into a `Vec<f32>`.
+    pub fn run_mono(&mut self, ticks: usize, output: &str) -> Vec<f32> {
+        (0..ticks).map(|_| { self.tick(); self.read_mono(output) }).collect()
+    }
+
+    /// Run `ticks` samples, feeding values from `inputs` (cycled if shorter)
+    /// into the named mono input each tick, and collect the named mono output.
+    pub fn run_mono_mapped(
+        &mut self,
+        ticks: usize,
+        input: &str,
+        inputs: &[f32],
+        output: &str,
+    ) -> Vec<f32> {
+        (0..ticks).map(|i| {
+            self.set_mono(input, inputs[i % inputs.len()]);
+            self.tick();
+            self.read_mono(output)
+        }).collect()
+    }
+
+    // ── Poly outputs ─────────────────────────────────────────────────────────
+
+    /// Read the poly output `(name, 0)` from the most recently completed tick.
+    ///
+    /// # Panics
+    /// Panics if the cable value is not `CableValue::Poly`.
+    pub fn read_poly(&self, name: &str) -> [f32; 16] {
+        self.read_poly_at(name, 0)
+    }
+
+    /// Read the poly output `(name, index)` from the most recently completed tick.
+    pub fn read_poly_at(&self, name: &str, index: usize) -> [f32; 16] {
+        let cable = self.output_cable(name, index);
+        match self.pool[cable][1 - self.wi] {
+            CableValue::Poly(v) => v,
+            CableValue::Mono(_) => panic!(
+                "ModuleHarness::read_poly: output '{}'/{}  is Mono, not Poly",
+                name, index
+            ),
+        }
+    }
+
+    /// Read a single voice from the poly output `(name, 0)`.
+    ///
+    /// Convenience wrapper around [`read_poly`] for tests that only care about
+    /// one voice.
+    ///
+    /// # Panics
+    /// Panics if `voice >= 16` or the cable value is not `CableValue::Poly`.
+    pub fn read_poly_voice(&self, name: &str, voice: usize) -> f32 {
+        self.read_poly_voice_at(name, 0, voice)
+    }
+
+    /// Read a single voice from the poly output `(name, index)`.
+    pub fn read_poly_voice_at(&self, name: &str, index: usize, voice: usize) -> f32 {
+        assert!(voice < 16, "read_poly_voice: voice {voice} out of range (max 15)");
+        self.read_poly_at(name, index)[voice]
+    }
+
+    /// Run `ticks` samples and collect the named poly output.
+    pub fn run_poly(&mut self, ticks: usize, output: &str) -> Vec<[f32; 16]> {
+        (0..ticks).map(|_| { self.tick(); self.read_poly(output) }).collect()
+    }
+
+    /// Run `ticks` samples, feeding `inputs` (cycled if shorter) into the named
+    /// poly input each tick, and collect the named poly output.
+    pub fn run_poly_mapped(
+        &mut self,
+        ticks: usize,
+        input: &str,
+        inputs: &[[f32; 16]],
+        output: &str,
+    ) -> Vec<[f32; 16]> {
+        (0..ticks).map(|i| {
+            self.set_poly(input, inputs[i % inputs.len()]);
+            self.tick();
+            self.read_poly(output)
+        }).collect()
+    }
+
+    // ── Measurement helpers ────────────────────────────────────────────────────
+
+    /// Run `ticks` samples collecting mono output, then return the RMS.
+    pub fn measure_rms(&mut self, ticks: usize, output: &str) -> f32 {
+        let samples = self.run_mono(ticks, output);
+        let sum_sq: f32 = samples.iter().map(|&x| x * x).sum();
+        (sum_sq / samples.len() as f32).sqrt()
+    }
+
+    /// Run `ticks` samples collecting mono output, then return the peak
+    /// absolute value.
+    pub fn measure_peak(&mut self, ticks: usize, output: &str) -> f32 {
+        let samples = self.run_mono(ticks, output);
+        samples.iter().map(|v| v.abs()).fold(0.0f32, f32::max)
+    }
+
+    /// Run `ticks` samples and assert every sample of the named mono output
+    /// falls within `[min, max]`.
+    ///
+    /// # Panics
+    /// Panics with the first out-of-range sample.
+    pub fn assert_output_bounded(
+        &mut self,
+        ticks: usize,
+        output: &str,
+        min: f32,
+        max: f32,
+    ) {
+        for i in 0..ticks {
+            self.tick();
+            let v = self.read_mono(output);
+            assert!(
+                v >= min && v <= max,
+                "sample {i}: output '{output}' = {v}, expected [{min}, {max}]"
+            );
+        }
+    }
+
+    /// Disconnect a list of input ports by name (all at index 0).
+    ///
+    /// Convenience for tests that need to isolate a module from CV inputs:
+    /// ```ignore
+    /// h.disconnect_inputs(&["voct", "fm", "resonance_cv"]);
+    /// ```
+    pub fn disconnect_inputs(&mut self, names: &[&str]) {
+        for name in names {
+            let pos = self.input_pos(name, 0);
+            self.input_connected[pos] = false;
+        }
+        self.rebuild_ports();
+    }
+
+    // ── Internals ─────────────────────────────────────────────────────────────
+
+    fn input_pos(&self, name: &str, index: usize) -> usize {
+        *self.input_idx.get(&(name.to_string(), index)).unwrap_or_else(|| {
+            panic!(
+                "ModuleHarness: input port '{}/{}' not found in descriptor. \
+                 Available inputs: {:?}",
+                name, index,
+                self.input_idx.keys().collect::<Vec<_>>()
+            )
+        })
+    }
+
+    fn output_pos(&self, name: &str, index: usize) -> usize {
+        *self.output_idx.get(&(name.to_string(), index)).unwrap_or_else(|| {
+            panic!(
+                "ModuleHarness: output port '{}/{}' not found in descriptor. \
+                 Available outputs: {:?}",
+                name, index,
+                self.output_idx.keys().collect::<Vec<_>>()
+            )
+        })
+    }
+
+    fn input_cable(&self, name: &str, index: usize) -> usize {
+        RESERVED_SLOTS + self.input_pos(name, index)
+    }
+
+    fn output_cable(&self, name: &str, index: usize) -> usize {
+        RESERVED_SLOTS + self.n_inputs + self.output_pos(name, index)
+    }
+
+    /// Read both ping-pong slots for a raw pool index.
+    ///
+    /// Useful for verifying writes to backplane slots (e.g. `AUDIO_OUT_L`)
+    /// that are not exposed as named output ports.
+    pub fn pool_slot(&self, idx: usize) -> CableValue {
+        self.pool[idx][1 - self.wi]
+    }
+
+    /// Write `value` to both ping-pong slots at a raw pool index.
+    ///
+    /// Useful for seeding backplane slots (e.g. `AUDIO_IN_L`) that are not
+    /// exposed as named input ports.
+    pub fn set_pool_slot(&mut self, idx: usize, value: CableValue) {
+        self.pool[idx] = [value; 2];
+    }
+
+    fn rebuild_ports(&mut self) {
+        let inputs: Vec<InputPort> = self.input_kinds
+            .iter()
+            .enumerate()
+            .map(|(i, kind)| match kind {
+                CableKind::Mono => InputPort::Mono(MonoInput {
+                    cable_idx: RESERVED_SLOTS + i,
+                    scale: 1.0,
+                    connected: self.input_connected[i],
+                }),
+                CableKind::Poly => InputPort::Poly(PolyInput {
+                    cable_idx: RESERVED_SLOTS + i,
+                    scale: 1.0,
+                    connected: self.input_connected[i],
+                }),
+            })
+            .collect();
+
+        let outputs: Vec<OutputPort> = self.output_kinds
+            .iter()
+            .enumerate()
+            .map(|(j, kind)| match kind {
+                CableKind::Mono => OutputPort::Mono(MonoOutput {
+                    cable_idx: RESERVED_SLOTS + self.n_inputs + j,
+                    connected: self.output_connected[j],
+                }),
+                CableKind::Poly => OutputPort::Poly(PolyOutput {
+                    cable_idx: RESERVED_SLOTS + self.n_inputs + j,
+                    connected: self.output_connected[j],
+                }),
+            })
+            .collect();
+
+        self.module.set_ports(&inputs, &outputs);
+    }
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AudioEnvironment;
+    use crate::modules::{ModuleDescriptor, ModuleShape};
+
+    // A minimal test-only module: one mono input, one mono output; output = input * 2.
+    struct Doubler {
+        id: InstanceId,
+        descriptor: ModuleDescriptor,
+        input: MonoInput,
+        output: MonoOutput,
+    }
+
+    impl Module for Doubler {
+        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+            ModuleDescriptor::new("Doubler", shape.clone())
+                .mono_in("in")
+                .mono_out("out")
+        }
+
+        fn prepare(
+            _env: &AudioEnvironment,
+            descriptor: ModuleDescriptor,
+            id: InstanceId,
+        ) -> Self {
+            Self {
+                id,
+                descriptor,
+                input: MonoInput::default(),
+                output: MonoOutput::default(),
+            }
+        }
+
+        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+
+        fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
+
+        fn instance_id(&self) -> InstanceId { self.id }
+
+        fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+            self.input  = MonoInput::from_ports(inputs, 0);
+            self.output = MonoOutput::from_ports(outputs, 0);
+        }
+
+        fn process(&mut self, pool: &mut CablePool<'_>) {
+            let v = pool.read_mono(&self.input);
+            pool.write_mono(&self.output, v * 2.0);
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any { self }
+    }
+
+    // A minimal poly test module: one poly in, one poly out; output = input (pass-through).
+    struct PolyPass {
+        id: InstanceId,
+        descriptor: ModuleDescriptor,
+        input: PolyInput,
+        output: PolyOutput,
+    }
+
+    impl Module for PolyPass {
+        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+            ModuleDescriptor::new("PolyPass", shape.clone())
+                .poly_in("in")
+                .poly_out("out")
+        }
+
+        fn prepare(
+            _env: &AudioEnvironment,
+            descriptor: ModuleDescriptor,
+            id: InstanceId,
+        ) -> Self {
+            Self {
+                id,
+                descriptor,
+                input: PolyInput::default(),
+                output: PolyOutput::default(),
+            }
+        }
+
+        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+
+        fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
+
+        fn instance_id(&self) -> InstanceId { self.id }
+
+        fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+            self.input  = PolyInput::from_ports(inputs, 0);
+            self.output = PolyOutput::from_ports(outputs, 0);
+        }
+
+        fn process(&mut self, pool: &mut CablePool<'_>) {
+            let v = pool.read_poly(&self.input);
+            pool.write_poly(&self.output, v);
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any { self }
+    }
+
+    #[test]
+    fn set_mono_and_read_mono_round_trip() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        h.set_mono("in", 3.0);
+        h.tick();
+        assert_eq!(h.read_mono("out"), 6.0);
+    }
+
+    #[test]
+    fn tick_advances_write_index() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        assert_eq!(h.wi, 0);
+        h.tick();
+        assert_eq!(h.wi, 1);
+        h.tick();
+        assert_eq!(h.wi, 0);
+    }
+
+    #[test]
+    fn run_mono_collects_correct_number_of_samples() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        h.set_mono("in", 1.0);
+        let out = h.run_mono(4, "out");
+        assert_eq!(out.len(), 4);
+        for &v in &out { assert_eq!(v, 2.0); }
+    }
+
+    #[test]
+    fn run_mono_mapped_feeds_inputs() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        let inputs = [1.0_f32, 2.0, 3.0];
+        let out = h.run_mono_mapped(3, "in", &inputs, "out");
+        assert_eq!(out, vec![2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn run_mono_mapped_cycles_short_input() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        let out = h.run_mono_mapped(4, "in", &[5.0_f32], "out");
+        assert_eq!(out, vec![10.0, 10.0, 10.0, 10.0]);
+    }
+
+    #[test]
+    fn set_poly_and_read_poly_round_trip() {
+        let mut h = ModuleHarness::build::<PolyPass>(&[]);
+        let v: [f32; 16] = std::array::from_fn(|i| i as f32);
+        h.set_poly("in", v);
+        h.tick();
+        assert_eq!(h.read_poly("out"), v);
+    }
+
+    #[test]
+    fn disconnect_input_delivers_false_connected() {
+        // After disconnect, the module should see connected=false on that port.
+        struct ConnectProbe {
+            id: InstanceId,
+            descriptor: ModuleDescriptor,
+            saw_connected: bool,
+        }
+
+        impl Module for ConnectProbe {
+            fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+                ModuleDescriptor::new("ConnectProbe", shape.clone()).mono_in("sig")
+            }
+            fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+                Self { id, descriptor: d, saw_connected: false }
+            }
+            fn update_validated_parameters(&mut self, _: &mut ParameterMap) {}
+            fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
+            fn instance_id(&self) -> InstanceId { self.id }
+            fn set_ports(&mut self, inputs: &[InputPort], _outputs: &[OutputPort]) {
+                if let InputPort::Mono(p) = &inputs[0] {
+                    self.saw_connected = p.connected;
+                }
+            }
+            fn process(&mut self, _pool: &mut CablePool<'_>) {}
+            fn as_any(&self) -> &dyn std::any::Any { self }
+        }
+
+        let mut h = ModuleHarness::build::<ConnectProbe>(&[]);
+        // After build, all connected = true.
+        {
+            let probe = h.module.as_any().downcast_ref::<ConnectProbe>().unwrap();
+            assert!(probe.saw_connected);
+        }
+        h.disconnect_input("sig");
+        {
+            let probe = h.module.as_any().downcast_ref::<ConnectProbe>().unwrap();
+            assert!(!probe.saw_connected);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "input port 'missing/0' not found")]
+    fn unknown_input_panics() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        h.set_mono("missing", 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "output port 'missing/0' not found")]
+    fn unknown_output_panics() {
+        let h = ModuleHarness::build::<Doubler>(&[]);
+        let _ = h.read_mono("missing");
+    }
+
+    #[test]
+    fn init_pool_sets_all_slots() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        h.init_pool(CableValue::Mono(99.0));
+        // All pool slots should now be 99.0; read before any tick returns 99.0
+        // (ri = 1 - wi = 1 when wi = 0).
+        let cable = h.n_inputs; // first output cable
+        match h.pool[cable][1] {
+            CableValue::Mono(v) => assert_eq!(v, 99.0),
+            _ => panic!("expected Mono(99.0)"),
+        }
+    }
+}

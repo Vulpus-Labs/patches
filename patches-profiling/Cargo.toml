@@ -1,0 +1,24 @@
+[package]
+name = "patches-profiling"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "profile"
+path = "src/bin/profile.rs"
+
+[dependencies]
+patches-core        = { path = "../patches-core" }
+patches-dsl         = { path = "../patches-dsl" }
+patches-engine      = { path = "../patches-engine" }
+patches-interpreter = { path = "../patches-interpreter" }
+patches-modules     = { path = "../patches-modules" }

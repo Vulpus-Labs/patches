@@ -1,0 +1,39 @@
+name: Build macOS executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build patch_player
+        run: cargo build --release -p patches-player --target ${{ matrix.target }}
+
+      - name: Ad-hoc sign binary
+        run: codesign --sign - target/${{ matrix.target }}/release/patch_player
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch_player-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/patch_player
+          if-no-files-found: error
