@@ -1,9 +1,6 @@
 # patches
 
-A Rust system for defining modular audio patches and running them in a real-time
-audio engine, with support for hot-reloading patches at runtime. The intended use
-case is live-coding performance: the patch graph can be rebuilt and swapped in
-without stopping the audio stream or resetting module state (oscillator phase,
+A Rust system for defining modular audio patches and running them in a real-time audio engine, with support for hot-reloading patches at runtime without stopping the audio stream or resetting module state (oscillator phase,
 filter history, etc.).
 
 ```patches
