@@ -58,6 +58,9 @@ pub(crate) fn compute_completions(
             BackwardContext::PortIndex(module_name) => {
                 return complete_port_index_aliases(&module_name, model);
             }
+            BackwardContext::SongRow => {
+                return complete_pattern_names(model);
+            }
         }
     }
 
@@ -86,6 +89,15 @@ fn try_completion_from_node(
                     if is_after_at_sign(source, byte_offset) {
                         return Some(complete_at_block_aliases(cursor, source));
                     }
+                    // Check if this is a MasterSequencer song: param
+                    let module_type = cursor
+                        .child_by_field_name("type")
+                        .map(|n| node_text(n, source));
+                    if module_type == Some("MasterSequencer")
+                        && is_after_param_colon(source, byte_offset, "song")
+                    {
+                        return Some(complete_song_names(model));
+                    }
                     let module_name = cursor
                         .child_by_field_name("name")
                         .map(|n| node_text(n, source));
@@ -101,6 +113,15 @@ fn try_completion_from_node(
                     if is_after_at_sign(source, byte_offset) {
                         return Some(complete_at_block_aliases(module_decl, source));
                     }
+                    // Check if this is a MasterSequencer song: param
+                    let module_type = module_decl
+                        .child_by_field_name("type")
+                        .map(|n| node_text(n, source));
+                    if module_type == Some("MasterSequencer")
+                        && is_after_param_colon(source, byte_offset, "song")
+                    {
+                        return Some(complete_song_names(model));
+                    }
                     let module_name = module_decl
                         .child_by_field_name("name")
                         .map(|n| node_text(n, source));
@@ -113,6 +134,9 @@ fn try_completion_from_node(
             }
             "port_ref" | "connection" => {
                 return Some(complete_port_ref(source, byte_offset, node, tree, model));
+            }
+            "song_row" | "song_cell" => {
+                return Some(complete_pattern_names(model));
             }
             _ => {}
         }
@@ -470,6 +494,67 @@ fn complete_template_ports(
     vec![]
 }
 
+/// Check if cursor is positioned after `param_name:` in a param block.
+fn is_after_param_colon(source: &str, byte_offset: usize, param_name: &str) -> bool {
+    let before = &source[..byte_offset];
+    let trimmed = before.trim_end();
+    // Look for `param_name:` possibly with whitespace
+    let pattern = format!("{param_name}:");
+    if let Some(pos) = trimmed.rfind(&pattern) {
+        // Ensure nothing between the colon and cursor except whitespace/partial ident
+        let after_colon = &trimmed[pos + pattern.len()..];
+        let after_colon = after_colon.trim_start();
+        // Either empty (just after colon) or a partial identifier
+        after_colon.is_empty()
+            || after_colon
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    } else {
+        false
+    }
+}
+
+/// Complete with all defined pattern names.
+fn complete_pattern_names(model: &SemanticModel) -> Vec<CompletionItem> {
+    let mut items: Vec<CompletionItem> = model
+        .declarations
+        .patterns
+        .values()
+        .map(|p| CompletionItem {
+            label: p.name.clone(),
+            kind: Some(CompletionItemKind::REFERENCE),
+            detail: Some(format!(
+                "pattern \u{2014} {} channels, {} steps",
+                p.channel_count, p.step_count
+            )),
+            ..Default::default()
+        })
+        .collect();
+    items.sort_by(|a, b| a.label.cmp(&b.label));
+    items
+}
+
+/// Complete with all defined song names.
+fn complete_song_names(model: &SemanticModel) -> Vec<CompletionItem> {
+    let mut items: Vec<CompletionItem> = model
+        .declarations
+        .songs
+        .values()
+        .map(|s| CompletionItem {
+            label: s.name.clone(),
+            kind: Some(CompletionItemKind::REFERENCE),
+            detail: Some(format!(
+                "song \u{2014} {} channels, {} rows",
+                s.channel_names.len(),
+                s.rows.len()
+            )),
+            ..Default::default()
+        })
+        .collect();
+    items.sort_by(|a, b| a.label.cmp(&b.label));
+    items
+}
+
 enum ConnectionSide {
     Source,
     Destination,
@@ -531,6 +616,8 @@ enum BackwardContext {
     DollarDot,
     /// `module_name.port_name[` — complete with shape aliases
     PortIndex(String),
+    /// Inside a song block row (after `|`)
+    SongRow,
 }
 
 /// Scan backward from the cursor to determine context when tree-sitter nodes
@@ -598,7 +685,31 @@ fn scan_backward_for_context(source: &str, byte_offset: usize) -> Option<Backwar
         }
     }
 
+    // Check if inside a song block row: last non-whitespace before cursor ends
+    // with `|` or we're after `| ` at start of a song row
+    if (trimmed.ends_with('|')
+        || (trimmed.rfind('|').is_some() && is_inside_song_block(source, byte_offset)))
+        && is_inside_song_block(source, byte_offset)
+    {
+        return Some(BackwardContext::SongRow);
+    }
+
     None
+}
+
+/// Heuristic: check if the cursor is inside a song block by scanning backward
+/// for `song <name> {` without a closing `}`.
+fn is_inside_song_block(source: &str, byte_offset: usize) -> bool {
+    let before = &source[..byte_offset];
+    // Find the last `song ` keyword
+    if let Some(song_pos) = before.rfind("song ") {
+        let after_song = &before[song_pos..];
+        let open_braces = after_song.matches('{').count();
+        let close_braces = after_song.matches('}').count();
+        open_braces > close_braces
+    } else {
+        false
+    }
 }
 
 fn dedup_completion_items(items: &mut Vec<CompletionItem>) {
@@ -629,6 +740,10 @@ pub(crate) fn format_parameter_kind(kind: &patches_core::ParameterKind) -> Strin
         }
         patches_core::ParameterKind::Array { length, .. } => {
             format!("array (length {length})")
+        }
+        patches_core::ParameterKind::File { extensions } => {
+            let exts = extensions.join(", ");
+            format!("file ({exts})")
         }
     }
 }
@@ -771,6 +886,33 @@ mod tests {
         assert!(
             labels.contains(&"audio"),
             "expected audio in completions, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn completions_for_pattern_names_in_song_row() {
+        let source = "pattern drums {\n    kick: x . x .\n}\n\nsong my_song {\n    | ch |\n    | \n}\n\npatch {}";
+        let (tree, model, registry) = setup(source);
+        // Position cursor inside the song row after `| `
+        let byte_offset = source.find("| \n}").unwrap() + 2;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"drums"),
+            "expected drums in completions, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn completions_for_song_names_in_master_sequencer() {
+        let source = "song my_song {\n    | ch |\n}\n\npatch {\n    module seq : MasterSequencer(channels: [ch]) {\n        song: \n    }\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find("song: \n").unwrap() + 6;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"my_song"),
+            "expected my_song in completions, got: {labels:?}"
         );
     }
 }

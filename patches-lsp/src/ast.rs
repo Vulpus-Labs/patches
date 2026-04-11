@@ -45,6 +45,8 @@ pub(crate) enum Value {
     Scalar(Scalar),
     Array(Vec<Value>),
     Table(Vec<(Ident, Value)>),
+    /// `file("path")` — a file reference.
+    File(String),
 }
 
 // ─── Module declarations ────────────────────────────────────────────────────
@@ -208,6 +210,53 @@ pub(crate) struct Template {
     pub span: Span,
 }
 
+// ─── Pattern blocks ────────────────────────────────────────────────────────
+
+/// A channel row within a pattern block.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PatternChannel {
+    pub label: Option<Ident>,
+    pub step_count: usize,
+    pub span: Span,
+}
+
+/// A `pattern name { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PatternBlock {
+    pub name: Option<Ident>,
+    pub channels: Vec<PatternChannel>,
+    pub span: Span,
+}
+
+// ─── Song blocks ──────────────────────────────────────────────────────────
+
+/// A reference to a pattern name inside a song row.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SongCellRef {
+    pub name: Option<Ident>,
+    pub is_silence: bool,
+    pub span: Span,
+}
+
+/// A single row in a song block.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SongRow {
+    pub cells: Vec<SongCellRef>,
+    pub is_loop_point: bool,
+    pub span: Span,
+}
+
+/// A `song name { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SongBlock {
+    pub name: Option<Ident>,
+    /// Channel names from the header row (first row).
+    pub channel_names: Vec<Ident>,
+    /// Data rows (all rows after the header).
+    pub rows: Vec<SongRow>,
+    pub span: Span,
+}
+
 // ─── Top-level ──────────────────────────────────────────────────────────────
 
 /// The `patch { ... }` block.
@@ -221,6 +270,8 @@ pub(crate) struct Patch {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct File {
     pub templates: Vec<Template>,
+    pub patterns: Vec<PatternBlock>,
+    pub songs: Vec<SongBlock>,
     pub patch: Option<Patch>,
     pub span: Span,
 }

@@ -9,7 +9,11 @@ module.exports = grammar({
 
   rules: {
     // ─── File root ──────────────────────────────────────────────────────
-    file: ($) => seq(repeat($.template), optional($.patch)),
+    file: ($) =>
+      seq(
+        repeat(choice($.template, $.pattern_block, $.song_block)),
+        optional($.patch)
+      ),
 
     // ─── Comments ───────────────────────────────────────────────────────
     comment: (_) => token(seq("#", /[^\n]*/)),
@@ -57,12 +61,15 @@ module.exports = grammar({
         $.ident
       ),
 
+    // file("path") — a file reference, syntactically distinct from a plain string.
+    file_ref: ($) => seq("file", "(", choice($.string_lit, $.param_ref), ")"),
+
     array: ($) => seq("[", comma_list($.value), "]"),
 
     table_entry: ($) => seq($.ident, ":", $.value),
     table: ($) => seq("{", comma_list($.table_entry), "}"),
 
-    value: ($) => choice($.table, $.array, $.scalar),
+    value: ($) => choice($.file_ref, $.table, $.array, $.scalar),
 
     // ─── Shape and param blocks ─────────────────────────────────────────
     alias_list: ($) => seq("[", comma_list($.ident), "]"),
@@ -173,6 +180,106 @@ module.exports = grammar({
         repeat($.statement),
         "}"
       ),
+
+    // ─── Pattern block ─────────────────────────────────────────────────
+    //
+    // pattern name {
+    //     channel_label: step step step ...
+    // }
+    pattern_block: ($) =>
+      seq(
+        "pattern",
+        field("name", $.ident),
+        "{",
+        repeat($.channel_row),
+        "}"
+      ),
+
+    channel_row: ($) =>
+      seq(
+        field("label", $.ident),
+        ":",
+        repeat1($.step),
+        repeat(seq("|", repeat1($.step)))
+      ),
+
+    // ─── Step notation ──────────────────────────────────────────────────
+    step_cv2: ($) => seq(":", $.step_value, optional($.step_slide_target)),
+
+    step_slide_target: ($) => seq(">", $.step_value),
+
+    step_repeat: ($) => seq("*", $.nat),
+
+    step_value: (_) =>
+      token(
+        prec(2, choice(
+          // float with optional unit
+          seq(optional("-"), /\d+/, ".", /\d*/, optional(/[kK]?[hH][zZ]|[dD][bB]/)),
+          // integer with optional unit
+          seq(optional("-"), /\d+/, /[kK]?[hH][zZ]|[dD][bB]/),
+          // plain integer
+          seq(optional("-"), /\d+/),
+          // note literal
+          seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/)
+        ))
+      ),
+
+    step: ($) =>
+      choice(
+        $.step_rest,
+        $.step_tie,
+        $.step_trigger,
+        $.slide_generator,
+        $.step_active
+      ),
+
+    step_rest: (_) => token(prec(3, ".")),
+    step_tie: (_) => token(prec(3, "~")),
+    step_trigger: ($) =>
+      prec(2, seq(
+        token(prec(3, "x")),
+        optional($.step_cv2),
+        optional($.step_repeat)
+      )),
+
+    step_active: ($) =>
+      prec(1, seq(
+        $.step_value,
+        optional($.step_slide_target),
+        optional($.step_cv2),
+        optional($.step_repeat)
+      )),
+
+    // slide(count, start, end)
+    slide_generator: ($) =>
+      seq("slide", "(", $.step_value, ",", $.step_value, ",", $.step_value, ")"),
+
+    // ─── Song block ─────────────────────────────────────────────────────
+    //
+    // song name {
+    //     | channel1 | channel2 |
+    //     | pattern1 | pattern2 |
+    //     | pattern3 | pattern4 |  @loop
+    // }
+    song_block: ($) =>
+      seq(
+        "song",
+        field("name", $.ident),
+        "{",
+        repeat($.song_row),
+        "}"
+      ),
+
+    song_row: ($) =>
+      seq(
+        repeat1(seq("|", $.song_cell)),
+        "|",
+        optional($.loop_annotation)
+      ),
+
+    song_cell: ($) => choice($.ident, "_"),
+
+    loop_annotation: (_) => token(seq("@", "loop")),
 
     // ─── Patch ──────────────────────────────────────────────────────────
     patch: ($) => seq("patch", "{", repeat($.statement), "}"),

@@ -29,6 +29,10 @@ pub(crate) enum SymbolKind {
     TemplateInPort,
     /// An output port in a template's `out:` list.
     TemplateOutPort,
+    /// `pattern name { ... }` — a pattern definition.
+    Pattern,
+    /// `song name { ... }` — a song definition.
+    Song,
 }
 
 // ─── Per-file navigation data ──────────────────────────────────────────────

@@ -6,9 +6,10 @@
 use tree_sitter::{Node, Tree};
 
 use crate::ast::{
-    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl,
-    ParamEntry, ParamIndex, ParamType, Patch, PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar,
-    ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
+    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl, ParamEntry,
+    ParamIndex, ParamType, Patch, PatternBlock, PatternChannel, PortGroupDecl, PortIndex,
+    PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongBlock, SongCellRef, SongRow, Span,
+    Statement, Template, Value,
 };
 
 /// Classification of a diagnostic for severity mapping.
@@ -21,6 +22,9 @@ pub(crate) enum DiagnosticKind {
     UnknownPort,
     UnknownParameter,
     InvalidValue,
+    UndefinedPattern,
+    UndefinedSong,
+    ChannelCountMismatch,
 }
 
 impl DiagnosticKind {
@@ -31,10 +35,13 @@ impl DiagnosticKind {
             DiagnosticKind::SyntaxError
             | DiagnosticKind::MissingToken
             | DiagnosticKind::UnknownModuleType
-            | DiagnosticKind::DependencyCycle => DiagnosticSeverity::ERROR,
+            | DiagnosticKind::DependencyCycle
+            | DiagnosticKind::UndefinedPattern
+            | DiagnosticKind::UndefinedSong => DiagnosticSeverity::ERROR,
             DiagnosticKind::UnknownPort
             | DiagnosticKind::UnknownParameter
-            | DiagnosticKind::InvalidValue => DiagnosticSeverity::WARNING,
+            | DiagnosticKind::InvalidValue
+            | DiagnosticKind::ChannelCountMismatch => DiagnosticSeverity::WARNING,
         }
     }
 }
@@ -124,12 +131,16 @@ fn build_file(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> File {
     walk_errors(node, diags);
 
     let mut templates = Vec::new();
+    let mut patterns = Vec::new();
+    let mut songs = Vec::new();
     let mut patch = None;
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "template" => templates.push(build_template(child, source, diags)),
+            "pattern_block" => patterns.push(build_pattern_block(child, source, diags)),
+            "song_block" => songs.push(build_song_block(child, source, diags)),
             "patch" => patch = Some(build_patch(child, source, diags)),
             _ => {}
         }
@@ -137,6 +148,8 @@ fn build_file(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> File {
 
     File {
         templates,
+        patterns,
+        songs,
         patch,
         span: span_of(node),
     }
@@ -356,6 +369,18 @@ fn build_value(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Value {
             "table" => {
                 let entries = build_table_entries(child, source, diags);
                 return Value::Table(entries);
+            }
+            "file_ref" => {
+                // file("path") — extract the string literal path.
+                let mut fc = child.walk();
+                for fchild in child.children(&mut fc) {
+                    if fchild.kind() == "string_lit" {
+                        let s = fchild.utf8_text(source.as_bytes()).unwrap_or("");
+                        let path = if s.len() >= 2 { &s[1..s.len()-1] } else { s };
+                        return Value::File(path.to_owned());
+                    }
+                }
+                return Value::File(String::new());
             }
             _ => {}
         }
@@ -794,6 +819,114 @@ fn build_port_group_decl(node: Node, source: &str, diags: &mut Vec<Diagnostic>) 
     }
 }
 
+// ─── Pattern block ─────────────────────────────────────────────────────────
+
+fn build_pattern_block(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> PatternBlock {
+    walk_errors(node, diags);
+
+    let name = node.child_by_field_name("name").map(|n| build_ident(n, source));
+
+    let channels = named_children_of_kind(node, "channel_row")
+        .into_iter()
+        .map(|n| build_pattern_channel(n, source, diags))
+        .collect();
+
+    PatternBlock {
+        name,
+        channels,
+        span: span_of(node),
+    }
+}
+
+fn build_pattern_channel(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> PatternChannel {
+    walk_errors(node, diags);
+
+    let label = node.child_by_field_name("label").map(|n| build_ident(n, source));
+
+    // Count step nodes (including those after continuation `|`)
+    let step_count = named_children_of_kind(node, "step").len();
+
+    PatternChannel {
+        label,
+        step_count,
+        span: span_of(node),
+    }
+}
+
+// ─── Song block ────────────────────────────────────────────────────────────
+
+fn build_song_block(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> SongBlock {
+    walk_errors(node, diags);
+
+    let name = node.child_by_field_name("name").map(|n| build_ident(n, source));
+
+    let all_rows = named_children_of_kind(node, "song_row");
+
+    // First row is the header (channel names), rest are data rows
+    let mut channel_names = Vec::new();
+    let mut rows = Vec::new();
+
+    for (i, row_node) in all_rows.into_iter().enumerate() {
+        if i == 0 {
+            // Header row — extract channel names
+            let cells = named_children_of_kind(row_node, "song_cell");
+            for cell in cells {
+                if let Some(id) = first_named_child_of_kind(cell, "ident") {
+                    channel_names.push(build_ident(id, source));
+                }
+            }
+        } else {
+            // Data row
+            rows.push(build_song_row(row_node, source, diags));
+        }
+    }
+
+    SongBlock {
+        name,
+        channel_names,
+        rows,
+        span: span_of(node),
+    }
+}
+
+fn build_song_row(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> SongRow {
+    walk_errors(node, diags);
+
+    let cells = named_children_of_kind(node, "song_cell")
+        .into_iter()
+        .map(|cell| {
+            let text = node_text(cell, source);
+            if text == "_" {
+                SongCellRef {
+                    name: None,
+                    is_silence: true,
+                    span: span_of(cell),
+                }
+            } else if let Some(id) = first_named_child_of_kind(cell, "ident") {
+                SongCellRef {
+                    name: Some(build_ident(id, source)),
+                    is_silence: false,
+                    span: span_of(cell),
+                }
+            } else {
+                SongCellRef {
+                    name: None,
+                    is_silence: false,
+                    span: span_of(cell),
+                }
+            }
+        })
+        .collect();
+
+    let is_loop_point = first_named_child_of_kind(node, "loop_annotation").is_some();
+
+    SongRow {
+        cells,
+        is_loop_point,
+        span: span_of(node),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1121,5 +1254,124 @@ patch {
         } else {
             panic!("expected connection");
         }
+    }
+
+    #[test]
+    fn pattern_block_basic() {
+        let source = r#"
+pattern drums {
+    kick:  x . . . x . . .
+    snare: . . x . . . x .
+}
+
+patch {}
+"#;
+        let (file, diags) = parse(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(file.patterns.len(), 1);
+        let pat = &file.patterns[0];
+        assert_eq!(pat.name.as_ref().unwrap().name, "drums");
+        assert_eq!(pat.channels.len(), 2);
+        assert_eq!(pat.channels[0].label.as_ref().unwrap().name, "kick");
+        assert_eq!(pat.channels[0].step_count, 8);
+        assert_eq!(pat.channels[1].label.as_ref().unwrap().name, "snare");
+        assert_eq!(pat.channels[1].step_count, 8);
+    }
+
+    #[test]
+    fn pattern_block_with_notes_and_floats() {
+        let source = r#"
+pattern melody {
+    note: C4 Eb4 . C4
+    vel:  1.0 0.8 . 0.8
+}
+
+patch {}
+"#;
+        let (file, diags) = parse(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(file.patterns.len(), 1);
+        let pat = &file.patterns[0];
+        assert_eq!(pat.channels.len(), 2);
+        assert_eq!(pat.channels[0].step_count, 4);
+    }
+
+    #[test]
+    fn song_block_basic() {
+        let source = r#"
+song my_song {
+    | drums   | bass  |
+    | pat_a   | pat_b |
+    | pat_a   | pat_b |  @loop
+    | pat_c   | pat_d |
+}
+
+patch {}
+"#;
+        let (file, diags) = parse(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(file.songs.len(), 1);
+        let song = &file.songs[0];
+        assert_eq!(song.name.as_ref().unwrap().name, "my_song");
+        assert_eq!(song.channel_names.len(), 2);
+        assert_eq!(song.channel_names[0].name, "drums");
+        assert_eq!(song.channel_names[1].name, "bass");
+        assert_eq!(song.rows.len(), 3);
+        // Row 0 (first data row)
+        assert_eq!(song.rows[0].cells.len(), 2);
+        assert_eq!(song.rows[0].cells[0].name.as_ref().unwrap().name, "pat_a");
+        assert!(!song.rows[0].is_loop_point);
+        // Row 1 has @loop
+        assert!(song.rows[1].is_loop_point);
+        // Row 2
+        assert!(!song.rows[2].is_loop_point);
+    }
+
+    #[test]
+    fn song_block_with_silence() {
+        let source = r#"
+song s {
+    | ch1 | ch2 |
+    | a   | _   |
+}
+
+patch {}
+"#;
+        let (file, diags) = parse(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let song = &file.songs[0];
+        assert_eq!(song.rows.len(), 1);
+        assert!(!song.rows[0].cells[0].is_silence);
+        assert!(song.rows[0].cells[1].is_silence);
+    }
+
+    #[test]
+    fn mixed_file_with_patterns_songs_templates() {
+        let source = r#"
+template voice {
+    in: voct
+    out: audio
+    module osc : Osc
+}
+
+pattern drums {
+    kick: x . x .
+}
+
+song arrangement {
+    | drums |
+    | drums |
+}
+
+patch {
+    module v : voice
+}
+"#;
+        let (file, diags) = parse(source);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(file.templates.len(), 1);
+        assert_eq!(file.patterns.len(), 1);
+        assert_eq!(file.songs.len(), 1);
+        assert!(file.patch.is_some());
     }
 }

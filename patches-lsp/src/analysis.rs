@@ -65,17 +65,50 @@ pub(crate) struct PortInfo {
     pub span: ast::Span,
 }
 
+/// Info about a pattern definition.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // span reserved for hover/navigation
+pub(crate) struct PatternInfo {
+    pub name: String,
+    pub channel_count: usize,
+    pub step_count: usize,
+    pub span: ast::Span,
+}
+
+/// Info about a song definition.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // span reserved for hover/navigation
+pub(crate) struct SongInfo {
+    pub name: String,
+    pub channel_names: Vec<String>,
+    /// Pattern name references per row, with their source spans.
+    pub rows: Vec<Vec<SongCellInfo>>,
+    pub span: ast::Span,
+}
+
+/// Info about a single cell in a song row.
+#[derive(Debug, Clone)]
+pub(crate) struct SongCellInfo {
+    pub pattern_name: Option<String>,
+    pub is_silence: bool,
+    pub span: ast::Span,
+}
+
 /// All declarations extracted from a file.
 #[derive(Debug, Clone)]
 pub(crate) struct DeclarationMap {
     pub modules: Vec<ModuleInfo>,
     pub templates: HashMap<String, TemplateInfo>,
+    pub patterns: HashMap<String, PatternInfo>,
+    pub songs: HashMap<String, SongInfo>,
 }
 
 /// Phase 1: shallow scan of the tolerant AST to extract declarations.
 pub(crate) fn shallow_scan(file: &ast::File) -> DeclarationMap {
     let mut modules = Vec::new();
     let mut templates = HashMap::new();
+    let mut patterns = HashMap::new();
+    let mut songs = HashMap::new();
 
     for t in &file.templates {
         if let Some(name) = &t.name {
@@ -123,6 +156,49 @@ pub(crate) fn shallow_scan(file: &ast::File) -> DeclarationMap {
         }
     }
 
+    for p in &file.patterns {
+        if let Some(name) = &p.name {
+            let step_count = p.channels.iter().map(|c| c.step_count).max().unwrap_or(0);
+            patterns.insert(
+                name.name.clone(),
+                PatternInfo {
+                    name: name.name.clone(),
+                    channel_count: p.channels.len(),
+                    step_count,
+                    span: p.span,
+                },
+            );
+        }
+    }
+
+    for s in &file.songs {
+        if let Some(name) = &s.name {
+            let rows = s
+                .rows
+                .iter()
+                .map(|row| {
+                    row.cells
+                        .iter()
+                        .map(|cell| SongCellInfo {
+                            pattern_name: cell.name.as_ref().map(|id| id.name.clone()),
+                            is_silence: cell.is_silence,
+                            span: cell.span,
+                        })
+                        .collect()
+                })
+                .collect();
+            songs.insert(
+                name.name.clone(),
+                SongInfo {
+                    name: name.name.clone(),
+                    channel_names: s.channel_names.iter().map(|id| id.name.clone()).collect(),
+                    rows,
+                    span: s.span,
+                },
+            );
+        }
+    }
+
     if let Some(patch) = &file.patch {
         extract_modules(&patch.body, "", &mut modules);
     }
@@ -135,6 +211,8 @@ pub(crate) fn shallow_scan(file: &ast::File) -> DeclarationMap {
     DeclarationMap {
         modules,
         templates,
+        patterns,
+        songs,
     }
 }
 
@@ -577,6 +655,182 @@ fn validate_port_ref_as_input(
     }
 }
 
+// ─── Tracker validation ────────────────────────────────────────────────────
+
+/// Validate tracker references: undefined patterns in songs, undefined songs
+/// in MasterSequencer params, and channel count mismatches.
+fn analyse_tracker(decl_map: &DeclarationMap) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    // Check song blocks: every pattern name referenced must exist
+    for song in decl_map.songs.values() {
+        for row in &song.rows {
+            for cell in row {
+                if cell.is_silence {
+                    continue;
+                }
+                if let Some(pattern_name) = &cell.pattern_name {
+                    if !decl_map.patterns.contains_key(pattern_name) {
+                        diagnostics.push(Diagnostic {
+                            span: cell.span,
+                            message: format!("undefined pattern '{pattern_name}'"),
+                            kind: crate::ast_builder::DiagnosticKind::UndefinedPattern,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check channel count consistency: patterns in the same column should
+        // have the same channel count
+        let num_cols = song.channel_names.len();
+        for col in 0..num_cols {
+            let mut first_count: Option<(usize, &str)> = None;
+            for row in &song.rows {
+                if col >= row.len() {
+                    continue;
+                }
+                let cell = &row[col];
+                if cell.is_silence {
+                    continue;
+                }
+                if let Some(pattern_name) = &cell.pattern_name {
+                    if let Some(pat_info) = decl_map.patterns.get(pattern_name) {
+                        match first_count {
+                            None => first_count = Some((pat_info.channel_count, pattern_name)),
+                            Some((expected, _)) if pat_info.channel_count != expected => {
+                                diagnostics.push(Diagnostic {
+                                    span: cell.span,
+                                    message: format!(
+                                        "pattern '{}' has {} channels, expected {} in this column",
+                                        pattern_name, pat_info.channel_count, expected
+                                    ),
+                                    kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check MasterSequencer song references
+    for module in &decl_map.modules {
+        if module.type_name != "MasterSequencer" {
+            continue;
+        }
+        // Find song parameter value — we need to check the AST for this.
+        // Since we only have the module info (not the full AST), we check
+        // song channel vs module channel alignment via shape args.
+        // The song parameter check is done below in analyse_tracker_modules.
+    }
+
+    diagnostics
+}
+
+/// Validate MasterSequencer song parameter references against known songs.
+/// This needs the full AST to read parameter values.
+fn analyse_tracker_modules(
+    file: &ast::File,
+    decl_map: &DeclarationMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    let bodies: Vec<(&[ast::Statement], &str)> = {
+        let mut v = Vec::new();
+        if let Some(patch) = &file.patch {
+            v.push((patch.body.as_slice(), ""));
+        }
+        for t in &file.templates {
+            let scope = t.name.as_ref().map_or("", |id| id.name.as_str());
+            v.push((t.body.as_slice(), scope));
+        }
+        v
+    };
+
+    for (body, _scope) in bodies {
+        for stmt in body {
+            if let ast::Statement::Module(m) = stmt {
+                let type_name = match &m.type_name {
+                    Some(id) => &id.name,
+                    None => continue,
+                };
+                if type_name != "MasterSequencer" {
+                    continue;
+                }
+
+                // Find the "song" parameter
+                for param in &m.params {
+                    if let ast::ParamEntry::KeyValue {
+                        name: Some(pname),
+                        value: Some(value),
+                        span,
+                        ..
+                    } = param
+                    {
+                        if pname.name != "song" {
+                            continue;
+                        }
+                        let song_name = match value {
+                            ast::Value::Scalar(ast::Scalar::Ident(s)) => s.as_str(),
+                            ast::Value::Scalar(ast::Scalar::Str(s)) => s.as_str(),
+                            _ => continue,
+                        };
+                        if !decl_map.songs.contains_key(song_name) {
+                            diagnostics.push(Diagnostic {
+                                span: *span,
+                                message: format!("undefined song '{song_name}'"),
+                                kind: crate::ast_builder::DiagnosticKind::UndefinedSong,
+                            });
+                        } else {
+                            // Check channel alignment: song channels vs module shape channels
+                            let song_info = &decl_map.songs[song_name];
+                            let module_info = decl_map.modules.iter().find(|mi| {
+                                mi.name == m.name.as_ref().map_or("", |id| id.name.as_str())
+                            });
+                            if let Some(mi) = module_info {
+                                for (arg_name, arg_val) in &mi.shape_args {
+                                    if arg_name == "channels" {
+                                        if let ShapeValue::AliasList(aliases) = arg_val {
+                                            if aliases.len() != song_info.channel_names.len() {
+                                                diagnostics.push(Diagnostic {
+                                                    span: *span,
+                                                    message: format!(
+                                                        "song '{}' has {} channels but MasterSequencer declares {}",
+                                                        song_name,
+                                                        song_info.channel_names.len(),
+                                                        aliases.len()
+                                                    ),
+                                                    kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                                });
+                                            } else if *aliases != song_info.channel_names {
+                                                diagnostics.push(Diagnostic {
+                                                    span: *span,
+                                                    message: format!(
+                                                        "song '{}' channel names [{}] don't match MasterSequencer channels [{}]",
+                                                        song_name,
+                                                        song_info.channel_names.join(", "),
+                                                        aliases.join(", ")
+                                                    ),
+                                                    kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    diagnostics
+}
+
 // ─── Semantic model ─────────────────────────────────────────────────────────
 
 /// The complete semantic analysis result.
@@ -622,6 +876,12 @@ pub(crate) fn analyse(file: &ast::File, registry: &Registry) -> SemanticModel {
     // Phase 4: body analysis
     let body_diags = analyse_body(file, &descriptors, &decl_map);
     diagnostics.extend(body_diags);
+
+    // Phase 4b: tracker validation
+    let tracker_diags = analyse_tracker(&decl_map);
+    diagnostics.extend(tracker_diags);
+    let tracker_module_diags = analyse_tracker_modules(file, &decl_map);
+    diagnostics.extend(tracker_module_diags);
 
     // Phase 5: navigation index
     let defs = collect_definitions(file);
@@ -712,6 +972,28 @@ fn collect_definitions(file: &ast::File) -> Vec<Definition> {
         }
     }
 
+    for p in &file.patterns {
+        if let Some(name) = &p.name {
+            defs.push(Definition {
+                name: name.name.clone(),
+                kind: SymbolKind::Pattern,
+                scope: String::new(),
+                span: name.span,
+            });
+        }
+    }
+
+    for s in &file.songs {
+        if let Some(name) = &s.name {
+            defs.push(Definition {
+                name: name.name.clone(),
+                kind: SymbolKind::Song,
+                scope: String::new(),
+                span: name.span,
+            });
+        }
+    }
+
     if let Some(patch) = &file.patch {
         for stmt in &patch.body {
             if let ast::Statement::Module(m) = stmt {
@@ -740,6 +1022,27 @@ fn collect_references(file: &ast::File, decl_map: &DeclarationMap) -> Vec<Refere
     for template in &file.templates {
         let scope = template.name.as_ref().map_or("", |id| id.name.as_str());
         collect_body_refs(&template.body, scope, decl_map, &mut refs);
+    }
+
+    // Pattern name references in song rows
+    for song in &file.songs {
+        for row in &song.rows {
+            for cell in &row.cells {
+                if cell.is_silence {
+                    continue;
+                }
+                if let Some(name_ident) = &cell.name {
+                    if decl_map.patterns.contains_key(&name_ident.name) {
+                        refs.push(Reference {
+                            span: name_ident.span,
+                            target_name: name_ident.name.clone(),
+                            target_kind: SymbolKind::Pattern,
+                            scope: String::new(),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     refs
@@ -1462,5 +1765,170 @@ patch {
         // Should point to the template name definition
         let def_text = &source[result_span.start..result_span.end];
         assert_eq!(def_text, "voice");
+    }
+
+    // ─── Tracker validation ────────────────────────────────────────────
+
+    #[test]
+    fn pattern_and_song_declarations_scanned() {
+        let file = parse(
+            r#"
+pattern drums {
+    kick: x . x .
+    snare: . x . x
+}
+
+song my_song {
+    | drums |
+    | drums |
+}
+
+patch {}
+"#,
+        );
+        let decl = shallow_scan(&file);
+        assert_eq!(decl.patterns.len(), 1);
+        assert!(decl.patterns.contains_key("drums"));
+        let pat = &decl.patterns["drums"];
+        assert_eq!(pat.channel_count, 2);
+        assert_eq!(pat.step_count, 4);
+
+        assert_eq!(decl.songs.len(), 1);
+        assert!(decl.songs.contains_key("my_song"));
+        let song = &decl.songs["my_song"];
+        assert_eq!(song.channel_names, vec!["drums"]);
+        assert_eq!(song.rows.len(), 1);
+    }
+
+    #[test]
+    fn undefined_pattern_in_song() {
+        let model = analyse_source(
+            r#"
+song my_song {
+    | ch |
+    | nonexistent |
+}
+
+patch {}
+"#,
+        );
+        let diags: Vec<_> = model
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("undefined pattern"))
+            .collect();
+        assert_eq!(diags.len(), 1, "expected 1 undefined pattern diagnostic, got {diags:?}");
+        assert!(diags[0].message.contains("nonexistent"));
+    }
+
+    #[test]
+    fn defined_pattern_no_diagnostic() {
+        let model = analyse_source(
+            r#"
+pattern drums {
+    kick: x . x .
+}
+
+song my_song {
+    | ch |
+    | drums |
+}
+
+patch {}
+"#,
+        );
+        let diags: Vec<_> = model
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("undefined pattern"))
+            .collect();
+        assert!(
+            diags.is_empty(),
+            "unexpected undefined pattern diagnostics: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn undefined_song_in_master_sequencer() {
+        let model = analyse_source(
+            r#"
+patch {
+    module seq : MasterSequencer(channels: [drums]) {
+        song: nonexistent_song
+    }
+}
+"#,
+        );
+        let diags: Vec<_> = model
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("undefined song"))
+            .collect();
+        assert_eq!(diags.len(), 1, "expected 1 undefined song diagnostic, got {diags:?}");
+        assert!(diags[0].message.contains("nonexistent_song"));
+    }
+
+    #[test]
+    fn pattern_and_song_navigation_definitions() {
+        let model = analyse_source(
+            r#"
+pattern drums {
+    kick: x . x .
+}
+
+song my_song {
+    | ch |
+    | drums |
+}
+
+patch {}
+"#,
+        );
+        let nav = &model.navigation;
+
+        let def_names: Vec<(&str, SymbolKind, &str)> = nav
+            .defs
+            .iter()
+            .map(|d| (d.name.as_str(), d.kind, d.scope.as_str()))
+            .collect();
+
+        assert!(
+            def_names.contains(&("drums", SymbolKind::Pattern, "")),
+            "expected pattern def, got: {def_names:?}"
+        );
+        assert!(
+            def_names.contains(&("my_song", SymbolKind::Song, "")),
+            "expected song def, got: {def_names:?}"
+        );
+    }
+
+    #[test]
+    fn pattern_ref_in_song_generates_navigation_ref() {
+        let model = analyse_source(
+            r#"
+pattern drums {
+    kick: x . x .
+}
+
+song my_song {
+    | ch |
+    | drums |
+}
+
+patch {}
+"#,
+        );
+        let nav = &model.navigation;
+
+        let ref_targets: Vec<(&str, SymbolKind, &str)> = nav
+            .refs
+            .iter()
+            .map(|r| (r.target_name.as_str(), r.target_kind, r.scope.as_str()))
+            .collect();
+
+        assert!(
+            ref_targets.contains(&("drums", SymbolKind::Pattern, "")),
+            "expected pattern ref, got: {ref_targets:?}"
+        );
     }
 }
