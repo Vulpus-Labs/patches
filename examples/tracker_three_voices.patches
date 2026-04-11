@@ -1,0 +1,199 @@
+# Three-voice tracker demo: bass + two lead parts
+# Bass uses a saw through a low-pass filter.
+# Lead 1 is a saw with a bright filter. Lead 2 is a square with filter sweep.
+# Stereo delay on the leads and a reverb on the master bus.
+
+# ── Patterns ──────────────────────────────────────────────────────────────
+
+pattern bass_verse {
+    note: C2  .  .  ~  Eb2 .  G1  .  C2  .  .  ~  Ab1 .  .  .
+    vel:  1.0 .  .  ~  0.8 .  0.9 .  1.0 .  .  ~  0.7 .  .  .
+}
+
+pattern bass_chorus {
+    note: C2  .  Eb2 .  F2  .  G2  .  Ab2 .  G2  .  F2  .  Eb2 .
+    vel:  1.0 .  0.9 .  1.0 .  0.8 .  0.9 .  0.8 .  0.7 .  0.9 .
+}
+
+pattern lead1_verse {
+    note: .   .   Eb4 .   .   .   C4  ~   .   .   G4  .   .   .   F4  .
+    vel:  .   .   0.7 .   .   .   0.8 ~   .   .   0.6 .   .   .   0.7 .
+}
+
+pattern lead1_chorus {
+    note: G4*2  .   Eb4*2 .   F4  ~   ~   .   Ab4 .   G4  .   F4>Eb4  .   .   .
+    vel:  0.9 .   0.8 .   0.7 ~   ~   .   1.0 .   0.8 .   0.7     .   .   .
+}
+
+pattern lead2_verse {
+    note: .   .   .   .   G4  .   .   .   .   .   .   .   Eb4 .   .   .
+    vel:  .   .   .   .   0.6 .   .   .   .   .   .   .   0.5 .   .   .
+}
+
+pattern lead2_chorus {
+    note: Eb5 .   .   .   C5  .   .   ~   Bb4 .   .   .   Ab4 .   .   .
+    vel:  0.8 .   .   .   0.9 .   .   ~   0.7 .   .   .   0.6 .   .   .
+}
+
+pattern lead2_fill {
+    note: C6 Eb5 Bb5 G5  Eb5  .  F5  .  Eb5 .  .  .  C5>Bb4  .  .  .
+    vel:  0.9 0.8 0.9 0.7 1.0 .  0.8 .  0.7   .  .  .  0.6     .  .  .
+}
+
+# ── Song ──────────────────────────────────────────────────────────────────
+
+song demo {
+    | bass        | lead1        | lead2        |
+    | bass_verse  | lead1_verse  | lead2_verse  |
+    | bass_verse  | lead1_verse  | lead2_verse   | @loop
+    | bass_chorus  | lead1_chorus | lead2_chorus |
+    | bass_chorus | lead2_fill | lead2_fill   |
+}
+
+# ── Voice template ────────────────────────────────────────────────────────
+
+template voice(attack: float = 0.01, decay: float = 0.1,
+               sustain: float = 0.7, release: float = 0.001,
+               cutoff: float = 6.0, q: float = 0.0,
+               glide_ms: float = 0.0) {
+    in:  voct, gate, trigger, velocity
+    out: audio
+
+    module osc    : Osc
+    module env    : Adsr { attack: <attack>, decay: <decay>,
+                           sustain: <sustain>, release: <release> }
+    module vca    : Vca
+    module filt   : Svf { cutoff: <cutoff>, q: <q> }
+    module vel_vca: Vca
+    module glide  : Glide { glide_ms: <glide_ms> }
+
+    $.voct      -> glide.in
+    glide.out   -> osc.voct
+    $.gate      -> env.gate
+    $.trigger   -> env.trigger
+
+    osc.sawtooth -> filt.in
+    filt.lowpass -> vca.in
+    env.out      -> vca.cv
+    vca.out      -> vel_vca.in
+    $.velocity   -> vel_vca.cv
+    vel_vca.out  -> $.audio
+}
+
+# Square-wave variant for lead 2
+template sq_voice(attack: float = 0.01, decay: float = 0.2,
+                  sustain: float = 0.4, release: float = 0.001,
+                  cutoff: float = 5.5, q: float = 0.4) {
+    in:  voct, gate, trigger, velocity
+    out: audio
+
+    module osc    : Osc
+    module env    : Adsr { attack: <attack>, decay: <decay>,
+                           sustain: <sustain>, release: <release> }
+    module vca    : Vca
+    module filt   : Svf { cutoff: <cutoff>, q: <q> }
+    module vel_vca: Vca
+
+    $.voct      -> osc.voct
+    $.gate      -> env.gate
+    $.trigger   -> env.trigger
+
+    osc.square   -> filt.in
+    filt.lowpass -> vca.in
+    env.out      -> vca.cv
+    vca.out      -> vel_vca.in
+    $.velocity   -> vel_vca.cv
+    vel_vca.out  -> $.audio
+}
+
+# ── Patch ─────────────────────────────────────────────────────────────────
+
+patch {
+    # ── Sequencer ─────────────────────────────────────────────────────────
+    module seq: MasterSequencer(channels: [bass, lead1, lead2]) {
+        song: demo,
+        bpm: 120,
+        rows_per_beat: 4,
+        loop: true,
+        autostart: true,
+        swing: 0.75
+    }
+
+    # ── Pattern players ───────────────────────────────────────────────────
+    module bass_pp:  PatternPlayer(channels: [note, vel])
+    module lead1_pp: PatternPlayer(channels: [note, vel])
+    module lead2_pp: PatternPlayer(channels: [note, vel])
+
+    seq.clock[bass]  -> bass_pp.clock
+    seq.clock[lead1] -> lead1_pp.clock
+    seq.clock[lead2] -> lead2_pp.clock
+
+    # ── Bass: saw + low-pass, portamento ──────────────────────────────────
+    module bass_v: voice(
+        attack: 0.005, decay: 0.15, sustain: 0.6, release: 0.1,
+        cutoff: 3.5, q: 0.3, glide_ms: 40.0
+    )
+
+    bass_pp.cv1[note]     -> bass_v.voct
+    bass_pp.gate[note]    -> bass_v.gate
+    bass_pp.trigger[note] -> bass_v.trigger
+    bass_pp.cv1[vel]      -> bass_v.velocity
+
+    # ── Lead 1: saw + bright filter ───────────────────────────────────────
+    module lead1_v: voice(
+        attack: 0.02, decay: 0.3, sustain: 0.5, release: 0.4,
+        cutoff: 7.0, q: 0.15
+    )
+
+    lead1_pp.cv1[note]     -> lead1_v.voct
+    lead1_pp.gate[note]    -> lead1_v.gate
+    lead1_pp.trigger[note] -> lead1_v.trigger
+    lead1_pp.cv1[vel]      -> lead1_v.velocity
+
+    # ── Lead 2: square + resonant filter ──────────────────────────────────
+    module lead2_v: sq_voice
+
+    lead2_pp.cv1[note]     -> lead2_v.voct
+    lead2_pp.gate[note]    -> lead2_v.gate
+    lead2_pp.trigger[note] -> lead2_v.trigger
+    lead2_pp.cv1[vel]      -> lead2_v.velocity
+
+    # ── Mixer: 3 channels, bass centre, leads panned ─────────────────────
+    module mix: StereoMixer(channels: 3) {
+        @0: { level: 0.7, pan: 0.0 },
+        @1: { level: 0.5, pan: -0.4, send_a: 0.3 },
+        @2: { level: 0.5, pan: 0.4,  send_a: 0.3 }
+    }
+
+    bass_v.audio  -> mix.in[0]
+    lead1_v.audio -> mix.in[1]
+    lead2_v.audio -> mix.in[2]
+
+    # ── FX: stereo delay on send A ────────────────────────────────────────
+    module delay: StereoDelay(channels: 2) {
+        delay_ms: 750,
+        feedback: 0.4,
+        dry_wet: 1.0
+    }
+
+    mix.send_a_left  -> delay.in_left
+    mix.send_a_right -> delay.in_right
+    delay.out_left   -> mix.return_a_left
+    delay.out_right  -> mix.return_a_right
+
+    # ── Master: reverb + limiter ──────────────────────────────────────────
+    module reverb: FdnReverb {
+        size: 0.45, brightness: 0.6, mix: 0.2, character: plate
+    }
+    module lim_l: Limiter { threshold: 0.85 }
+    module lim_r: Limiter { threshold: 0.85 }
+
+    mix.out_left  -> reverb.in_left
+    mix.out_right -> reverb.in_right
+    reverb.out_left  -> lim_l.in
+    reverb.out_right -> lim_r.in
+
+    module out: AudioOut
+    lim_l.out -> out.in_left
+    lim_r.out -> out.in_right
+}

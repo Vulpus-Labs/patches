@@ -38,6 +38,8 @@ pub mod poly_quant;
 pub mod limiter;
 pub mod pitch_shift;
 pub mod convolution_reverb;
+pub mod master_sequencer;
+pub mod pattern_player;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -82,6 +84,8 @@ pub use limiter::Limiter;
 pub use pitch_shift::PitchShift;
 pub use convolution_reverb::ConvolutionReverb;
 pub use convolution_reverb::StereoConvReverb;
+pub use master_sequencer::MasterSequencer;
+pub use pattern_player::PatternPlayer;
 
 pub fn default_registry() -> patches_core::Registry {
     let mut r = patches_core::Registry::new();
@@ -134,6 +138,8 @@ pub fn default_registry() -> patches_core::Registry {
     r.register_file_processor::<ConvolutionReverb>();
     r.register::<StereoConvReverb>();
     r.register_file_processor::<StereoConvReverb>();
+    r.register::<MasterSequencer>();
+    r.register::<PatternPlayer>();
     r
 }
 
@@ -196,6 +202,8 @@ mod tests {
             "PitchShift",
             "ConvReverb",
             "StereoConvReverb",
+            "MasterSequencer",
+            "PatternPlayer",
         ] {
             assert!(
                 r.create(name, &env, &shape, &params, InstanceId::next()).is_ok(),

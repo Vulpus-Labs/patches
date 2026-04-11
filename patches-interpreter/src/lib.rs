@@ -95,9 +95,18 @@ pub fn build_with_base_dir(
 ) -> Result<BuildResult, InterpretError> {
     let mut graph = ModuleGraph::new();
 
+    // Pre-compute the song name-to-index map (alphabetical order, matching
+    // the Vec order used when building SongBank in stage 3). This is needed
+    // in stage 1 so that SongName parameters can be resolved to indices.
+    let song_name_to_index: HashMap<String, usize> = {
+        let mut names: Vec<&str> = flat.songs.iter().map(|s| s.name.name.as_str()).collect();
+        names.sort();
+        names.iter().enumerate().map(|(i, &n)| (n.to_string(), i)).collect()
+    };
+
     // Stage 1 — add all module nodes.
     for flat_module in &flat.modules {
-        add_module(&mut graph, flat_module, registry, base_dir)?;
+        add_module(&mut graph, flat_module, registry, base_dir, &song_name_to_index)?;
     }
 
     // Stage 2 — add all connections (after all nodes are present so that
@@ -164,9 +173,13 @@ fn build_tracker_data(
     }
     let patterns: Vec<Pattern> = indexed_patterns.into_iter().flatten().collect();
 
-    // Convert DSL songs to runtime Songs.
-    let mut songs = HashMap::new();
-    for song_def in &flat.songs {
+    // Convert DSL songs to runtime Songs (alphabetical order so that Vec
+    // indices match the pre-computed song_name_to_index map in the caller).
+    let mut sorted_song_defs: Vec<&_> = flat.songs.iter().collect();
+    sorted_song_defs.sort_by_key(|s| &s.name.name);
+    let mut song_list: Vec<Song> = Vec::new();
+    let mut song_name_to_index: HashMap<String, usize> = HashMap::new();
+    for song_def in &sorted_song_defs {
         // Validate: every pattern name in the song must exist.
         for (row_idx, row) in song_def.rows.iter().enumerate() {
             for (col_idx, cell) in row.patterns.iter().enumerate() {
@@ -242,15 +255,22 @@ fn build_tracker_data(
             order,
             loop_point: song_def.loop_point.unwrap_or(0),
         };
-        songs.insert(song_def.name.name.clone(), song);
+        let song_idx = song_list.len();
+        song_list.push(song);
+        song_name_to_index.insert(song_def.name.name.clone(), song_idx);
     }
 
+    let song_bank = SongBank {
+        songs: song_list,
+        name_to_index: song_name_to_index,
+    };
+
     // Validate: MasterSequencer song references and channel matching.
-    validate_sequencer_songs(graph, &songs, flat)?;
+    validate_sequencer_songs(graph, &song_bank, flat)?;
 
     Ok(Some(TrackerData {
         patterns: PatternBank { patterns },
-        songs: SongBank { songs },
+        songs: song_bank,
     }))
 }
 
@@ -271,7 +291,7 @@ fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
 /// song, and that the song's column headers match the sequencer's channels.
 fn validate_sequencer_songs(
     _graph: &ModuleGraph,
-    songs: &HashMap<String, Song>,
+    song_bank: &SongBank,
     flat: &FlatPatch,
 ) -> Result<(), InterpretError> {
     for flat_module in &flat.modules {
@@ -290,7 +310,7 @@ fn validate_sequencer_songs(
             }
         });
         if let Some(song_name) = song_name {
-            if !songs.contains_key(song_name) {
+            let Some(&song_idx) = song_bank.name_to_index.get(song_name) else {
                 return Err(InterpretError {
                     span: flat_module.span,
                     message: format!(
@@ -298,10 +318,10 @@ fn validate_sequencer_songs(
                         flat_module.id, song_name,
                     ),
                 });
-            }
+            };
             // Validate channel matching: the song's column count must match
             // the sequencer's declared channel count.
-            let song = &songs[song_name];
+            let song = &song_bank.songs[song_idx];
             let seq_channels = flat_module.shape.iter().find_map(|(name, scalar)| {
                 if name == "channels" {
                     if let Scalar::Int(n) = scalar { Some(*n as usize) } else { None }
@@ -330,6 +350,7 @@ fn add_module(
     flat_module: &FlatModule,
     registry: &Registry,
     base_dir: Option<&Path>,
+    song_name_to_index: &HashMap<String, usize>,
 ) -> Result<(), InterpretError> {
     let shape = shape_from_args(&flat_module.shape);
 
@@ -340,9 +361,10 @@ fn add_module(
             message: e.to_string(),
         })?;
 
-    let params = convert_params(&flat_module.params, &descriptor, base_dir).map_err(|msg| {
-        InterpretError { span: flat_module.span, message: msg }
-    })?;
+    let params = convert_params(&flat_module.params, &descriptor, base_dir, song_name_to_index)
+        .map_err(|msg| {
+            InterpretError { span: flat_module.span, message: msg }
+        })?;
 
     patches_core::validate_parameters(&params, &descriptor).map_err(|e| InterpretError {
         span: flat_module.span,
@@ -479,6 +501,7 @@ fn convert_params(
     params: &[(String, Value)],
     descriptor: &patches_core::ModuleDescriptor,
     base_dir: Option<&Path>,
+    song_name_to_index: &HashMap<String, usize>,
 ) -> Result<ParameterMap, String> {
     let mut map = ParameterMap::new();
     for (raw_name, value) in params {
@@ -508,7 +531,7 @@ fn convert_params(
                 )
             })?;
 
-        let mut pv = convert_value(value, &param_desc.parameter_type)
+        let mut pv = convert_value(value, &param_desc.parameter_type, song_name_to_index)
             .map_err(|e| format!("parameter '{raw_name}': {e}"))?;
 
         // Resolve relative file paths against the patch file's directory.
@@ -540,7 +563,11 @@ fn convert_params(
 /// Integer literals are accepted where a float is expected (widening
 /// conversion). Enum string values are resolved to a `&'static str` from the
 /// declared variant list.
-fn convert_value(value: &Value, kind: &ParameterKind) -> Result<ParameterValue, String> {
+fn convert_value(
+    value: &Value,
+    kind: &ParameterKind,
+    song_name_to_index: &HashMap<String, usize>,
+) -> Result<ParameterValue, String> {
     match (value, kind) {
         (Value::Scalar(Scalar::Float(f)), ParameterKind::Float { .. }) => {
             Ok(ParameterValue::Float(*f as f32))
@@ -577,6 +604,16 @@ fn convert_value(value: &Value, kind: &ParameterKind) -> Result<ParameterValue, 
                 }
             }
             Ok(ParameterValue::File(path.clone()))
+        }
+        (Value::Scalar(Scalar::Str(s)), ParameterKind::SongName) => {
+            if s.is_empty() {
+                Ok(ParameterValue::Int(-1))
+            } else {
+                song_name_to_index
+                    .get(s.as_str())
+                    .map(|&idx| ParameterValue::Int(idx as i64))
+                    .ok_or_else(|| format!("song '{s}' not found"))
+            }
         }
         (Value::Array(items), ParameterKind::Array { .. }) => {
             let strings = items
@@ -974,7 +1011,8 @@ mod tests {
         }];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();
-        let song = &td.songs.songs["my_song"];
+        let song_idx = td.songs.name_to_index["my_song"];
+        let song = &td.songs.songs[song_idx];
         assert_eq!(song.channels, 1);
         assert_eq!(song.order.len(), 3);
         assert_eq!(song.order[0][0], Some(0)); // pat_a = index 0

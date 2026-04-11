@@ -71,6 +71,11 @@ pub enum ParameterKind {
     /// `process_file` method called, and the `ParameterValue::File` is replaced with
     /// `ParameterValue::FloatBuffer(Arc<[f32]>)` before the plan reaches the audio thread.
     File { extensions: &'static [&'static str] },
+    /// A song name parameter. The DSL writes a string (`song: "my_song"`)
+    /// which the interpreter resolves to an integer index into the
+    /// alphabetically-sorted song bank. The module receives a
+    /// `ParameterValue::Int` (−1 if unresolved/empty).
+    SongName,
 }
 
 impl ParameterKind {
@@ -86,6 +91,7 @@ impl ParameterKind {
                 default.iter().map(|s| s.to_string()).collect::<Vec<_>>().into()
             ),
             ParameterKind::File { .. } => ParameterValue::File(String::new()),
+            ParameterKind::SongName => ParameterValue::Int(-1),
         }
     }
 
@@ -99,6 +105,7 @@ impl ParameterKind {
             ParameterKind::String { .. } => "string",
             ParameterKind::Array  { .. } => "array",
             ParameterKind::File  { .. } => "file",
+            ParameterKind::SongName => "song_name",
         }
     }
 }
@@ -250,6 +257,17 @@ impl ModuleDescriptor {
     param_builder!(file_param, file_param_multi,
         (extensions: &'static [&'static str]),
         ParameterKind::File { extensions });
+
+    /// Declare a song-name parameter. The DSL supplies a string; the
+    /// interpreter resolves it to a `ParameterValue::Int` song-bank index.
+    pub fn song_name_param(mut self, name: &'static str) -> Self {
+        self.parameters.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::SongName,
+        });
+        self
+    }
 
     // array_param has no _multi sibling so it is written by hand.
     pub fn array_param(

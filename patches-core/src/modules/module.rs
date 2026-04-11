@@ -83,6 +83,7 @@ pub fn validate_parameters(
                 }
             }
             (ParameterKind::String { .. }, ParameterValue::String(_)) => {}
+            (ParameterKind::SongName, ParameterValue::Int(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::File(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::FloatBuffer(_)) => {}
             (ParameterKind::Array { length, .. }, ParameterValue::Array(v)) => {

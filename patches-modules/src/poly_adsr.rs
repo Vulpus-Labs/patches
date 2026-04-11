@@ -257,9 +257,14 @@ mod tests {
         h.set_poly("gate",    arr(1.0, 0));
         h.tick();
 
-        // Voice 0 in Decay; trigger voice 1
-        h.set_poly("trigger", arr(1.0, 1));
-        h.set_poly("gate",    arr(1.0, 1));
+        // Voice 0 in Decay; trigger voice 1 (keep voice 0 gate high)
+        let mut trig1 = [0.0f32; 16];
+        trig1[1] = 1.0;
+        let mut gate1 = [0.0f32; 16];
+        gate1[0] = 1.0;
+        gate1[1] = 1.0;
+        h.set_poly("trigger", trig1);
+        h.set_poly("gate",    gate1);
         h.tick();
         let out = h.read_poly("out");
         // Voice 0 decaying (1.0 - 0.1 = 0.9), voice 1 just started attack (1.0)

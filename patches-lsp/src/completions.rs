@@ -745,6 +745,7 @@ pub(crate) fn format_parameter_kind(kind: &patches_core::ParameterKind) -> Strin
             let exts = extensions.join(", ");
             format!("file ({exts})")
         }
+        patches_core::ParameterKind::SongName => "song name".to_string(),
     }
 }
 

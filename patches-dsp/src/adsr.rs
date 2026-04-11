@@ -53,6 +53,18 @@ impl AdsrCore {
         self.prev_trigger = 0.0;
     }
 
+    /// Transition to Release from the current level.
+    fn enter_release(&mut self) {
+        self.release_inc = self.level / (self.release_secs * self.sample_rate);
+        self.level -= self.release_inc;
+        if self.level <= 0.0 {
+            self.level = 0.0;
+            self.stage = AdsrStage::Idle;
+        } else {
+            self.stage = AdsrStage::Release;
+        }
+    }
+
     /// Run one sample of the ADSR state machine.
     ///
     /// Returns the envelope level clamped to [0, 1].
@@ -68,31 +80,31 @@ impl AdsrCore {
         match self.stage {
             AdsrStage::Idle => {}
             AdsrStage::Attack => {
-                self.level += self.attack_inc;
-                if self.level >= 1.0 {
-                    self.level = 1.0;
-                    self.stage = AdsrStage::Decay;
+                if gate < 0.5 {
+                    self.enter_release();
+                } else {
+                    self.level += self.attack_inc;
+                    if self.level >= 1.0 {
+                        self.level = 1.0;
+                        self.stage = AdsrStage::Decay;
+                    }
                 }
             }
             AdsrStage::Decay => {
-                self.level -= self.decay_inc;
-                if self.level <= self.sustain {
-                    self.level = self.sustain;
-                    self.stage = AdsrStage::Sustain;
+                if gate < 0.5 {
+                    self.enter_release();
+                } else {
+                    self.level -= self.decay_inc;
+                    if self.level <= self.sustain {
+                        self.level = self.sustain;
+                        self.stage = AdsrStage::Sustain;
+                    }
                 }
             }
             AdsrStage::Sustain => {
                 self.level = self.sustain;
                 if gate < 0.5 {
-                    // Recalculate release slope from current level and begin immediately
-                    self.release_inc = self.level / (self.release_secs * self.sample_rate);
-                    self.level -= self.release_inc;
-                    if self.level <= 0.0 {
-                        self.level = 0.0;
-                        self.stage = AdsrStage::Idle;
-                    } else {
-                        self.stage = AdsrStage::Release;
-                    }
+                    self.enter_release();
                 }
             }
             AdsrStage::Release => {

@@ -156,6 +156,9 @@ fn write_parameter_kind(out: &mut String, kind: &ParameterKind) {
             }
             out.push_str("]}");
         }
+        ParameterKind::SongName => {
+            out.push_str("{\"type\":\"song_name\"}");
+        }
         ParameterKind::Array { default, length } => {
             out.push_str(&format!("{{\"type\":\"array\",\"length\":{length},\"default\":["));
             for (i, v) in default.iter().enumerate() {
@@ -578,6 +581,7 @@ fn deserialize_parameter_kind(val: &JsonValue) -> Result<ParameterKind, String> 
             let default = leak_static_slice(default_arr);
             Ok(ParameterKind::Array { default, length })
         }
+        "song_name" => Ok(ParameterKind::SongName),
         other => Err(format!("unknown parameter kind: {other}")),
     }
 }

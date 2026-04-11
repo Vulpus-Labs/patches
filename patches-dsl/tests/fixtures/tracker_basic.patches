@@ -1,0 +1,30 @@
+pattern drums {
+    kick: x . . . x . . .
+}
+
+pattern fill {
+    kick: x x x x x x x x
+}
+
+song my_song {
+    | drums   |
+    | drums   |
+    | fill    |
+}
+
+patch {
+    module seq: MasterSequencer(channels: [drums]) {
+        song: my_song,
+        bpm: 120,
+        rows_per_beat: 4,
+        loop: false,
+        autostart: true,
+        swing: 0.5
+    }
+    module player: PatternPlayer(channels: [kick])
+    module out: AudioOut
+
+    seq.clock[drums] -> player.clock
+    player.trigger[kick] -> out.in_left
+    player.cv1[kick] -> out.in_right
+}
