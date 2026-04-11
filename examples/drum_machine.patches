@@ -1,0 +1,259 @@
+# Drum machine demo: exercises all eight E061 drum modules
+# 808-style electronic drum kit driven by the tracker sequencer.
+# Kick, snare, closed hat, open hat, clap, tom, claves, cymbal.
+
+# ── Patterns ──────────────────────────────────────────────────────────────
+
+# Four-on-the-floor kick with ghost notes
+pattern kick_basic {
+    hit: x:1.0 .     .     .     x:1.0 .     .     .     x:1.0 .     .     .     x:1.0 .     .     .
+}
+
+pattern kick_syncopated {
+    hit: x:1.0 .     .     x:0.6 .     .     x:0.8 .     x:1.0 .     .     x:0.5 .     .     x:0.7 .
+}
+
+# Backbeat snare
+pattern snare_basic {
+    hit: .     .     .     .     x:1.0 .     .     .     .     .     .     .     x:1.0 .     .     .
+}
+
+pattern snare_busy {
+    hit: .     .     .     .     x:1.0 .     x:0.4 .     .     .     x:0.3 .     x:1.0 .     .     x:0.5
+}
+
+# Closed hat: eighth notes with accents
+pattern hat_eighths {
+    hit: x:0.8 .     x:0.5 .     x:0.8 .     x:0.5 .     x:0.8 .     x:0.5 .     x:0.8 .     x:0.5 .
+}
+
+pattern hat_sixteenths {
+    hit: x:0.7 x:0.4 x:0.5 x:0.4 x:0.7 x:0.4 x:0.5 x:0.4 x:0.7 x:0.4 x:0.5 x:0.4 x:0.7 x:0.4 x:0.5 x:0.4
+}
+
+# Open hat on the off-beats
+pattern ohat_basic {
+    hit: .     .     .     .     .     .     x:0.7 .     .     .     .     .     .     .     x:0.7 .
+}
+
+pattern ohat_fill {
+    hit: .     .     x:0.6 .     .     .     x:0.8 .     .     .     x:0.6 .     x:0.9 .     x:0.7 .
+}
+
+# Clap layered with snare
+pattern clap_basic {
+    hit: .     .     .     .     x:0.9 .     .     .     .     .     .     .     x:0.9 .     .     .
+}
+
+pattern clap_fill {
+    hit: .     .     .     .     x:0.9 .     .     .     .     .     x:0.6 .     x:1.0 .     x:0.5 x:0.4
+}
+
+# Tom fill patterns
+pattern tom_rest {
+    hit: .     .     .     .     .     .     .     .     .     .     .     .     .     .     .     .
+}
+
+pattern tom_fill {
+    hit: .     .     .     .     .     .     .     .     x:0.8 .     x:0.7 .     x:0.9 x:0.6 x:1.0 .
+}
+
+# Claves: syncopated Latin-ish pattern (3-2 son clave)
+pattern claves_clave {
+    hit: x:0.8 .     .     x:0.7 .     .     x:0.9 .     .     .     x:0.7 .     x:0.8 .     .     .
+}
+
+pattern claves_rest {
+    hit: .     .     .     .     .     .     .     .     .     .     .     .     .     .     .     .
+}
+
+# Cymbal: crash on bar 1
+pattern cymbal_crash {
+    hit: x:1.0 .     .     .     .     .     .     .     .     .     .     .     .     .     .     .
+}
+
+pattern cymbal_rest {
+    hit: .     .     .     .     .     .     .     .     .     .     .     .     .     .     .     .
+}
+
+# ── Song ──────────────────────────────────────────────────────────────────
+
+song drums {
+    | kick            | snare       | hat            | ohat       | clap       | tom      | claves       | cymbal       |
+    | kick_basic      | snare_basic | hat_eighths    | ohat_basic | clap_basic | tom_rest | claves_rest  | cymbal_crash |
+    | kick_basic      | snare_basic | hat_eighths    | ohat_basic | clap_basic | tom_rest | claves_clave | cymbal_rest  |
+    | kick_syncopated | snare_busy  | hat_sixteenths | ohat_basic | clap_basic | tom_rest | claves_clave | cymbal_rest  |
+    | kick_syncopated | snare_busy  | hat_sixteenths | ohat_fill  | clap_fill  | tom_fill | claves_clave | cymbal_crash |
+}
+
+# ── Velocity VCA template ────────────────────────────────────────────────
+
+template drum_vca() {
+    in:  signal, velocity
+    out: audio
+
+    module vca: Vca
+
+    $.signal   -> vca.in
+    $.velocity -> vca.cv
+    vca.out    -> $.audio
+}
+
+# ── Patch ─────────────────────────────────────────────────────────────────
+
+patch {
+    # ── Sequencer ─────────────────────────────────────────────────────────
+    module seq: MasterSequencer(channels: [kick, snare, hat, ohat, clap, tom, claves, cymbal]) {
+        song: drums,
+        bpm: 120,
+        rows_per_beat: 4,
+        loop: true,
+        autostart: true,
+        swing: 0.55
+    }
+
+    # ── Pattern players (one per drum voice) ──────────────────────────────
+    module kick_pp:   PatternPlayer(channels: [hit])
+    module snare_pp:  PatternPlayer(channels: [hit])
+    module hat_pp:    PatternPlayer(channels: [hit])
+    module ohat_pp:   PatternPlayer(channels: [hit])
+    module clap_pp:   PatternPlayer(channels: [hit])
+    module tom_pp:    PatternPlayer(channels: [hit])
+    module claves_pp: PatternPlayer(channels: [hit])
+    module cymbal_pp: PatternPlayer(channels: [hit])
+
+    seq.clock[kick]   -> kick_pp.clock
+    seq.clock[snare]  -> snare_pp.clock
+    seq.clock[hat]    -> hat_pp.clock
+    seq.clock[ohat]   -> ohat_pp.clock
+    seq.clock[clap]   -> clap_pp.clock
+    seq.clock[tom]    -> tom_pp.clock
+    seq.clock[claves] -> claves_pp.clock
+    seq.clock[cymbal] -> cymbal_pp.clock
+
+    # ── Drum modules ─────────────────────────────────────────────────────
+
+    module kick_drum: Kick {
+        pitch: 50, sweep: 3000, sweep_time: 0.04, decay: 0.4, drive: 0.2, click: 0.4
+    }
+    module kick_vca: drum_vca
+
+    kick_pp.trigger[hit] -> kick_drum.trigger
+    kick_drum.out        -> kick_vca.signal
+    kick_pp.cv2[hit]     -> kick_vca.velocity
+
+    module snare_drum: Snare {
+        pitch: 190, tone: 0.55, body_decay: 0.12, noise_decay: 0.18,
+        noise_freq: 3500, noise_q: 0.25, snap: 0.6
+    }
+    module snare_vca: drum_vca
+
+    snare_pp.trigger[hit] -> snare_drum.trigger
+    snare_drum.out        -> snare_vca.signal
+    snare_pp.cv2[hit]     -> snare_vca.velocity
+
+    module closed_hat: ClosedHiHat {
+        pitch: 420, decay: 0.035, tone: 0.6, filter: 9000
+    }
+    module hat_vca: drum_vca
+
+    hat_pp.trigger[hit] -> closed_hat.trigger
+    closed_hat.out      -> hat_vca.signal
+    hat_pp.cv2[hit]     -> hat_vca.velocity
+
+    module open_hat: OpenHiHat {
+        pitch: 420, decay: 0.45, tone: 0.55, filter: 8000
+    }
+    module ohat_vca: drum_vca
+
+    ohat_pp.trigger[hit] -> open_hat.trigger
+    # Closed hat chokes the open hat
+    hat_pp.trigger[hit]  -> open_hat.choke
+    open_hat.out         -> ohat_vca.signal
+    ohat_pp.cv2[hit]     -> ohat_vca.velocity
+
+    module clap_drum: Clap {
+        decay: 0.25, filter: 1400, q: 0.35, spread: 0.5, bursts: 4
+    }
+    module clap_vca: drum_vca
+
+    clap_pp.trigger[hit] -> clap_drum.trigger
+    clap_drum.out        -> clap_vca.signal
+    clap_pp.cv2[hit]     -> clap_vca.velocity
+
+    module tom_drum: Tom {
+        pitch: 100, sweep: 350, sweep_time: 0.025, decay: 0.25, noise: 0.12
+    }
+    module tom_vca: drum_vca
+
+    tom_pp.trigger[hit] -> tom_drum.trigger
+    tom_drum.out        -> tom_vca.signal
+    tom_pp.cv2[hit]     -> tom_vca.velocity
+
+    module claves_drum: Claves {
+        pitch: 2800, decay: 0.05, reson: 0.88
+    }
+    module claves_vca: drum_vca
+
+    claves_pp.trigger[hit] -> claves_drum.trigger
+    claves_drum.out        -> claves_vca.signal
+    claves_pp.cv2[hit]     -> claves_vca.velocity
+
+    module cymbal_drum: Cymbal {
+        pitch: 550, decay: 3.0, tone: 0.5, filter: 5500, shimmer: 0.25
+    }
+    module cymbal_vca: drum_vca
+
+    cymbal_pp.trigger[hit] -> cymbal_drum.trigger
+    cymbal_drum.out        -> cymbal_vca.signal
+    cymbal_pp.cv2[hit]     -> cymbal_vca.velocity
+
+    # ── Mixer: 8 channels panned across the stereo field ─────────────────
+    module mix: StereoMixer(channels: 8) {
+        @0: { level: 0.85, pan: 0.0 },
+        @1: { level: 0.75, pan: -0.1 },
+        @2: { level: 0.55, pan: 0.3 },
+        @3: { level: 0.55, pan: -0.3 },
+        @4: { level: 0.65, pan: 0.15, send_a: 0.2 },
+        @5: { level: 0.7,  pan: -0.25 },
+        @6: { level: 0.4,  pan: 0.45, send_a: 0.3 },
+        @7: { level: 0.5,  pan: 0.0,  send_a: 0.15 }
+    }
+
+    kick_vca.audio   -> mix.in[0]
+    snare_vca.audio  -> mix.in[1]
+    hat_vca.audio    -> mix.in[2]
+    ohat_vca.audio   -> mix.in[3]
+    clap_vca.audio   -> mix.in[4]
+    tom_vca.audio    -> mix.in[5]
+    claves_vca.audio -> mix.in[6]
+    cymbal_vca.audio -> mix.in[7]
+
+    # ── FX: stereo delay on send A (clap + claves + cymbal) ──────────────
+    module delay: StereoDelay(channels: 2) {
+        delay_ms: 375,
+        feedback: 0.3,
+        dry_wet: 1.0
+    }
+
+    mix.send_a_left  -> delay.in_left
+    mix.send_a_right -> delay.in_right
+    delay.out_left   -> mix.return_a_left
+    delay.out_right  -> mix.return_a_right
+
+    # ── Master: reverb + limiter ──────────────────────────────────────────
+    module reverb: FdnReverb {
+        size: 0.3, brightness: 0.5, mix: 0.15, character: plate
+    }
+    module lim_l: Limiter { threshold: 0.8 }
+    module lim_r: Limiter { threshold: 0.8 }
+
+    mix.out_left  -> reverb.in_left
+    mix.out_right -> reverb.in_right
+    reverb.out_left  -> lim_l.in
+    reverb.out_right -> lim_r.in
+
+    module out: AudioOut
+    lim_l.out -> out.in_left
+    lim_r.out -> out.in_right
+}
