@@ -49,7 +49,6 @@
 //! an [`IrLoader`] background thread handles the heavy work. The audio thread
 //! only stashes a request and polls for results in [`periodic_update`].
 
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
 
@@ -166,31 +165,19 @@ fn variant_params(name: &str) -> (f32, u64, u64, f32, f32, f32) {
     }
 }
 
-/// Resolve an IR variant name to mono samples.
-fn resolve_ir(variant: &str, path: &str, sample_rate: f32) -> Result<Vec<f32>, String> {
-    if variant == "file" {
-        return patches_io::read_mono(Path::new(path), sample_rate as f64)
-            .map_err(|e| format!("failed to load '{path}': {e}"));
-    }
+/// Generate a synthetic mono IR for the given variant name.
+fn generate_variant_ir(variant: &str, sample_rate: f32) -> Vec<f32> {
     let (dur, seed_l, _, lp_l, _, ramp) = variant_params(variant);
-    Ok(generate_ir(sample_rate, dur, seed_l, lp_l, ramp))
+    generate_ir(sample_rate, dur, seed_l, lp_l, ramp)
 }
 
-/// Resolve an IR variant name to stereo samples (left, right).
-fn resolve_stereo_ir(
-    variant: &str,
-    path: &str,
-    sample_rate: f32,
-) -> Result<(Vec<f32>, Vec<f32>), String> {
-    if variant == "file" {
-        return patches_io::read_stereo(Path::new(path), sample_rate as f64)
-            .map_err(|e| format!("failed to load '{path}': {e}"));
-    }
+/// Generate a synthetic stereo IR pair for the given variant name.
+fn generate_stereo_variant_ir(variant: &str, sample_rate: f32) -> (Vec<f32>, Vec<f32>) {
     let (dur, seed_l, seed_r, lp_l, lp_r, ramp) = variant_params(variant);
-    Ok((
+    (
         generate_ir(sample_rate, dur, seed_l, lp_l, ramp),
         generate_ir(sample_rate, dur, seed_r, lp_r, ramp),
-    ))
+    )
 }
 
 /// Map an IR variant name to its index in [`IR_VARIANTS`].
@@ -229,6 +216,34 @@ fn run_processor(
 }
 
 // ---------------------------------------------------------------------------
+// Processor kit: the result of building a convolution processor
+// ---------------------------------------------------------------------------
+
+/// A single-channel convolution processor (OverlapBuffer + thread + shared params).
+struct ProcessorKit {
+    overlap_buffer: OverlapBuffer,
+    shared: Arc<SharedParams>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+/// Build a single-channel processor from a pre-built convolver.
+fn build_processor(convolver: NonUniformConvolver, base_mix: f32, name: &str) -> ProcessorKit {
+    let config = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
+        .expect("convolution_reverb: invalid SlotDeckConfig");
+    let shared = Arc::new(SharedParams::new());
+    shared.mix.store(base_mix);
+    let shared_clone = Arc::clone(&shared);
+    let thread_name = name.to_owned();
+    let (overlap_buffer, thread) = OverlapBuffer::new(config, |handle| {
+        std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || run_processor(handle, shared_clone, convolver, BLOCK_SIZE))
+            .expect("convolution_reverb: failed to spawn processing thread")
+    });
+    ProcessorKit { overlap_buffer, shared, thread }
+}
+
+// ---------------------------------------------------------------------------
 // Async IR loading infrastructure
 // ---------------------------------------------------------------------------
 
@@ -236,12 +251,11 @@ fn run_processor(
 struct IrLoadRequest {
     stereo: bool,
     variant_idx: u8,
-    path: String,
     sample_rate: f32,
     base_mix: f32,
     /// Pre-computed spectral data from a `FloatBuffer` parameter.
-    /// When `Some`, the loader skips file I/O / synthesis and builds the
-    /// convolver directly from this data via `NonUniformConvolver::from_pre_fft`.
+    /// When `Some`, the loader skips synthesis and builds the convolver
+    /// directly from this data via `NonUniformConvolver::from_pre_fft`.
     /// The `Arc` is moved off the audio thread into the loader, so its
     /// deallocation never happens on the audio thread.
     pre_fft_data: Option<Arc<[f32]>>,
@@ -249,24 +263,20 @@ struct IrLoadRequest {
 
 /// A ready-to-use mono convolution processor.
 struct MonoProcessorReady {
-    overlap_buffer: OverlapBuffer,
-    shared: Arc<SharedParams>,
-    thread: std::thread::JoinHandle<()>,
+    kit: ProcessorKit,
 }
 
 /// A ready-to-use stereo convolution processor.
 struct StereoProcessorReady {
-    overlap_l: OverlapBuffer,
-    overlap_r: OverlapBuffer,
+    kit_l: ProcessorKit,
+    kit_r: ProcessorKit,
     shared: Arc<SharedParams>,
-    thread_l: std::thread::JoinHandle<()>,
-    thread_r: std::thread::JoinHandle<()>,
 }
 
 /// Result of an async IR load.
 enum ProcessorReady {
     Mono(MonoProcessorReady),
-    Stereo(StereoProcessorReady),
+    Stereo(Box<StereoProcessorReady>),
 }
 
 // SAFETY: OverlapBuffer is !Send as a lint against casual cross-thread use.
@@ -279,19 +289,10 @@ unsafe impl Send for ProcessorReady {}
 /// The `OverlapBuffer` fields are not read — they exist so their drop runs on
 /// the loader thread rather than the audio thread.
 #[allow(dead_code)]
-enum ProcessorTeardown {
-    Mono {
-        shared: Arc<SharedParams>,
-        thread: std::thread::JoinHandle<()>,
-        overlap_buffer: OverlapBuffer,
-    },
-    Stereo {
-        shared: Arc<SharedParams>,
-        thread_l: std::thread::JoinHandle<()>,
-        thread_r: std::thread::JoinHandle<()>,
-        overlap_l: OverlapBuffer,
-        overlap_r: OverlapBuffer,
-    },
+struct ProcessorTeardown {
+    shared: Arc<SharedParams>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+    overlap_buffers: Vec<OverlapBuffer>,
 }
 
 // SAFETY: Same reasoning as ProcessorReady.
@@ -300,16 +301,9 @@ unsafe impl Send for ProcessorTeardown {}
 impl ProcessorTeardown {
     /// Signal the processor thread(s) to shut down and join them.
     fn shutdown_and_join(self) {
-        match self {
-            ProcessorTeardown::Mono { shared, thread, .. } => {
-                shared.shutdown.store(true, Relaxed);
-                let _ = thread.join();
-            }
-            ProcessorTeardown::Stereo { shared, thread_l, thread_r, .. } => {
-                shared.shutdown.store(true, Relaxed);
-                let _ = thread_l.join();
-                let _ = thread_r.join();
-            }
+        self.shared.shutdown.store(true, Relaxed);
+        for thread in self.threads {
+            let _ = thread.join();
         }
     }
 }
@@ -317,57 +311,30 @@ impl ProcessorTeardown {
 /// Shut down and clean up an unclaimed processor result.
 fn cleanup_processor_ready(ready: ProcessorReady) {
     match ready {
-        ProcessorReady::Mono(MonoProcessorReady { shared, thread, .. }) => {
-            shared.shutdown.store(true, Relaxed);
-            let _ = thread.join();
+        ProcessorReady::Mono(MonoProcessorReady { kit }) => {
+            kit.shared.shutdown.store(true, Relaxed);
+            let _ = kit.thread.join();
         }
-        ProcessorReady::Stereo(StereoProcessorReady { shared, thread_l, thread_r, .. }) => {
-            shared.shutdown.store(true, Relaxed);
-            let _ = thread_l.join();
-            let _ = thread_r.join();
+        ProcessorReady::Stereo(stereo) => {
+            stereo.shared.shutdown.store(true, Relaxed);
+            let _ = stereo.kit_l.thread.join();
+            let _ = stereo.kit_r.thread.join();
         }
     }
 }
 
-/// Build a mono convolution processor from a pre-built convolver.
-fn build_mono_processor_from_convolver(convolver: NonUniformConvolver, base_mix: f32) -> MonoProcessorReady {
-    let config = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-        .expect("convolution_reverb: invalid SlotDeckConfig");
-    let shared = Arc::new(SharedParams::new());
-    shared.mix.store(base_mix);
-    let shared_clone = Arc::clone(&shared);
-    let (overlap_buffer, thread) = OverlapBuffer::new(config, |handle| {
-        std::thread::Builder::new()
-            .name("patches-conv-reverb".into())
-            .spawn(move || run_processor(handle, shared_clone, convolver, BLOCK_SIZE))
-            .expect("convolution_reverb: failed to spawn processing thread")
-    });
-    MonoProcessorReady { overlap_buffer, shared, thread }
+/// Build a mono `ProcessorReady` from a convolver.
+fn build_mono_ready(convolver: NonUniformConvolver, base_mix: f32) -> ProcessorReady {
+    let kit = build_processor(convolver, base_mix, "patches-conv-reverb");
+    ProcessorReady::Mono(MonoProcessorReady { kit })
 }
 
-/// Build a mono convolution processor (called on the loader or control thread).
-fn build_mono_processor(ir_samples: Vec<f32>, base_mix: f32) -> MonoProcessorReady {
-    let convolver = NonUniformConvolver::new(&ir_samples, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
-    let config = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-        .expect("convolution_reverb: invalid SlotDeckConfig");
-    let shared = Arc::new(SharedParams::new());
-    shared.mix.store(base_mix);
-    let shared_clone = Arc::clone(&shared);
-    let (overlap_buffer, thread) = OverlapBuffer::new(config, |handle| {
-        std::thread::Builder::new()
-            .name("patches-conv-reverb".into())
-            .spawn(move || run_processor(handle, shared_clone, convolver, BLOCK_SIZE))
-            .expect("convolution_reverb: failed to spawn processing thread")
-    });
-    MonoProcessorReady { overlap_buffer, shared, thread }
-}
-
-/// Build a stereo convolution processor pair from pre-built convolvers.
-fn build_stereo_processor_from_convolvers(
+/// Build a stereo `ProcessorReady` from two convolvers.
+fn build_stereo_ready(
     conv_l: NonUniformConvolver,
     conv_r: NonUniformConvolver,
     base_mix: f32,
-) -> StereoProcessorReady {
+) -> ProcessorReady {
     let shared = Arc::new(SharedParams::new());
     shared.mix.store(base_mix);
 
@@ -391,41 +358,11 @@ fn build_stereo_processor_from_convolvers(
             .expect("stereo_conv_reverb: failed to spawn R thread")
     });
 
-    StereoProcessorReady { overlap_l, overlap_r, shared, thread_l, thread_r }
-}
-
-/// Build a stereo convolution processor pair (called on the loader or control thread).
-fn build_stereo_processor(
-    ir_l: Vec<f32>,
-    ir_r: Vec<f32>,
-    base_mix: f32,
-) -> StereoProcessorReady {
-    let shared = Arc::new(SharedParams::new());
-    shared.mix.store(base_mix);
-
-    let conv_l = NonUniformConvolver::new(&ir_l, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
-    let config_l = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-        .expect("stereo_conv_reverb: invalid SlotDeckConfig");
-    let shared_l = Arc::clone(&shared);
-    let (overlap_l, thread_l) = OverlapBuffer::new(config_l, |handle| {
-        std::thread::Builder::new()
-            .name("patches-conv-reverb-l".into())
-            .spawn(move || run_processor(handle, shared_l, conv_l, BLOCK_SIZE))
-            .expect("stereo_conv_reverb: failed to spawn L thread")
-    });
-
-    let conv_r = NonUniformConvolver::new(&ir_r, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
-    let config_r = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-        .expect("stereo_conv_reverb: invalid SlotDeckConfig");
-    let shared_r = Arc::clone(&shared);
-    let (overlap_r, thread_r) = OverlapBuffer::new(config_r, |handle| {
-        std::thread::Builder::new()
-            .name("patches-conv-reverb-r".into())
-            .spawn(move || run_processor(handle, shared_r, conv_r, BLOCK_SIZE))
-            .expect("stereo_conv_reverb: failed to spawn R thread")
-    });
-
-    StereoProcessorReady { overlap_l, overlap_r, shared, thread_l, thread_r }
+    ProcessorReady::Stereo(Box::new(StereoProcessorReady {
+        kit_l: ProcessorKit { overlap_buffer: overlap_l, shared: Arc::clone(&shared), thread: thread_l },
+        kit_r: ProcessorKit { overlap_buffer: overlap_r, shared: Arc::clone(&shared), thread: thread_r },
+        shared,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -434,9 +371,12 @@ fn build_stereo_processor(
 
 /// Per-module IR loader service.
 ///
-/// Runs a background thread that resolves IRs, builds convolvers, and spawns
-/// processing threads — all off the audio thread. Results are delivered via a
-/// lock-free ring buffer polled in [`PeriodicUpdate::periodic_update`].
+/// Runs a background thread that generates synthetic IRs, builds convolvers,
+/// and spawns processing threads — all off the audio thread. For file-based
+/// IRs the heavy work (I/O, FFT partitioning) is done by `FileProcessor` on
+/// the control thread; the loader receives pre-FFT data and only builds the
+/// convolver. Results are delivered via a lock-free ring buffer polled in
+/// [`PeriodicUpdate::periodic_update`].
 struct IrLoader {
     request_tx: rtrb::Producer<IrLoadRequest>,
     teardown_tx: rtrb::Producer<ProcessorTeardown>,
@@ -507,39 +447,30 @@ fn ir_loader_main(
             Ok(req) => {
                 let result = if let Some(pre_fft) = req.pre_fft_data {
                     // Pre-computed spectral data from a FloatBuffer parameter.
-                    // Build convolver(s) directly — no file I/O needed.
                     if req.stereo {
                         let left_len = pre_fft[0] as usize;
                         let conv_l = NonUniformConvolver::from_pre_fft(&pre_fft[1..1 + left_len]);
                         let conv_r = NonUniformConvolver::from_pre_fft(&pre_fft[1 + left_len..]);
-                        Ok(ProcessorReady::Stereo(
-                            build_stereo_processor_from_convolvers(conv_l, conv_r, req.base_mix),
-                        ))
+                        build_stereo_ready(conv_l, conv_r, req.base_mix)
                     } else {
                         let convolver = NonUniformConvolver::from_pre_fft(&pre_fft);
-                        Ok(ProcessorReady::Mono(
-                            build_mono_processor_from_convolver(convolver, req.base_mix),
-                        ))
+                        build_mono_ready(convolver, req.base_mix)
                     }
                 } else {
-                    // Synthetic IR variant — generate or load from file.
+                    // Synthetic IR variant — generate noise IR.
                     let variant = IR_VARIANTS[req.variant_idx as usize];
                     if req.stereo {
-                        resolve_stereo_ir(variant, &req.path, req.sample_rate)
-                            .map(|(l, r)| {
-                                ProcessorReady::Stereo(build_stereo_processor(l, r, req.base_mix))
-                            })
+                        let (ir_l, ir_r) = generate_stereo_variant_ir(variant, req.sample_rate);
+                        let conv_l = NonUniformConvolver::new(&ir_l, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+                        let conv_r = NonUniformConvolver::new(&ir_r, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+                        build_stereo_ready(conv_l, conv_r, req.base_mix)
                     } else {
-                        resolve_ir(variant, &req.path, req.sample_rate)
-                            .map(|samples| {
-                                ProcessorReady::Mono(build_mono_processor(samples, req.base_mix))
-                            })
+                        let ir = generate_variant_ir(variant, req.sample_rate);
+                        let convolver = NonUniformConvolver::new(&ir, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+                        build_mono_ready(convolver, req.base_mix)
                     }
                 };
-                match result {
-                    Ok(ready) => { let _ = result_tx.push(ready); }
-                    Err(e) => eprintln!("patches: async IR load failed: {e}"),
-                }
+                let _ = result_tx.push(result);
             }
             Err(_) => {
                 if shutdown.load(Relaxed) {
@@ -556,111 +487,124 @@ fn ir_loader_main(
 }
 
 // ---------------------------------------------------------------------------
-// Module: ConvolutionReverb (Mono)
+// ConvReverbCore: shared state machine for mono and stereo
 // ---------------------------------------------------------------------------
 
-/// Mono convolution reverb.
+/// Core state machine shared by [`ConvolutionReverb`] and [`StereoConvReverb`].
 ///
-/// See [module-level documentation](self) for port and parameter tables.
-pub struct ConvolutionReverb {
-    instance_id: InstanceId,
-    descriptor: ModuleDescriptor,
+/// Manages the IR loader, processor thread lifecycle, parameter caching, and
+/// the install/teardown protocol. Parameterised by channel count: 1 for mono,
+/// 2 for stereo. Each channel has its own `OverlapBuffer` and processor thread.
+struct ConvReverbCore {
+    stereo: bool,
     sample_rate: f32,
 
-    // Ports
-    in_audio: MonoInput,
-    in_mix: MonoInput,
-    out_audio: MonoOutput,
+    // Per-channel overlap buffers (1 for mono, 2 for stereo)
+    overlap_buffers: Vec<Option<OverlapBuffer>>,
 
-    // OLA buffer (audio thread side) — None until first parameter update.
-    overlap_buffer: Option<OverlapBuffer>,
-
-    // Shared parameters
+    // Shared parameters (one set — all channels share the same mix)
     shared: Arc<SharedParams>,
 
     // Cached parameter values
     base_mix: f32,
     ir_variant_idx: u8,
 
-    // Processing thread handle (joined on drop)
-    processor_thread: Option<std::thread::JoinHandle<()>>,
+    // Processing thread handles (one per channel)
+    threads: Vec<Option<std::thread::JoinHandle<()>>>,
 
     // Async IR loading
     ir_loader: IrLoader,
 }
 
-// SAFETY: ConvolutionReverb is constructed on the control thread and sent once
+// SAFETY: ConvReverbCore is constructed on the control thread and sent once
 // to the audio thread (via Module: Send), where it remains for its lifetime.
 // OverlapBuffer is !Send as a lint against casual cross-thread use, but single
 // ownership transfer at plan activation is safe.
-unsafe impl Send for ConvolutionReverb {}
+unsafe impl Send for ConvReverbCore {}
 
-impl Drop for ConvolutionReverb {
+impl Drop for ConvReverbCore {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Relaxed);
-        if let Some(handle) = self.processor_thread.take() {
-            let _ = handle.join();
+        for thread in &mut self.threads {
+            if let Some(h) = thread.take() {
+                let _ = h.join();
+            }
         }
         // IrLoader's Drop handles the loader thread and any unclaimed results.
     }
 }
 
-impl ConvolutionReverb {
-    /// Start a new processor directly (for use on the control thread during build).
-    fn start_processor(&mut self, ir_samples: Vec<f32>) {
-        // Shut down existing processor thread.
-        self.shared.shutdown.store(true, Relaxed);
-        if let Some(handle) = self.processor_thread.take() {
-            let _ = handle.join();
+impl ConvReverbCore {
+    fn new(stereo: bool, sample_rate: f32) -> Self {
+        let channels = if stereo { 2 } else { 1 };
+        Self {
+            stereo,
+            sample_rate,
+            overlap_buffers: (0..channels).map(|_| None).collect(),
+            shared: Arc::new(SharedParams::new()),
+            base_mix: 1.0,
+            ir_variant_idx: 0,
+            threads: (0..channels).map(|_| None).collect(),
+            ir_loader: IrLoader::new(),
         }
-
-        let kit = build_mono_processor(ir_samples, self.base_mix);
-        self.overlap_buffer = Some(kit.overlap_buffer);
-        self.shared = kit.shared;
-        self.processor_thread = Some(kit.thread);
     }
 
-    /// Start a new processor from a pre-built convolver (skips FFT).
-    fn start_processor_from_convolver(&mut self, convolver: NonUniformConvolver) {
-        self.shared.shutdown.store(true, Relaxed);
-        if let Some(handle) = self.processor_thread.take() {
-            let _ = handle.join();
+    /// Install fields from a `ProcessorReady` into self.
+    fn adopt_ready(&mut self, ready: ProcessorReady) {
+        match ready {
+            ProcessorReady::Mono(MonoProcessorReady { kit }) => {
+                self.overlap_buffers[0] = Some(kit.overlap_buffer);
+                self.shared = kit.shared;
+                self.threads[0] = Some(kit.thread);
+            }
+            ProcessorReady::Stereo(stereo) => {
+                let StereoProcessorReady { kit_l, kit_r, shared } = *stereo;
+                self.overlap_buffers[0] = Some(kit_l.overlap_buffer);
+                self.overlap_buffers[1] = Some(kit_r.overlap_buffer);
+                self.shared = shared;
+                self.threads[0] = Some(kit_l.thread);
+                self.threads[1] = Some(kit_r.thread);
+            }
         }
+    }
 
-        let config = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-            .expect("convolution_reverb: invalid SlotDeckConfig");
-        let shared = Arc::new(SharedParams::new());
-        shared.mix.store(self.base_mix);
-        let shared_clone = Arc::clone(&shared);
-        let (overlap_buffer, thread) = OverlapBuffer::new(config, |handle| {
-            std::thread::Builder::new()
-                .name("patches-conv-reverb".into())
-                .spawn(move || run_processor(handle, shared_clone, convolver, BLOCK_SIZE))
-                .expect("convolution_reverb: failed to spawn processing thread")
-        });
-
-        self.overlap_buffer = Some(overlap_buffer);
-        self.shared = shared;
-        self.processor_thread = Some(thread);
+    /// Start processor(s) from a `ProcessorReady` result (control thread).
+    ///
+    /// Shuts down any existing processor threads synchronously — safe because
+    /// this only runs on the control thread during build.
+    fn start_from_ready(&mut self, ready: ProcessorReady) {
+        // Shut down existing processors.
+        self.shared.shutdown.store(true, Relaxed);
+        for thread in &mut self.threads {
+            if let Some(h) = thread.take() {
+                let _ = h.join();
+            }
+        }
+        self.adopt_ready(ready);
     }
 
     /// Install a processor received from the IR loader (audio thread).
     ///
     /// Sends the old processor to the loader thread for off-audio-thread teardown.
-    fn install_mono_processor(&mut self, kit: MonoProcessorReady) {
-        let MonoProcessorReady { overlap_buffer, shared: new_shared, thread } = kit;
+    fn install_from_ready(&mut self, ready: ProcessorReady) {
+        // Collect old threads and overlap buffers for teardown.
+        let old_shared = std::mem::replace(
+            &mut self.shared,
+            Arc::new(SharedParams::new()),
+        );
+        let old_threads: Vec<_> = self.threads.iter_mut()
+            .filter_map(|t| t.take())
+            .collect();
+        let old_overlaps: Vec<_> = self.overlap_buffers.iter_mut()
+            .filter_map(|o| o.take())
+            .collect();
 
-        // Swap in new shared params, get old ones for teardown.
-        let old_shared = std::mem::replace(&mut self.shared, new_shared);
-
-        if let (Some(old_thread), Some(old_overlap)) =
-            (self.processor_thread.take(), self.overlap_buffer.take())
-        {
+        if !old_threads.is_empty() {
             old_shared.shutdown.store(true, Relaxed);
-            let teardown = ProcessorTeardown::Mono {
+            let teardown = ProcessorTeardown {
                 shared: old_shared,
-                thread: old_thread,
-                overlap_buffer: old_overlap,
+                threads: old_threads,
+                overlap_buffers: old_overlaps,
             };
             match self.ir_loader.teardown_tx.push(teardown) {
                 Ok(()) => self.ir_loader.wake(),
@@ -668,21 +612,13 @@ impl ConvolutionReverb {
                     eprintln!(
                         "patches: IR teardown buffer full — detaching old processor"
                     );
-                    // Signal shutdown; thread will exit on its own.
-                    // JoinHandle detaches on drop; OverlapBuffer deallocates here.
-                    match &td {
-                        ProcessorTeardown::Mono { shared, .. }
-                        | ProcessorTeardown::Stereo { shared, .. } => {
-                            shared.shutdown.store(true, Relaxed);
-                        }
-                    }
+                    td.shared.shutdown.store(true, Relaxed);
                     drop(td);
                 }
             }
         }
 
-        self.overlap_buffer = Some(overlap_buffer);
-        self.processor_thread = Some(thread);
+        self.adopt_ready(ready);
     }
 
     /// Send an IR load request to the loader thread. O(1), non-blocking,
@@ -693,14 +629,157 @@ impl ConvolutionReverb {
         }
     }
 
-    fn update_shared_params(&self, mix_cv: f32) {
+    fn update_shared_mix(&self, mix_cv: f32) {
         let mix = (self.base_mix + mix_cv).clamp(0.0, 1.0);
         self.shared.mix.store(mix);
     }
+
+    /// Handle parameter updates on the control thread (initial build).
+    ///
+    /// Resolves the IR synchronously — file I/O and convolver construction
+    /// are safe here (not the audio thread).
+    fn update_parameters(
+        &mut self,
+        params: &ParameterMap,
+        module_name: &'static str,
+    ) -> Result<(), BuildError> {
+        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
+            self.base_mix = *v;
+        }
+        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
+            self.ir_variant_idx = ir_variant_index(v);
+        }
+
+        // Handle pre-processed file data (FloatBuffer from planner's FileProcessor).
+        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
+            let ready = if self.stereo {
+                let left_len = data[0] as usize;
+                let conv_l = NonUniformConvolver::from_pre_fft(&data[1..1 + left_len]);
+                let conv_r = NonUniformConvolver::from_pre_fft(&data[1 + left_len..]);
+                build_stereo_ready(conv_l, conv_r, self.base_mix)
+            } else {
+                let convolver = NonUniformConvolver::from_pre_fft(data);
+                build_mono_ready(convolver, self.base_mix)
+            };
+            self.start_from_ready(ready);
+            self.update_shared_mix(0.0);
+            return Ok(());
+        }
+
+        // Synthetic IR variants.
+        let variant = IR_VARIANTS[self.ir_variant_idx as usize];
+        if variant == "file" {
+            // No FloatBuffer means the file hasn't been provided yet.
+            self.update_shared_mix(0.0);
+            return Ok(());
+        }
+
+        let ready = if self.stereo {
+            let (ir_l, ir_r) = generate_stereo_variant_ir(variant, self.sample_rate);
+            let conv_l = NonUniformConvolver::new(&ir_l, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+            let conv_r = NonUniformConvolver::new(&ir_r, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+            build_stereo_ready(conv_l, conv_r, self.base_mix)
+        } else {
+            let ir = generate_variant_ir(variant, self.sample_rate);
+            let convolver = NonUniformConvolver::new(&ir, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+            build_mono_ready(convolver, self.base_mix)
+        };
+        self.start_from_ready(ready);
+        self.update_shared_mix(0.0);
+
+        let _ = module_name; // used for error context if needed in future
+        Ok(())
+    }
+
+    /// Handle parameter updates on the audio thread (hot reload).
+    ///
+    /// Must be real-time safe: no file I/O, no thread spawn/join, no blocking.
+    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
+            self.base_mix = *v;
+        }
+
+        // Handle pre-processed file data — FloatBuffer from planner.
+        if let Some(ParameterValue::FloatBuffer(data)) = params.take_scalar("ir_data") {
+            self.ir_variant_idx = FILE_VARIANT_IDX;
+            self.send_load_request(IrLoadRequest {
+                stereo: self.stereo,
+                variant_idx: FILE_VARIANT_IDX,
+                sample_rate: self.sample_rate,
+                base_mix: self.base_mix,
+                pre_fft_data: Some(data),
+            });
+            self.update_shared_mix(0.0);
+            return;
+        }
+
+        let mut ir_changed = false;
+
+        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
+            let idx = ir_variant_index(v);
+            if idx != self.ir_variant_idx {
+                self.ir_variant_idx = idx;
+                ir_changed = true;
+            }
+        }
+
+        if ir_changed && self.ir_variant_idx != FILE_VARIANT_IDX {
+            self.send_load_request(IrLoadRequest {
+                stereo: self.stereo,
+                variant_idx: self.ir_variant_idx,
+                sample_rate: self.sample_rate,
+                base_mix: self.base_mix,
+                pre_fft_data: None,
+            });
+        }
+
+        self.update_shared_mix(0.0);
+    }
+
+    /// Poll for completed async IR load and install if ready.
+    fn poll_loader(&mut self) {
+        let expected_mono = !self.stereo;
+        if let Ok(ready) = self.ir_loader.result_rx.pop() {
+            let matches = matches!(
+                (&ready, expected_mono),
+                (ProcessorReady::Mono(_), true) | (ProcessorReady::Stereo(_), false)
+            );
+            if matches {
+                self.install_from_ready(ready);
+            } else {
+                cleanup_processor_ready(ready);
+            }
+        }
+    }
 }
 
-/// File extensions supported by the convolution reverb's `ir_data` parameter.
+// ---------------------------------------------------------------------------
+// File extensions supported by the convolution reverb's `ir_data` parameter.
+// ---------------------------------------------------------------------------
+
 const IR_FILE_EXTENSIONS: &[&str] = &["wav", "aiff", "aif"];
+
+// ---------------------------------------------------------------------------
+// Module: ConvolutionReverb (Mono)
+// ---------------------------------------------------------------------------
+
+/// Mono convolution reverb.
+///
+/// See [module-level documentation](self) for port and parameter tables.
+pub struct ConvolutionReverb {
+    instance_id: InstanceId,
+    descriptor: ModuleDescriptor,
+
+    // Ports
+    in_audio: MonoInput,
+    in_mix: MonoInput,
+    out_audio: MonoOutput,
+
+    core: ConvReverbCore,
+}
+
+// SAFETY: see ConvReverbCore.
+unsafe impl Send for ConvolutionReverb {}
 
 impl FileProcessor for ConvolutionReverb {
     fn process_file(
@@ -741,107 +820,20 @@ impl patches_core::Module for ConvolutionReverb {
         Self {
             instance_id,
             descriptor,
-            sample_rate: audio_environment.sample_rate,
             in_audio: MonoInput::default(),
             in_mix: MonoInput::default(),
             out_audio: MonoOutput::default(),
-            overlap_buffer: None,
-            shared: Arc::new(SharedParams::new()),
-            base_mix: 1.0,
-            ir_variant_idx: 0,
-            processor_thread: None,
-            ir_loader: IrLoader::new(),
+            core: ConvReverbCore::new(false, audio_environment.sample_rate),
         }
     }
 
-    /// Called on the control thread during module build.
-    ///
-    /// Validates parameters and resolves the IR synchronously — file I/O and
-    /// convolver construction are safe here (not the audio thread).
     fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
         validate_parameters(params, self.descriptor())?;
-
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            self.ir_variant_idx = ir_variant_index(v);
-        }
-
-        // Handle pre-processed file data (FloatBuffer from planner's FileProcessor).
-        // Safe to allocate and spawn threads here — this runs on the control thread.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
-            let convolver = NonUniformConvolver::from_pre_fft(data);
-            self.start_processor_from_convolver(convolver);
-            self.update_shared_params(0.0);
-            return Ok(());
-        }
-
-        // Synthetic IR variants.
-        let variant = IR_VARIANTS[self.ir_variant_idx as usize];
-        if variant == "file" {
-            // No FloatBuffer means the file hasn't been provided — this is
-            // expected when the user hasn't set ir_data yet.
-            self.update_shared_params(0.0);
-            return Ok(());
-        }
-
-        let ir_samples = resolve_ir(variant, "", self.sample_rate)
-            .map_err(|e| BuildError::Custom { module: "ConvReverb", message: e })?;
-        self.start_processor(ir_samples);
-
-        self.update_shared_params(0.0);
-        Ok(())
+        self.core.update_parameters(params, "ConvReverb")
     }
 
-    /// Called on the audio thread during plan adoption for surviving modules.
-    ///
-    /// Must be real-time safe: no file I/O, no thread spawn/join, no blocking.
-    /// Load requests are sent directly to the [`IrLoader`] thread (O(1)
-    /// ring-buffer push). The `Arc<[f32]>` from `FloatBuffer` parameters is
-    /// moved into the request so its deallocation happens on the loader thread.
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
-
-        // Handle pre-processed file data — FloatBuffer from planner.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.take_scalar("ir_data") {
-            self.ir_variant_idx = FILE_VARIANT_IDX;
-            self.send_load_request(IrLoadRequest {
-                stereo: false,
-                variant_idx: FILE_VARIANT_IDX,
-                path: String::new(),
-                sample_rate: self.sample_rate,
-                base_mix: self.base_mix,
-                pre_fft_data: Some(data),
-            });
-            self.update_shared_params(0.0);
-            return;
-        }
-
-        let mut ir_changed = false;
-
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            let idx = ir_variant_index(v);
-            if idx != self.ir_variant_idx {
-                self.ir_variant_idx = idx;
-                ir_changed = true;
-            }
-        }
-
-        if ir_changed && self.ir_variant_idx != FILE_VARIANT_IDX {
-            self.send_load_request(IrLoadRequest {
-                stereo: false,
-                variant_idx: self.ir_variant_idx,
-                path: String::new(),
-                sample_rate: self.sample_rate,
-                base_mix: self.base_mix,
-                pre_fft_data: None,
-            });
-        }
-
-        self.update_shared_params(0.0);
+        self.core.update_validated_parameters(params);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -860,7 +852,7 @@ impl patches_core::Module for ConvolutionReverb {
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let input = pool.read_mono(&self.in_audio);
-        if let Some(ref mut overlap_buffer) = self.overlap_buffer {
+        if let Some(ref mut overlap_buffer) = self.core.overlap_buffers[0] {
             overlap_buffer.write(input);
             let output = overlap_buffer.read();
             pool.write_mono(&self.out_audio, output);
@@ -881,15 +873,11 @@ impl patches_core::Module for ConvolutionReverb {
 
 impl PeriodicUpdate for ConvolutionReverb {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
-        // Check for completed async IR load.
-        if let Ok(ProcessorReady::Mono(kit)) = self.ir_loader.result_rx.pop() {
-            self.install_mono_processor(kit);
-        }
+        self.core.poll_loader();
 
-        // Update mix from CV input.
         if self.in_mix.is_connected() {
             let mix_cv = pool.read_mono(&self.in_mix);
-            self.update_shared_params(mix_cv);
+            self.core.update_shared_mix(mix_cv);
         }
     }
 }
@@ -907,7 +895,6 @@ impl PeriodicUpdate for ConvolutionReverb {
 pub struct StereoConvReverb {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    sample_rate: f32,
 
     // Ports
     in_left: MonoInput,
@@ -916,164 +903,10 @@ pub struct StereoConvReverb {
     out_left: MonoOutput,
     out_right: MonoOutput,
 
-    // OLA buffers (one per channel)
-    overlap_l: Option<OverlapBuffer>,
-    overlap_r: Option<OverlapBuffer>,
-
-    // Shared parameters (one set — both channels use the same mix)
-    shared: Arc<SharedParams>,
-
-    // Cached parameter values
-    base_mix: f32,
-    ir_variant_idx: u8,
-
-    // Processing threads (one per channel)
-    thread_l: Option<std::thread::JoinHandle<()>>,
-    thread_r: Option<std::thread::JoinHandle<()>>,
-
-    // Async IR loading
-    ir_loader: IrLoader,
+    core: ConvReverbCore,
 }
 
 unsafe impl Send for StereoConvReverb {}
-
-impl Drop for StereoConvReverb {
-    fn drop(&mut self) {
-        self.shared.shutdown.store(true, Relaxed);
-        if let Some(h) = self.thread_l.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.thread_r.take() {
-            let _ = h.join();
-        }
-        // IrLoader's Drop handles the loader thread and any unclaimed results.
-    }
-}
-
-impl StereoConvReverb {
-    /// Send an IR load request to the loader thread. O(1), non-blocking,
-    /// no allocation — safe to call on the audio thread.
-    fn send_load_request(&mut self, request: IrLoadRequest) {
-        if self.ir_loader.request_tx.push(request).is_ok() {
-            self.ir_loader.wake();
-        }
-    }
-
-    /// Start processors from pre-built convolvers (skips FFT).
-    fn start_processors_from_convolvers(
-        &mut self,
-        conv_l: NonUniformConvolver,
-        conv_r: NonUniformConvolver,
-    ) {
-        self.shared.shutdown.store(true, Relaxed);
-        if let Some(h) = self.thread_l.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.thread_r.take() {
-            let _ = h.join();
-        }
-
-        let shared = Arc::new(SharedParams::new());
-        shared.mix.store(self.base_mix);
-
-        let config_l = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-            .expect("stereo_conv_reverb: invalid SlotDeckConfig");
-        let shared_l = Arc::clone(&shared);
-        let (overlap_l, thread_l) = OverlapBuffer::new(config_l, |handle| {
-            std::thread::Builder::new()
-                .name("patches-conv-reverb-l".into())
-                .spawn(move || run_processor(handle, shared_l, conv_l, BLOCK_SIZE))
-                .expect("stereo_conv_reverb: failed to spawn L thread")
-        });
-
-        let config_r = SlotDeckConfig::new(BLOCK_SIZE, 1, PROCESSING_BUDGET)
-            .expect("stereo_conv_reverb: invalid SlotDeckConfig");
-        let shared_r = Arc::clone(&shared);
-        let (overlap_r, thread_r) = OverlapBuffer::new(config_r, |handle| {
-            std::thread::Builder::new()
-                .name("patches-conv-reverb-r".into())
-                .spawn(move || run_processor(handle, shared_r, conv_r, BLOCK_SIZE))
-                .expect("stereo_conv_reverb: failed to spawn R thread")
-        });
-
-        self.overlap_l = Some(overlap_l);
-        self.overlap_r = Some(overlap_r);
-        self.shared = shared;
-        self.thread_l = Some(thread_l);
-        self.thread_r = Some(thread_r);
-    }
-
-    /// Start processors directly (for use on the control thread during build).
-    fn start_processors(&mut self, ir_l: Vec<f32>, ir_r: Vec<f32>) {
-        // Shut down existing threads.
-        self.shared.shutdown.store(true, Relaxed);
-        if let Some(h) = self.thread_l.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.thread_r.take() {
-            let _ = h.join();
-        }
-
-        let kit = build_stereo_processor(ir_l, ir_r, self.base_mix);
-        self.overlap_l = Some(kit.overlap_l);
-        self.overlap_r = Some(kit.overlap_r);
-        self.shared = kit.shared;
-        self.thread_l = Some(kit.thread_l);
-        self.thread_r = Some(kit.thread_r);
-    }
-
-    /// Install a processor received from the IR loader (audio thread).
-    ///
-    /// Sends the old processor to the loader thread for off-audio-thread teardown.
-    fn install_stereo_processor(&mut self, kit: StereoProcessorReady) {
-        let StereoProcessorReady {
-            overlap_l, overlap_r, shared: new_shared, thread_l, thread_r,
-        } = kit;
-
-        let old_shared = std::mem::replace(&mut self.shared, new_shared);
-
-        if let (Some(old_tl), Some(old_tr), Some(old_ol), Some(old_or)) = (
-            self.thread_l.take(),
-            self.thread_r.take(),
-            self.overlap_l.take(),
-            self.overlap_r.take(),
-        ) {
-            old_shared.shutdown.store(true, Relaxed);
-            let teardown = ProcessorTeardown::Stereo {
-                shared: old_shared,
-                thread_l: old_tl,
-                thread_r: old_tr,
-                overlap_l: old_ol,
-                overlap_r: old_or,
-            };
-            match self.ir_loader.teardown_tx.push(teardown) {
-                Ok(()) => self.ir_loader.wake(),
-                Err(rtrb::PushError::Full(td)) => {
-                    eprintln!(
-                        "patches: IR teardown buffer full — detaching old processor"
-                    );
-                    match &td {
-                        ProcessorTeardown::Mono { shared, .. }
-                        | ProcessorTeardown::Stereo { shared, .. } => {
-                            shared.shutdown.store(true, Relaxed);
-                        }
-                    }
-                    drop(td);
-                }
-            }
-        }
-
-        self.overlap_l = Some(overlap_l);
-        self.overlap_r = Some(overlap_r);
-        self.thread_l = Some(thread_l);
-        self.thread_r = Some(thread_r);
-    }
-
-    fn update_shared_params(&self, mix_cv: f32) {
-        let mix = (self.base_mix + mix_cv).clamp(0.0, 1.0);
-        self.shared.mix.store(mix);
-    }
-}
 
 impl FileProcessor for StereoConvReverb {
     fn process_file(
@@ -1121,105 +954,22 @@ impl patches_core::Module for StereoConvReverb {
         Self {
             instance_id,
             descriptor,
-            sample_rate: audio_environment.sample_rate,
             in_left: MonoInput::default(),
             in_right: MonoInput::default(),
             in_mix: MonoInput::default(),
             out_left: MonoOutput::default(),
             out_right: MonoOutput::default(),
-            overlap_l: None,
-            overlap_r: None,
-            shared: Arc::new(SharedParams::new()),
-            base_mix: 1.0,
-            ir_variant_idx: 0,
-            thread_l: None,
-            thread_r: None,
-            ir_loader: IrLoader::new(),
+            core: ConvReverbCore::new(true, audio_environment.sample_rate),
         }
     }
 
-    /// Called on the control thread during module build.
     fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
         validate_parameters(params, self.descriptor())?;
-
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            self.ir_variant_idx = ir_variant_index(v);
-        }
-
-        // Handle pre-processed stereo file data (FloatBuffer from planner's FileProcessor).
-        // Safe to allocate and spawn threads here — this runs on the control thread.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
-            let left_len = data[0] as usize;
-            let conv_l = NonUniformConvolver::from_pre_fft(&data[1..1 + left_len]);
-            let conv_r = NonUniformConvolver::from_pre_fft(&data[1 + left_len..]);
-            self.start_processors_from_convolvers(conv_l, conv_r);
-            self.update_shared_params(0.0);
-            return Ok(());
-        }
-
-        // Synthetic IR variants.
-        let variant = IR_VARIANTS[self.ir_variant_idx as usize];
-        if variant == "file" {
-            self.update_shared_params(0.0);
-            return Ok(());
-        }
-
-        let (ir_l, ir_r) = resolve_stereo_ir(variant, "", self.sample_rate)
-            .map_err(|e| BuildError::Custom { module: "StereoConvReverb", message: e })?;
-        self.start_processors(ir_l, ir_r);
-
-        self.update_shared_params(0.0);
-        Ok(())
+        self.core.update_parameters(params, "StereoConvReverb")
     }
 
-    /// Called on the audio thread — must be real-time safe.
-    /// Load requests are sent directly to the [`IrLoader`] thread (O(1)
-    /// ring-buffer push).
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
-
-        // Handle pre-processed stereo file data.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.take_scalar("ir_data") {
-            self.ir_variant_idx = FILE_VARIANT_IDX;
-            self.send_load_request(IrLoadRequest {
-                stereo: true,
-                variant_idx: FILE_VARIANT_IDX,
-                path: String::new(),
-                sample_rate: self.sample_rate,
-                base_mix: self.base_mix,
-                pre_fft_data: Some(data),
-            });
-            self.update_shared_params(0.0);
-            return;
-        }
-
-        let mut ir_changed = false;
-
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            let idx = ir_variant_index(v);
-            if idx != self.ir_variant_idx {
-                self.ir_variant_idx = idx;
-                ir_changed = true;
-            }
-        }
-
-        if ir_changed && self.ir_variant_idx != FILE_VARIANT_IDX {
-            self.send_load_request(IrLoadRequest {
-                stereo: true,
-                variant_idx: self.ir_variant_idx,
-                path: String::new(),
-                sample_rate: self.sample_rate,
-                base_mix: self.base_mix,
-                pre_fft_data: None,
-            });
-        }
-
-        self.update_shared_params(0.0);
+        self.core.update_validated_parameters(params);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -1246,14 +996,14 @@ impl patches_core::Module for StereoConvReverb {
             input_l
         };
 
-        if let Some(ref mut ol) = self.overlap_l {
+        if let Some(ref mut ol) = self.core.overlap_buffers[0] {
             ol.write(input_l);
             pool.write_mono(&self.out_left, ol.read());
         } else {
             pool.write_mono(&self.out_left, input_l);
         }
 
-        if let Some(ref mut or) = self.overlap_r {
+        if let Some(ref mut or) = self.core.overlap_buffers[1] {
             or.write(input_r);
             pool.write_mono(&self.out_right, or.read());
         } else {
@@ -1272,15 +1022,11 @@ impl patches_core::Module for StereoConvReverb {
 
 impl PeriodicUpdate for StereoConvReverb {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
-        // Check for completed async IR load.
-        if let Ok(ProcessorReady::Stereo(kit)) = self.ir_loader.result_rx.pop() {
-            self.install_stereo_processor(kit);
-        }
+        self.core.poll_loader();
 
-        // Update mix from CV input.
         if self.in_mix.is_connected() {
             let mix_cv = pool.read_mono(&self.in_mix);
-            self.update_shared_params(mix_cv);
+            self.core.update_shared_mix(mix_cv);
         }
     }
 }
