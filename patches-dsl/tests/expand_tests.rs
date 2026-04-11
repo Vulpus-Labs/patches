@@ -1260,3 +1260,82 @@ patch {
     let file = parse(src).expect("parse ok");
     expand(&file).expect("int should coerce to float");
 }
+
+// ─── Pattern/song pass-through ──────────────────────────────────────────────
+
+#[test]
+fn expand_preserves_patterns() {
+    let src = include_str!("fixtures/pattern_basic.patches");
+    let flat = parse_expand(src);
+    assert_eq!(flat.patterns.len(), 1);
+    assert_eq!(flat.patterns[0].name, "verse_drums");
+    assert_eq!(flat.patterns[0].channels.len(), 2);
+    assert_eq!(flat.patterns[0].channels[0].name, "kick");
+    assert_eq!(flat.patterns[0].channels[0].steps.len(), 8);
+}
+
+#[test]
+fn expand_preserves_songs() {
+    let src = include_str!("fixtures/song_basic.patches");
+    let flat = parse_expand(src);
+    assert_eq!(flat.songs.len(), 1);
+    assert_eq!(flat.songs[0].name.name, "my_song");
+    assert_eq!(flat.songs[0].channels.len(), 2);
+    assert_eq!(flat.songs[0].rows.len(), 4);
+}
+
+#[test]
+fn expand_slide_generator_produces_steps() {
+    let src = include_str!("fixtures/pattern_slides.patches");
+    let flat = parse_expand(src);
+    // The "auto" channel had slide(4, 0.0, 1.0) — should expand to 4 concrete steps.
+    let auto_ch = flat.patterns[0].channels.iter().find(|c| c.name == "auto").unwrap();
+    assert_eq!(auto_ch.steps.len(), 4, "slide(4,...) should produce 4 steps");
+
+    // Check first step: 0.0 → 0.25
+    assert!((auto_ch.steps[0].cv1 - 0.0).abs() < 1e-6);
+    assert!((auto_ch.steps[0].cv1_end.unwrap() - 0.25).abs() < 1e-6);
+
+    // Check last step: 0.75 → 1.0
+    assert!((auto_ch.steps[3].cv1 - 0.75).abs() < 1e-6);
+    assert!((auto_ch.steps[3].cv1_end.unwrap() - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn expand_round_trip_patterns_and_songs() {
+    let src = r#"
+        template Gain(level: float = 1.0) {
+            in: audio
+            out: audio
+            module amp : Amplifier { gain: <level> }
+            $.audio -> amp.in
+            amp.out -> $.audio
+        }
+
+        pattern drums {
+            kick:  x . . . x . . .
+            snare: . . x . . . x .
+        }
+
+        song arrangement {
+            | ch1   |
+            | drums |
+            | drums |
+        }
+
+        patch {
+            module g : Gain
+            module out : AudioOut
+            g.audio -> out.in_left
+        }
+    "#;
+    let flat = parse_expand(src);
+    // Template was expanded
+    assert!(!flat.modules.is_empty());
+    // Pattern passed through
+    assert_eq!(flat.patterns.len(), 1);
+    assert_eq!(flat.patterns[0].name, "drums");
+    // Song passed through
+    assert_eq!(flat.songs.len(), 1);
+    assert_eq!(flat.songs[0].name.name, "arrangement");
+}

@@ -38,6 +38,7 @@ pub use modules::{ParameterKey, ParameterMap, ParameterValue};
 pub use modules::parameter_map;
 pub use modules::InstanceId;
 pub use random_walk::{BoundedRandomWalk, GLOBAL_DRIFT_STEP, OSCILLATOR_DRIFT_STEP, HALF_SEMITONE_VOCT};
+pub use registries::FileProcessor;
 pub use registries::ModuleBuilder;
 pub use registries::Registry;
 pub use graphs::planner::{

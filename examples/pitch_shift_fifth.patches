@@ -38,7 +38,7 @@ patch {
 
     # ── Mono effects ──
     module shifter   : PitchShift(length: 256, high_quality: true) { semitones: 7.0, mix: 0.5, mono: true }
-    module reverb : StereoConvReverb { mix: 0.3, ir: file, path: "/Users/dominicfox/src/vulpus-labs-patches/examples/RoomConcertHall.aiff" }
+    module reverb : StereoConvReverb { mix: 0.3, ir_data: file("/Users/dominicfox/src/vulpus-labs-patches/examples/RoomConcertHall.aiff") }
 
     module out       : AudioOut
 

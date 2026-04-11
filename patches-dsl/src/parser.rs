@@ -2,9 +2,10 @@ use pest::iterators::Pair;
 use pest::Parser as _;
 
 use crate::ast::{
-    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl,
-    ParamEntry, ParamIndex, ParamType, Patch, PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar,
-    ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
+    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl, ParamEntry,
+    ParamIndex, ParamType, Patch, PatternChannel, PatternDef, PortGroupDecl, PortIndex, PortLabel,
+    PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef, SongRow, Span, Statement, Step,
+    StepOrGenerator, Template, Value,
 };
 
 // ─── Pest glue ────────────────────────────────────────────────────────────────
@@ -136,11 +137,15 @@ fn span_of(pair: &Pair<'_, Rule>) -> Span {
 fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
     let span = span_of(&pair);
     let mut templates = Vec::new();
+    let mut patterns = Vec::new();
+    let mut songs = Vec::new();
     let mut patch = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::template => templates.push(build_template(inner)?),
+            Rule::pattern_block => patterns.push(build_pattern_block(inner)?),
+            Rule::song_block => songs.push(build_song_block(inner)?),
             Rule::patch => patch = Some(build_patch(inner)?),
             Rule::EOI => {}
             _ => unreachable!("unexpected rule in file: {:?}", inner.as_rule()),
@@ -149,7 +154,9 @@ fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
 
     Ok(File {
         templates,
-        patch: patch.unwrap(), // grammar: file = SOI ~ template* ~ patch ~ EOI
+        patterns,
+        songs,
+        patch: patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
         span,
     })
 }
@@ -238,6 +245,22 @@ fn build_value(pair: Pair<'_, Rule>) -> Result<Value, ParseError> {
     // pair.as_rule() == Rule::value
     let inner = pair.into_inner().next().unwrap(); // grammar guarantees one child
     match inner.as_rule() {
+        Rule::file_ref => {
+            let child = inner.into_inner().next().unwrap();
+            let path = match child.as_rule() {
+                Rule::string_lit => {
+                    let s = child.as_str();
+                    s[1..s.len() - 1].to_owned()
+                }
+                Rule::param_ref => {
+                    // Template parameter substitution happens at expand time;
+                    // store the raw param ref name for now.
+                    return Ok(Value::Scalar(Scalar::ParamRef(build_param_ref_name(child))));
+                }
+                _ => unreachable!("unexpected rule in file_ref: {:?}", child.as_rule()),
+            };
+            Ok(Value::File(path))
+        }
         Rule::scalar => Ok(Value::Scalar(build_scalar(inner)?)),
         Rule::array => {
             let items: Result<Vec<Value>, ParseError> =
@@ -623,4 +646,275 @@ fn build_patch(pair: Pair<'_, Rule>) -> Result<Patch, ParseError> {
     let span = span_of(&pair);
     let body = pair.into_inner().map(build_statement).collect::<Result<_, _>>()?;
     Ok(Patch { body, span })
+}
+
+// ─── Step notation builders ─────────────────────────────────────────────────
+
+/// Parse a step_note string (e.g. "C4", "Eb3") to v/oct f32.
+fn parse_step_note(s: &str, span: Span) -> Result<f32, ParseError> {
+    parse_note_voct(s, span).map(|v| v as f32)
+}
+
+/// Parse a step float/int string to f32.
+fn parse_step_float(s: &str, span: Span) -> Result<f32, ParseError> {
+    s.parse::<f32>().map_err(|_| ParseError {
+        span,
+        message: format!("invalid step float: {s:?}"),
+    })
+}
+
+/// Parse a step_unit string (e.g. "440Hz", "-6dB") to f32.
+fn parse_step_unit(s: &str, span: Span) -> Result<f32, ParseError> {
+    let sl = s.to_ascii_lowercase();
+    let (num_str, unit) = if sl.ends_with("khz") {
+        (&s[..s.len() - 3], "khz")
+    } else if sl.ends_with("hz") {
+        (&s[..s.len() - 2], "hz")
+    } else if sl.ends_with("db") {
+        (&s[..s.len() - 2], "db")
+    } else {
+        return Err(ParseError { span, message: format!("unrecognised unit suffix in: {s:?}") });
+    };
+    let num: f64 = num_str.parse().map_err(|_| ParseError {
+        span,
+        message: format!("invalid number in unit literal: {s:?}"),
+    })?;
+    let value = match unit {
+        "db" => 10.0_f64.powf(num / 20.0),
+        "hz" => hz_to_voct(num, span)?,
+        "khz" => hz_to_voct(num * 1000.0, span)?,
+        _ => unreachable!(),
+    };
+    Ok(value as f32)
+}
+
+/// Parse a cv1 value from a step primary pair (step_note, step_trigger, step_float, step_int, step_unit).
+fn parse_cv1_value(pair: &Pair<'_, Rule>) -> Result<f32, ParseError> {
+    let span = span_of(pair);
+    match pair.as_rule() {
+        Rule::step_note => parse_step_note(pair.as_str(), span),
+        Rule::step_trigger => Ok(0.0),
+        Rule::step_float | Rule::step_int => parse_step_float(pair.as_str(), span),
+        Rule::step_unit => parse_step_unit(pair.as_str(), span),
+        _ => unreachable!("unexpected cv1 rule: {:?}", pair.as_rule()),
+    }
+}
+
+/// Parse a slide target value from a step_slide_target's inner pair.
+fn parse_slide_target_value(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
+    let inner = pair.into_inner().next().unwrap();
+    let span = span_of(&inner);
+    match inner.as_rule() {
+        Rule::step_note => parse_step_note(inner.as_str(), span),
+        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), span),
+        Rule::step_unit => parse_step_unit(inner.as_str(), span),
+        _ => unreachable!("unexpected slide target rule: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
+    // pair.as_rule() == Rule::step
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::step_rest => Ok(Step {
+            cv1: 0.0,
+            cv2: 0.0,
+            trigger: false,
+            gate: false,
+            cv1_end: None,
+            cv2_end: None,
+            repeat: 1,
+        }),
+        Rule::step_tie => Ok(Step {
+            cv1: 0.0,
+            cv2: 0.0,
+            trigger: false,
+            gate: true,
+            cv1_end: None,
+            cv2_end: None,
+            repeat: 1,
+        }),
+        Rule::step_valued => {
+            let mut it = inner.into_inner();
+            // First child: the cv1 primary value
+            let cv1_pair = it.next().unwrap();
+            let cv1 = parse_cv1_value(&cv1_pair)?;
+            let mut cv1_end: Option<f32> = None;
+            let mut cv2: f32 = 0.0;
+            let mut cv2_end: Option<f32> = None;
+            let mut repeat: u8 = 1;
+
+            for child in it {
+                match child.as_rule() {
+                    Rule::step_slide_target => {
+                        cv1_end = Some(parse_slide_target_value(child)?);
+                    }
+                    Rule::step_cv2 => {
+                        let mut cv2_it = child.into_inner();
+                        let cv2_val_pair = cv2_it.next().unwrap();
+                        let cv2_span = span_of(&cv2_val_pair);
+                        cv2 = match cv2_val_pair.as_rule() {
+                            Rule::step_float | Rule::step_int => {
+                                parse_step_float(cv2_val_pair.as_str(), cv2_span)?
+                            }
+                            Rule::step_unit => {
+                                parse_step_unit(cv2_val_pair.as_str(), cv2_span)?
+                            }
+                            _ => unreachable!(
+                                "unexpected cv2 rule: {:?}",
+                                cv2_val_pair.as_rule()
+                            ),
+                        };
+                        // Optional cv2 slide target
+                        if let Some(slide_pair) = cv2_it.next() {
+                            cv2_end = Some(parse_slide_target_value(slide_pair)?);
+                        }
+                    }
+                    Rule::step_repeat => {
+                        // step_repeat = ${ "*" ~ nat }
+                        let nat_pair = child.into_inner().next().unwrap();
+                        let span = span_of(&nat_pair);
+                        repeat = nat_pair.as_str().parse::<u8>().map_err(|_| ParseError {
+                            span,
+                            message: format!("invalid repeat count: {:?}", nat_pair.as_str()),
+                        })?;
+                    }
+                    _ => unreachable!("unexpected rule in step_valued: {:?}", child.as_rule()),
+                }
+            }
+
+            Ok(Step {
+                cv1,
+                cv2,
+                trigger: true,
+                gate: true,
+                cv1_end,
+                cv2_end,
+                repeat,
+            })
+        }
+        _ => unreachable!("unexpected rule in step: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_slide_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
+    // slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ (step_float | step_int) ~ "," ~ (step_float | step_int) ~ ")" }
+    let mut it = pair.into_inner();
+    let count_pair = it.next().unwrap();
+    let count_span = span_of(&count_pair);
+    let count: u32 = count_pair.as_str().parse().map_err(|_| ParseError {
+        span: count_span,
+        message: format!("invalid slide count: {:?}", count_pair.as_str()),
+    })?;
+    let start_pair = it.next().unwrap();
+    let start_span = span_of(&start_pair);
+    let start: f32 = start_pair.as_str().parse().map_err(|_| ParseError {
+        span: start_span,
+        message: format!("invalid slide start: {:?}", start_pair.as_str()),
+    })?;
+    let end_pair = it.next().unwrap();
+    let end_span = span_of(&end_pair);
+    let end: f32 = end_pair.as_str().parse().map_err(|_| ParseError {
+        span: end_span,
+        message: format!("invalid slide end: {:?}", end_pair.as_str()),
+    })?;
+    Ok(StepOrGenerator::Slide { count, start, end })
+}
+
+fn build_step_or_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
+    // step_or_generator = { slide_generator | step }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::slide_generator => build_slide_generator(inner),
+        Rule::step => Ok(StepOrGenerator::Step(build_step(inner)?)),
+        _ => unreachable!("unexpected rule in step_or_generator: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_channel_row(pair: Pair<'_, Rule>) -> Result<PatternChannel, ParseError> {
+    // channel_row = { ident ~ ":" ~ step_or_generator* ~ channel_row_cont* }
+    let mut it = pair.into_inner();
+    let name = build_ident(it.next().unwrap());
+    let mut steps = Vec::new();
+
+    for child in it {
+        match child.as_rule() {
+            Rule::step_or_generator => steps.push(build_step_or_generator(child)?),
+            Rule::channel_row_cont => {
+                // channel_row_cont = { "|" ~ step_or_generator* }
+                for sg in child.into_inner() {
+                    steps.push(build_step_or_generator(sg)?);
+                }
+            }
+            _ => unreachable!("unexpected rule in channel_row: {:?}", child.as_rule()),
+        }
+    }
+
+    Ok(PatternChannel { name, steps })
+}
+
+fn build_pattern_block(pair: Pair<'_, Rule>) -> Result<PatternDef, ParseError> {
+    // pattern_block = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+    let name = build_ident(it.next().unwrap());
+    let channels: Vec<PatternChannel> =
+        it.map(build_channel_row).collect::<Result<_, _>>()?;
+    Ok(PatternDef { name, channels, span })
+}
+
+fn build_song_block(pair: Pair<'_, Rule>) -> Result<SongDef, ParseError> {
+    // song_block = { "song" ~ ident ~ "{" ~ song_header_row ~ song_data_row+ ~ "}" }
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+    let name = build_ident(it.next().unwrap());
+
+    // Header row
+    let header_pair = it.next().unwrap();
+    let channels: Vec<Ident> = header_pair.into_inner().map(build_ident).collect();
+
+    // Data rows
+    let mut rows = Vec::new();
+    let mut loop_point: Option<usize> = None;
+
+    for row_pair in it {
+        // song_data_row = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }
+        let row_span = span_of(&row_pair);
+        let mut patterns = Vec::new();
+        let mut has_loop = false;
+
+        for child in row_pair.into_inner() {
+            match child.as_rule() {
+                Rule::song_cell => {
+                    let cell_inner = child.into_inner().next().unwrap();
+                    match cell_inner.as_rule() {
+                        Rule::ident => patterns.push(Some(build_ident(cell_inner))),
+                        Rule::song_silence => patterns.push(None),
+                        _ => unreachable!(
+                            "unexpected rule in song_cell: {:?}",
+                            cell_inner.as_rule()
+                        ),
+                    }
+                }
+                Rule::song_loop => {
+                    has_loop = true;
+                }
+                _ => unreachable!("unexpected rule in song_data_row: {:?}", child.as_rule()),
+            }
+        }
+
+        if has_loop {
+            if loop_point.is_some() {
+                return Err(ParseError {
+                    span: row_span,
+                    message: "multiple @loop annotations in song block".to_owned(),
+                });
+            }
+            loop_point = Some(rows.len());
+        }
+
+        rows.push(SongRow { patterns });
+    }
+
+    Ok(SongDef { name, channels, rows, loop_point, span })
 }

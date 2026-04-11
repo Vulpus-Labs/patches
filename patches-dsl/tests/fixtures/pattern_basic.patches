@@ -1,0 +1,8 @@
+pattern verse_drums {
+    kick:   x . . . x . . .
+    snare:  . . x . . . x .
+}
+
+patch {
+    module out : AudioOut
+}

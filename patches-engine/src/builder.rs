@@ -8,7 +8,8 @@ use patches_core::{
     NodeState, OutputPort, PlanError, PlannerState, PolyInput, PolyOutput, Registry,
     ResolvedGraph,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use std::sync::Arc;
 
 #[cfg(test)]
 use crate::pool::ModulePool;
@@ -220,29 +221,41 @@ impl PatchBuilder {
         prev_state: &PlannerState,
     ) -> Result<(ExecutionPlan, PlannerState), BuildError> {
         // ── Decision phase ───────────────────────────────────────────────────
-        let PlanDecisions { index, order, buf_alloc, decisions } =
+        let PlanDecisions { index, order, buf_alloc, mut decisions } =
             make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 
         // ── Action phase ─────────────────────────────────────────────────────
 
         // Step A – mint InstanceIds for Install nodes and instantiate fresh modules.
+        // Before creating modules, resolve any ParameterValue::File entries
+        // by calling the registered FileProcessor for the module type.
         let mut instance_ids: HashMap<NodeId, InstanceId> =
             HashMap::with_capacity(decisions.len());
         let mut fresh_modules: HashMap<NodeId, Box<dyn Module>> =
             HashMap::with_capacity(decisions.len());
 
-        for (id, decision) in &decisions {
+        for (id, decision) in &mut decisions {
             match decision {
                 NodeDecision::Install { module_name, shape, params } => {
+                    let resolved_params = resolve_file_params(params, module_name, env, shape, registry)?;
                     let new_id = InstanceId::next();
                     let m = registry
-                        .create(module_name, env, shape, params, new_id)
+                        .create(module_name, env, shape, &resolved_params, new_id)
                         .map_err(|e| BuildError::ModuleCreationError(e.to_string()))?;
                     instance_ids.insert(id.clone(), new_id);
                     fresh_modules.insert(id.clone(), m);
                 }
-                NodeDecision::Update { instance_id, .. } => {
+                NodeDecision::Update { instance_id, param_diff, .. } => {
                     instance_ids.insert(id.clone(), *instance_id);
+                    // Resolve file params in the diff for surviving modules.
+                    if param_diff.iter().any(|(_, _, v)| matches!(v, ParameterValue::File(_))) {
+                        let node = index.get_node(id).ok_or_else(|| {
+                            BuildError::InternalError(format!("node {id:?} missing from graph"))
+                        })?;
+                        let module_name = node.module_descriptor.module_name;
+                        let shape = &node.module_descriptor.shape;
+                        *param_diff = resolve_file_params(param_diff, module_name, env, shape, registry)?;
+                    }
                 }
             }
         }
@@ -436,6 +449,50 @@ pub fn build_patch(
 ) -> Result<(ExecutionPlan, PlannerState), BuildError> {
     PatchBuilder::new(pool_capacity, module_pool_capacity)
         .build_patch(graph, registry, env, prev_state)
+}
+
+// ── File parameter resolution ────────────────────────────────────────────────
+
+/// Resolve `ParameterValue::File` entries in a parameter map by calling the
+/// registry's [`FileProcessor`] for the given module type.
+///
+/// Returns a new `ParameterMap` where every `File(path)` has been replaced
+/// with `FloatBuffer(Arc<[f32]>)`. Non-file parameters are cloned as-is.
+///
+/// Returns an error if the module has a `File` parameter but no registered
+/// `FileProcessor`, or if `process_file` fails.
+fn resolve_file_params(
+    params: &ParameterMap,
+    module_name: &str,
+    env: &AudioEnvironment,
+    shape: &patches_core::ModuleShape,
+    registry: &Registry,
+) -> Result<ParameterMap, BuildError> {
+    let has_file = params.iter().any(|(_, _, v)| matches!(v, ParameterValue::File(_)));
+    if !has_file {
+        return Ok(params.clone());
+    }
+
+    let mut resolved = ParameterMap::new();
+    for (name, idx, value) in params.iter() {
+        match value {
+            ParameterValue::File(path) => {
+                let data = registry
+                    .process_file(module_name, env, shape, name, path)
+                    .ok_or_else(|| BuildError::ModuleCreationError(format!(
+                        "module '{module_name}' has file parameter '{name}' but no FileProcessor is registered"
+                    )))?
+                    .map_err(|e| BuildError::ModuleCreationError(format!(
+                        "module '{module_name}' file parameter '{name}': {e}"
+                    )))?;
+                resolved.insert_param(name.to_string(), idx, ParameterValue::FloatBuffer(Arc::from(data)));
+            }
+            _ => {
+                resolved.insert_param(name.to_string(), idx, value.clone());
+            }
+        }
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]

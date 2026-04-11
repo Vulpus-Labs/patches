@@ -1,0 +1,2711 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Patches Manual — v0.5.1</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-4a680bed.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/Vulpus-Labs/patches" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p>Patches is a modular audio synthesiser you program with a text file. You describe a graph of modules — oscillators, filters, envelopes, effects — and how they connect. The engine runs the graph in real time. When you edit the file and save, the engine swaps in the new graph without stopping the audio or resetting module state. This makes it a live-coding instrument: you perform by editing.</p>
+<h2 id="building"><a class="header" href="#building">Building</a></h2>
+<pre><code class="language-bash">git clone &lt;repo-url&gt;
+cd patches
+cargo build
+</code></pre>
+<h2 id="a-first-patch"><a class="header" href="#a-first-patch">A first patch</a></h2>
+<pre><code class="language-patches">patch {
+    module osc : Osc { frequency: 440Hz }
+    module out : AudioOut
+
+    osc.sine -&gt; out.in_left
+    osc.sine -&gt; out.in_right
+}
+</code></pre>
+<p>Save this as <code>hello.patches</code> and run:</p>
+<pre><code class="language-bash">cargo run -p patches-player -- hello.patches
+</code></pre>
+<p>A 440 Hz sine tone. Change the frequency to <code>220Hz</code>, save, and the pitch drops — no click, no restart. Change <code>osc.sine</code> to <code>osc.sawtooth</code> for a brighter timbre. Press Ctrl-C to stop.</p>
+<p>For MIDI-driven patches, connect your controller before starting the player. <code>MidiIn</code> and <code>PolyMidiIn</code> use the first available MIDI port.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="building-a-patch"><a class="header" href="#building-a-patch">Building a patch</a></h1>
+<p>A patch is a set of module instances and the cables between them. This chapter builds up the concepts one at a time, starting from a single module.</p>
+<h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
+<p>A module declaration gives the instance a name and a type:</p>
+<pre><code class="language-patches">module osc : Osc
+</code></pre>
+<p>This creates an oscillator named <code>osc</code>. The name is how you refer to it when making connections; the type determines what it does and what ports it has.</p>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<p>Most modules accept parameters that configure their behaviour. Parameters are written in braces after the type:</p>
+<pre><code class="language-patches">module osc : Osc { frequency: 440Hz }
+module env : Adsr { attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.3 }
+</code></pre>
+<p>Parameter values have types. The DSL supports several literal forms:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Syntax</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>440.0</code></td><td>float</td></tr>
+<tr><td><code>2</code></td><td>integer</td></tr>
+<tr><td><code>440Hz</code>, <code>2.5kHz</code></td><td>frequency — converted to V/oct internally</td></tr>
+<tr><td><code>-6dB</code></td><td>decibels — converted to linear amplitude</td></tr>
+<tr><td><code>C4</code>, <code>Bb2</code></td><td>note name — converted to V/oct</td></tr>
+<tr><td><code>true</code> / <code>false</code></td><td>boolean</td></tr>
+<tr><td><code>linear</code></td><td>bare string (quotes optional)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Duration parameters like <code>attack</code> and <code>release</code> are bare floats in seconds — there is no time-unit suffix.</p>
+<h3 id="shape-arguments"><a class="header" href="#shape-arguments">Shape arguments</a></h3>
+<p>Some modules have a variable number of ports. Shape arguments control this and are written in parentheses before the parameter braces:</p>
+<pre><code class="language-patches">module mix : Sum(channels: 3)
+module dly : Delay(channels: 4)
+</code></pre>
+<p><code>Sum(channels: 3)</code> creates a mixer with three indexed inputs: <code>mix.in[0]</code>, <code>mix.in[1]</code>, <code>mix.in[2]</code>.</p>
+<h2 id="ports-and-connections"><a class="header" href="#ports-and-connections">Ports and connections</a></h2>
+<p>Modules have named input and output ports. A connection (cable) carries a signal from one output to one input:</p>
+<pre><code class="language-patches">osc.sine -&gt; out.in_left
+</code></pre>
+<p>This reads: take the <code>sine</code> output of <code>osc</code> and feed it to the <code>in_left</code> input of <code>out</code>.</p>
+<p>An output can drive multiple inputs (fan-out):</p>
+<pre><code class="language-patches">osc.sine -&gt; out.in_left
+osc.sine -&gt; out.in_right
+</code></pre>
+<p>But each input accepts exactly one cable. To combine signals, use a mixer:</p>
+<pre><code class="language-patches">module mix : Sum(channels: 2)
+osc_a.sine -&gt; mix.in[0]
+osc_b.sine -&gt; mix.in[1]
+mix.out    -&gt; vca.in
+</code></pre>
+<h3 id="scaled-connections"><a class="header" href="#scaled-connections">Scaled connections</a></h3>
+<p>A cable can carry a scale factor that multiplies the signal:</p>
+<pre><code class="language-patches">osc.sine -[0.5]-&gt; out.in_left     # attenuate by half
+lfo.sine -[-1.0]-&gt; osc.phase_mod  # invert
+mod.out  -[0.03]-&gt; osc.phase_mod  # light FM
+</code></pre>
+<p>This is useful for mixing at different levels, attenuating modulation depth, or inverting a signal. The scale is applied at the cable level with no extra processing cost.</p>
+<h3 id="indexed-ports"><a class="header" href="#indexed-ports">Indexed ports</a></h3>
+<p>Modules with multi-port shape arguments use bracket notation:</p>
+<pre><code class="language-patches">module mix : StereoMixer(channels: 4) { level[0]: 0.8, pan[0]: -0.5 }
+
+osc.out   -&gt; mix.in_left[0]
+osc.out   -&gt; mix.in_right[0]
+noise.out -&gt; mix.in_left[1]
+</code></pre>
+<p>Indexed parameters can also be grouped with at-block syntax:</p>
+<pre><code class="language-patches">module dly : Delay(channels: 2) {
+    @0: { delay_ms: 250, feedback: 0.4 },
+    @1: { delay_ms: 375, feedback: 0.3 }
+}
+</code></pre>
+<h2 id="mono-and-poly"><a class="header" href="#mono-and-poly">Mono and poly</a></h2>
+<p>Cables come in two kinds: <strong>mono</strong> (one sample per tick) and <strong>poly</strong> (one sample per voice per tick, typically 16 voices). A module’s port kind is fixed by its type — <code>Osc</code> has mono ports, <code>PolyOsc</code> has poly ports.</p>
+<p>You cannot connect a mono output to a poly input or vice versa. Use <code>MonoToPoly</code> to broadcast a mono signal to all voices, and <code>PolyToMono</code> to sum voices down to mono.</p>
+<h2 id="cable-delay"><a class="header" href="#cable-delay">Cable delay</a></h2>
+<p>All cables have a one-sample delay. A module’s <code>process</code> call sees the values that other modules wrote on the <em>previous</em> tick. This means modules can run in any order without affecting the result, and feedback connections are well-defined — they simply carry the previous tick’s value.</p>
+<h2 id="a-complete-example"><a class="header" href="#a-complete-example">A complete example</a></h2>
+<p>Two detuned oscillators mixed and sent to stereo output:</p>
+<pre><code class="language-patches">patch {
+    module osc_a : Osc { frequency: 220Hz }
+    module osc_b : Osc { frequency: 221Hz }
+    module mix   : Sum(channels: 2)
+    module out   : AudioOut
+
+    osc_a.sawtooth -&gt; mix.in[0]
+    osc_b.sawtooth -&gt; mix.in[1]
+
+    mix.out -[0.3]-&gt; out.in_left
+    mix.out -[0.3]-&gt; out.in_right
+}
+</code></pre>
+<p>The 1 Hz detuning produces a slow beating effect. The <code>-[0.3]-&gt;</code> scaling keeps the output at a comfortable level. Save this, run it, then try changing one frequency or swapping <code>sawtooth</code> for <code>square</code> while it plays.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="anatomy-of-a-synth"><a class="header" href="#anatomy-of-a-synth">Anatomy of a synth</a></h1>
+<p>This chapter walks through <code>examples/poly_synth.patches</code> — a 16-voice polyphonic subtractive synthesiser driven by MIDI. It is a good example of how modules compose into a real instrument, and of the kinds of edits you might make while performing.</p>
+<h2 id="the-full-patch"><a class="header" href="#the-full-patch">The full patch</a></h2>
+<pre><code class="language-patches">patch {
+    module kbd       : PolyMidiIn
+    module vibrato   : Lfo        { rate: 5.0 }
+    module pm_spread : MonoToPoly
+    module osc       : PolyOsc
+    module mix       : PolySum(channels: 2)
+    module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.12,  sustain: 0.65, release: 0.4 }
+    module vca       : PolyVca
+    module filt_env  : PolyAdsr   { attack: 0.2,   decay: 0.25,  sustain: 0.3,  release: 0.4 }
+    module filt      : PolyLowpass { cutoff: 600.0Hz, resonance: 0.7, saturate: true }
+    module collapse  : PolyToMono
+    module out       : AudioOut
+
+    # Vibrato LFO → phase modulation on all voices
+    vibrato.sine   -[0.03]-&gt; pm_spread.in
+    pm_spread.out         -&gt; osc.phase_mod
+
+    # V/oct: keyboard → oscillator (all voices)
+    kbd.voct               -&gt; osc.voct
+
+    # Oscillator mix: sawtooth (body) + square (edge)
+    osc.sine       -[0.6]-&gt; mix.in[0]
+    osc.square     -[0.4]-&gt; mix.in[1]
+
+    # Amplitude envelope: triggered and gated per voice
+    kbd.trigger            -&gt; amp_env.trigger
+    kbd.gate               -&gt; amp_env.gate
+
+    # VCA: shaped audio per voice
+    mix.out                -&gt; vca.in
+    amp_env.out            -&gt; vca.cv
+
+    # Filter envelope: triggered and gated per voice
+    kbd.trigger            -&gt; filt_env.trigger
+    kbd.gate               -&gt; filt_env.gate
+
+    # Filter cutoff CV: envelope sweeps each voice's cutoff
+    filt_env.out   -[0.7]-&gt; filt.voct
+
+    # Filter: VCA output → lowpass → collapse
+    vca.out                -&gt; filt.in
+
+    # Collapse all voices to mono
+    filt.out               -&gt; collapse.in
+
+    # Stereo output — scale down to avoid clipping with many voices
+    collapse.out  -[0.12]-&gt; out.in_left
+    collapse.out  -[0.12]-&gt; out.in_right
+}
+</code></pre>
+<h2 id="signal-flow"><a class="header" href="#signal-flow">Signal flow</a></h2>
+<p>The patch has a classic subtractive architecture: oscillator → mixer → amplifier → filter → output. What makes it interesting is that every stage from the oscillator onwards is polyphonic — each MIDI voice has its own independent signal path — until the very end, where all voices are summed to mono for output.</p>
+<pre><code>kbd ──voct──→ osc ──sine──→ mix ──→ vca ──→ filt ──→ collapse ──→ out
+               ↑  ──square──↗       ↑        ↑
+           vibrato            amp_env    filt_env
+</code></pre>
+<h2 id="midi-input"><a class="header" href="#midi-input">MIDI input</a></h2>
+<p><code>PolyMidiIn</code> listens on the first available MIDI port and allocates incoming notes across 16 voices using LIFO (last-in, first-out) voice stealing. It outputs three poly signals:</p>
+<ul>
+<li><strong>voct</strong> — pitch as a voltage, following the V/oct convention (MIDI note 0 = 0 V, each semitone adds 1/12 V). This drives the oscillator’s pitch directly.</li>
+<li><strong>gate</strong> — high (1.0) while a key is held, low (0.0) when released. Envelopes use this to know when to enter their release phase.</li>
+<li><strong>trigger</strong> — a single-sample pulse (1.0) at the moment a note starts. Envelopes use this to restart from the attack phase.</li>
+</ul>
+<p>The distinction between gate and trigger matters. The gate tells the envelope <em>how long</em> the note is held; the trigger tells it <em>when</em> to restart. An envelope that only received a gate would not retrigger if you played the same note twice in quick succession — the gate would stay high.</p>
+<h2 id="oscillators-and-mixing"><a class="header" href="#oscillators-and-mixing">Oscillators and mixing</a></h2>
+<p><code>PolyOsc</code> generates multiple waveforms simultaneously — sine, sawtooth, square, triangle — all at the pitch set by <code>voct</code>. Here we mix two of them:</p>
+<pre><code class="language-patches">osc.sine       -[0.6]-&gt; mix.in[0]
+osc.square     -[0.4]-&gt; mix.in[1]
+</code></pre>
+<p>The scale factors set the blend: 60% sine, 40% square. <code>PolySum(channels: 2)</code> adds its inputs together. Changing these ratios is one of the simplest live tweaks — shift the balance towards square for a harder, more hollow sound, or towards sine for something rounder.</p>
+<h2 id="amplitude-shaping"><a class="header" href="#amplitude-shaping">Amplitude shaping</a></h2>
+<p>Without a VCA, every voice would sound continuously. The amplitude envelope gives each note its dynamic shape:</p>
+<pre><code class="language-patches">kbd.trigger -&gt; amp_env.trigger
+kbd.gate    -&gt; amp_env.gate
+mix.out     -&gt; vca.in
+amp_env.out -&gt; vca.cv
+</code></pre>
+<p><code>PolyAdsr</code> produces a control signal that rises over the attack time (0.005s — a fast 5ms onset), falls to the sustain level (0.65) over the decay time (0.12s), holds there while the gate is high, then drops to zero over the release time (0.4s) when the key is released.</p>
+<p><code>PolyVca</code> multiplies the audio signal by this control voltage. When the envelope output is 0, the voice is silent. When it is 1, the voice is at full volume.</p>
+<h2 id="filter-modulation"><a class="header" href="#filter-modulation">Filter modulation</a></h2>
+<p>The filter has its own envelope with different timing:</p>
+<pre><code class="language-patches">filt_env.out -[0.7]-&gt; filt.voct
+</code></pre>
+<p>This second envelope sweeps the lowpass cutoff up from the base frequency (600 Hz) on each note attack, then lets it fall back. The attack is slower (0.2s) and the sustain lower (0.3), creating a filter “pluck” — brightness on the onset that fades to a darker sustain.</p>
+<p>The <code>-[0.7]-&gt;</code> scale controls how far the sweep reaches. At 0.7, it opens the filter substantially. Reducing this to 0.2 would give a subtler, darker sweep; raising it past 1.0 would push the cutoff into very bright territory.</p>
+<p>The <code>resonance: 0.7</code> parameter adds emphasis at the cutoff frequency — a nasal, vocal quality. With <code>saturate: true</code>, the filter soft-clips internally, adding warmth when driven hard.</p>
+<h2 id="vibrato"><a class="header" href="#vibrato">Vibrato</a></h2>
+<p>A mono LFO provides gentle pitch modulation:</p>
+<pre><code class="language-patches">vibrato.sine   -[0.03]-&gt; pm_spread.in
+pm_spread.out         -&gt; osc.phase_mod
+</code></pre>
+<p>The LFO runs at 5 Hz. <code>MonoToPoly</code> broadcasts its mono output to all 16 voices so every voice gets the same vibrato. The scale of 0.03 keeps it subtle — just enough to add life without obvious pitch wobble. Push it to 0.1 or higher for a more dramatic effect, or drop the rate to 1 Hz for a slow, seasick drift.</p>
+<p>Phase modulation (writing to <code>osc.phase_mod</code>) is perceptually similar to frequency modulation but better-behaved at extreme depths.</p>
+<h2 id="output-and-level-management"><a class="header" href="#output-and-level-management">Output and level management</a></h2>
+<p>The final stage collapses all voices to mono and routes to stereo output:</p>
+<pre><code class="language-patches">filt.out      -&gt; collapse.in
+collapse.out -[0.12]-&gt; out.in_left
+collapse.out -[0.12]-&gt; out.in_right
+</code></pre>
+<p><code>PolyToMono</code> sums all 16 voice signals. If several voices are active simultaneously, their amplitudes add up and can easily exceed 1.0. The <code>-[0.12]-&gt;</code> scaling compensates — it is roughly 1/8, leaving headroom for eight simultaneous voices at full amplitude. In practice you would adjust this by ear: if it clips, reduce the scale; if it is too quiet, raise it.</p>
+<h2 id="performing-with-this-patch"><a class="header" href="#performing-with-this-patch">Performing with this patch</a></h2>
+<p>The parameters are laid out for live editing. Some modifications to try while the patch is running:</p>
+<p><strong>Tighter attack</strong> — change <code>amp_env</code>’s attack to <code>0.001</code> for a harder, more percussive onset. Or raise it to <code>0.1</code> for a pad-like swell.</p>
+<p><strong>Shorter decay, lower sustain</strong> — set <code>decay: 0.3, sustain: 0.2</code> on <code>amp_env</code> for a plucked, piano-like envelope where the note fades quickly to a quiet sustain.</p>
+<p><strong>Darker timbre</strong> — drop the filter cutoff to <code>200Hz</code> and reduce the envelope scale to <code>-[0.3]-&gt;</code>. The sound becomes muffled with just a hint of brightness on the attack.</p>
+<p><strong>More resonance</strong> — raise <code>resonance</code> towards <code>0.9</code>. The filter starts to ring, giving a sharp, acidic edge. Combined with a slow filter envelope, this produces the squelchy sound associated with the TB-303.</p>
+<p><strong>Different waveform blend</strong> — change the mix to <code>osc.sawtooth -[1.0]-&gt;</code> and remove the square entirely for a classic sawtooth lead. Or use <code>osc.triangle</code> for a softer, flute-like quality.</p>
+<p><strong>Wider vibrato</strong> — increase the scale on the vibrato connection to <code>0.1</code> and slow the rate to <code>3.0</code>. This gives a more expressive, vocal-like pitch movement.</p>
+<p>Each of these changes takes effect on the next save. The oscillator phases, envelope positions, and filter states all carry over — you hear the change, not a restart.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="live-coding-and-hot-reload"><a class="header" href="#live-coding-and-hot-reload">Live coding and hot-reload</a></h1>
+<p>The player watches your <code>.patches</code> file for changes. When you save, it parses the new file, builds a new execution plan, and hands it to the audio thread — all without stopping the audio stream. This chapter explains what happens during that handoff, what state is preserved, and how to think about it while performing.</p>
+<h2 id="the-reload-cycle"><a class="header" href="#the-reload-cycle">The reload cycle</a></h2>
+<ol>
+<li>You edit the <code>.patches</code> file and save.</li>
+<li>The file watcher detects the change and hands the new source to the DSL parser.</li>
+<li>The parser produces a flat list of module declarations and connections.</li>
+<li>The interpreter validates this against the module registry — checking that module types exist, ports are real, parameter types and ranges are correct, and cable kinds (mono/poly) match.</li>
+<li>If validation fails, the error is printed to stderr and the running patch continues unchanged.</li>
+<li>If validation succeeds, the planner builds a new execution plan.</li>
+<li>The plan is sent to the audio thread via a lock-free ring buffer. The audio thread picks it up at the start of its next processing block and swaps it in.</li>
+</ol>
+<p>The audio stream never stops. There is no gap, no fade-out-and-fade-in. The new plan takes effect between two consecutive samples.</p>
+<h2 id="what-survives"><a class="header" href="#what-survives">What survives</a></h2>
+<p>The planner matches modules in the new patch against those in the running patch by <strong>name and type</strong>. A module named <code>osc</code> of type <code>PolyOsc</code> in the old patch will be matched to a module named <code>osc</code> of type <code>PolyOsc</code> in the new patch. When a match is found, the running module instance is carried forward — its internal state is untouched.</p>
+<p>This means:</p>
+<ul>
+<li><strong>Oscillator phase</strong> carries over. A 440 Hz oscillator that has been running for ten seconds will continue from its current phase position, not restart from zero.</li>
+<li><strong>Filter state</strong> carries over. The filter’s internal delay buffers (which determine its current resonant behaviour) are preserved.</li>
+<li><strong>Envelope position</strong> carries over. An envelope in its sustain phase stays in sustain.</li>
+<li><strong>Delay buffers</strong> carry over. A delay line full of audio retains its contents.</li>
+</ul>
+<p>The practical effect is that parameter changes sound smooth. Changing a filter cutoff mid-note produces a continuous sweep, not an abrupt reset.</p>
+<h2 id="what-resets"><a class="header" href="#what-resets">What resets</a></h2>
+<p>A module is <strong>not</strong> matched — and is freshly instantiated — when:</p>
+<ul>
+<li>It is new in the patch (did not exist before).</li>
+<li>Its type changed (e.g. you replaced <code>Osc</code> with <code>PolyOsc</code>). The names match but the types do not, so the old instance cannot be reused.</li>
+<li>Its name changed (e.g. you renamed <code>osc</code> to <code>oscillator</code>). From the planner’s perspective this is a different module.</li>
+</ul>
+<p>Freshly instantiated modules start from their initial state: oscillator phase at zero, envelopes idle, delay buffers empty.</p>
+<p>Modules that existed in the old patch but are absent from the new patch are removed. Their memory is reclaimed on a background thread so the audio thread does not have to deallocate anything.</p>
+<h2 id="parameter-updates"><a class="header" href="#parameter-updates">Parameter updates</a></h2>
+<p>When a surviving module’s parameters change (e.g. you edited <code>cutoff: 600Hz</code> to <code>cutoff: 800Hz</code>), the new values are applied to the existing instance. The module is not reinstantiated — only its parameter fields are updated. Most modules respond to parameter changes immediately on the next sample. Some (like filters) recompute their coefficients periodically, so a parameter change may take effect over a few samples rather than instantaneously, which actually sounds more natural.</p>
+<h2 id="connectivity-changes"><a class="header" href="#connectivity-changes">Connectivity changes</a></h2>
+<p>When you add, remove, or reroute cables, the affected modules are notified of their new port assignments. Modules that care about connectivity (e.g. an oscillator that skips computing an output waveform if nothing is connected to it) can adapt accordingly. The cable pool itself is stable — unchanged cables keep their buffer slots, so signals on cables that were not rewired continue without interruption.</p>
+<h2 id="error-recovery"><a class="header" href="#error-recovery">Error recovery</a></h2>
+<p>If the new patch file has a syntax error or fails validation, the running patch is unaffected. The error is printed to stderr with file position information (line and column). You can fix the error and save again; the next successful parse will trigger a reload as normal.</p>
+<p>This means you can make speculative edits freely. A half-finished connection or a misspelled module type will not crash the running audio — it will just fail to reload, and you can correct it.</p>
+<h2 id="thinking-about-identity"><a class="header" href="#thinking-about-identity">Thinking about identity</a></h2>
+<p>The matching rule — same name, same type — is the key mental model. If you want a module to survive a reload, keep its name and type the same. If you want it to reset, change one of them. A common pattern is renaming a module temporarily to force a reset (clearing a delay buffer, for example), then renaming it back.</p>
+<p>Structural changes — adding new modules, removing old ones, rewiring — are all fine and happen smoothly. The only thing the planner cannot carry across is a change in a module’s fundamental identity.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="dsl-reference"><a class="header" href="#dsl-reference">DSL reference</a></h1>
+<p>This is the complete syntax reference for <code>.patches</code> files. It assumes familiarity with the concepts in <a href="#building-a-patch">Building a patch</a>.</p>
+<h2 id="file-structure"><a class="header" href="#file-structure">File structure</a></h2>
+<p>A patch file contains zero or more template definitions followed by exactly one <code>patch</code> block. Comments run from <code>#</code> to end of line. Whitespace is insignificant.</p>
+<pre><code class="language-patches"># optional templates
+template voice(...) {
+    ...
+}
+
+# required: exactly one patch block
+patch {
+    ...
+}
+</code></pre>
+<h2 id="module-declarations"><a class="header" href="#module-declarations">Module declarations</a></h2>
+<pre><code>module &lt;name&gt; : &lt;Type&gt;
+module &lt;name&gt; : &lt;Type&gt; { &lt;params&gt; }
+module &lt;name&gt; : &lt;Type&gt;(&lt;shape-args&gt;) { &lt;params&gt; }
+</code></pre>
+<ul>
+<li><strong>name</strong> — an identifier (<code>[a-zA-Z_][a-zA-Z0-9_-]*</code>). Used for connections and for identity matching across hot-reloads.</li>
+<li><strong>Type</strong> — the module type name as registered in the module registry (e.g. <code>Osc</code>, <code>PolyAdsr</code>, <code>Sum</code>).</li>
+<li><strong>shape-args</strong> — key-value pairs that control port arity. Written in parentheses before the parameter braces: <code>Sum(channels: 3)</code>.</li>
+<li><strong>params</strong> — key-value pairs configuring the module’s parameters.</li>
+</ul>
+<h3 id="parameter-syntax"><a class="header" href="#parameter-syntax">Parameter syntax</a></h3>
+<p>Parameters are comma-separated <code>key: value</code> pairs:</p>
+<pre><code class="language-patches">module env : Adsr { attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.3 }
+</code></pre>
+<p>Indexed parameters use bracket notation:</p>
+<pre><code class="language-patches">module mix : StereoMixer(channels: 4) { level[0]: 0.8, pan[0]: -0.5 }
+</code></pre>
+<p>At-block syntax groups parameters by index:</p>
+<pre><code class="language-patches">module dly : Delay(channels: 2) {
+    @0: { delay_ms: 250, feedback: 0.4 },
+    @1: { delay_ms: 375, feedback: 0.3 }
+}
+</code></pre>
+<p>When the module shape defines named aliases, those can be used instead of numeric indices:</p>
+<pre><code class="language-patches">module mix : Mixer(channels: [drums, bass, lead]) {
+    @drums: { level: 0.8 },
+    @bass:  { level: 0.6 }
+}
+</code></pre>
+<h3 id="parameter-value-types"><a class="header" href="#parameter-value-types">Parameter value types</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Syntax</th><th>Type</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>440.0</code></td><td>float</td><td>bare decimal</td></tr>
+<tr><td><code>2</code></td><td>int</td><td>bare integer</td></tr>
+<tr><td><code>440Hz</code></td><td>frequency</td><td>converted to V/oct; also <code>2.5kHz</code></td></tr>
+<tr><td><code>-6dB</code></td><td>amplitude</td><td>converted to linear (0 dB = 1.0, -6 dB ≈ 0.5)</td></tr>
+<tr><td><code>C4</code>, <code>A#3</code>, <code>Bb2</code></td><td>note name</td><td>converted to V/oct</td></tr>
+<tr><td><code>true</code> / <code>false</code></td><td>boolean</td><td></td></tr>
+<tr><td><code>linear</code></td><td>string</td><td>unquoted; <code>"linear"</code> also works</td></tr>
+<tr><td><code>"hello world"</code></td><td>string</td><td>quotes required if value contains spaces</td></tr>
+<tr><td><code>[1, 2, 3]</code></td><td>array</td><td></td></tr>
+</tbody>
+</table>
+</div>
+<p>Frequency, note, and dB literals are case-insensitive. There is no time-unit suffix; durations are bare floats in seconds.</p>
+<h2 id="connections"><a class="header" href="#connections">Connections</a></h2>
+<h3 id="forward-connection"><a class="header" href="#forward-connection">Forward connection</a></h3>
+<pre><code class="language-patches">osc.sine -&gt; out.in_left
+</code></pre>
+<h3 id="scaled-forward-connection"><a class="header" href="#scaled-forward-connection">Scaled forward connection</a></h3>
+<pre><code class="language-patches">osc.sine -[0.5]-&gt; out.in_left
+</code></pre>
+<p>The scale factor is a float multiplied onto the signal at the cable level.</p>
+<h3 id="backward-connection"><a class="header" href="#backward-connection">Backward connection</a></h3>
+<pre><code class="language-patches">$.audio &lt;- vca.out
+$.audio &lt;-[0.5]- vca.out
+</code></pre>
+<p><code>&lt;-</code> connects from right to left. Primarily useful inside templates for wiring boundary ports. The scaled form uses <code>&lt;-[scale]-</code>.</p>
+<h3 id="indexed-ports-1"><a class="header" href="#indexed-ports-1">Indexed ports</a></h3>
+<pre><code class="language-patches">osc_a.sine -&gt; mix.in[0]
+osc_b.sine -&gt; mix.in[1]
+</code></pre>
+<p>The index in brackets selects which slot of a multi-port to connect.</p>
+<h3 id="arity-expansion"><a class="header" href="#arity-expansion">Arity expansion</a></h3>
+<pre><code class="language-patches">$.audio[*size] -&gt; sum.in[*size]
+</code></pre>
+<p>The <code>[*name]</code> wildcard expands into one connection per index from 0 to <code>name - 1</code>. Only valid inside templates where <code>name</code> is an int parameter.</p>
+<h3 id="rules"><a class="header" href="#rules">Rules</a></h3>
+<ul>
+<li>Each input port accepts exactly one cable. A second connection to the same input is an error.</li>
+<li>An output port can drive any number of inputs.</li>
+<li>Mono outputs can only connect to mono inputs; poly to poly. Use <code>MonoToPoly</code> / <code>PolyToMono</code> to bridge.</li>
+</ul>
+<h2 id="templates"><a class="header" href="#templates">Templates</a></h2>
+<p>Templates define reusable sub-graphs that are expanded at compile time with no runtime cost.</p>
+<h3 id="definition"><a class="header" href="#definition">Definition</a></h3>
+<pre><code class="language-patches">template voice(attack: float = 0.01, decay: float = 0.1, sustain: float = 0.7) {
+    in:  voct, gate
+    out: audio
+
+    module osc : Osc
+    module env : Adsr { attack: &lt;attack&gt;, decay: &lt;decay&gt;, sustain: &lt;sustain&gt;, release: 0.3 }
+    module vca : Vca
+
+    $.voct    -&gt; osc.voct
+    $.gate    -&gt; env.gate
+    osc.sine  -&gt; vca.in
+    env.out   -&gt; vca.cv
+    $.audio   &lt;- vca.out
+}
+</code></pre>
+<ul>
+<li><strong>Parameters</strong> are typed: <code>float</code>, <code>int</code>, <code>str</code>, <code>bool</code>. Parameters with <code>= default</code> are optional at the call site; those without are required.</li>
+<li><strong>Boundary ports</strong> are declared with <code>in:</code> and <code>out:</code> lists. Inside the template body, <code>$.name</code> refers to a boundary port.</li>
+<li><strong>Parameter references</strong> <code>&lt;name&gt;</code> substitute the parameter’s value anywhere in the template body: in parameter values (<code>{ attack: &lt;attack&gt; }</code>), port names (<code>osc.&lt;wave&gt;</code>), and cable scales (<code>-[&lt;gain&gt;]-&gt;</code>).</li>
+</ul>
+<h3 id="instantiation"><a class="header" href="#instantiation">Instantiation</a></h3>
+<pre><code class="language-patches">patch {
+    module v1 : voice(attack: 0.005, sustain: 0.6)
+    module v2 : voice    # all defaults
+
+    v1.audio -&gt; out.in_left
+    v2.audio -&gt; out.in_right
+}
+</code></pre>
+<p>Each instantiation expands to a separate copy of the template’s modules with mangled names to avoid collisions.</p>
+<h3 id="parameter-types"><a class="header" href="#parameter-types">Parameter types</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Accepts</th></tr>
+</thead>
+<tbody>
+<tr><td><code>float</code></td><td>numeric values (int-to-float coercion allowed)</td></tr>
+<tr><td><code>int</code></td><td>integer values</td></tr>
+<tr><td><code>str</code></td><td>string values</td></tr>
+<tr><td><code>bool</code></td><td><code>true</code> / <code>false</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Type checking is strict. A <code>float</code> parameter rejects <code>true</code>; a <code>bool</code> rejects <code>0</code>.</p>
+<h3 id="arity-parameters"><a class="header" href="#arity-parameters">Arity parameters</a></h3>
+<p>A template parameter can control the number of ports:</p>
+<pre><code class="language-patches">template mixer(size: int, level[size]: float = 1.0) {
+    in: audio[size]
+    out: mixed
+
+    module sum : Sum(channels: &lt;size&gt;)
+
+    $.audio[*size] -&gt; sum.in[*size]
+    $.mixed        &lt;- sum.out
+}
+</code></pre>
+<p>The <code>[*size]</code> expansion generates one connection per index, scaling automatically with the arity.</p>
+<h3 id="scale-composition"><a class="header" href="#scale-composition">Scale composition</a></h3>
+<p>When a scaled connection crosses a template boundary, the scales are multiplied. A connection <code>-[0.5]-&gt;</code> into a template that internally has <code>-[0.3]-&gt;</code> produces an effective scale of 0.15 at the underlying cable.</p>
+<h3 id="nesting"><a class="header" href="#nesting">Nesting</a></h3>
+<p>Templates can instantiate other templates. A <code>filtered_voice</code> template can contain <code>module v : voice(...)</code> and add further processing. Expansion is recursive — the outermost template is fully flattened before the patch is built.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="module-reference"><a class="header" href="#module-reference">Module reference</a></h1>
+<p>Each module type is documented with its ports, parameters, and behaviour. The canonical source of truth for port names and parameter ranges is the doc comment on each module struct in <code>patches-modules/src/</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category</th><th>Modules</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#oscillators">Oscillators</a></td><td><code>Osc</code>, <code>PolyOsc</code>, <code>Lfo</code></td><td>Waveform generation</td></tr>
+<tr><td><a href="#envelopes">Envelopes</a></td><td><code>Adsr</code>, <code>PolyAdsr</code></td><td>Amplitude and modulation shaping</td></tr>
+<tr><td><a href="#filters">Filters</a></td><td><code>Lowpass</code>, <code>Highpass</code>, <code>PolyLowpass</code>, <code>PolyHighpass</code></td><td>Frequency-dependent attenuation</td></tr>
+<tr><td><a href="#amplifiers--vcas">Amplifiers &amp; VCAs</a></td><td><code>Vca</code>, <code>PolyVca</code>, <code>StereoVca</code></td><td>Voltage-controlled amplitude</td></tr>
+<tr><td><a href="#mixers">Mixers</a></td><td><code>Sum</code>, <code>PolySum</code>, <code>StereoMixer</code>, <code>MonoToMono</code></td><td>Signal summing and routing</td></tr>
+<tr><td><a href="#noise-generators">Noise</a></td><td><code>Noise</code></td><td>White, pink, brown, and red noise</td></tr>
+<tr><td><a href="#sequencers--clocks">Sequencers &amp; clocks</a></td><td><code>Clock</code></td><td>Tempo-locked trigger generation</td></tr>
+<tr><td><a href="#midi-input-1">MIDI</a></td><td><code>MidiIn</code>, <code>PolyMidiIn</code></td><td>MIDI keyboard and controller input</td></tr>
+<tr><td><a href="#delays--reverb">Delays &amp; reverb</a></td><td><code>Delay</code></td><td>Multi-tap delay with feedback</td></tr>
+<tr><td><a href="#dynamics">Dynamics</a></td><td><code>Limiter</code></td><td>Lookahead peak limiting</td></tr>
+<tr><td><a href="#utilities">Utilities</a></td><td><code>Glide</code>, <code>MonoToPoly</code>, <code>PolyToMono</code></td><td>Signal conversion and smoothing</td></tr>
+<tr><td><a href="#audio-output">Output</a></td><td><code>AudioOut</code></td><td>Stereo audio output (required)</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="oscillators"><a class="header" href="#oscillators">Oscillators</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="osc--mono-oscillator"><a class="header" href="#osc--mono-oscillator"><code>Osc</code> — Mono oscillator</a></h2>
+<p>A single-voice oscillator with multiple waveform outputs.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>frequency</code></td><td>float (v/oct)</td><td><code>0.0</code></td><td>Base pitch as V/oct above C0 (0.0 = C0 ≈ 16.35 Hz). Hz/kHz literals are converted to V/oct at parse time (<code>440Hz</code> → <code>≈4.75</code>); bare floats are used as V/oct directly.</td></tr>
+<tr><td><code>drift</code></td><td>float</td><td><code>0.0</code></td><td>Slow random pitch drift amount (0 = off, 1 = max)</td></tr>
+<tr><td><code>fm_type</code></td><td>string</td><td><code>linear</code></td><td>FM response: <code>linear</code> or <code>logarithmic</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>V/oct pitch offset (added to <code>frequency</code> at runtime)</td></tr>
+<tr><td><code>fm</code></td><td>Frequency modulation input</td></tr>
+<tr><td><code>pulse_width_cv</code></td><td>Pulse width control for square wave (−1 to +1; maps to 0–99% duty cycle)</td></tr>
+<tr><td><code>phase_mod</code></td><td>Phase modulation offset (0–1, fraction of a cycle; wraps)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sine</code></td><td>Sine wave</td></tr>
+<tr><td><code>triangle</code></td><td>Triangle wave</td></tr>
+<tr><td><code>sawtooth</code></td><td>Sawtooth wave (PolyBLEP anti-aliased)</td></tr>
+<tr><td><code>square</code></td><td>Square wave (PolyBLEP anti-aliased; duty cycle set by <code>pulse_width_cv</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polyosc--polyphonic-oscillator"><a class="header" href="#polyosc--polyphonic-oscillator"><code>PolyOsc</code> — Polyphonic oscillator</a></h2>
+<p>Per-voice oscillator. Each voice runs independently at the pitch set by the
+<code>voct</code> poly cable.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>frequency</code></td><td>float (v/oct)</td><td><code>0.0</code></td><td>Base pitch as V/oct above C0 (0.0 = C0 ≈ 16.35 Hz). Hz/kHz literals are converted at parse time; bare floats are used as V/oct directly.</td></tr>
+<tr><td><code>drift</code></td><td>float</td><td><code>0.0</code></td><td>Slow random pitch drift amount, independent per voice (0 = off, 1 = max)</td></tr>
+<tr><td><code>fm_type</code></td><td>string</td><td><code>linear</code></td><td>FM response: <code>linear</code> or <code>logarithmic</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>Per-voice V/oct pitch offset (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM input (poly)</td></tr>
+<tr><td><code>pulse_width_cv</code></td><td>Per-voice pulse width control for square wave (poly)</td></tr>
+<tr><td><code>phase_mod</code></td><td>Per-voice phase modulation (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sine</code></td><td>Per-voice sine (poly)</td></tr>
+<tr><td><code>triangle</code></td><td>Per-voice triangle (poly)</td></tr>
+<tr><td><code>sawtooth</code></td><td>Per-voice sawtooth, PolyBLEP anti-aliased (poly)</td></tr>
+<tr><td><code>square</code></td><td>Per-voice square, PolyBLEP anti-aliased (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="lfo--low-frequency-oscillator"><a class="header" href="#lfo--low-frequency-oscillator"><code>Lfo</code> — Low-frequency oscillator</a></h2>
+<p>Multi-waveform LFO intended for modulation signals. Runs at audio rate.</p>
+<p><code>rate</code> is a frequency in Hz (range 0.01–20.0 Hz, default 1.0 Hz). This is
+<strong>not</strong> a V/oct value — it is a plain frequency. <code>rate_cv</code> adds linearly to
+<code>rate</code> in Hz (effective rate is clamped to 0.001–40.0 Hz).</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>rate</code></td><td>float (Hz)</td><td><code>1.0</code></td><td>Rate in Hz (0.01–20.0)</td></tr>
+<tr><td><code>phase_offset</code></td><td>float</td><td><code>0.0</code></td><td>Phase offset (0–1, fraction of a cycle)</td></tr>
+<tr><td><code>mode</code></td><td>string</td><td><code>bipolar</code></td><td>Output polarity: <code>bipolar</code> (−1 to +1), <code>unipolar_positive</code> (0 to +1), <code>unipolar_negative</code> (−1 to 0)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sync</code></td><td>Rising edge resets phase to zero</td></tr>
+<tr><td><code>rate_cv</code></td><td>Added linearly to <code>rate</code> (Hz); effective rate clamped to 0.001–40.0 Hz</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>sine</code></td><td>Sine wave</td></tr>
+<tr><td><code>triangle</code></td><td>Triangle wave</td></tr>
+<tr><td><code>saw_up</code></td><td>Rising sawtooth</td></tr>
+<tr><td><code>saw_down</code></td><td>Falling sawtooth</td></tr>
+<tr><td><code>square</code></td><td>Square wave (50% duty cycle)</td></tr>
+<tr><td><code>random</code></td><td>Sample-and-hold random value, updated once per cycle</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="envelopes"><a class="header" href="#envelopes">Envelopes</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="adsr--mono-adsr-envelope"><a class="header" href="#adsr--mono-adsr-envelope"><code>Adsr</code> — Mono ADSR envelope</a></h2>
+<p>A standard Attack-Decay-Sustain-Release envelope generator.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>attack</code></td><td>float (s)</td><td><code>0.01</code></td><td>Attack time in seconds</td></tr>
+<tr><td><code>decay</code></td><td>float (s)</td><td><code>0.1</code></td><td>Decay time in seconds</td></tr>
+<tr><td><code>sustain</code></td><td>float</td><td><code>0.7</code></td><td>Sustain level (0–1)</td></tr>
+<tr><td><code>release</code></td><td>float (s)</td><td><code>0.3</code></td><td>Release time in seconds</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>Rising edge starts the attack</td></tr>
+<tr><td><code>gate</code></td><td>High = sustain; falling edge starts release</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Envelope value (0–1)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polyadsr--per-voice-adsr"><a class="header" href="#polyadsr--per-voice-adsr"><code>PolyAdsr</code> — Per-voice ADSR</a></h2>
+<p>Same as <code>Adsr</code> but operates independently on each polyphonic voice.</p>
+<p><strong>Parameters</strong> — same as <code>Adsr</code>.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>Per-voice trigger (poly)</td></tr>
+<tr><td><code>gate</code></td><td>Per-voice gate (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice envelope (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="filters"><a class="header" href="#filters">Filters</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<p>All filter modules implement a resonant biquad (Transposed Direct Form II).</p>
+<blockquote>
+<p><strong>Note:</strong> The legacy <code>Filter</code> module name is no longer supported. Use
+<code>Lowpass</code> instead.</p>
+</blockquote>
+<hr>
+<h2 id="lowpass--highpass"><a class="header" href="#lowpass--highpass"><code>Lowpass</code> / <code>Highpass</code></a></h2>
+<p>Mono resonant filters.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cutoff</code></td><td>float (V/oct)</td><td><code>6.0</code></td><td>Cutoff as V/oct above C0: <code>0.0</code> = C0 (≈16 Hz), <code>4.0</code> = C4 (≈262 Hz), <code>6.0</code> = C6 (≈1047 Hz). <code>Hz</code>/<code>kHz</code> literals are accepted and converted at parse time.</td></tr>
+<tr><td><code>resonance</code></td><td>float</td><td><code>0.0</code></td><td>Resonance (0–1; approaching 1 = self-oscillation)</td></tr>
+<tr><td><code>saturate</code></td><td>bool</td><td><code>false</code></td><td>Apply soft-clip saturation in the feedback path</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>voct</code></td><td>V/oct offset added to <code>cutoff</code>; 1.0 = +1 octave</td></tr>
+<tr><td><code>fm</code></td><td>FM sweep: ±1 sweeps ±4 octaves around <code>cutoff</code></td></tr>
+<tr><td><code>resonance_cv</code></td><td>Added to <code>resonance</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Filtered audio</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="bandpass"><a class="header" href="#bandpass"><code>Bandpass</code></a></h2>
+<p>Mono resonant bandpass filter.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>center</code></td><td>float (V/oct)</td><td><code>6.0</code></td><td>Centre frequency as V/oct above C0: <code>0.0</code> = C0 (≈16 Hz), <code>4.0</code> = C4 (≈262 Hz), <code>6.0</code> = C6 (≈1047 Hz). <code>Hz</code>/<code>kHz</code> literals are accepted and converted at parse time.</td></tr>
+<tr><td><code>bandwidth_q</code></td><td>float</td><td><code>1.0</code></td><td>Bandwidth Q (0.1–20; higher = narrower band)</td></tr>
+<tr><td><code>saturate</code></td><td>bool</td><td><code>false</code></td><td>Apply soft-clip saturation in the feedback path</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>voct</code></td><td>V/oct offset added to <code>center</code>; 1.0 = +1 octave</td></tr>
+<tr><td><code>fm</code></td><td>FM sweep: ±1 sweeps ±4 octaves around <code>center</code></td></tr>
+<tr><td><code>resonance_cv</code></td><td>Added to <code>bandwidth_q</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Filtered audio</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polylowpass--polyhighpass"><a class="header" href="#polylowpass--polyhighpass"><code>PolyLowpass</code> / <code>PolyHighpass</code></a></h2>
+<p>Per-voice versions of <code>Lowpass</code> / <code>Highpass</code>. Each voice maintains
+independent biquad state. Same parameters as their mono counterparts.
+CV inputs carry poly cables; modulation is applied per-voice.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Per-voice audio (poly)</td></tr>
+<tr><td><code>voct</code></td><td>Per-voice V/oct offset added to <code>cutoff</code>; 1.0 = +1 octave (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM sweep: ±1 sweeps ±4 octaves around <code>cutoff</code> (poly)</td></tr>
+<tr><td><code>resonance_cv</code></td><td>Per-voice resonance modulation (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice filtered audio (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<hr>
+<h2 id="svf"><a class="header" href="#svf"><code>Svf</code></a></h2>
+<p>Mono State Variable Filter (Chamberlin topology). Produces lowpass, highpass,
+and bandpass outputs simultaneously from a single audio input. All three outputs
+can be used at once — they share the same two integrator state variables and cost
+no extra computation per connected output.</p>
+<p>Unlike the biquad filters above, <code>Svf</code> is capable of <strong>self-oscillation</strong>: at
+high <code>q</code> values the filter will sustain a sine wave at the cutoff frequency
+without any audio input. Noise or other signals act as an exciter to kick the
+filter into ringing.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cutoff</code></td><td>float (V/oct)</td><td><code>6.0</code></td><td>Cutoff as V/oct above C0: <code>0.0</code> = C0 (≈16 Hz), <code>4.0</code> = C4 (≈262 Hz), <code>6.0</code> = C6 (≈1047 Hz). <code>Hz</code>/<code>kHz</code> literals are accepted and converted at parse time.</td></tr>
+<tr><td><code>q</code></td><td>float</td><td><code>0.0</code></td><td>Resonance (0–1). The mapping is exponential: values below 0.5 give moderate resonance; above 0.9 the filter enters self-oscillation territory (Q ≈ 70–100).</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>voct</code></td><td>V/oct offset added to <code>cutoff</code>; 1.0 = +1 octave</td></tr>
+<tr><td><code>fm</code></td><td>FM sweep: ±1 sweeps ±4 octaves around <code>cutoff</code></td></tr>
+<tr><td><code>q_cv</code></td><td>Added to <code>q</code> before clamping to [0, 1]</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>lowpass</code></td><td>Lowpass output</td></tr>
+<tr><td><code>highpass</code></td><td>Highpass output</td></tr>
+<tr><td><code>bandpass</code></td><td>Bandpass output</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Warning:</strong> At <code>q</code> values above ≈ 0.95 the filter self-oscillates. Loud
+audio input at those settings can drive the output to clip. Scale the output
+down or use a VCA after the filter if this is a concern.</p>
+</blockquote>
+<hr>
+<h2 id="polysvf"><a class="header" href="#polysvf"><code>PolySvf</code></a></h2>
+<p>Per-voice version of <code>Svf</code>. Each voice maintains independent integrator state.
+All parameters and CV semantics are identical to <code>Svf</code>; all ports carry poly
+cables.</p>
+<p><strong>Parameters</strong></p>
+<p>Same as <code>Svf</code>: <code>cutoff</code> and <code>q</code>.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Per-voice audio (poly)</td></tr>
+<tr><td><code>voct</code></td><td>Per-voice V/oct offset added to <code>cutoff</code> (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM sweep: ±1 sweeps ±4 octaves around <code>cutoff</code> (poly)</td></tr>
+<tr><td><code>q_cv</code></td><td>Per-voice additive Q offset, clamped to [0, 1] (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>lowpass</code></td><td>Per-voice lowpass output (poly)</td></tr>
+<tr><td><code>highpass</code></td><td>Per-voice highpass output (poly)</td></tr>
+<tr><td><code>bandpass</code></td><td>Per-voice bandpass output (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polybandpass"><a class="header" href="#polybandpass"><code>PolyBandpass</code></a></h2>
+<p>Per-voice version of <code>Bandpass</code>. Same parameters as <code>Bandpass</code>.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Per-voice audio (poly)</td></tr>
+<tr><td><code>voct</code></td><td>Per-voice V/oct offset added to <code>center</code>; 1.0 = +1 octave (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM sweep: ±1 sweeps ±4 octaves around <code>center</code> (poly)</td></tr>
+<tr><td><code>resonance_cv</code></td><td>Per-voice bandwidth_q modulation (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice filtered audio (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="amplifiers--vcas"><a class="header" href="#amplifiers--vcas">Amplifiers &amp; VCAs</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="vca--mono-voltage-controlled-amplifier"><a class="header" href="#vca--mono-voltage-controlled-amplifier"><code>Vca</code> — Mono voltage-controlled amplifier</a></h2>
+<p>Multiplies an audio signal by a control signal.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>cv</code></td><td>Control voltage (0–1 typical)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td><code>in × cv</code></td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polyvca--per-voice-vca"><a class="header" href="#polyvca--per-voice-vca"><code>PolyVca</code> — Per-voice VCA</a></h2>
+<p>Same as <code>Vca</code> but operates on poly cables, multiplying each voice independently.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Per-voice audio (poly)</td></tr>
+<tr><td><code>cv</code></td><td>Per-voice control voltage (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice <code>in × cv</code> (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mixers"><a class="header" href="#mixers">Mixers</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<hr>
+<h2 id="sum--unweighted-mono-sum"><a class="header" href="#sum--unweighted-mono-sum"><code>Sum</code> — Unweighted mono sum</a></h2>
+<p>Sums N mono inputs into one mono output with no level control.</p>
+<pre><code class="language-patches">module mix : Sum(channels: 4)
+</code></pre>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Mono inputs</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Sum of all inputs</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="mixer--mono-mixer-with-sends-and-mutesolo"><a class="header" href="#mixer--mono-mixer-with-sends-and-mutesolo"><code>Mixer</code> — Mono mixer with sends and mute/solo</a></h2>
+<p>N-channel mono mixer. Each channel has level CV, two auxiliary send buses,
+and mute/solo. If any channel is soloed, only soloed (non-muted) channels
+contribute to the output.</p>
+<pre><code class="language-patches">module mix : Mixer(channels: 4)
+</code></pre>
+<p><strong>Parameters</strong> (all indexed per channel)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>level[n]</code></td><td>float</td><td><code>1.0</code></td><td>Channel gain (0–1)</td></tr>
+<tr><td><code>send_a[n]</code></td><td>float</td><td><code>0.0</code></td><td>Send A amount (0–1)</td></tr>
+<tr><td><code>send_b[n]</code></td><td>float</td><td><code>0.0</code></td><td>Send B amount (0–1)</td></tr>
+<tr><td><code>mute[n]</code></td><td>bool</td><td><code>false</code></td><td>Mute this channel</td></tr>
+<tr><td><code>solo[n]</code></td><td>bool</td><td><code>false</code></td><td>Solo this channel</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Mono audio inputs</td></tr>
+<tr><td><code>level_cv[0]</code> … <code>level_cv[n-1]</code></td><td>Per-channel level CV (added to <code>level</code>)</td></tr>
+<tr><td><code>send_a_cv[0]</code> … <code>send_a_cv[n-1]</code></td><td>Per-channel send A CV</td></tr>
+<tr><td><code>send_b_cv[0]</code> … <code>send_b_cv[n-1]</code></td><td>Per-channel send B CV</td></tr>
+<tr><td><code>return_a</code></td><td>Return input added to main output</td></tr>
+<tr><td><code>return_b</code></td><td>Return input added to main output</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Main mono mix</td></tr>
+<tr><td><code>send_a</code></td><td>Send A bus output</td></tr>
+<tr><td><code>send_b</code></td><td>Send B bus output</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="stereomixer--stereo-mixer-with-pan-sends-and-mutesolo"><a class="header" href="#stereomixer--stereo-mixer-with-pan-sends-and-mutesolo"><code>StereoMixer</code> — Stereo mixer with pan, sends and mute/solo</a></h2>
+<p>N-channel stereo mixer. Each channel has level, pan, two send buses, and
+mute/solo.</p>
+<pre><code class="language-patches">module mix : StereoMixer(channels: 4)
+</code></pre>
+<p><strong>Parameters</strong> (all indexed per channel)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>level[n]</code></td><td>float</td><td><code>1.0</code></td><td>Channel gain (0–1)</td></tr>
+<tr><td><code>pan[n]</code></td><td>float</td><td><code>0.0</code></td><td>Pan (−1 = full left, +1 = full right)</td></tr>
+<tr><td><code>send_a[n]</code></td><td>float</td><td><code>0.0</code></td><td>Send A amount (0–1)</td></tr>
+<tr><td><code>send_b[n]</code></td><td>float</td><td><code>0.0</code></td><td>Send B amount (0–1)</td></tr>
+<tr><td><code>mute[n]</code></td><td>bool</td><td><code>false</code></td><td>Mute this channel</td></tr>
+<tr><td><code>solo[n]</code></td><td>bool</td><td><code>false</code></td><td>Solo this channel</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Mono audio inputs</td></tr>
+<tr><td><code>level_cv[0]</code> … <code>level_cv[n-1]</code></td><td>Per-channel level CV</td></tr>
+<tr><td><code>pan_cv[0]</code> … <code>pan_cv[n-1]</code></td><td>Per-channel pan CV</td></tr>
+<tr><td><code>send_a_cv[0]</code> … <code>send_a_cv[n-1]</code></td><td>Per-channel send A CV</td></tr>
+<tr><td><code>send_b_cv[0]</code> … <code>send_b_cv[n-1]</code></td><td>Per-channel send B CV</td></tr>
+<tr><td><code>return_a_left</code> / <code>return_a_right</code></td><td>Send A stereo return</td></tr>
+<tr><td><code>return_b_left</code> / <code>return_b_right</code></td><td>Send B stereo return</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out_left</code> / <code>out_right</code></td><td>Main stereo output</td></tr>
+<tr><td><code>send_a_left</code> / <code>send_a_right</code></td><td>Send A stereo bus</td></tr>
+<tr><td><code>send_b_left</code> / <code>send_b_right</code></td><td>Send B stereo bus</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polymix--unweighted-poly-sum"><a class="header" href="#polymix--unweighted-poly-sum"><code>PolyMix</code> — Unweighted poly sum</a></h2>
+<p>Sums N poly inputs voice-by-voice with no level control.</p>
+<pre><code class="language-patches">module mix : PolyMix(channels: 2)
+</code></pre>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Poly inputs</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice sum (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polymixer--poly-mixer-with-level-and-mutesolo"><a class="header" href="#polymixer--poly-mixer-with-level-and-mutesolo"><code>PolyMixer</code> — Poly mixer with level and mute/solo</a></h2>
+<p>N-channel poly mixer with per-channel level, mute, and solo. Level CV inputs
+are mono (applied uniformly across all voices of that channel).</p>
+<pre><code class="language-patches">module mix : PolyMixer(channels: 2)
+</code></pre>
+<p><strong>Parameters</strong> (indexed per channel)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>level[n]</code></td><td>float</td><td><code>1.0</code></td><td>Channel gain (0–1)</td></tr>
+<tr><td><code>mute[n]</code></td><td>bool</td><td><code>false</code></td><td>Mute this channel</td></tr>
+<tr><td><code>solo[n]</code></td><td>bool</td><td><code>false</code></td><td>Solo this channel</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Poly audio inputs</td></tr>
+<tr><td><code>level_cv[0]</code> … <code>level_cv[n-1]</code></td><td>Per-channel level CV (mono)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice sum (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="stereopolymixer--stereo-poly-mixer-with-pan-and-mutesolo"><a class="header" href="#stereopolymixer--stereo-poly-mixer-with-pan-and-mutesolo"><code>StereoPolyMixer</code> — Stereo poly mixer with pan and mute/solo</a></h2>
+<p>N-channel stereo poly mixer. Outputs two poly cables (left and right).
+Level and pan CV inputs are mono.</p>
+<pre><code class="language-patches">module mix : StereoPolyMixer(channels: 2)
+</code></pre>
+<p><strong>Parameters</strong> (indexed per channel)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>level[n]</code></td><td>float</td><td><code>1.0</code></td><td>Channel gain (0–1)</td></tr>
+<tr><td><code>pan[n]</code></td><td>float</td><td><code>0.0</code></td><td>Pan (−1 = full left, +1 = full right)</td></tr>
+<tr><td><code>mute[n]</code></td><td>bool</td><td><code>false</code></td><td>Mute this channel</td></tr>
+<tr><td><code>solo[n]</code></td><td>bool</td><td><code>false</code></td><td>Solo this channel</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Poly audio inputs</td></tr>
+<tr><td><code>level_cv[0]</code> … <code>level_cv[n-1]</code></td><td>Per-channel level CV (mono)</td></tr>
+<tr><td><code>pan_cv[0]</code> … <code>pan_cv[n-1]</code></td><td>Per-channel pan CV (mono)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out_left</code></td><td>Per-voice left output (poly)</td></tr>
+<tr><td><code>out_right</code></td><td>Per-voice right output (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polytomono--collapse-poly-to-mono"><a class="header" href="#polytomono--collapse-poly-to-mono"><code>PolyToMono</code> — Collapse poly to mono</a></h2>
+<p>Sums all active voices of a poly cable into a single mono signal.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Poly input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Mono sum of all voices</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="monotopoly--broadcast-mono-to-all-voices"><a class="header" href="#monotopoly--broadcast-mono-to-all-voices"><code>MonoToPoly</code> — Broadcast mono to all voices</a></h2>
+<p>Copies a mono signal into every voice slot of a poly cable.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Mono input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Poly cable (same value in every voice)</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="noise-generators"><a class="header" href="#noise-generators">Noise generators</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="noise--mono-noise-generator"><a class="header" href="#noise--mono-noise-generator"><code>Noise</code> — Mono noise generator</a></h2>
+<p>Four coloured noise outputs from a single module. Only connected outputs are
+computed, so unused colours have no CPU cost.</p>
+<p>The four outputs span a range of spectral slopes. White noise is the source for
+all other colours: pink is derived by filtering white, brown by integrating
+white, and red by integrating brown.</p>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Spectrum</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>white</code></td><td>flat</td><td>Uncorrelated samples, equal energy per Hz band</td></tr>
+<tr><td><code>pink</code></td><td>−3 dB/oct (1/f)</td><td>Equal energy per octave; useful for natural-sounding randomness and modulation</td></tr>
+<tr><td><code>brown</code></td><td>−6 dB/oct (1/f²)</td><td>Random-walk integration of white; deep, slow-moving character</td></tr>
+<tr><td><code>red</code></td><td>−9 dB/oct (1/f³)</td><td>Integration of brown; very slow drift, sub-bass emphasis</td></tr>
+</tbody>
+</table>
+</div>
+<p>All outputs are in the range <code>[−1, 1]</code>. Each instance has its own PRNG state
+seeded from the module’s instance ID, so two <code>Noise</code> modules in the same patch
+produce independent signals.</p>
+<p><strong>Example — white noise as a sound source</strong></p>
+<pre><code class="language-text">Noise noise
+AudioOut out
+
+noise.white -&gt; out.in_left
+noise.white -&gt; out.in_right
+</code></pre>
+<p><strong>Example — pink noise for modulation</strong></p>
+<pre><code class="language-text">Noise lfo_noise
+Vca filter_env { frequency: 440Hz }
+
+lfo_noise.pink -&gt; filter_env.cv
+</code></pre>
+<hr>
+<h2 id="polynoise--polyphonic-noise-generator"><a class="header" href="#polynoise--polyphonic-noise-generator"><code>PolyNoise</code> — Polyphonic noise generator</a></h2>
+<p>Identical to <code>Noise</code> but with poly outputs. Each voice has its own independent
+PRNG and filter state, so voices are uncorrelated with each other and with any
+<code>Noise</code> instance.</p>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Spectrum</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>white</code></td><td>flat</td><td>Per-voice white noise (poly)</td></tr>
+<tr><td><code>pink</code></td><td>−3 dB/oct (1/f)</td><td>Per-voice pink noise (poly)</td></tr>
+<tr><td><code>brown</code></td><td>−6 dB/oct (1/f²)</td><td>Per-voice brown noise (poly)</td></tr>
+<tr><td><code>red</code></td><td>−9 dB/oct (1/f³)</td><td>Per-voice red noise (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>PolyNoise</code> is useful for adding independent per-voice variation to polyphonic
+patches — for example, routing the <code>white</code> output through a <code>PolyVca</code> to add
+noise to each voice’s amplitude independently.</p>
+<p><strong>Example — per-voice breath noise</strong></p>
+<pre><code class="language-text">PolyNoise src
+PolyVca noise_vca
+PolyAdsr env { attack: 5ms, decay: 100ms, sustain: 0.2, release: 200ms }
+PolyMidiIn midi
+
+midi.voct   -&gt; env.gate  (unused — routing gate)
+midi.gate   -&gt; env.gate
+env.out     -&gt; noise_vca.cv
+src.white   -&gt; noise_vca.signal
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="sequencers--clocks"><a class="header" href="#sequencers--clocks">Sequencers &amp; clocks</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="clock--tempo-locked-trigger-generator"><a class="header" href="#clock--tempo-locked-trigger-generator"><code>Clock</code> — Tempo-locked trigger generator</a></h2>
+<p>Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable
+BPM and time signature. All outputs are derived from a single beat-phase
+accumulator, so they are always phase-locked to each other.</p>
+<p>Each output fires a one-sample pulse (<code>1.0</code>) at the relevant boundary and is
+<code>0.0</code> on all other samples.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>bpm</code></td><td>float</td><td><code>120.0</code></td><td>Tempo in beats per minute (1–300)</td></tr>
+<tr><td><code>beats_per_bar</code></td><td>int</td><td><code>4</code></td><td>Number of beats per bar (1–16)</td></tr>
+<tr><td><code>quavers_per_beat</code></td><td>int</td><td><code>2</code></td><td>Subdivisions per beat: <code>2</code> = simple, <code>3</code> = compound (1–4)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>bar</code></td><td>Fires once per bar</td></tr>
+<tr><td><code>beat</code></td><td>Fires once per beat</td></tr>
+<tr><td><code>quaver</code></td><td>Fires once per quaver (<code>beats_per_bar × quavers_per_beat</code> per bar)</td></tr>
+<tr><td><code>semiquaver</code></td><td>Fires once per semiquaver (twice per quaver)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="seq--step-sequencer"><a class="header" href="#seq--step-sequencer"><code>Seq</code> — Step sequencer</a></h2>
+<p>Advances through a list of note steps on each rising edge of the <code>clock</code>
+input. Each step is a note name, a rest (<code>-</code>), or a tie (<code>_</code>).</p>
+<h3 id="pitch-output-convention"><a class="header" href="#pitch-output-convention">Pitch output convention</a></h3>
+<p>The <code>pitch</code> output carries a <strong>V/oct signal referenced to C0 (≈ 16.35 Hz)</strong>,
+matching the convention used by <code>Osc</code>, <code>PolyOsc</code>, <code>Lfo</code>, and the filter
+<code>cutoff</code>/<code>center</code> parameters:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Note</th><th>V/oct value</th></tr>
+</thead>
+<tbody>
+<tr><td>C0</td><td><code>0.0</code></td></tr>
+<tr><td>C1</td><td><code>1.0</code></td></tr>
+<tr><td>C4 (middle C)</td><td><code>4.0</code></td></tr>
+<tr><td>A4 (concert A)</td><td><code>4.75</code></td></tr>
+<tr><td>C0 + 1 semitone (C#0)</td><td><code>≈ 0.083</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>This is the same scale that results from writing a note literal directly as a
+parameter value (e.g. <code>frequency: C4</code> in a module declaration).</p>
+<h3 id="step-syntax"><a class="header" href="#step-syntax">Step syntax</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Step string</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>C4</code>, <code>A#3</code>, <code>Bb2</code></td><td>Note: sets pitch, gate=1, trigger=1 for one sample</td></tr>
+<tr><td><code>-</code></td><td>Rest: gate=0, trigger=0; pitch holds its previous value</td></tr>
+<tr><td><code>_</code></td><td>Tie: gate=1, trigger=0; pitch holds its previous value</td></tr>
+</tbody>
+</table>
+</div>
+<p>Note names are case-sensitive. Sharps use <code>#</code>; flats use <code>b</code>. Octave digits
+<code>0</code>–<code>9</code> are supported.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>steps</code></td><td>string array</td><td><code>[]</code></td><td>Ordered list of step strings</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>clock</code></td><td>Rising edge (≥ 0.5, from below) advances to the next step</td></tr>
+<tr><td><code>start</code></td><td>Rising edge resumes playback</td></tr>
+<tr><td><code>stop</code></td><td>Rising edge pauses playback (gate and trigger go to 0)</td></tr>
+<tr><td><code>reset</code></td><td>Rising edge returns to step 0 without advancing</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>pitch</code></td><td>Current pitch as V/oct above C0</td></tr>
+<tr><td><code>trigger</code></td><td><code>1.0</code> for one sample on each note step advance, otherwise <code>0.0</code></td></tr>
+<tr><td><code>gate</code></td><td><code>1.0</code> while a note or tie step is current and playback is active</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="hot-reload-behaviour"><a class="header" href="#hot-reload-behaviour">Hot-reload behaviour</a></h3>
+<p>When the <code>steps</code> list is updated by a hot-reload, the current step index is
+preserved so playback continues from the same position without an audible
+jump. If the new list is shorter, the sequencer treats the out-of-range
+position as a rest until the next clock edge wraps the index back in bounds.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="midi-input-1"><a class="header" href="#midi-input-1">MIDI input</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<p>MIDI modules consume from the first available system MIDI input port. Connect
+your device before starting the player.</p>
+<h2 id="midiin--mono-midi-note-input"><a class="header" href="#midiin--mono-midi-note-input"><code>MidiIn</code> — Mono MIDI note input</a></h2>
+<p>Monophonic: only one note active at a time (last-note priority). Pressing a
+new key updates pitch immediately; releasing the top key falls back to the
+previously held key without retriggering. Up to 16 simultaneously held keys
+are tracked.</p>
+<h3 id="voct-convention"><a class="header" href="#voct-convention">V/oct convention</a></h3>
+<p><code>voct</code> is referenced to MIDI note 0 (C0 ≈ 16.35 Hz) at 0 V, with 1/12 V per
+semitone:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>MIDI note</th><th>Note</th><th><code>voct</code></th></tr>
+</thead>
+<tbody>
+<tr><td>0</td><td>C0</td><td><code>0.0</code></td></tr>
+<tr><td>12</td><td>C1</td><td><code>1.0</code></td></tr>
+<tr><td>60</td><td>C4 (middle C)</td><td><code>5.0</code></td></tr>
+<tr><td>69</td><td>A4 (concert A)</td><td><code>5.75</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>Pitch in V/oct above C0 (MIDI note 0 = 0.0, 1/12 V per semitone)</td></tr>
+<tr><td><code>trigger</code></td><td><code>1.0</code> for one sample after each note-on, then <code>0.0</code></td></tr>
+<tr><td><code>gate</code></td><td><code>1.0</code> while any note is held or sustain pedal (CC 64) is active</td></tr>
+<tr><td><code>mod</code></td><td>CC 1 (mod wheel) normalised to [0.0, 1.0]</td></tr>
+<tr><td><code>pitch</code></td><td>Pitchbend normalised to [−1.0, 1.0] (centre = 0.0)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polymidiin--polyphonic-midi-input"><a class="header" href="#polymidiin--polyphonic-midi-input"><code>PolyMidiIn</code> — Polyphonic MIDI input</a></h2>
+<p>Distributes incoming notes across up to 16 voices with LIFO voice stealing.
+When all voices are occupied the most-recently-allocated voice is stolen.</p>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>Poly</td><td>Per-voice pitch in V/oct above C0</td></tr>
+<tr><td><code>trigger</code></td><td>Poly</td><td><code>1.0</code> for one sample after each note-on per voice, then <code>0.0</code></td></tr>
+<tr><td><code>gate</code></td><td>Poly</td><td><code>1.0</code> while the note for that voice is physically held</td></tr>
+<tr><td><code>mod</code></td><td>Mono</td><td>CC 1 (mod wheel) normalised to [0.0, 1.0]</td></tr>
+<tr><td><code>pitch</code></td><td>Mono</td><td>Pitchbend normalised to [−1.0, 1.0]</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="delays--reverb"><a class="header" href="#delays--reverb">Delays &amp; Reverb</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<hr>
+<h2 id="delay--mono-multi-tap-delay"><a class="header" href="#delay--mono-multi-tap-delay"><code>Delay</code> — Mono multi-tap delay</a></h2>
+<p>One shared 4-second delay buffer with N independent read taps. Each tap has its
+own delay time, gain, feedback, tone, and drive. All tap feedbacks sum back into
+the buffer write before the next sample. N is set by <code>channels</code>.</p>
+<pre><code class="language-patches">module dly : Delay(channels: 2) {
+    delay_ms[0]: 250,
+    delay_ms[1]: 375,
+    feedback[0]: 0.4,
+    feedback[1]: 0.3,
+    dry_wet:     1.0
+}
+</code></pre>
+<p><strong>Parameters</strong> (global)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dry_wet</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>Crossfade between dry input and wet tap sum</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong> (per tap <code>i</code>)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>delay_ms[i]</code></td><td>int</td><td>0–2000</td><td><code>500</code></td><td>Tap delay time in milliseconds</td></tr>
+<tr><td><code>gain[i]</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>Tap output gain</td></tr>
+<tr><td><code>feedback[i]</code></td><td>float</td><td>0–1</td><td><code>0.0</code></td><td>Tap feedback amount (sent back into write)</td></tr>
+<tr><td><code>tone[i]</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>High-frequency roll-off in the feedback path (1 = bright, 0 = dark)</td></tr>
+<tr><td><code>drive[i]</code></td><td>float</td><td>0.1–10</td><td><code>1.0</code></td><td>Soft-clip drive in the feedback path</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Mono audio input</td></tr>
+<tr><td><code>drywet_cv</code></td><td>Additive CV for <code>dry_wet</code></td></tr>
+<tr><td><code>delay_cv[0]</code> … <code>delay_cv[n-1]</code></td><td>Additive CV for delay time (±1 scales ±100%)</td></tr>
+<tr><td><code>gain_cv[0]</code> … <code>gain_cv[n-1]</code></td><td>Additive CV for tap gain</td></tr>
+<tr><td><code>fb_cv[0]</code> … <code>fb_cv[n-1]</code></td><td>Additive CV for feedback amount</td></tr>
+<tr><td><code>return[0]</code> … <code>return[n-1]</code></td><td>Pre-gain return signal per tap (added after the raw tap read)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Dry/wet mixed output</td></tr>
+<tr><td><code>send[0]</code> … <code>send[n-1]</code></td><td>Pre-gain tap signal per tap (before <code>return</code> mixing)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="stereodelay--stereo-multi-tap-delay"><a class="header" href="#stereodelay--stereo-multi-tap-delay"><code>StereoDelay</code> — Stereo multi-tap delay</a></h2>
+<p>Two 4-second delay buffers (L and R) sharing a single set of N read taps. Each
+tap has pan, and an optional pingpong mode that cross-routes feedback (L→R,
+R→L). N is set by <code>channels</code>.</p>
+<pre><code class="language-patches">module dly : StereoDelay(channels: 2) {
+    delay_ms[0]: 300,
+    delay_ms[1]: 450,
+    feedback[0]: 0.35,
+    feedback[1]: 0.35,
+    pingpong[0]: true,
+    pingpong[1]: true,
+    pan[0]:      -0.3,
+    pan[1]:       0.3
+}
+</code></pre>
+<p><strong>Parameters</strong> (global)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>dry_wet</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>Crossfade between dry input and wet tap sum</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong> (per tap <code>i</code>)</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>delay_ms[i]</code></td><td>int</td><td>0–2000</td><td><code>500</code></td><td>Tap delay time in milliseconds</td></tr>
+<tr><td><code>gain[i]</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>Tap output gain</td></tr>
+<tr><td><code>feedback[i]</code></td><td>float</td><td>0–1</td><td><code>0.0</code></td><td>Tap feedback amount</td></tr>
+<tr><td><code>tone[i]</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>HF roll-off in feedback path (1 = bright, 0 = dark)</td></tr>
+<tr><td><code>drive[i]</code></td><td>float</td><td>0.1–10</td><td><code>1.0</code></td><td>Soft-clip drive in feedback path</td></tr>
+<tr><td><code>pan[i]</code></td><td>float</td><td>−1–+1</td><td><code>0.0</code></td><td>Stereo pan position (−1 = full left, +1 = full right)</td></tr>
+<tr><td><code>pingpong[i]</code></td><td>bool</td><td>—</td><td><code>false</code></td><td>Cross-route feedback: L feedback→R buffer, R feedback→L buffer</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in_left</code></td><td>Left audio input</td></tr>
+<tr><td><code>in_right</code></td><td>Right audio input</td></tr>
+<tr><td><code>drywet_cv</code></td><td>Additive CV for <code>dry_wet</code></td></tr>
+<tr><td><code>delay_cv[0]</code> … <code>delay_cv[n-1]</code></td><td>Additive CV for delay time</td></tr>
+<tr><td><code>gain_cv[0]</code> … <code>gain_cv[n-1]</code></td><td>Additive CV for tap gain</td></tr>
+<tr><td><code>fb_cv[0]</code> … <code>fb_cv[n-1]</code></td><td>Additive CV for feedback amount</td></tr>
+<tr><td><code>pan_cv[0]</code> … <code>pan_cv[n-1]</code></td><td>Additive CV for tap pan</td></tr>
+<tr><td><code>return_left[0]</code> … <code>return_left[n-1]</code></td><td>Pre-gain L return per tap</td></tr>
+<tr><td><code>return_right[0]</code> … <code>return_right[n-1]</code></td><td>Pre-gain R return per tap</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out_left</code></td><td>Left dry/wet mixed output</td></tr>
+<tr><td><code>out_right</code></td><td>Right dry/wet mixed output</td></tr>
+<tr><td><code>send_left[0]</code> … <code>send_left[n-1]</code></td><td>Pre-gain L tap signal per tap</td></tr>
+<tr><td><code>send_right[0]</code> … <code>send_right[n-1]</code></td><td>Pre-gain R tap signal per tap</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="fdnreverb--stereo-fdn-reverb"><a class="header" href="#fdnreverb--stereo-fdn-reverb"><code>FdnReverb</code> — Stereo FDN reverb</a></h2>
+<p>An 8-line feedback delay network (FDN) with Hadamard mixing matrix, per-line
+high-shelf absorption, Thiran all-pass interpolation for LFO-modulated reads,
+and stereo output via orthogonal output gain vectors. Five character archetypes
+control the room model; <code>size</code> and <code>brightness</code> sweep within each archetype.</p>
+<pre><code class="language-patches">module verb : FdnReverb {
+    character: hall,
+    size:       0.6,
+    brightness: 0.5,
+    pre_delay:  0.3,
+    mix:        0.8
+}
+</code></pre>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>character</code></td><td>enum</td><td><code>plate</code> / <code>room</code> / <code>chamber</code> / <code>hall</code> / <code>cathedral</code></td><td><code>hall</code></td><td>Room archetype — sets delay-line scaling, LFO rate/depth, pre-delay length, and decay curve shape</td></tr>
+<tr><td><code>size</code></td><td>float</td><td>0–1</td><td><code>0.5</code></td><td>Room size within the archetype: 0 = smallest/shortest, 1 = largest/longest</td></tr>
+<tr><td><code>brightness</code></td><td>float</td><td>0–1</td><td><code>0.5</code></td><td>High-frequency decay ratio: 0 = dark (HF decays much faster), 1 = bright (HF/LF decay close together)</td></tr>
+<tr><td><code>pre_delay</code></td><td>float</td><td>0–1</td><td><code>0.0</code></td><td>Additional pre-delay (additive with <code>size</code>): 0 = no extra, 1 = maximum for the archetype</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td>0–1</td><td><code>1.0</code></td><td>Dry/wet mix: 0 = fully dry, 1 = fully wet</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Character archetypes</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>RT60 range (LF)</th><th>Pre-delay</th><th>Character</th></tr>
+</thead>
+<tbody>
+<tr><td><code>plate</code></td><td>0.3 s – 1.5 s</td><td>up to 10 ms</td><td>Dense, smooth; no sense of room geometry</td></tr>
+<tr><td><code>room</code></td><td>0.4 s – 2.5 s</td><td>up to 25 ms</td><td>Small to mid-size room with clear early reflections</td></tr>
+<tr><td><code>chamber</code></td><td>0.3 s – 2.0 s</td><td>up to 20 ms</td><td>Tight, controlled decay; studio chamber character</td></tr>
+<tr><td><code>hall</code></td><td>0.8 s – 5.0 s</td><td>up to 50 ms</td><td>Concert hall — the default</td></tr>
+<tr><td><code>cathedral</code></td><td>1.5 s – 8.0 s</td><td>up to 80 ms</td><td>Very long, diffuse reverb tail</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in_left</code></td><td>Left audio input (if unconnected, <code>in_right</code> is used for both channels)</td></tr>
+<tr><td><code>in_right</code></td><td>Right audio input</td></tr>
+<tr><td><code>size_cv</code></td><td>Additive CV for <code>size</code></td></tr>
+<tr><td><code>brightness_cv</code></td><td>Additive CV for <code>brightness</code></td></tr>
+<tr><td><code>pre_delay_cv</code></td><td>Additive CV for <code>pre_delay</code></td></tr>
+<tr><td><code>mix_cv</code></td><td>Additive CV for <code>mix</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out_left</code></td><td>Left reverb output</td></tr>
+<tr><td><code>out_right</code></td><td>Right reverb output</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="dynamics"><a class="header" href="#dynamics">Dynamics</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="limiter--lookahead-peak-limiter"><a class="header" href="#limiter--lookahead-peak-limiter"><code>Limiter</code> — Lookahead peak limiter</a></h2>
+<p>Transparent peak limiter with true lookahead. The <code>attack_ms</code> parameter
+determines how far ahead the detector looks, giving the gain envelope time to
+ramp down before a transient arrives at the output — eliminating the
+overshoot that zero-latency limiters suffer.</p>
+<p>Inter-sample peaks (peaks that fall between base-rate samples) are caught by
+internally upsampling the detector path to 2× rate. The extra precision
+prevents hard-clipped peaks from sneaking through at high signal levels.</p>
+<p>The output is hard-clipped to ±1.0 as a final safety stage.</p>
+<p><strong>Signal chain (per base-rate sample)</strong></p>
+<pre><code class="language-text">input ──► dry delay (lookahead + group delay)
+      │
+      └─► 2× interpolator
+              │
+              ▼
+           peak window [t-L .. t]
+              │
+              ▼
+           gain computation (attack / release smoothing)
+              │
+              ▼
+           output = clamp(delayed_input × gain, −1.0, 1.0)
+</code></pre>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float</td><td><code>0.9</code></td><td>Peak level above which gain reduction is applied (0.0–2.0). Internally multiplied by 0.98 for a small headroom margin.</td></tr>
+<tr><td><code>attack_ms</code></td><td>float (ms)</td><td><code>2.0</code></td><td>Lookahead / attack time in milliseconds (0.1–50.0). Sets how early the gain ramp begins before a transient.</td></tr>
+<tr><td><code>release_ms</code></td><td>float (ms)</td><td><code>100.0</code></td><td>Release time in milliseconds (1.0–5000.0). Controls how quickly the gain recovers after the peak falls.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio signal to limit</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Limited output, hard-clipped to ±1.0</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Notes</strong></p>
+<ul>
+<li>The module introduces a latency of <code>attack_ms</code> plus a small FIR group delay
+(~8 samples at base rate for the interpolator). Account for this when mixing
+a limited signal against an unlimitated reference.</li>
+<li>All buffers are pre-allocated at <code>prepare</code> time for the maximum <code>attack_ms</code>
+value (50 ms), so changing <code>attack_ms</code> at runtime never allocates.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="utilities"><a class="header" href="#utilities">Utilities</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="glide--portamento--pitch-smoothing"><a class="header" href="#glide--portamento--pitch-smoothing"><code>Glide</code> — Portamento / pitch smoothing</a></h2>
+<p>Smooths a stepped input signal toward its target using a one-pole low-pass
+filter. Because V/oct is a log-frequency scale, linear interpolation in V/oct
+space gives a perceptually constant-ratio (equal-interval) glide.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>glide_ms</code></td><td>float (ms)</td><td><code>100.0</code></td><td>Glide time in milliseconds (0–10000)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Input signal (typically V/oct)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Smoothed output</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="tuner--pitch-offset"><a class="header" href="#tuner--pitch-offset"><code>Tuner</code> — Pitch offset</a></h2>
+<p>Transposes a V/oct signal by a fixed interval expressed as octaves, semitones,
+and cents. All three parameters are additive:</p>
+<pre><code class="language-text">out = in + octave + semi/12 + cent/1200
+</code></pre>
+<p>Setting all parameters to zero passes the signal through unchanged.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>octave</code></td><td>int</td><td><code>0</code></td><td>Octave shift (−8 to +8)</td></tr>
+<tr><td><code>semi</code></td><td>int</td><td><code>0</code></td><td>Semitone shift (−12 to +12)</td></tr>
+<tr><td><code>cent</code></td><td>int</td><td><code>0</code></td><td>Fine-tune in cents (−100 to +100; 100 cents = 1 semitone)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>V/oct input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Transposed V/oct</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="sah--sample-and-hold"><a class="header" href="#sah--sample-and-hold"><code>Sah</code> — Sample and hold</a></h2>
+<p>Latches the <code>in</code> signal on each rising edge of <code>trig</code> (threshold 0.5) and holds
+the sampled value on <code>out</code> until the next trigger. The held value is initialised
+to 0.0 before the first trigger.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Signal to sample</td></tr>
+<tr><td><code>trig</code></td><td>Trigger input; latch fires on the ≥ 0.5 rising edge</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Held output value</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polysah--polyphonic-sample-and-hold"><a class="header" href="#polysah--polyphonic-sample-and-hold"><code>PolySah</code> — Polyphonic sample and hold</a></h2>
+<p>Polyphonic variant of <code>Sah</code>. A single mono <code>trig</code> latches all 16 voice channels
+simultaneously on each rising edge (threshold 0.5).</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Polyphonic signal to sample (16 voices)</td></tr>
+<tr><td><code>trig</code></td><td>Mono trigger; all voices are latched together</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Polyphonic held output (16 voices)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="quant--voct-quantiser"><a class="header" href="#quant--voct-quantiser"><code>Quant</code> — V/oct quantiser</a></h2>
+<p>Snaps a continuous V/oct signal to the nearest note in a user-supplied semitone
+set. The formula applied before quantisation is:</p>
+<pre><code class="language-text">quantised_input = centre + in × scale
+</code></pre>
+<p>Emits a one-sample pulse on <code>trig_out</code> whenever the quantised pitch changes.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes</code></td><td>array (up to 12)</td><td><code>["0"]</code></td><td>Semitone offsets within an octave (0–11). Values are parsed as integers.</td></tr>
+<tr><td><code>centre</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>DC offset added to the input before quantisation (−4 to +4)</td></tr>
+<tr><td><code>scale</code></td><td>float</td><td><code>1.0</code></td><td>Gain applied to <code>in</code> before quantisation (−4 to +4)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Continuous V/oct input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Quantised V/oct output</td></tr>
+<tr><td><code>trig_out</code></td><td>One-sample pulse (1.0) on each pitch change, otherwise 0.0</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="polyquant--polyphonic-voct-quantiser"><a class="header" href="#polyquant--polyphonic-voct-quantiser"><code>PolyQuant</code> — Polyphonic V/oct quantiser</a></h2>
+<p>Applies the same quantisation logic as <code>Quant</code> independently to each of the 16
+polyphonic voices. All voices share the same <code>notes</code>, <code>centre</code>, and <code>scale</code>
+parameters. Each voice has its own <code>trig_out</code> channel that fires independently
+when that voice’s quantised pitch changes.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>notes</code></td><td>array (up to 12)</td><td><code>["0"]</code></td><td>Semitone offsets within an octave (0–11)</td></tr>
+<tr><td><code>centre</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>DC offset added to each voice before quantisation (−4 to +4)</td></tr>
+<tr><td><code>scale</code></td><td>float</td><td><code>1.0</code></td><td>Gain applied to each voice before quantisation (−4 to +4)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Polyphonic V/oct input (16 voices)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Polyphonic quantised V/oct output (16 voices)</td></tr>
+<tr><td><code>trig_out</code></td><td>Per-voice one-sample pulse on pitch change (16 voices)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="ringmod--diode-ring-modulator"><a class="header" href="#ringmod--diode-ring-modulator"><code>RingMod</code> — Diode ring modulator</a></h2>
+<p>Analog diode-bridge ring modulator model (Julian Parker, DAFx-11). Produces
+sum and difference frequencies. The <code>drive</code> parameter sets the operating point
+on the diode I–V curve: low drive is near-ideal multiplication; higher drive
+introduces harmonic colouring.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>drive</code></td><td>float (dB)</td><td><code>1.0</code></td><td>Diode operating point in dB (0.2–20.0); low = linear, high = saturated</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>signal</code></td><td>Audio signal to modulate</td></tr>
+<tr><td><code>carrier</code></td><td>Carrier / modulator signal</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Ring-modulated output</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="audio-output"><a class="header" href="#audio-output">Audio output</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<h2 id="audioout--stereo-audio-output"><a class="header" href="#audioout--stereo-audio-output"><code>AudioOut</code> — Stereo audio output</a></h2>
+<p>Sends signals to the left and right channels of the system audio output.
+This module must appear exactly once in a patch.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in_left</code></td><td>Left channel</td></tr>
+<tr><td><code>in_right</code></td><td>Right channel</td></tr>
+</tbody>
+</table>
+</div>
+<p>No clamping is applied by <code>AudioOut</code> itself. Use attenuation (scaled cables or
+a <code>StereoMixer</code>) to keep levels in range — summing many signals without
+attenuation will overdrive the output.</p>
+<p><strong>Example</strong></p>
+<pre><code class="language-patches">mix.out_left  -[0.1]-&gt; out.in_left
+mix.out_right -[0.1]-&gt; out.in_right
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="implementing-modules"><a class="header" href="#implementing-modules">Implementing modules</a></h1>
+<p>This chapter covers everything needed to add a new module to Patches: the <code>Module</code> trait, the descriptor builder, a worked example, registration, and testing.</p>
+<h2 id="the-module-trait"><a class="header" href="#the-module-trait">The Module trait</a></h2>
+<p>All audio modules implement <code>patches_core::Module</code> (defined in <code>patches-core/src/modules/module.rs</code>). The trait has a small surface:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait Module: Send {
+    fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor where Self: Sized;
+    fn prepare(env: &amp;AudioEnvironment, descriptor: ModuleDescriptor, id: InstanceId) -&gt; Self
+        where Self: Sized;
+    fn descriptor(&amp;self) -&gt; &amp;ModuleDescriptor;
+    fn instance_id(&amp;self) -&gt; InstanceId;
+    fn set_ports(&amp;mut self, inputs: &amp;[InputPort], outputs: &amp;[OutputPort]);
+    fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap);
+    fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;);
+    fn as_any(&amp;self) -&gt; &amp;dyn std::any::Any;
+
+    // Optional:
+    fn as_midi_receiver(&amp;mut self) -&gt; Option&lt;&amp;mut dyn ReceivesMidi&gt; { None }
+}
+<span class="boring">}</span></code></pre>
+<p>The lifecycle is: <code>describe</code> (static, at registration) → <code>prepare</code> (construct instance) → <code>set_ports</code> (called when topology changes) → <code>update_validated_parameters</code> (called when parameters change) → <code>process</code> (called once per sample, at audio rate).</p>
+<h3 id="describe"><a class="header" href="#describe">describe</a></h3>
+<p>A static method — called on the type, not an instance. Returns the <code>ModuleDescriptor</code> for this module at the given shape. Built using the descriptor builder:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor {
+    ModuleDescriptor::new("MyModule", shape.clone())
+        .mono_in("signal")
+        .mono_in("cv")
+        .mono_out("out")
+        .float_param("gain", 0.0, 2.0, 1.0)
+        .enum_param("mode", &amp;["add", "mul"], "add")
+}
+<span class="boring">}</span></code></pre>
+<p>Port and parameter names are <code>&amp;'static str</code>. The order you add ports determines their positional index in <code>set_ports</code>.</p>
+<h3 id="prepare"><a class="header" href="#prepare">prepare</a></h3>
+<p>Allocates and returns a new instance. Store the descriptor, instance ID, and <code>env.sample_rate</code> if needed. Initialise all port fields to their defaults (<code>MonoInput::default()</code>, etc.) — they will be set properly by the first <code>set_ports</code> call before <code>process</code> runs.</p>
+<p>This method is infallible.</p>
+<h3 id="set_ports"><a class="header" href="#set_ports">set_ports</a></h3>
+<p>Called when the patch topology changes. The slice positions correspond to the order ports were declared in <code>describe</code>. Extract ports with <code>MonoInput::from_ports(inputs, index)</code>.</p>
+<p>Must not allocate, block, or perform I/O — it may be called on the audio thread.</p>
+<h3 id="update_validated_parameters"><a class="header" href="#update_validated_parameters">update_validated_parameters</a></h3>
+<p>Apply parameter values to the instance’s fields. The map has already been validated against the descriptor, so types and ranges are guaranteed correct. Parameters not present in the map are unchanged — leave them at their current values.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap) {
+    if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
+        self.gain = *v;
+    }
+}
+<span class="boring">}</span></code></pre>
+<h3 id="process"><a class="header" href="#process">process</a></h3>
+<p>Called once per sample at audio rate (typically 44,100 times per second). Read inputs and write outputs through the cable pool:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;) {
+    let signal = pool.read_mono(&amp;self.in_signal);
+    let cv = pool.read_mono(&amp;self.in_cv);
+    pool.write_mono(&amp;self.out_audio, signal * cv);
+}
+<span class="boring">}</span></code></pre>
+<p><strong>Must not allocate, block, or perform I/O.</strong> Pre-compute or look up all values. Avoid branches that touch heap memory.</p>
+<h3 id="descriptor-instance_id-as_any"><a class="header" href="#descriptor-instance_id-as_any">descriptor, instance_id, as_any</a></h3>
+<p>Boilerplate — return the stored descriptor, the stored ID, and <code>self</code> respectively.</p>
+<h2 id="descriptor-builder-reference"><a class="header" href="#descriptor-builder-reference">Descriptor builder reference</a></h2>
+<h3 id="port-methods"><a class="header" href="#port-methods">Port methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Adds</th></tr>
+</thead>
+<tbody>
+<tr><td><code>.mono_in("name")</code></td><td>One <code>MonoInput</code> port</td></tr>
+<tr><td><code>.mono_in_multi("name", n)</code></td><td><code>n</code> <code>MonoInput</code> ports at indices 0..n</td></tr>
+<tr><td><code>.poly_in("name")</code></td><td>One <code>PolyInput</code> port</td></tr>
+<tr><td><code>.poly_in_multi("name", n)</code></td><td><code>n</code> <code>PolyInput</code> ports</td></tr>
+<tr><td><code>.mono_out("name")</code></td><td>One <code>MonoOutput</code> port</td></tr>
+<tr><td><code>.mono_out_multi("name", n)</code></td><td><code>n</code> <code>MonoOutput</code> ports</td></tr>
+<tr><td><code>.poly_out("name")</code></td><td>One <code>PolyOutput</code> port</td></tr>
+<tr><td><code>.poly_out_multi("name", n)</code></td><td><code>n</code> <code>PolyOutput</code> ports</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="parameter-methods"><a class="header" href="#parameter-methods">Parameter methods</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Method</th><th>Adds</th></tr>
+</thead>
+<tbody>
+<tr><td><code>.float_param("name", min, max, default)</code></td><td>Float parameter</td></tr>
+<tr><td><code>.float_param_multi("name", n, min, max, default)</code></td><td><code>n</code> indexed float params</td></tr>
+<tr><td><code>.int_param("name", min, max, default)</code></td><td>Integer parameter</td></tr>
+<tr><td><code>.bool_param("name", default)</code></td><td>Boolean parameter</td></tr>
+<tr><td><code>.enum_param("name", &amp;["a", "b"], "a")</code></td><td>String enum parameter</td></tr>
+<tr><td><code>.array_param("name", &amp;[], max_length)</code></td><td>Variable-length string array</td></tr>
+<tr><td><code>.sink()</code></td><td>Marks module as the audio output sink</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="worked-example-gain"><a class="header" href="#worked-example-gain">Worked example: Gain</a></h2>
+<p>A module with one audio input, one CV input, a <code>gain</code> float parameter, a <code>clip</code> boolean parameter, and one output.</p>
+<h3 id="struct"><a class="header" href="#struct">Struct</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// patches-modules/src/gain.rs
+
+use patches_core::{
+    AudioEnvironment, CablePool, InputPort, InstanceId,
+    Module, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
+};
+use patches_core::parameter_map::{ParameterMap, ParameterValue};
+
+pub struct Gain {
+    instance_id: InstanceId,
+    descriptor: ModuleDescriptor,
+    in_signal: MonoInput,
+    in_cv: MonoInput,
+    out_audio: MonoOutput,
+    gain: f32,
+    clip: bool,
+}
+<span class="boring">}</span></code></pre>
+<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>impl Module for Gain {
+    fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor {
+        ModuleDescriptor::new("Gain", shape.clone())
+            .mono_in("in")
+            .mono_in("cv")
+            .mono_out("out")
+            .float_param("gain", 0.0, 4.0, 1.0)
+            .bool_param("clip", false)
+    }
+
+    fn prepare(
+        _env: &amp;AudioEnvironment,
+        descriptor: ModuleDescriptor,
+        instance_id: InstanceId,
+    ) -&gt; Self {
+        Self {
+            instance_id,
+            descriptor,
+            in_signal: MonoInput::default(),
+            in_cv: MonoInput::default(),
+            out_audio: MonoOutput::default(),
+            gain: 1.0,
+            clip: false,
+        }
+    }
+
+    fn descriptor(&amp;self) -&gt; &amp;ModuleDescriptor { &amp;self.descriptor }
+    fn instance_id(&amp;self) -&gt; InstanceId { self.instance_id }
+    fn as_any(&amp;self) -&gt; &amp;dyn std::any::Any { self }
+
+    fn set_ports(&amp;mut self, inputs: &amp;[InputPort], outputs: &amp;[OutputPort]) {
+        self.in_signal = MonoInput::from_ports(inputs, 0);  // matches "in"
+        self.in_cv     = MonoInput::from_ports(inputs, 1);  // matches "cv"
+        self.out_audio = MonoOutput::from_ports(outputs, 0); // matches "out"
+    }
+
+    fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap) {
+        if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
+            self.gain = *v;
+        }
+        if let Some(ParameterValue::Bool(v)) = params.get("clip", 0) {
+            self.clip = *v;
+        }
+    }
+
+    fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;) {
+        let signal = pool.read_mono(&amp;self.in_signal);
+        let cv     = pool.read_mono(&amp;self.in_cv);
+        let mut out = signal * cv * self.gain;
+        if self.clip {
+            out = out.clamp(-1.0, 1.0);
+        }
+        pool.write_mono(&amp;self.out_audio, out);
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Port order in <code>describe</code> must match the positional indices in <code>set_ports</code>. Here <code>"in"</code> is input index 0, <code>"cv"</code> is input index 1, and <code>"out"</code> is output index 0.</p>
+<h3 id="registration"><a class="header" href="#registration">Registration</a></h3>
+<p>In <code>patches-modules/src/lib.rs</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub mod gain;
+pub use gain::Gain;
+<span class="boring">}</span></code></pre>
+<p>And in <code>default_registry()</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>r.register::&lt;Gain&gt;();
+<span class="boring">}</span></code></pre>
+<p>The DSL name comes from the string passed to <code>ModuleDescriptor::new</code> — here <code>"Gain"</code>. Users write <code>module g : Gain { gain: 0.5, clip: true }</code>.</p>
+<h2 id="testing-with-moduleharness"><a class="header" href="#testing-with-moduleharness">Testing with ModuleHarness</a></h2>
+<p><code>ModuleHarness</code> from <code>patches_core::test_support</code> provides a single-module test fixture with a cable pool, named-port accessors, and automatic ping-pong management.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod tests {
+    use super::*;
+    use patches_core::test_support::{assert_nearly, ModuleHarness, params};
+
+    #[test]
+    fn multiplies_signal_by_cv_and_gain() {
+        let mut h = ModuleHarness::build::&lt;Gain&gt;(params!["gain" =&gt; 2.0_f32]);
+        h.set_mono("in", 0.5);
+        h.set_mono("cv", 0.8);
+        h.tick();
+        assert_nearly!(0.8, h.read_mono("out"));  // 0.5 * 0.8 * 2.0
+    }
+
+    #[test]
+    fn clip_clamps_output() {
+        let mut h = ModuleHarness::build::&lt;Gain&gt;(params!["gain" =&gt; 4.0_f32, "clip" =&gt; true]);
+        h.set_mono("in", 1.0);
+        h.set_mono("cv", 1.0);
+        h.tick();
+        assert_nearly!(1.0, h.read_mono("out"));  // 4.0 clamped to 1.0
+    }
+}
+<span class="boring">}</span></code></pre>
+<p><code>params!</code> builds a <code>ParameterMap</code> from key-value pairs. <code>set_mono</code> writes a value to a named input port. <code>tick</code> runs one sample through the module. <code>read_mono</code> reads a named output port.</p>
+<h2 id="checklist"><a class="header" href="#checklist">Checklist</a></h2>
+<p>Before submitting a new module:</p>
+<ul>
+<li><code>describe</code> declares all ports and parameters with correct names and types</li>
+<li>Port order in <code>describe</code> matches <code>set_ports</code> positional indices</li>
+<li><code>prepare</code> initialises all port fields to their defaults</li>
+<li><code>update_validated_parameters</code> handles all declared parameters</li>
+<li><code>process</code> does not allocate, block, or perform I/O</li>
+<li>Module registered in <code>default_registry()</code></li>
+<li>Unit tests with <code>ModuleHarness</code> cover the main behaviours</li>
+<li><code>cargo clippy</code> and <code>cargo test</code> pass</li>
+<li>Doc comment on the struct follows the <a href="https://github.com/anthropics/patches/blob/main/CLAUDE.md">module documentation standard</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="engine-internals"><a class="header" href="#engine-internals">Engine internals</a></h1>
+<p>This chapter describes how Patches works under the hood: the compilation pipeline, the cable pool, the audio thread, plan handoff, and polyphony. It is aimed at contributors and anyone curious about the real-time architecture.</p>
+<h2 id="compilation-pipeline"><a class="header" href="#compilation-pipeline">Compilation pipeline</a></h2>
+<p>A <code>.patches</code> file goes through four stages before audio runs:</p>
+<pre><code>.patches source
+     │
+     ▼
+  Parser (patches-dsl)          PEG grammar → AST with source spans
+     │
+     ▼
+  Expander (patches-dsl)        Inline templates, substitute parameters → FlatPatch
+     │
+     ▼
+  Interpreter (patches-interpreter)  Validate against module registry → ModuleGraph
+     │
+     ▼
+  Planner (patches-engine)      Graph → ExecutionPlan, reusing surviving modules
+     │
+     ▼
+  Audio thread                  Tick loop: execute plan, one sample at a time
+</code></pre>
+<p><strong>Parser.</strong> The PEG grammar in <code>patches-dsl/src/grammar.pest</code> defines the syntax. The parser (Pest-based) produces an AST with source location spans preserved for error reporting. The output is a <code>File</code> struct containing template definitions and a patch block.</p>
+<p><strong>Expander.</strong> Template instantiation happens here. Each <code>module v : voice(...)</code> is expanded into a copy of the template’s modules and connections, with names mangled to avoid collisions (e.g. <code>v/osc</code>, <code>v/env</code>). Parameter references are substituted. Cable scales are composed by multiplication at template boundaries. The output is a <code>FlatPatch</code> — a flat list of <code>FlatModule</code> and <code>FlatConnection</code> structs with no template nesting.</p>
+<p><strong>Interpreter.</strong> The <code>FlatPatch</code> is validated against the module registry. Module type names are resolved to descriptors. Parameters are checked against their declared types and ranges. Cable kinds (mono/poly) are verified to match between connected ports. The output is a <code>ModuleGraph</code> — a directed graph of typed nodes and edges.</p>
+<p><strong>Planner.</strong> The planner converts the <code>ModuleGraph</code> into an <code>ExecutionPlan</code> — a flat, ordered list of module slots and buffer assignments that the audio thread can execute without any graph traversal. The planner carries state between builds: it matches modules in the new graph against the previous plan by name and type, reusing existing instances (with their state intact) where possible. New modules are freshly instantiated; removed modules are listed as tombstones for cleanup.</p>
+<h2 id="the-cable-pool"><a class="header" href="#the-cable-pool">The cable pool</a></h2>
+<p>All inter-module signals live in a single contiguous allocation: a <code>Vec&lt;[CableValue; 2]&gt;</code>. Each cable occupies one slot in this vector. The two-element inner array is a ping-pong pair.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum CableValue {
+    Mono(f32),
+    Poly([f32; 16]),
+}
+<span class="boring">}</span></code></pre>
+<p><code>CableValue</code> is <code>Copy</code>. On each tick, the write index <code>wi</code> alternates between 0 and 1. Modules write to <code>pool[cable_idx][wi]</code> and read from <code>pool[cable_idx][1 - wi]</code>. This gives every cable a one-sample delay: a module always reads the value that was written on the <em>previous</em> tick. The consequence is that execution order does not matter — modules can be scheduled in any order and the results are identical. Feedback connections are also well-defined: they carry the previous tick’s value.</p>
+<h3 id="reserved-slots"><a class="header" href="#reserved-slots">Reserved slots</a></h3>
+<p>The first 16 slots are reserved for infrastructure and never allocated to user cables:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Index</th><th>Name</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>0</td><td><code>MONO_READ_SINK</code></td><td>Disconnected mono inputs read zero from here</td></tr>
+<tr><td>1</td><td><code>POLY_READ_SINK</code></td><td>Disconnected poly inputs read zero from here</td></tr>
+<tr><td>2</td><td><code>MONO_WRITE_SINK</code></td><td>Unconnected mono outputs write harmlessly here</td></tr>
+<tr><td>3</td><td><code>POLY_WRITE_SINK</code></td><td>Unconnected poly outputs write harmlessly here</td></tr>
+<tr><td>4</td><td><code>AUDIO_OUT_L</code></td><td>Left audio output — AudioOut writes, callback reads</td></tr>
+<tr><td>5</td><td><code>AUDIO_OUT_R</code></td><td>Right audio output</td></tr>
+<tr><td>6</td><td><code>AUDIO_IN_L</code></td><td>Left audio input (reserved)</td></tr>
+<tr><td>7</td><td><code>AUDIO_IN_R</code></td><td>Right audio input (reserved)</td></tr>
+<tr><td>8</td><td><code>GLOBAL_CLOCK</code></td><td>Absolute sample counter, written by callback each tick</td></tr>
+<tr><td>9</td><td><code>GLOBAL_DRIFT</code></td><td>Slowly varying value in [-1, 1] for globally correlated pitch drift</td></tr>
+<tr><td>10–15</td><td>—</td><td>Reserved for future use</td></tr>
+</tbody>
+</table>
+</div>
+<p>Disconnected ports point at the sink slots. This means <code>process</code> never needs to branch on connectivity — it can always call <code>pool.read_mono(&amp;self.port)</code> safely, getting zero for unconnected inputs. Modules that want to <em>skip work</em> for disconnected outputs can check the <code>connected</code> field on their output port.</p>
+<h3 id="buffer-stability"><a class="header" href="#buffer-stability">Buffer stability</a></h3>
+<p>The cable pool persists across re-plans. Unchanged cables keep their buffer index, so CV signals on cables that were not rewired continue without interruption. Recycled and newly allocated slots are listed in the execution plan’s <code>to_zero</code> vector; the audio thread zeroes them before the first tick of the new plan.</p>
+<p>The pool has a fixed capacity (default 4096 slots). A freelist tracks available indices for allocation.</p>
+<h2 id="audio-thread-constraints"><a class="header" href="#audio-thread-constraints">Audio thread constraints</a></h2>
+<p>The audio callback runs under hard real-time constraints. Violating them causes audible glitches.</p>
+<p><strong>No allocations.</strong> All buffers and module state are pre-allocated when the plan is built. The callback never calls <code>Box::new</code>, <code>Vec::push</code> with growth, or any other heap-allocating operation.</p>
+<p><strong>No blocking.</strong> No mutexes, no file or network I/O, no syscalls that may sleep.</p>
+<p><strong>No deallocation.</strong> Dropping a <code>Box&lt;dyn Module&gt;</code> can run arbitrary destructor code. All deallocation is routed to a background thread (see below).</p>
+<p>Communication with the control thread uses an <strong>rtrb</strong> lock-free single-producer / single-consumer ring buffer. The callback polls it at the start of each processing block.</p>
+<h2 id="the-execution-plan"><a class="header" href="#the-execution-plan">The execution plan</a></h2>
+<p><code>ExecutionPlan</code> is the audio thread’s working document. It contains:</p>
+<ul>
+<li><strong>slots</strong> — one <code>ModuleSlot</code> per active module, listing its pool index and the buffer indices for each of its input and output ports (with scale factors for scaled inputs).</li>
+<li><strong>active_indices</strong> — the execution order. The audio thread iterates this list and calls <code>process</code> on each module.</li>
+<li><strong>to_zero / to_zero_poly</strong> — buffer indices to zero before the first tick.</li>
+<li><strong>new_modules</strong> — freshly instantiated modules to install in the pool.</li>
+<li><strong>tombstones</strong> — pool indices of removed modules, to be sent to the cleanup thread.</li>
+<li><strong>parameter_updates</strong> — changed parameter maps for surviving modules.</li>
+<li><strong>port_updates</strong> — new port assignments for modules whose wiring changed.</li>
+</ul>
+<p>The plan is built on the control thread and sent to the audio thread as a single value via the ring buffer. Once received, the audio thread applies it in one block: zero buffers, tombstone old modules, install new ones, apply updates, then resume ticking.</p>
+<h2 id="plan-handoff"><a class="header" href="#plan-handoff">Plan handoff</a></h2>
+<p>The sequence when a patch file is saved:</p>
+<ol>
+<li>The control thread builds a new <code>ExecutionPlan</code> via the planner.</li>
+<li><code>PatchEngine</code> sends the plan through the rtrb ring buffer.</li>
+<li>The audio callback checks for a new plan at the top of each processing block.</li>
+<li>If a plan is waiting: the current plan is replaced via <code>mem::replace</code>. The old plan is pushed to the cleanup ring buffer as a <code>CleanupAction::DropPlan</code>.</li>
+<li>The callback applies the new plan’s updates (zeroing, tombstoning, installation, parameter and port updates) and transitions to the new execution state.</li>
+<li>Processing resumes with the new plan.</li>
+</ol>
+<p>There is a brief window between when the planner snapshots the old module state and when the audio thread installs the new plan. Module state (e.g. oscillator phase) advances during this window. This is an intentional trade-off — the alternative would require stopping the audio thread, which would cause a gap.</p>
+<h2 id="module-lifecycle"><a class="header" href="#module-lifecycle">Module lifecycle</a></h2>
+<p>Every module instance has an immutable <code>InstanceId</code> — a monotonically increasing <code>u64</code> assigned at construction. The planner uses the combination of the module’s DSL name and type name to match modules across reloads.</p>
+<p>The module pool is a <code>Vec&lt;Option&lt;Box&lt;dyn Module&gt;&gt;&gt;</code> owned by the audio thread. Surviving modules keep their pool slot. New modules are inserted at free slots. Tombstoned modules are extracted from their slot and pushed to the cleanup thread.</p>
+<p>The <code>set_ports</code> and <code>update_validated_parameters</code> methods are called on the audio thread when a surviving module’s wiring or parameters change. Both are required to be non-allocating and infallible.</p>
+<h2 id="off-thread-deallocation"><a class="header" href="#off-thread-deallocation">Off-thread deallocation</a></h2>
+<p>Dropping a module or an old execution plan runs destructors that may allocate or block. A dedicated thread named <code>patches-cleanup</code> handles this. It owns the consumer end of a lock-free ring buffer and drains <code>CleanupAction</code> values:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>enum CleanupAction {
+    DropModule(Box&lt;dyn Module&gt;),
+    DropPlan(ExecutionPlan),
+}
+<span class="boring">}</span></code></pre>
+<p>The audio thread pushes to this buffer; the cleanup thread drops the values on its own time. If the buffer is full (which should not happen in normal operation), the audio thread falls back to dropping inline with a warning.</p>
+<h2 id="polyphony"><a class="header" href="#polyphony">Polyphony</a></h2>
+<p>The system supports two cable kinds: mono (a single <code>f32</code> per tick) and poly (an <code>[f32; 16]</code> array — one value per voice per tick). The voice count is fixed at engine initialisation (default 16) and shared by all poly cables in a patch.</p>
+<p>Poly modules (<code>PolyOsc</code>, <code>PolyAdsr</code>, <code>PolyVca</code>, etc.) process each voice independently within a single <code>process</code> call. Their ports read and write <code>[f32; 16]</code> arrays via <code>pool.read_poly</code> and <code>pool.write_poly</code>.</p>
+<p>Connecting a mono output to a poly input (or vice versa) is a validation error caught by the interpreter. <code>MonoToPoly</code> broadcasts a mono value to all 16 voices. <code>PolyToMono</code> sums all voices down to a single mono signal.</p>
+<p>Poly cable slots are zeroed with <code>Poly([0.0; 16])</code> rather than <code>Mono(0.0)</code> to prevent type mismatches during the first tick after a hot-reload.</p>
+<h2 id="periodic-updates"><a class="header" href="#periodic-updates">Periodic updates</a></h2>
+<p>Some modules need to recompute internal coefficients when their CV inputs change — for example, a filter whose cutoff is controlled by a cable. Recomputing coefficients on every sample would be expensive, so the engine supports a <code>PeriodicUpdate</code> trait:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait PeriodicUpdate {
+    fn periodic_update(&amp;mut self, pool: &amp;CablePool&lt;'_&gt;);
+}
+<span class="boring">}</span></code></pre>
+<p>Modules that implement this trait (and return <code>Some(self)</code> from <code>as_periodic()</code>) have their <code>periodic_update</code> method called every N samples (a configurable interval, typically a few dozen samples). This is where they read their CV inputs and update filter coefficients, frequency targets, or other derived state. The processing in <code>process</code> then uses these precomputed values, keeping the per-sample path fast.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>

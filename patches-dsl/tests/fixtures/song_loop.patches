@@ -1,0 +1,14 @@
+pattern a { ch: x . }
+pattern b { ch: . x }
+
+song looped {
+    | main |
+    | a    |
+    | a    |  @loop
+    | b    |
+    | a    |
+}
+
+patch {
+    module out : AudioOut
+}

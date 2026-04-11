@@ -35,8 +35,14 @@ note_lit        = @{ note_letter ~ note_accidental? ~ note_octave ~ !(ASCII_ALPH
 param_ref_ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-" | "/")* }
 param_ref  = ${ "<" ~ param_ref_ident ~ ">" }
 
+// ─── File reference ──────────────────────────────────────────────────────────
+// `file("path/to/ir.wav")` — syntactically distinct from a plain string.
+// The path may be a string literal or a <param> reference.
+file_ref    = { "file" ~ "(" ~ (string_lit | param_ref) ~ ")" }
+
 // ─── Value hierarchy ──────────────────────────────────────────────────────────
 // Alternatives are ordered:
+//   file_ref before ident (so "file(...)" is not consumed as a bare ident)
 //   float_unit before float_lit/int_lit (so "440Hz" is not consumed as "440")
 //   note_lit before ident (so "C1" is a note, not a bare string)
 //   bool_lit before ident (existing; "true"/"false" have word-boundary check)
@@ -44,7 +50,7 @@ scalar      = { float_unit | float_lit | int_lit | bool_lit | note_lit | string_
 array       = { "[" ~ (value ~ ","?)* ~ "]" }
 table_entry = { ident ~ ":" ~ value }
 table       = { "{" ~ (table_entry ~ ","?)* ~ "}" }
-value       = { table | array | scalar }
+value       = { file_ref | table | array | scalar }
 
 // ─── Shape and param blocks ───────────────────────────────────────────────────
 // alias_list: a bracketed list of identifiers; used in shape args to declare
@@ -128,5 +134,53 @@ template = { "template" ~ ident ~ param_decls? ~ "{" ~ port_decls ~ statement* ~
 // ─── Patch ────────────────────────────────────────────────────────────────────
 patch = { "patch" ~ "{" ~ statement* ~ "}" }
 
+// ─── Step notation (inside pattern channel rows) ─────────────────────────────
+// A step value: the cv1 part of a step (note, trigger, float, rest, or tie).
+// Order: float_unit before float_lit/int_lit; note_lit before ident.
+step_note     = @{ note_letter ~ note_accidental? ~ note_octave }
+step_trigger  = @{ "x" ~ !(ASCII_ALPHANUMERIC | "_") }
+step_rest     = @{ "." }
+step_tie      = @{ "~" }
+step_float    = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
+step_int      = @{ "-"? ~ ASCII_DIGIT+ }
+step_unit     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix }
+
+// Slide target: ">value" where value is a note, float, or unit literal.
+step_slide_target = { ">" ~ (step_unit | step_note | step_float | step_int) }
+
+// cv2 part: ":value" with optional slide ">value"
+step_cv2      = { ":" ~ (step_unit | step_float | step_int) ~ step_slide_target? }
+
+// Repeat suffix: "*N"
+step_repeat   = ${ "*" ~ nat }
+
+// A full step: cv1 (with optional slide) + optional cv2 + optional repeat
+// Rest and tie are standalone (no cv2/slide/repeat).
+step_valued   = { (step_unit | step_note | step_trigger | step_float | step_int) ~ step_slide_target? ~ step_cv2? ~ step_repeat? }
+step          = { step_rest | step_tie | step_valued }
+
+// ─── Slide generator ─────────────────────────────────────────────────────────
+// slide(count, start, end) — expands to `count` slide steps.
+slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ (step_float | step_int) ~ "," ~ (step_float | step_int) ~ ")" }
+
+// ─── Pattern blocks ──────────────────────────────────────────────────────────
+// A channel row: "label: step step ... [| continuation ...]"
+// The trailing "|" continues the row on the next line.
+step_or_generator  = { slide_generator | step }
+channel_row_cont   = { "|" ~ step_or_generator* }
+channel_row        = { ident ~ ":" ~ step_or_generator* ~ channel_row_cont* }
+pattern_block      = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
+
+// ─── Song blocks ─────────────────────────────────────────────────────────────
+// Pipe-delimited table format:
+//   | col1 | col2 | ... |          (header)
+//   | pat1 | pat2 | ... |  @loop   (data row with optional loop annotation)
+song_silence    = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+song_cell       = { song_silence | ident }
+song_loop       = { "@loop" }
+song_header_row = { "|" ~ (ident ~ "|")+ }
+song_data_row   = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }
+song_block      = { "song" ~ ident ~ "{" ~ song_header_row ~ song_data_row+ ~ "}" }
+
 // ─── File root ────────────────────────────────────────────────────────────────
-file = { SOI ~ template* ~ patch ~ EOI }
+file = { SOI ~ (template | pattern_block | song_block)* ~ patch ~ EOI }

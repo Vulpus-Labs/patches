@@ -10,7 +10,8 @@ use crate::ast::{
     AtBlockIndex, Connection, Direction, File, ModuleDecl, ParamEntry, ParamIndex, ParamType,
     PortIndex, PortLabel, Scalar, ShapeArgValue, Span, Statement, Template, Value,
 };
-use crate::flat::{FlatConnection, FlatModule, FlatPatch};
+use crate::ast::{PatternDef, Step, StepOrGenerator};
+use crate::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -71,10 +72,68 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     let result =
         Expander::new(&templates).expand_body(&file.patch.body, None, &HashMap::new())?;
 
+    // Expand patterns: resolve slide generators into concrete steps.
+    let patterns = file.patterns.iter().map(expand_pattern_def).collect();
+    // Songs pass through unchanged.
+    let songs = file.songs.clone();
+
     Ok(ExpandResult {
-        patch: FlatPatch { modules: result.modules, connections: result.connections },
+        patch: FlatPatch {
+            modules: result.modules,
+            connections: result.connections,
+            patterns,
+            songs,
+        },
         warnings: vec![],
     })
+}
+
+/// Expand a `PatternDef` by resolving all slide generators into concrete steps.
+fn expand_pattern_def(pattern: &PatternDef) -> FlatPatternDef {
+    let channels = pattern
+        .channels
+        .iter()
+        .map(|ch| {
+            let steps = expand_steps(&ch.steps);
+            FlatPatternChannel { name: ch.name.name.clone(), steps }
+        })
+        .collect();
+    FlatPatternDef {
+        name: pattern.name.name.clone(),
+        channels,
+        span: pattern.span,
+    }
+}
+
+/// Expand a sequence of `StepOrGenerator` into concrete `Step` values.
+fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            StepOrGenerator::Step(s) => out.push(s.clone()),
+            StepOrGenerator::Slide { count, start, end } => {
+                let n = *count as usize;
+                if n == 0 {
+                    continue;
+                }
+                let step_size = (end - start) / n as f32;
+                for i in 0..n {
+                    let from = start + step_size * i as f32;
+                    let to = start + step_size * (i + 1) as f32;
+                    out.push(Step {
+                        cv1: from,
+                        cv2: 0.0,
+                        trigger: true,
+                        gate: true,
+                        cv1_end: Some(to),
+                        cv2_end: None,
+                        repeat: 1,
+                    });
+                }
+            }
+        }
+    }
+    out
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────
@@ -287,6 +346,7 @@ impl<'a> Expander<'a> {
                     .collect();
                 Ok(Value::Table(resolved?))
             }
+            Value::File(path) => Ok(Value::File(path.clone())),
         }
     }
 

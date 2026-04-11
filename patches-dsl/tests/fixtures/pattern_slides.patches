@@ -1,0 +1,8 @@
+pattern slide_test {
+    note: C4>E4 . E4:0.5>0.8 .
+    auto: slide(4, 0.0, 1.0)
+}
+
+patch {
+    module out : AudioOut
+}

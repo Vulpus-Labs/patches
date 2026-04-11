@@ -1,4 +1,4 @@
-use crate::ast::{Scalar, Span, Value};
+use crate::ast::{Scalar, SongDef, Span, Step, Value};
 
 /// A concrete module instance with all template parameters resolved.
 #[derive(Debug, Clone)]
@@ -32,6 +32,21 @@ pub struct FlatConnection {
     pub span: Span,
 }
 
+/// A pattern channel with slide generators expanded into concrete steps.
+#[derive(Debug, Clone)]
+pub struct FlatPatternChannel {
+    pub name: String,
+    pub steps: Vec<Step>,
+}
+
+/// A pattern definition with all generators expanded.
+#[derive(Debug, Clone)]
+pub struct FlatPatternDef {
+    pub name: String,
+    pub channels: Vec<FlatPatternChannel>,
+    pub span: Span,
+}
+
 /// A flat, template-free description of a patch.
 ///
 /// This is the output of the template expander (Stage 2) and the input to the
@@ -42,4 +57,8 @@ pub struct FlatConnection {
 pub struct FlatPatch {
     pub modules: Vec<FlatModule>,
     pub connections: Vec<FlatConnection>,
+    /// Pattern definitions with slide generators expanded.
+    pub patterns: Vec<FlatPatternDef>,
+    /// Song definitions (passed through unchanged from the AST).
+    pub songs: Vec<SongDef>,
 }

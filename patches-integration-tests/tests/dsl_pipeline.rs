@@ -114,6 +114,8 @@ fn nested_template_expansion() {
 #[test]
 fn unknown_type_returns_error() {
     let flat = FlatPatch {
+        patterns: vec![],
+        songs: vec![],
         modules: vec![FlatModule {
             id: "x".to_string(),
             type_name: "NoSuchModule".to_string(),
@@ -134,6 +136,8 @@ fn unknown_type_returns_error() {
 #[test]
 fn unknown_port_returns_error() {
     let flat = FlatPatch {
+        patterns: vec![],
+        songs: vec![],
         modules: vec![
             FlatModule {
                 id: "osc".to_string(),

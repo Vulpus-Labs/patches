@@ -77,6 +77,15 @@ pub enum ParameterValue {
     // (unlike Enum variants, which are a closed compile-time set declared in the
     // descriptor).
     Array(Arc<[String]>),
+    /// A resolved absolute file path. Produced by the interpreter from
+    /// `file("path")` DSL syntax. The planner replaces this with `FloatBuffer`
+    /// after calling the module's `FileProcessor::process_file`.
+    File(String),
+    /// Pre-processed file data as a flat float buffer. Produced by the planner
+    /// after calling `FileProcessor::process_file`. The `Arc` makes cloning
+    /// O(1) — important because `ParameterMap::clone()` is called in the
+    /// default `Module::update_parameters` implementation.
+    FloatBuffer(Arc<[f32]>),
 }
 
 impl ParameterValue {
@@ -88,6 +97,8 @@ impl ParameterValue {
             ParameterValue::Enum(_) => "enum",
             ParameterValue::String(_) => "string",
             ParameterValue::Array(_) => "array",
+            ParameterValue::File(_) => "file",
+            ParameterValue::FloatBuffer(_) => "float_buffer",
         }
     }
 }

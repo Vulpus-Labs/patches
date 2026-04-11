@@ -1,0 +1,8 @@
+pattern long_bass {
+    note: C2 . . ~ E2 . G2 . |
+          C2 . E2 ~ G2 . . .
+}
+
+patch {
+    module out : AudioOut
+}

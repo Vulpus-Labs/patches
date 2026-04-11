@@ -131,7 +131,9 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Limiter>();
     r.register::<PitchShift>();
     r.register::<ConvolutionReverb>();
+    r.register_file_processor::<ConvolutionReverb>();
     r.register::<StereoConvReverb>();
+    r.register_file_processor::<StereoConvReverb>();
     r
 }
 

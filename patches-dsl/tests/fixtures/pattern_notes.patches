@@ -1,0 +1,8 @@
+pattern melody {
+    note: C4 Eb4 . C4 Eb4 F4 . Eb4
+    vel:  1.0 0.8 . 0.8 1.0 0.8 . 0.8
+}
+
+patch {
+    module out : AudioOut
+}

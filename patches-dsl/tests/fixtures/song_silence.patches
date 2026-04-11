@@ -1,0 +1,11 @@
+pattern a { ch: x . }
+
+song with_silence {
+    | left | right |
+    | a    | _     |
+    | _    | a     |
+}
+
+patch {
+    module out : AudioOut
+}

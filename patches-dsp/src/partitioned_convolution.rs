@@ -164,6 +164,19 @@ impl IrPartitions {
         }
     }
 
+    /// Create `IrPartitions` from pre-computed frequency-domain partition data.
+    ///
+    /// `partitions` must contain frequency-domain spectra of length `2 * block_size`
+    /// in CMSIS packed format (as produced by [`RealPackedFft::forward`]).
+    ///
+    /// This skips the forward FFT step, allowing the caller to pre-compute
+    /// spectral data (e.g. during file processing on the control thread).
+    pub fn from_packed(partitions: Vec<Box<[f32]>>, block_size: usize) -> Self {
+        let fft_size = 2 * block_size;
+        let num_partitions = partitions.len();
+        Self { partitions, block_size, fft_size, num_partitions }
+    }
+
     /// Number of IR partitions.
     pub fn num_partitions(&self) -> usize {
         self.num_partitions
@@ -445,6 +458,82 @@ impl NonUniformConvolver {
                 *out += tier_val;
             }
             tier.output_read_pos += n;
+        }
+    }
+
+    /// Serialize the pre-computed frequency-domain data into a flat `Vec<f32>`.
+    ///
+    /// The format is a private contract between `process_file` and
+    /// `from_pre_fft`. Layout:
+    ///
+    /// ```text
+    /// [tier_count, base_block_size]
+    /// Per tier: [tier_block_size, partition_count, ratio, <partition_data...>]
+    /// ```
+    ///
+    /// All header values are stored as `f32` (they are small integers).
+    pub fn serialize_pre_fft(ir: &[f32], base_block_size: usize, max_tier_block_size: usize) -> Vec<f32> {
+        // Build the convolver to partition the IR.
+        let temp = Self::new(ir, base_block_size, max_tier_block_size);
+        let mut data = Vec::new();
+        data.push(temp.tiers.len() as f32);
+        data.push(base_block_size as f32);
+        for tier in &temp.tiers {
+            data.push(tier.tier_block_size as f32);
+            data.push(tier.convolver.ir.num_partitions() as f32);
+            data.push(tier.ratio as f32);
+            for part in &tier.convolver.ir.partitions {
+                data.extend_from_slice(part);
+            }
+        }
+        data
+    }
+
+    /// Reconstruct a `NonUniformConvolver` from pre-FFT'd data produced by
+    /// [`serialize_pre_fft`](Self::serialize_pre_fft).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data` does not contain a valid serialized convolver.
+    pub fn from_pre_fft(data: &[f32]) -> Self {
+        let tier_count = data[0] as usize;
+        let base_block_size = data[1] as usize;
+        let mut offset = 2;
+        let mut tiers = Vec::with_capacity(tier_count);
+
+        for _ in 0..tier_count {
+            let tier_block_size = data[offset] as usize;
+            let partition_count = data[offset + 1] as usize;
+            let ratio = data[offset + 2] as usize;
+            offset += 3;
+
+            let fft_size = 2 * tier_block_size;
+            let mut partitions = Vec::with_capacity(partition_count);
+            for _ in 0..partition_count {
+                let part = data[offset..offset + fft_size].to_vec().into_boxed_slice();
+                partitions.push(part);
+                offset += fft_size;
+            }
+
+            let ir_parts = IrPartitions::from_packed(partitions, tier_block_size);
+            let convolver = PartitionedConvolver::new(ir_parts);
+
+            tiers.push(ConvolutionTier {
+                convolver,
+                tier_block_size,
+                ratio,
+                input_ring: vec![0.0f32; tier_block_size].into_boxed_slice(),
+                input_pos: 0,
+                output_ring: vec![0.0f32; tier_block_size].into_boxed_slice(),
+                output_read_pos: 0,
+            });
+        }
+
+        let max_tier = tiers.iter().map(|t| t.tier_block_size).max().unwrap_or(base_block_size);
+        Self {
+            tiers,
+            base_block_size,
+            tier_output_scratch: vec![0.0f32; max_tier].into_boxed_slice(),
         }
     }
 

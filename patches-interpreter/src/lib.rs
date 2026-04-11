@@ -277,13 +277,20 @@ fn convert_params(
             .map_err(|e| format!("parameter '{raw_name}': {e}"))?;
 
         // Resolve relative file paths against the patch file's directory.
-        if let (Some(dir), ParameterValue::String(s)) = (base_dir, &mut pv) {
-            if matches!(param_desc.parameter_type, ParameterKind::String { .. })
-                && param_desc.name == "path"
-                && !s.is_empty()
-                && !Path::new(s.as_str()).is_absolute()
-            {
-                *s = dir.join(s.as_str()).to_string_lossy().into_owned();
+        if let Some(dir) = base_dir {
+            match &mut pv {
+                ParameterValue::File(s) if !s.is_empty() && !Path::new(s.as_str()).is_absolute() => {
+                    *s = dir.join(s.as_str()).to_string_lossy().into_owned();
+                }
+                ParameterValue::String(s)
+                    if matches!(param_desc.parameter_type, ParameterKind::String { .. })
+                        && param_desc.name == "path"
+                        && !s.is_empty()
+                        && !Path::new(s.as_str()).is_absolute() =>
+                {
+                    *s = dir.join(s.as_str()).to_string_lossy().into_owned();
+                }
+                _ => {}
             }
         }
 
@@ -320,6 +327,22 @@ fn convert_value(value: &Value, kind: &ParameterKind) -> Result<ParameterValue, 
         (Value::Scalar(Scalar::Str(s)), ParameterKind::String { .. }) => {
             Ok(ParameterValue::String(s.clone()))
         }
+        (Value::File(path), ParameterKind::File { extensions }) => {
+            // Validate file extension if the path is non-empty.
+            if !path.is_empty() {
+                let ext = std::path::Path::new(path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                if !extensions.is_empty() && !extensions.iter().any(|&e| e.eq_ignore_ascii_case(ext)) {
+                    return Err(format!(
+                        "unsupported file extension '.{ext}'; expected one of: {}",
+                        extensions.join(", ")
+                    ));
+                }
+            }
+            Ok(ParameterValue::File(path.clone()))
+        }
         (Value::Array(items), ParameterKind::Array { .. }) => {
             let strings = items
                 .iter()
@@ -343,6 +366,7 @@ fn value_kind_name(value: &Value) -> &'static str {
         Value::Scalar(Scalar::ParamRef(_)) => "param-ref",
         Value::Array(_) => "array",
         Value::Table(_) => "table",
+        Value::File(_) => "file",
     }
 }
 
@@ -405,6 +429,8 @@ mod tests {
     #[test]
     fn build_single_module_patch() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![osc_module("osc1")],
             connections: vec![],
         };
@@ -415,6 +441,8 @@ mod tests {
     #[test]
     fn build_two_modules_with_connection() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![osc_module("osc1"), sum_module("mix", 1)],
             connections: vec![connection("osc1", "sine", 0, "mix", "in", 0)],
         };
@@ -427,6 +455,8 @@ mod tests {
     fn forward_references_are_not_errors() {
         // Connections are processed after all modules, so module order doesn't matter.
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![sum_module("mix", 1), osc_module("osc1")],
             connections: vec![connection("osc1", "sine", 0, "mix", "in", 0)],
         };
@@ -436,6 +466,8 @@ mod tests {
     #[test]
     fn unknown_type_name_returns_interpret_error() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![FlatModule {
                 id: "x".to_string(),
                 type_name: "NonExistentModule".to_string(),
@@ -456,6 +488,8 @@ mod tests {
     #[test]
     fn unknown_output_port_returns_interpret_error() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![osc_module("osc1"), sum_module("mix", 1)],
             connections: vec![FlatConnection {
                 from_module: "osc1".to_string(),
@@ -479,6 +513,8 @@ mod tests {
     #[test]
     fn unknown_input_port_returns_interpret_error() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![osc_module("osc1"), sum_module("mix", 1)],
             connections: vec![FlatConnection {
                 from_module: "osc1".to_string(),
@@ -520,6 +556,8 @@ mod tests {
             span: Span { start: 50, end: 60 },
         };
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![osc_module("osc1"), osc2, sum_module("mix", 1)],
             connections: vec![
                 connection("osc1", "sine", 0, "mix", "in", 0),
@@ -536,6 +574,8 @@ mod tests {
     #[test]
     fn float_param_is_accepted() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![FlatModule {
                 id: "osc1".to_string(),
                 type_name: "Osc".to_string(),
@@ -554,6 +594,8 @@ mod tests {
     #[test]
     fn enum_param_is_accepted() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![FlatModule {
                 id: "osc1".to_string(),
                 type_name: "Osc".to_string(),
@@ -598,6 +640,8 @@ mod tests {
     #[test]
     fn unknown_param_name_returns_interpret_error() {
         let flat = FlatPatch {
+            patterns: vec![],
+            songs: vec![],
             modules: vec![FlatModule {
                 id: "osc1".to_string(),
                 type_name: "Osc".to_string(),

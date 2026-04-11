@@ -148,6 +148,14 @@ fn write_parameter_kind(out: &mut String, kind: &ParameterKind) {
             write_string(out, default);
             out.push('}');
         }
+        ParameterKind::File { extensions } => {
+            out.push_str("{\"type\":\"file\",\"extensions\":[");
+            for (i, ext) in extensions.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                write_string(out, ext);
+            }
+            out.push_str("]}");
+        }
         ParameterKind::Array { default, length } => {
             out.push_str(&format!("{{\"type\":\"array\",\"length\":{length},\"default\":["));
             for (i, v) in default.iter().enumerate() {
@@ -202,6 +210,16 @@ fn write_parameter_value(out: &mut String, value: &ParameterValue) {
             out.push_str("{\"type\":\"string\",\"v\":");
             write_string(out, v);
             out.push('}');
+        }
+        ParameterValue::File(v) => {
+            out.push_str("{\"type\":\"file\",\"v\":");
+            write_string(out, v);
+            out.push('}');
+        }
+        ParameterValue::FloatBuffer(_) => {
+            // FloatBuffer is not serialized via JSON; it uses a binary sideband.
+            // Write a placeholder so the JSON is valid.
+            out.push_str("{\"type\":\"float_buffer\",\"v\":null}");
         }
         ParameterValue::Array(v) => {
             out.push_str("{\"type\":\"array\",\"v\":[");
@@ -536,6 +554,17 @@ fn deserialize_parameter_kind(val: &JsonValue) -> Result<ParameterKind, String> 
             );
             Ok(ParameterKind::String { default })
         }
+        "file" => {
+            let empty = vec![];
+            let exts_json = val.get("extensions").and_then(|v| v.as_array()).unwrap_or(&empty);
+            let extensions: &'static [&'static str] = Box::leak(
+                exts_json.iter()
+                    .filter_map(|v| v.as_str().map(|s| leak_str(s.to_string())))
+                    .collect::<Vec<&'static str>>()
+                    .into_boxed_slice(),
+            );
+            Ok(ParameterKind::File { extensions })
+        }
         "array" => {
             let length = val.get("length").and_then(|v| v.as_usize()).unwrap_or(0);
             let default_arr = val.get("default")
@@ -593,6 +622,10 @@ fn deserialize_parameter_value(val: &JsonValue) -> Result<ParameterValue, String
         "string" => {
             let v = val.get("v").and_then(|v| v.as_str()).ok_or("string missing v")?.to_string();
             Ok(ParameterValue::String(v))
+        }
+        "file" => {
+            let v = val.get("v").and_then(|v| v.as_str()).ok_or("file missing v")?.to_string();
+            Ok(ParameterValue::File(v))
         }
         "array" => {
             let arr = val.get("v").and_then(|v| v.as_array()).ok_or("array missing v")?;

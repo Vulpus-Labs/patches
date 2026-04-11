@@ -3,10 +3,19 @@ use std::marker::PhantomData;
 use crate::audio_environment::AudioEnvironment;
 use crate::build_error::BuildError;
 use crate::modules::{InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap};
+use super::file_processor::FileProcessor;
 use super::module_builder::{Builder, ModuleBuilder};
+
+/// Type-erased file processor function pointer.
+type FileProcessorFn = Box<
+    dyn Fn(&AudioEnvironment, &ModuleShape, &str, &str) -> Result<Vec<f32>, String>
+        + Send
+        + Sync,
+>;
 
 pub struct Registry {
     builders: HashMap<String, Box<dyn ModuleBuilder>>,
+    file_processors: HashMap<String, FileProcessorFn>,
 }
 
 impl Default for Registry {
@@ -17,7 +26,10 @@ impl Default for Registry {
 
 impl Registry {
     pub fn new() -> Self {
-        Self { builders: HashMap::new() }
+        Self {
+            builders: HashMap::new(),
+            file_processors: HashMap::new(),
+        }
     }
 
     pub fn register<T>(&mut self)
@@ -27,6 +39,23 @@ impl Registry {
         let name = T::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }).module_name;
         self.builders
             .insert(name.to_string(), Box::new(Builder::<T>(PhantomData)));
+    }
+
+    /// Register a [`FileProcessor`] implementation for a module type.
+    ///
+    /// The module must already be registered via [`register`](Self::register).
+    /// At plan-build time, the planner calls [`process_file`](Self::process_file)
+    /// for any `ParameterValue::File` parameters on modules with a registered
+    /// file processor.
+    pub fn register_file_processor<T>(&mut self)
+    where
+        T: Module + FileProcessor + 'static,
+    {
+        let name = T::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }).module_name;
+        self.file_processors.insert(
+            name.to_string(),
+            Box::new(|env, shape, param_name, path| T::process_file(env, shape, param_name, path)),
+        );
     }
 
     /// Register a pre-built `ModuleBuilder` under the given name.
@@ -48,6 +77,28 @@ impl Registry {
             .get(name)
             .map(|builder| builder.describe(shape))
             .ok_or_else(|| BuildError::UnknownModule { name: name.to_string() })
+    }
+
+    /// Call the registered [`FileProcessor`] for the given module type.
+    ///
+    /// Returns `None` if no file processor is registered for `module_name`.
+    /// Returns `Some(Err(...))` if the processor fails.
+    pub fn process_file(
+        &self,
+        module_name: &str,
+        env: &AudioEnvironment,
+        shape: &ModuleShape,
+        param_name: &str,
+        path: &str,
+    ) -> Option<Result<Vec<f32>, String>> {
+        self.file_processors
+            .get(module_name)
+            .map(|f| f(env, shape, param_name, path))
+    }
+
+    /// Returns `true` if a [`FileProcessor`] is registered for the given module.
+    pub fn has_file_processor(&self, module_name: &str) -> bool {
+        self.file_processors.contains_key(module_name)
     }
 
     pub fn create(

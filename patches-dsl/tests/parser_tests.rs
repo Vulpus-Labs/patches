@@ -1,4 +1,4 @@
-use patches_dsl::{parse, Connection, Direction, ParseError, Scalar, Statement, Value};
+use patches_dsl::{parse, Connection, Direction, ParseError, Scalar, Statement, Step, StepOrGenerator, Value};
 
 // ─── Positive fixtures ────────────────────────────────────────────────────────
 
@@ -422,4 +422,276 @@ fn error_span_int_overflow_at_literal_position() {
         "error span should have nonzero length for a literal; got {}..{}",
         err.span.start, err.span.end
     );
+}
+
+// ─── Pattern block parsing ──────────────────────────────────────────────────
+
+#[test]
+fn pattern_basic_parses() {
+    let src = include_str!("fixtures/pattern_basic.patches");
+    let file = parse(src).expect("pattern_basic should parse");
+    assert_eq!(file.patterns.len(), 1);
+    let pat = &file.patterns[0];
+    assert_eq!(pat.name.name, "verse_drums");
+    assert_eq!(pat.channels.len(), 2);
+    assert_eq!(pat.channels[0].name.name, "kick");
+    assert_eq!(pat.channels[1].name.name, "snare");
+    // kick: x . . . x . . . — 8 steps
+    assert_eq!(pat.channels[0].steps.len(), 8);
+}
+
+#[test]
+fn pattern_step_values() {
+    let src = include_str!("fixtures/pattern_basic.patches");
+    let file = parse(src).unwrap();
+    let kick = &file.patterns[0].channels[0];
+
+    // First step: x → trigger=true, gate=true, cv1=0.0
+    match &kick.steps[0] {
+        StepOrGenerator::Step(s) => {
+            assert!(s.trigger);
+            assert!(s.gate);
+            assert!((s.cv1 - 0.0).abs() < 1e-6);
+        }
+        _ => panic!("expected Step"),
+    }
+    // Second step: . → rest
+    match &kick.steps[1] {
+        StepOrGenerator::Step(s) => {
+            assert!(!s.trigger);
+            assert!(!s.gate);
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_notes_parse() {
+    let src = include_str!("fixtures/pattern_notes.patches");
+    let file = parse(src).expect("pattern_notes should parse");
+    let pat = &file.patterns[0];
+    assert_eq!(pat.name.name, "melody");
+    let note_ch = &pat.channels[0];
+    // C4 → v/oct 4.0
+    match &note_ch.steps[0] {
+        StepOrGenerator::Step(s) => {
+            assert!((s.cv1 - 4.0).abs() < 1e-6, "C4 should be 4.0 v/oct, got {}", s.cv1);
+            assert!(s.trigger);
+            assert!(s.gate);
+        }
+        _ => panic!("expected Step"),
+    }
+    // Eb4 → v/oct = (4*12 + 3) / 12 = 51/12 = 4.25
+    match &note_ch.steps[1] {
+        StepOrGenerator::Step(s) => {
+            assert!((s.cv1 - 4.25).abs() < 1e-6, "Eb4 should be 4.25 v/oct, got {}", s.cv1);
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_continuation_lines() {
+    let src = include_str!("fixtures/pattern_continuation.patches");
+    let file = parse(src).expect("pattern_continuation should parse");
+    let pat = &file.patterns[0];
+    let note_ch = &pat.channels[0];
+    // 8 steps on first line + 8 on continuation = 16 total
+    assert_eq!(note_ch.steps.len(), 16, "expected 16 steps with continuation");
+}
+
+#[test]
+fn pattern_tie_step() {
+    let src = include_str!("fixtures/pattern_continuation.patches");
+    let file = parse(src).unwrap();
+    let note_ch = &file.patterns[0].channels[0];
+    // Step index 3 is ~ (tie)
+    match &note_ch.steps[3] {
+        StepOrGenerator::Step(s) => {
+            assert!(!s.trigger, "tie should have trigger=false");
+            assert!(s.gate, "tie should have gate=true");
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_cv2_parsing() {
+    // x:0.7 should parse cv2=0.7
+    let src = "pattern p { ch: x:0.7 . }\npatch { module o : AudioOut }";
+    let file = parse(src).unwrap();
+    let ch = &file.patterns[0].channels[0];
+    match &ch.steps[0] {
+        StepOrGenerator::Step(s) => {
+            assert!((s.cv2 - 0.7).abs() < 1e-6, "cv2 should be 0.7, got {}", s.cv2);
+            assert!(s.trigger);
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_repeat_parsing() {
+    let src = "pattern p { ch: x*3 . }\npatch { module o : AudioOut }";
+    let file = parse(src).unwrap();
+    match &file.patterns[0].channels[0].steps[0] {
+        StepOrGenerator::Step(s) => {
+            assert_eq!(s.repeat, 3);
+            assert!(s.trigger);
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_slide_step() {
+    let src = "pattern p { ch: C4>E4 . }\npatch { module o : AudioOut }";
+    let file = parse(src).unwrap();
+    match &file.patterns[0].channels[0].steps[0] {
+        StepOrGenerator::Step(s) => {
+            assert!((s.cv1 - 4.0).abs() < 1e-6, "slide start should be C4=4.0");
+            // E4 = (4*12 + 4) / 12 = 52/12 ≈ 4.3333
+            assert!(s.cv1_end.is_some(), "should have slide target");
+            let end = s.cv1_end.unwrap();
+            assert!((end - 4.333_333).abs() < 1e-3, "slide end should be E4≈4.333, got {end}");
+        }
+        _ => panic!("expected Step"),
+    }
+}
+
+#[test]
+fn pattern_slide_generator() {
+    let src = include_str!("fixtures/pattern_slides.patches");
+    let file = parse(src).expect("pattern_slides should parse");
+    let auto_ch = &file.patterns[0].channels[1];
+    // slide(4, 0.0, 1.0) should be a single Slide generator
+    assert_eq!(auto_ch.steps.len(), 1);
+    match &auto_ch.steps[0] {
+        StepOrGenerator::Slide { count, start, end } => {
+            assert_eq!(*count, 4);
+            assert!((start - 0.0).abs() < 1e-6);
+            assert!((end - 1.0).abs() < 1e-6);
+        }
+        _ => panic!("expected Slide generator"),
+    }
+}
+
+// ─── Song block parsing ─────────────────────────────────────────────────────
+
+#[test]
+fn song_basic_parses() {
+    let src = include_str!("fixtures/song_basic.patches");
+    let file = parse(src).expect("song_basic should parse");
+    assert_eq!(file.songs.len(), 1);
+    let song = &file.songs[0];
+    assert_eq!(song.name.name, "my_song");
+    assert_eq!(song.channels.len(), 2);
+    assert_eq!(song.channels[0].name, "drums");
+    assert_eq!(song.channels[1].name, "bass");
+    assert_eq!(song.rows.len(), 4);
+    assert!(song.loop_point.is_none());
+}
+
+#[test]
+fn song_pattern_refs() {
+    let src = include_str!("fixtures/song_basic.patches");
+    let file = parse(src).unwrap();
+    let song = &file.songs[0];
+    // First row: verse_drums, bass_a
+    assert_eq!(song.rows[0].patterns[0].as_ref().unwrap().name, "verse_drums");
+    assert_eq!(song.rows[0].patterns[1].as_ref().unwrap().name, "bass_a");
+    // Third row: fill_drums, bass_a
+    assert_eq!(song.rows[2].patterns[0].as_ref().unwrap().name, "fill_drums");
+}
+
+#[test]
+fn song_loop_point() {
+    let src = include_str!("fixtures/song_loop.patches");
+    let file = parse(src).expect("song_loop should parse");
+    let song = &file.songs[0];
+    assert_eq!(song.loop_point, Some(1), "loop point should be row index 1");
+    assert_eq!(song.rows.len(), 4);
+}
+
+#[test]
+fn song_silence_marker() {
+    let src = include_str!("fixtures/song_silence.patches");
+    let file = parse(src).expect("song_silence should parse");
+    let song = &file.songs[0];
+    // Row 0: a, _
+    assert!(song.rows[0].patterns[0].is_some());
+    assert!(song.rows[0].patterns[1].is_none(), "_ should parse as None");
+    // Row 1: _, a
+    assert!(song.rows[1].patterns[0].is_none());
+    assert!(song.rows[1].patterns[1].is_some());
+}
+
+#[test]
+fn song_multiple_loops_is_error() {
+    let src = r#"
+        pattern a { ch: x . }
+        song bad {
+            | main |
+            | a    | @loop
+            | a    | @loop
+        }
+        patch { module o : AudioOut }
+    "#;
+    let err = parse(src);
+    assert!(err.is_err(), "multiple @loop should be a parse error");
+}
+
+#[test]
+fn multiple_songs_in_file() {
+    let src = r#"
+        pattern a { ch: x . }
+        pattern b { ch: . x }
+
+        song first {
+            | main |
+            | a    |
+        }
+
+        song second {
+            | main |
+            | b    |
+            | a    |
+        }
+
+        patch { module o : AudioOut }
+    "#;
+    let file = parse(src).expect("multiple songs should parse");
+    assert_eq!(file.songs.len(), 2);
+    assert_eq!(file.songs[0].name.name, "first");
+    assert_eq!(file.songs[1].name.name, "second");
+}
+
+#[test]
+fn patterns_and_templates_coexist() {
+    let src = r#"
+        template Gain(level: float = 1.0) {
+            in: audio
+            out: audio
+            module amp : Amplifier { gain: <level> }
+            $.audio -> amp.in
+            amp.out -> $.audio
+        }
+
+        pattern drums {
+            kick: x . . . x . . .
+        }
+
+        song my_song {
+            | ch1   |
+            | drums |
+        }
+
+        patch {
+            module out : AudioOut
+        }
+    "#;
+    let file = parse(src).expect("mixed templates/patterns/songs should parse");
+    assert_eq!(file.templates.len(), 1);
+    assert_eq!(file.patterns.len(), 1);
+    assert_eq!(file.songs.len(), 1);
 }

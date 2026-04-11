@@ -35,6 +35,9 @@ pub enum Value {
     Scalar(Scalar),
     Array(Vec<Value>),
     Table(Vec<(Ident, Value)>),
+    /// `file("path")` — a file reference. The string is the raw path from the
+    /// DSL source; path resolution happens in the interpreter.
+    File(String),
 }
 
 // ─── Module declarations ──────────────────────────────────────────────────────
@@ -230,6 +233,71 @@ pub struct Template {
     pub span: Span,
 }
 
+// ─── Pattern / song types ────────────────────────────────────────────────────
+
+/// A single step in a pattern channel row.
+///
+/// Every step produces four values: `cv1`, `cv2`, `trigger`, and `gate`.
+/// Optional `cv1_end` / `cv2_end` specify slide targets; `repeat` subdivides
+/// the tick into multiple evenly-spaced triggers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Step {
+    pub cv1: f32,
+    pub cv2: f32,
+    pub trigger: bool,
+    pub gate: bool,
+    /// Slide target for cv1 (interpolates from `cv1` to `cv1_end` over the tick).
+    pub cv1_end: Option<f32>,
+    /// Slide target for cv2 (interpolates from `cv2` to `cv2_end` over the tick).
+    pub cv2_end: Option<f32>,
+    /// Repeat count: 1 = normal, >1 = subdivide the tick into `repeat` triggers.
+    pub repeat: u8,
+}
+
+/// An element in a pattern channel row: either a concrete step or a
+/// `slide(n, start, end)` generator to be expanded.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StepOrGenerator {
+    Step(Step),
+    /// `slide(n, start, end)` — expands to `n` slide steps interpolating cv1.
+    Slide { count: u32, start: f32, end: f32 },
+}
+
+/// One channel (row) within a pattern block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternChannel {
+    pub name: Ident,
+    pub steps: Vec<StepOrGenerator>,
+}
+
+/// A `pattern <name> { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternDef {
+    pub name: Ident,
+    pub channels: Vec<PatternChannel>,
+    pub span: Span,
+}
+
+/// One row in a song order table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SongRow {
+    /// Pattern name per channel; `None` means silence (`_`).
+    pub patterns: Vec<Option<Ident>>,
+}
+
+/// A `song <name> { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SongDef {
+    pub name: Ident,
+    /// Channel names from the header row.
+    pub channels: Vec<Ident>,
+    /// Arrangement rows (pattern assignments per channel).
+    pub rows: Vec<SongRow>,
+    /// Row index to loop back to; `None` means loop from beginning (row 0).
+    pub loop_point: Option<usize>,
+    pub span: Span,
+}
+
 // ─── Top-level ────────────────────────────────────────────────────────────────
 
 /// The `patch { ... }` block.
@@ -243,6 +311,8 @@ pub struct Patch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct File {
     pub templates: Vec<Template>,
+    pub patterns: Vec<PatternDef>,
+    pub songs: Vec<SongDef>,
     pub patch: Patch,
     pub span: Span,
 }

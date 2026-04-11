@@ -61,6 +61,16 @@ pub enum ParameterKind {
     /// `validate_parameters` rejects any `ParameterValue::Array` whose element count
     /// exceeds this limit.
     Array { default: &'static [&'static str], length: usize },
+    /// A file path parameter. The DSL writes `file("path")` which the interpreter
+    /// resolves to an absolute path against the patch file's directory.
+    ///
+    /// `extensions` declares the set of accepted file extensions (e.g. `&["wav", "aiff"]`).
+    /// The interpreter validates the extension before the value reaches the planner.
+    ///
+    /// At plan-build time, modules that implement [`FileProcessor`] have their
+    /// `process_file` method called, and the `ParameterValue::File` is replaced with
+    /// `ParameterValue::FloatBuffer(Arc<[f32]>)` before the plan reaches the audio thread.
+    File { extensions: &'static [&'static str] },
 }
 
 impl ParameterKind {
@@ -75,6 +85,7 @@ impl ParameterKind {
             ParameterKind::Array { default, .. } => ParameterValue::Array(
                 default.iter().map(|s| s.to_string()).collect::<Vec<_>>().into()
             ),
+            ParameterKind::File { .. } => ParameterValue::File(String::new()),
         }
     }
 
@@ -87,6 +98,7 @@ impl ParameterKind {
             ParameterKind::Enum   { .. } => "enum",
             ParameterKind::String { .. } => "string",
             ParameterKind::Array  { .. } => "array",
+            ParameterKind::File  { .. } => "file",
         }
     }
 }
@@ -234,6 +246,10 @@ impl ModuleDescriptor {
     param_builder!(string_param, string_param_multi,
         (default: &'static str),
         ParameterKind::String { default });
+
+    param_builder!(file_param, file_param_multi,
+        (extensions: &'static [&'static str]),
+        ParameterKind::File { extensions });
 
     // array_param has no _multi sibling so it is written by hand.
     pub fn array_param(

@@ -1,0 +1,10 @@
+patch {
+    module osc : Osc
+    module reverb : StereoConvReverb { mix: 0.3 }
+    module out : AudioOut
+
+    osc.sine -> reverb.in_left
+    osc.sine -> reverb.in_right
+    reverb.out_left -> out.in_left
+    reverb.out_right -> out.in_right
+}
