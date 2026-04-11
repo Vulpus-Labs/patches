@@ -32,7 +32,8 @@ fn load_graph(
         eprintln!("dsl warning: {w}");
     }
     let env = AudioEnvironment { sample_rate: 44_100.0, poly_voices: 16, periodic_update_interval: 32 };
-    Ok(patches_interpreter::build(&result.patch, registry, &env)?)
+    let base_dir = std::path::Path::new(path).parent();
+    Ok(patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?)
 }
 
 /// Push `graph` to `engine`, retrying if the plan channel is full.

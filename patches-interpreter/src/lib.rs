@@ -14,6 +14,8 @@
 //! This crate knows about concrete module types (via `patches-modules`) but
 //! has no audio-backend or engine dependencies.
 
+use std::path::Path;
+
 use patches_core::{
     AudioEnvironment, ModuleGraph, ModuleShape, Registry,
     ParameterMap, ParameterValue, ParameterKind,
@@ -55,11 +57,26 @@ pub fn build(
     registry: &Registry,
     _env: &AudioEnvironment,
 ) -> Result<ModuleGraph, InterpretError> {
+    build_with_base_dir(flat, registry, _env, None)
+}
+
+/// Build a [`ModuleGraph`] from a validated [`FlatPatch`], resolving
+/// relative file paths against `base_dir`.
+///
+/// String parameters whose descriptor name is `"path"` are resolved
+/// relative to `base_dir` when the value is not already an absolute path.
+/// Pass `None` to leave paths as-is (same behaviour as [`build`]).
+pub fn build_with_base_dir(
+    flat: &FlatPatch,
+    registry: &Registry,
+    _env: &AudioEnvironment,
+    base_dir: Option<&Path>,
+) -> Result<ModuleGraph, InterpretError> {
     let mut graph = ModuleGraph::new();
 
-    // Stage 1 — add all module nodes.
+    // Stage 1 ��� add all module nodes.
     for flat_module in &flat.modules {
-        add_module(&mut graph, flat_module, registry)?;
+        add_module(&mut graph, flat_module, registry, base_dir)?;
     }
 
     // Stage 2 — add all connections (after all nodes are present so that
@@ -77,6 +94,7 @@ fn add_module(
     graph: &mut ModuleGraph,
     flat_module: &FlatModule,
     registry: &Registry,
+    base_dir: Option<&Path>,
 ) -> Result<(), InterpretError> {
     let shape = shape_from_args(&flat_module.shape);
 
@@ -87,7 +105,7 @@ fn add_module(
             message: e.to_string(),
         })?;
 
-    let params = convert_params(&flat_module.params, &descriptor).map_err(|msg| {
+    let params = convert_params(&flat_module.params, &descriptor, base_dir).map_err(|msg| {
         InterpretError { span: flat_module.span, message: msg }
     })?;
 
@@ -225,6 +243,7 @@ fn parse_param_name(name: &str) -> (&str, usize) {
 fn convert_params(
     params: &[(String, Value)],
     descriptor: &patches_core::ModuleDescriptor,
+    base_dir: Option<&Path>,
 ) -> Result<ParameterMap, String> {
     let mut map = ParameterMap::new();
     for (raw_name, value) in params {
@@ -254,8 +273,19 @@ fn convert_params(
                 )
             })?;
 
-        let pv = convert_value(value, &param_desc.parameter_type)
+        let mut pv = convert_value(value, &param_desc.parameter_type)
             .map_err(|e| format!("parameter '{raw_name}': {e}"))?;
+
+        // Resolve relative file paths against the patch file's directory.
+        if let (Some(dir), ParameterValue::String(s)) = (base_dir, &mut pv) {
+            if matches!(param_desc.parameter_type, ParameterKind::String { .. })
+                && param_desc.name == "path"
+                && !s.is_empty()
+                && !Path::new(s.as_str()).is_absolute()
+            {
+                *s = dir.join(s.as_str()).to_string_lossy().into_owned();
+            }
+        }
 
         map.insert_param(base_name.to_string(), idx, pv);
     }

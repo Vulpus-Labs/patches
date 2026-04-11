@@ -53,9 +53,9 @@ static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports {
 
 unsafe extern "C" fn audio_ports_count(
     _plugin: *const clap_plugin,
-    is_input: bool,
+    _is_input: bool,
 ) -> u32 {
-    if is_input { 0 } else { 1 }
+    1
 }
 
 unsafe extern "C" fn audio_ports_get(
@@ -183,6 +183,11 @@ unsafe extern "C" fn state_load(
         }
     }
     p.dsl_source = source;
+    p.base_dir = if path_str.is_empty() {
+        None
+    } else {
+        std::path::Path::new(&path_str).parent().map(|d| d.to_path_buf())
+    };
 
     // If activated, compile and push the plan.
     if p.env.is_some() && !p.dsl_source.is_empty() {

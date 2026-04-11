@@ -25,11 +25,12 @@ pub const PLUGIN_DESCRIPTION: &CStr = c"Modular audio DSL with live-reload";
 
 /// CLAP features list (null-terminated array).
 ///
-/// We declare `audio-effect`, `stereo`, and `synthesizer` so that
-/// hosts categorise the plugin sensibly.  All three have VST3
-/// equivalents, so clap-wrapper can map them.
+/// We declare `instrument`, `audio-effect`, `synthesizer`, and `stereo`
+/// so that hosts can load the plugin as either an instrument or an
+/// effect.  All four have VST3 equivalents, so clap-wrapper can map them.
 pub const FEATURES: &[*const std::ffi::c_char] = &[
     c"instrument".as_ptr(),
+    c"audio-effect".as_ptr(),
     c"synthesizer".as_ptr(),
     c"stereo".as_ptr(),
     std::ptr::null(),

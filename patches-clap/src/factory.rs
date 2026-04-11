@@ -89,6 +89,7 @@ unsafe extern "C" fn create_plugin(
         registry: patches_modules::default_registry(),
         env: None,
         dsl_source: String::new(),
+        base_dir: None,
         graph: None,
         gui_state: std::sync::Arc::new(std::sync::Mutex::new(GuiState::default())),
         gui_handle: None,

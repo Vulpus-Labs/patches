@@ -63,6 +63,9 @@ pub struct PatchesClapPlugin {
 
     // ── DSL state ───────────────────────────────────────────────────
     pub(crate) dsl_source: String,
+    /// Parent directory of the loaded `.patches` file, used to resolve
+    /// relative asset paths (e.g. IR files).
+    pub(crate) base_dir: Option<std::path::PathBuf>,
     pub(crate) graph: Option<ModuleGraph>,
 
     // ── GUI ─────────────────────────────────────────────────────────
@@ -88,8 +91,13 @@ impl PatchesClapPlugin {
         let env = self.env.as_ref().ok_or("not activated")?;
         let file = patches_dsl::parse(&self.dsl_source).map_err(|e| e.to_string())?;
         let result = patches_dsl::expand(&file).map_err(|e| e.to_string())?;
-        let graph = patches_interpreter::build(&result.patch, &self.registry, env)
-            .map_err(|e| e.to_string())?;
+        let graph = patches_interpreter::build_with_base_dir(
+            &result.patch,
+            &self.registry,
+            env,
+            self.base_dir.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
         let plan = self
             .planner
             .build(&graph, &self.registry, env)
@@ -514,6 +522,7 @@ fn set_status_from_load(
     match std::fs::read_to_string(path) {
         Ok(source) => {
             p.dsl_source = source;
+            p.base_dir = path.parent().map(|d| d.to_path_buf());
             match p.compile_and_push_plan() {
                 Ok(()) => lock_gui_mut(&p.gui_state, |g| {
                     g.status = success_msg.into();
