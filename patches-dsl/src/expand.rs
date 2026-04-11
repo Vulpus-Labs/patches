@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
     AtBlockIndex, Connection, Direction, File, ModuleDecl, ParamEntry, ParamIndex, ParamType,
-    PortIndex, PortLabel, Scalar, ShapeArgValue, Span, Statement, Template, Value,
+    PortIndex, PortLabel, Scalar, ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
 };
 use crate::ast::{PatternDef, Step, StepOrGenerator};
 use crate::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
@@ -476,15 +476,7 @@ impl<'a> Expander<'a> {
                 instance_ports.insert(decl.name.name.clone(), ports);
             } else {
                 let inst_id = qualify(namespace, &decl.name.name);
-                // Build alias map for this instance from AliasList shape args.
-                let mut instance_alias_map: HashMap<String, u32> = HashMap::new();
-                for arg in &decl.shape {
-                    if let ShapeArgValue::AliasList(names) = &arg.value {
-                        for (i, name_ident) in names.iter().enumerate() {
-                            instance_alias_map.insert(name_ident.name.clone(), i as u32);
-                        }
-                    }
-                }
+                let instance_alias_map = build_alias_map(&decl.shape);
                 let has_aliases = !instance_alias_map.is_empty();
                 if has_aliases {
                     self.alias_maps.insert(decl.name.name.clone(), instance_alias_map);
@@ -580,15 +572,7 @@ impl<'a> Expander<'a> {
         let declared_names: HashSet<&str> =
             template.params.iter().map(|p| p.name.name.as_str()).collect();
 
-        // Build alias map for this instance from AliasList shape args.
-        let mut instance_alias_map: HashMap<String, u32> = HashMap::new();
-        for arg in &decl.shape {
-            if let ShapeArgValue::AliasList(names) = &arg.value {
-                for (i, name_ident) in names.iter().enumerate() {
-                    instance_alias_map.insert(name_ident.name.clone(), i as u32);
-                }
-            }
-        }
+        let instance_alias_map = build_alias_map(&decl.shape);
         let has_aliases = !instance_alias_map.is_empty();
         if has_aliases {
             self.alias_maps.insert(decl.name.name.clone(), instance_alias_map);
@@ -868,7 +852,6 @@ impl<'a> Expander<'a> {
                 to_is_arity,
                 arrow_scale,
                 namespace,
-                param_env,
                 instance_ports,
                 flat_connections,
                 boundary,
@@ -897,7 +880,6 @@ impl<'a> Expander<'a> {
         to_is_arity: bool,
         arrow_scale: f64,
         namespace: Option<&str>,
-        param_env: &HashMap<String, Scalar>,
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
@@ -919,7 +901,7 @@ impl<'a> Expander<'a> {
             // $.in_port ─→ inner  (template in-port boundary)
             (true, false) => {
                 let dsts = resolve_to(
-                    to_module, to_port, to_i, namespace, instance_ports, span, param_env,
+                    to_module, to_port, to_i, namespace, instance_ports, span,
                 )?;
                 let scaled: Vec<PortEntry> =
                     dsts.into_iter().map(|(m, p, i, s)| (m, p, i, arrow_scale * s)).collect();
@@ -936,8 +918,13 @@ impl<'a> Expander<'a> {
                     .insert(to_bkey, (src_m, src_p, src_i, inner_scale * arrow_scale));
             }
 
-            // Both $ on the same connection: not valid in correct input; skip.
-            (true, true) => {}
+            // Both sides are boundary markers — this is never valid.
+            (true, true) => {
+                return Err(ExpandError {
+                    span: *span,
+                    message: "connection has '$' on both sides".to_owned(),
+                });
+            }
 
             // Regular connection (from and to are both concrete or instances).
             (false, false) => {
@@ -946,7 +933,7 @@ impl<'a> Expander<'a> {
                 )?;
                 let composed = from_inner * arrow_scale;
                 let mut dsts = resolve_to(
-                    to_module, to_port, to_i, namespace, instance_ports, span, param_env,
+                    to_module, to_port, to_i, namespace, instance_ports, span,
                 )?;
                 if let Some((last_dst_m, last_dst_p, last_dst_i, last_to_inner)) = dsts.pop() {
                     for (dst_m, dst_p, dst_i, to_inner) in dsts {
@@ -1111,6 +1098,19 @@ fn resolve_group_param_value(
 
 // ─── Free helpers ─────────────────────────────────────────────────────────────
 
+/// Build an alias map from `AliasList` shape args: alias name → index.
+fn build_alias_map(shape: &[ShapeArg]) -> HashMap<String, u32> {
+    let mut map = HashMap::new();
+    for arg in shape {
+        if let ShapeArgValue::AliasList(names) = &arg.value {
+            for (i, name_ident) in names.iter().enumerate() {
+                map.insert(name_ident.name.clone(), i as u32);
+            }
+        }
+    }
+    map
+}
+
 /// Build a fully-qualified module ID under `namespace`.
 fn qualify(namespace: Option<&str>, name: &str) -> String {
     match namespace {
@@ -1268,7 +1268,6 @@ fn resolve_to(
     namespace: Option<&str>,
     instance_ports: &HashMap<String, TemplatePorts>,
     span: &Span,
-    _param_env: &HashMap<String, Scalar>,
 ) -> Result<Vec<PortEntry>, ExpandError> {
     if let Some(ports) = instance_ports.get(to_module) {
         // Try indexed key first (arity port), then plain key.
