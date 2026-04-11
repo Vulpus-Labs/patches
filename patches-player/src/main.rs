@@ -21,10 +21,10 @@ fn mtime(path: &str) -> std::io::Result<SystemTime> {
     fs::metadata(path)?.modified()
 }
 
-fn load_graph(
+fn load_patch(
     path: &str,
     registry: &patches_core::Registry,
-) -> Result<patches_core::ModuleGraph, Box<dyn std::error::Error>> {
+) -> Result<patches_interpreter::BuildResult, Box<dyn std::error::Error>> {
     let src = fs::read_to_string(path)?;
     let file = patches_dsl::parse(&src)?;
     let result = patches_dsl::expand(&file)?;
@@ -36,10 +36,10 @@ fn load_graph(
     Ok(patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?)
 }
 
-/// Push `graph` to `engine`, retrying if the plan channel is full.
-fn push_graph(engine: &mut PatchEngine, graph: &patches_core::ModuleGraph) {
+/// Push a build result to `engine`, retrying if the plan channel is full.
+fn push_build_result(engine: &mut PatchEngine, result: &patches_interpreter::BuildResult) {
     loop {
-        match engine.update(graph) {
+        match engine.update_with_tracker_data(&result.graph, result.tracker_data.clone()) {
             Ok(()) => {
                 println!("Reloaded.");
                 return;
@@ -63,7 +63,7 @@ fn run(
     device_config: DeviceConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let load_registry = patches_modules::default_registry();
-    let graph = load_graph(path, &load_registry)?;
+    let build_result = load_patch(path, &load_registry)?;
 
     let engine_registry = patches_modules::default_registry();
     let mut engine = PatchEngine::with_device_config(
@@ -73,7 +73,12 @@ fn run(
     )?;
 
     let (midi_producer, midi_consumer) = new_event_queue(256);
-    engine.start(&graph, Some(midi_consumer), record_path)?;
+    engine.start_with_tracker_data(
+        &build_result.graph,
+        build_result.tracker_data.clone(),
+        Some(midi_consumer),
+        record_path,
+    )?;
 
     let sample_rate = engine.sample_rate().unwrap_or(44_100.0);
     let scheduler = EventScheduler::new(sample_rate, 128);
@@ -129,8 +134,8 @@ fn run(
 
         if current_mtime != last_mtime {
             last_mtime = current_mtime;
-            match load_graph(path, &load_registry) {
-                Ok(graph) => push_graph(&mut engine, &graph),
+            match load_patch(path, &load_registry) {
+                Ok(result) => push_build_result(&mut engine, &result),
                 Err(e) => eprintln!("parse error (keeping current patch): {e}"),
             }
         }

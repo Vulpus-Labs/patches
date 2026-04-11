@@ -30,11 +30,11 @@ fn conv_reverb_synthetic_ir_builds() {
     let src = load_fixture("file_param.patches");
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
-    let graph = patches_interpreter::build(&result.patch, &registry(), &env())
+    let build_result = patches_interpreter::build(&result.patch, &registry(), &env())
         .expect("build failed");
 
-    assert!(graph.get_node(&NodeId::from("reverb".to_string())).is_some());
-    assert_eq!(graph.node_ids().len(), 3);
+    assert!(build_result.graph.get_node(&NodeId::from("reverb".to_string())).is_some());
+    assert_eq!(build_result.graph.node_ids().len(), 3);
 }
 
 /// DSL `file("path")` parses as `Value::File`.
@@ -77,7 +77,8 @@ fn file_extension_validation_rejects_unsupported() {
         }],
         connections: vec![],
     };
-    let err = patches_interpreter::build(&flat, &registry(), &env());
+    let result = patches_interpreter::build(&flat, &registry(), &env());
+    let err = result;
     assert!(err.is_err(), "expected error for .mp3 extension");
     let msg = match err {
         Err(e) => e.message,
@@ -105,12 +106,12 @@ fn nonexistent_file_fails_at_plan_build() {
     };
 
     // The interpreter should succeed (file existence is not checked at parse time).
-    let graph = patches_interpreter::build(&flat, &registry(), &env())
+    let build_result = patches_interpreter::build(&flat, &registry(), &env())
         .expect("interpreter should not fail for file paths");
 
     // The planner should fail when trying to process the file.
     let mut planner = patches_engine::Planner::new();
-    let result = planner.build(&graph, &registry(), &env());
+    let result = planner.build(&build_result.graph, &registry(), &env());
     assert!(result.is_err(), "expected error for nonexistent file");
 }
 
@@ -133,13 +134,13 @@ fn relative_path_resolved_against_base_dir() {
     };
 
     let base_dir = std::path::Path::new("/my/patch/dir");
-    let graph = patches_interpreter::build_with_base_dir(
+    let build_result = patches_interpreter::build_with_base_dir(
         &flat, &registry(), &env(), Some(base_dir),
     )
     .expect("build should succeed");
 
     // The graph should have the resolved absolute path.
-    let node = graph.get_node(&NodeId::from("verb".to_string())).expect("verb not found");
+    let node = build_result.graph.get_node(&NodeId::from("verb".to_string())).expect("verb not found");
     let ir_data = node.parameter_map.get_scalar("ir_data");
     match ir_data {
         Some(patches_core::ParameterValue::File(p)) => {

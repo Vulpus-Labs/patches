@@ -38,10 +38,11 @@ fn load_plan(path: &str) -> ExecutionPlan {
         eprintln!("dsl warning: {w}");
     }
     let env = AudioEnvironment { sample_rate: SAMPLE_RATE, poly_voices: 16, periodic_update_interval: 32 };
-    let graph = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
+    let build_result = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
         eprintln!("interpreter error: {e}");
         process::exit(1);
     });
+    let graph = build_result.graph;
     let (plan, _) =
         build_patch(&graph, &registry, &env, &PlannerState::empty(), POOL_CAPACITY, MODULE_POOL_CAPACITY)
             .unwrap_or_else(|e| {

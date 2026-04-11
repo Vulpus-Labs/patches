@@ -129,6 +129,12 @@ impl PatchProcessor {
         for (idx, inputs, outputs) in &plan.port_updates {
             pool.set_ports(*idx, inputs, outputs);
         }
+        // Broadcast tracker data to all receiving modules.
+        if let Some(ref tracker_data) = plan.tracker_data {
+            for &idx in &plan.tracker_receiver_indices {
+                pool.receive_tracker_data(idx, tracker_data.clone());
+            }
+        }
         for &i in &plan.to_zero {
             self.buffer_pool[i] = [CableValue::Mono(0.0), CableValue::Mono(0.0)];
         }

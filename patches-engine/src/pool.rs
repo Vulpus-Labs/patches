@@ -1,4 +1,6 @@
-use patches_core::{CablePool, InputPort, MidiEvent, Module, OutputPort, PeriodicUpdate, ReceivesMidi};
+use std::sync::Arc;
+
+use patches_core::{CablePool, InputPort, MidiEvent, Module, OutputPort, PeriodicUpdate, ReceivesMidi, TrackerData};
 use patches_core::parameter_map::ParameterMap;
 
 /// Audio-thread-owned pool of module instances.
@@ -124,6 +126,18 @@ impl ModulePool {
         if let Some(m) = self.modules[idx].as_mut() {
             if let Some(recv) = m.as_midi_receiver() {
                 recv.receive_midi(event);
+            }
+        }
+    }
+
+    /// Deliver tracker data to the module at `idx`.
+    ///
+    /// Does nothing if the slot is empty or if the module does not implement
+    /// [`ReceivesTrackerData`](patches_core::ReceivesTrackerData).
+    pub fn receive_tracker_data(&mut self, idx: usize, data: Arc<TrackerData>) {
+        if let Some(m) = self.modules[idx].as_mut() {
+            if let Some(recv) = m.as_tracker_data_receiver() {
+                recv.receive_tracker_data(data);
             }
         }
     }

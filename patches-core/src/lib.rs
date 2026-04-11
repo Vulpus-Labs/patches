@@ -20,6 +20,7 @@ pub mod cables;
 pub mod graphs;
 pub mod midi;
 pub mod modules;
+pub mod tracker;
 pub mod random_walk;
 pub mod registries;
 
@@ -32,6 +33,8 @@ pub use cable_pool::CablePool;
 pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput};
 pub use graphs::{GraphError, ModuleGraph, NodeId};
 pub use midi::{MidiEvent, ReceivesMidi};
+pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
+pub use tracker::Step as TrackerStep;
 pub use modules::{validate_parameters, Module, PeriodicUpdate, PortConnectivity};
 pub use modules::{ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterRef, PortDescriptor, PortRef};
 pub use modules::{ParameterKey, ParameterMap, ParameterValue};

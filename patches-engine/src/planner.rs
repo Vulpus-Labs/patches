@@ -41,6 +41,9 @@ pub struct Planner {
     /// instances remain in the set; tombstoned instances are dropped naturally
     /// because they no longer appear in `new_state.module_alloc.pool_map`.
     midi_receiver_instance_ids: HashSet<InstanceId>,
+    /// Instance IDs of modules that implement [`ReceivesTrackerData`] in the
+    /// most recently built plan.
+    tracker_receiver_instance_ids: HashSet<InstanceId>,
 }
 
 impl Default for Planner {
@@ -67,6 +70,7 @@ impl Planner {
             state: PlannerState::empty(),
             builder: PatchBuilder::new(pool_capacity, DEFAULT_MODULE_POOL_CAPACITY),
             midi_receiver_instance_ids: HashSet::new(),
+            tracker_receiver_instance_ids: HashSet::new(),
         }
     }
 
@@ -83,11 +87,24 @@ impl Planner {
         registry: &Registry,
         env: &AudioEnvironment,
     ) -> Result<ExecutionPlan, BuildError> {
+        self.build_with_tracker_data(graph, registry, env, None)
+    }
+
+    /// Build an [`ExecutionPlan`] with optional [`TrackerData`].
+    ///
+    /// If `tracker_data` is `Some`, it is wrapped in `Arc` and attached to the
+    /// plan. Modules implementing `ReceivesTrackerData` will receive it on plan
+    /// adoption.
+    pub fn build_with_tracker_data(
+        &mut self,
+        graph: &ModuleGraph,
+        registry: &Registry,
+        env: &AudioEnvironment,
+        tracker_data: Option<patches_core::TrackerData>,
+    ) -> Result<ExecutionPlan, BuildError> {
         let (mut plan, new_state) = self.builder.build_patch(graph, registry, env, &self.state)?;
 
         // ── Populate midi_receiver_indices ────────────────────────────────────
-        // Surviving MIDI receivers: their InstanceId is still present in the
-        // new allocation map (tombstoned ones are absent and drop naturally).
         let mut new_midi_ids: HashSet<InstanceId> = self
             .midi_receiver_instance_ids
             .iter()
@@ -95,14 +112,25 @@ impl Planner {
             .copied()
             .collect();
 
-        // Freshly installed modules: check via as_midi_receiver.
+        // ── Populate tracker_receiver_indices ────────────────────────────────
+        let mut new_tracker_ids: HashSet<InstanceId> = self
+            .tracker_receiver_instance_ids
+            .iter()
+            .filter(|id| new_state.module_alloc.pool_map.contains_key(id))
+            .copied()
+            .collect();
+
+        // Freshly installed modules: check capabilities.
         for (_, m) in plan.new_modules.iter_mut() {
             if m.as_midi_receiver().is_some() {
                 new_midi_ids.insert(m.instance_id());
             }
+            if m.as_tracker_data_receiver().is_some() {
+                new_tracker_ids.insert(m.instance_id());
+            }
         }
 
-        // Build the index list from the new InstanceId → pool-slot map.
+        // Build the MIDI index list.
         let mut midi_receiver_indices: Vec<usize> = new_midi_ids
             .iter()
             .filter_map(|id| new_state.module_alloc.pool_map.get(id).copied())
@@ -115,7 +143,19 @@ impl Planner {
         }
         plan.midi_receiver_indices = midi_receiver_indices;
 
+        // Build the tracker receiver index list.
+        let mut tracker_receiver_indices: Vec<usize> = new_tracker_ids
+            .iter()
+            .filter_map(|id| new_state.module_alloc.pool_map.get(id).copied())
+            .collect();
+        tracker_receiver_indices.sort_unstable();
+        plan.tracker_receiver_indices = tracker_receiver_indices;
+
+        // Attach tracker data.
+        plan.tracker_data = tracker_data.map(Arc::new);
+
         self.midi_receiver_instance_ids = new_midi_ids;
+        self.tracker_receiver_instance_ids = new_tracker_ids;
         self.state = new_state;
         Ok(plan)
     }
@@ -267,6 +307,17 @@ impl PatchEngine {
         event_queue: Option<EventQueueConsumer>,
         record_path: Option<&str>,
     ) -> Result<(), PatchEngineError> {
+        self.start_with_tracker_data(graph, None, event_queue, record_path)
+    }
+
+    /// Open the audio device, build the initial plan with tracker data, and begin processing.
+    pub fn start_with_tracker_data(
+        &mut self,
+        graph: &ModuleGraph,
+        tracker_data: Option<patches_core::TrackerData>,
+        event_queue: Option<EventQueueConsumer>,
+        record_path: Option<&str>,
+    ) -> Result<(), PatchEngineError> {
         if self.env.is_some() {
             return Ok(()); // already started
         }
@@ -274,7 +325,7 @@ impl PatchEngine {
         let env = self.engine.open(&self.device_config).map_err(PatchEngineError::Engine)?;
         self.env = Some(env);
         self.engine.start(event_queue, record_path).map_err(PatchEngineError::Engine)?;
-        self.update(graph)?;
+        self.update_with_tracker_data(graph, tracker_data)?;
         Ok(())
     }
 
@@ -305,8 +356,17 @@ impl PatchEngine {
     /// Returns [`PatchEngineError::ChannelFull`] if the engine's channel is
     /// already occupied. The caller is responsible for retrying.
     pub fn update(&mut self, graph: &ModuleGraph) -> Result<(), PatchEngineError> {
+        self.update_with_tracker_data(graph, None)
+    }
+
+    /// Apply an updated graph with optional tracker data.
+    pub fn update_with_tracker_data(
+        &mut self,
+        graph: &ModuleGraph,
+        tracker_data: Option<patches_core::TrackerData>,
+    ) -> Result<(), PatchEngineError> {
         let env = self.env.as_ref().ok_or(PatchEngineError::NotStarted)?;
-        let new_plan = self.planner.build(graph, &self.registry, env)?;
+        let new_plan = self.planner.build_with_tracker_data(graph, &self.registry, env, tracker_data)?;
 
         match self.engine.swap_plan(new_plan) {
             Ok(()) => Ok(()),

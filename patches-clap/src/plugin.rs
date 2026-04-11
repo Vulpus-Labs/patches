@@ -91,16 +91,18 @@ impl PatchesClapPlugin {
         let env = self.env.as_ref().ok_or("not activated")?;
         let file = patches_dsl::parse(&self.dsl_source).map_err(|e| e.to_string())?;
         let result = patches_dsl::expand(&file).map_err(|e| e.to_string())?;
-        let graph = patches_interpreter::build_with_base_dir(
+        let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
             &self.registry,
             env,
             self.base_dir.as_deref(),
         )
         .map_err(|e| e.to_string())?;
+        let graph = build_result.graph;
+        let tracker_data = build_result.tracker_data;
         let plan = self
             .planner
-            .build(&graph, &self.registry, env)
+            .build_with_tracker_data(&graph, &self.registry, env, tracker_data)
             .map_err(|e| e.to_string())?;
         // Snapshot the graph for the GUI before storing it.
         let snapshot = PatchSnapshot::from_graph(&graph);

@@ -40,7 +40,7 @@ fn flat_patch_round_trip() {
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
     let graph = patches_interpreter::build(&result.patch, &registry(), &env())
-        .expect("build failed");
+        .expect("build failed").graph;
 
     assert!(
         graph.get_node(&NodeId::from("osc".to_string())).is_some(),
@@ -62,7 +62,7 @@ fn template_expansion() {
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
     let graph = patches_interpreter::build(&result.patch, &registry(), &env())
-        .expect("build failed");
+        .expect("build failed").graph;
 
     // Both voice instances should produce namespaced nodes.
     assert!(
@@ -90,7 +90,7 @@ fn nested_template_expansion() {
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
     let graph = patches_interpreter::build(&result.patch, &registry(), &env())
-        .expect("build failed");
+        .expect("build failed").graph;
 
     // filtered_voice(fv) contains voice(v) which contains osc/env/vca.
     assert!(

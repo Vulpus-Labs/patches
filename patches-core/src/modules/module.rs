@@ -322,6 +322,18 @@ pub trait Module: Send {
         None
     }
 
+    /// Returns `Some(self)` if this module implements [`ReceivesTrackerData`], `None` otherwise.
+    ///
+    /// Override this to return `Some(self)` in modules that implement
+    /// [`ReceivesTrackerData`]. The planner uses this during plan construction
+    /// to build the `tracker_receiver_indices` list; the audio thread calls
+    /// `receive_tracker_data` on each receiver at plan activation.
+    ///
+    /// The default implementation returns `None`.
+    fn as_tracker_data_receiver(&mut self) -> Option<&mut dyn crate::tracker::ReceivesTrackerData> {
+        None
+    }
+
     /// Returns `Some(self)` if this module implements [`PeriodicUpdate`], `None` otherwise.
     ///
     /// Override this to return `Some(self)` in modules that implement [`PeriodicUpdate`].

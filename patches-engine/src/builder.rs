@@ -6,7 +6,7 @@ use patches_core::{
     AudioEnvironment, BufferAllocState, CableKind, InputPort, InstanceId,
     MonoInput, MonoOutput, Module, ModuleAllocState, ModuleGraph, NodeDecision, NodeId,
     NodeState, OutputPort, PlanError, PlannerState, PolyInput, PolyOutput, Registry,
-    ResolvedGraph,
+    ResolvedGraph, TrackerData,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use std::sync::Arc;
@@ -144,6 +144,16 @@ pub struct ExecutionPlan {
     /// [`Module::set_ports`] called on them inline before being pushed to
     /// [`new_modules`](Self::new_modules). Empty when no surviving module changed ports.
     pub port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)>,
+    /// Shared tracker data (patterns and songs) for this plan.
+    ///
+    /// `None` for patches that don't use pattern/song blocks — zero overhead
+    /// for non-tracker patches.
+    pub tracker_data: Option<Arc<TrackerData>>,
+    /// Pool indices of modules that implement [`ReceivesTrackerData`].
+    ///
+    /// On plan adoption, `receive_tracker_data(arc.clone())` is called on each
+    /// module in this list. Empty for non-tracker patches.
+    pub tracker_receiver_indices: Vec<usize>,
 }
 
 impl ExecutionPlan {
@@ -160,6 +170,8 @@ impl ExecutionPlan {
             periodic_indices: vec![],
             active_indices: vec![],
             port_updates: vec![],
+            tracker_data: None,
+            tracker_receiver_indices: vec![],
         }
     }
 }
@@ -415,6 +427,8 @@ impl PatchBuilder {
                 periodic_indices,
                 active_indices,
                 port_updates,
+                tracker_data: None,
+                tracker_receiver_indices: Vec::new(),
             },
             PlannerState {
                 nodes: node_states,

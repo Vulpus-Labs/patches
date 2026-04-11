@@ -62,10 +62,11 @@ fn main() {
         poly_voices: 16,
         periodic_update_interval: patches_core::BASE_PERIODIC_UPDATE_INTERVAL * OVERSAMPLING_FACTOR as u32,
     };
-    let graph = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
+    let build_result = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
         eprintln!("interpreter error: {e}");
         process::exit(1);
     });
+    let graph = build_result.graph;
     let (mut plan, _state) = build_patch(
         &graph,
         &registry,
