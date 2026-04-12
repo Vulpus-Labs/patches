@@ -40,6 +40,10 @@
 //! | `drive[i]` | float | 0.1--10.0 | `1.0` | Feedback saturation drive (per tap) |
 //! | `pan[i]` | float | -1.0--1.0 | `0.0` | Stereo pan position (per tap) |
 //! | `pingpong[i]` | bool | -- | `false` | Cross-route feedback L/R (per tap) |
+//!
+//! When `high_quality` is set in the module shape, tap reads use cubic
+//! (Catmull-Rom) interpolation; otherwise linear interpolation is used,
+//! which is cheaper but may produce audible artifacts on modulated delays.
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -84,6 +88,7 @@ pub struct StereoDelay {
     instance_id: InstanceId,
     descriptor:  ModuleDescriptor,
     taps:        usize,
+    high_quality: bool,
     sr_ms: f32,
 
     // Audio state
@@ -158,6 +163,7 @@ impl Module for StereoDelay {
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
         let sr   = env.sample_rate;
         let taps = descriptor.shape.channels;
+        let high_quality = descriptor.shape.high_quality;
         let sr_ms = sr * 0.001;
 
         let buf_l = DelayBuffer::for_duration(4.0, sr);
@@ -182,6 +188,7 @@ impl Module for StereoDelay {
             instance_id,
             descriptor,
             taps,
+            high_quality,
             sr_ms,
             buf_l,
             buf_r,
@@ -286,8 +293,11 @@ impl Module for StereoDelay {
             let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
             let offset = (self.delay_ms[i] * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
 
-            let tap_raw_l = self.buf_l.read_cubic(offset);
-            let tap_raw_r = self.buf_r.read_cubic(offset);
+            let (tap_raw_l, tap_raw_r) = if self.high_quality {
+                (self.buf_l.read_cubic(offset), self.buf_r.read_cubic(offset))
+            } else {
+                (self.buf_l.read_linear(offset), self.buf_r.read_linear(offset))
+            };
 
             // Send outputs (pre-gain, pre-pan, pre-return)
             pool.write_mono(&self.send_l[i], tap_raw_l);

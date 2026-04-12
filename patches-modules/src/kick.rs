@@ -7,9 +7,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port      | Kind | Description                                          |
+/// |-----------|------|------------------------------------------------------|
+/// | `trigger` | mono | Rising edge triggers                                 |
+/// | `voct`    | mono | V/oct pitch CV; overrides `sweep` start frequency if connected |
 ///
 /// # Outputs
 ///
@@ -27,18 +28,20 @@
 /// | `decay`      | float | 0.01–2.0 s  | 0.5     | Amplitude decay time              |
 /// | `drive`      | float | 0.0–1.0     | 0.0     | Saturation amount                 |
 /// | `click`      | float | 0.0–1.0     | 0.3     | Transient click intensity         |
+use crate::common::approximate::fast_exp2;
+use crate::common::frequency::C0_FREQ;
+
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort, PeriodicUpdate, TriggerInput
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
-use patches_dsp::MonoPhaseAccumulator;
+use patches_dsp::{MonoPhaseAccumulator, fast_sine};
 
 pub struct Kick {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    sample_rate: f32,
+    sample_rate_reciprocal: f32,
     // Parameters
     pitch: f32,
     sweep_start: f32,
@@ -46,6 +49,7 @@ pub struct Kick {
     decay_time: f32,
     drive: f32,
     click: f32,
+    voct_connected: bool,
     // DSP state
     osc: MonoPhaseAccumulator,
     pitch_sweep: PitchSweep,
@@ -53,6 +57,7 @@ pub struct Kick {
     click_env: DecayEnvelope,
     // Ports
     in_trigger: TriggerInput,
+    voct_in : MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -60,6 +65,7 @@ impl Module for Kick {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Kick", shape.clone())
             .mono_in("trigger")
+            .mono_in("voct")
             .mono_out("out")
             .float_param("pitch", 20.0, 200.0, 55.0)
             .float_param("sweep", 0.0, 5000.0, 2500.0)
@@ -80,8 +86,9 @@ impl Module for Kick {
         Self {
             instance_id,
             descriptor,
-            sample_rate: sr,
+            sample_rate_reciprocal: sr.recip(),
             pitch: 55.0,
+            voct_connected: false,
             sweep_start: 2500.0,
             sweep_time: 0.04,
             decay_time: 0.5,
@@ -92,6 +99,7 @@ impl Module for Kick {
             amp_env,
             click_env,
             in_trigger: TriggerInput::default(),
+            voct_in: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -124,6 +132,12 @@ impl Module for Kick {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.voct_in = MonoInput::from_ports(inputs, 1);
+        let was_connected = self.voct_connected;
+        self.voct_connected = self.voct_in.is_connected();
+        if was_connected && !self.voct_connected {
+            self.pitch_sweep.set_params(self.sweep_start, self.pitch, self.sweep_time);
+        }
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -140,17 +154,18 @@ impl Module for Kick {
         let click_amp = self.click_env.tick(trigger_rose);
 
         // Set oscillator frequency
-        let increment = freq / self.sample_rate;
+        let increment = freq * self.sample_rate_reciprocal;
         self.osc.set_increment(increment);
 
         // Sine oscillator
         let phase = self.osc.phase;
-        let sine = (phase * std::f32::consts::TAU).sin();
+        let sine = fast_sine(phase);
+        let two_phase = (phase + phase).fract();
+        let three_phase = (two_phase + phase).fract();
+        let click_signal = (fast_sine(two_phase) + fast_sine(three_phase)) * 0.5;
         self.osc.advance();
 
         // Mix sine body with click transient (higher harmonics)
-        let click_signal = (phase * std::f32::consts::TAU * 2.0).sin()
-            + (phase * std::f32::consts::TAU * 3.0).sin() * 0.5;
         let signal = sine * amp + click_signal * click_amp * self.click * 0.3;
 
         // Apply saturation
@@ -163,7 +178,23 @@ impl Module for Kick {
         pool.write_mono(&self.out_audio, output);
     }
 
+    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
+        Some(self)
+    }
+
     fn as_any(&self) -> &dyn std::any::Any { self }
+}
+
+impl PeriodicUpdate for Kick {
+    fn periodic_update(&mut self, pool: &CablePool<'_>) {
+        if !self.voct_connected {
+            return;
+        }
+        let start_hz = C0_FREQ * fast_exp2(pool.read_mono(&self.voct_in));
+        let ratio = self.pitch / self.sweep_start;
+        let end_hz = start_hz * ratio;
+        self.pitch_sweep.set_params(start_hz, end_hz, self.sweep_time);
+    }
 }
 
 #[cfg(test)]
@@ -172,14 +203,16 @@ mod tests {
     use patches_core::test_support::ModuleHarness;
 
     fn make_kick() -> ModuleHarness {
-        ModuleHarness::build::<Kick>(&[
+        let mut h = ModuleHarness::build::<Kick>(&[
             ("pitch", ParameterValue::Float(55.0)),
             ("sweep", ParameterValue::Float(2500.0)),
             ("sweep_time", ParameterValue::Float(0.04)),
             ("decay", ParameterValue::Float(0.5)),
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.3)),
-        ])
+        ]);
+        h.disconnect_input("voct");
+        h
     }
 
     #[test]
@@ -202,6 +235,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.3)),
         ]);
+        h.disconnect_input("voct");
 
         // Trigger
         h.set_mono("trigger", 1.0);
@@ -229,6 +263,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
+        h_low.disconnect_input("voct");
 
         // High pitch kick
         let mut h_high = ModuleHarness::build::<Kick>(&[
@@ -239,6 +274,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
+        h_high.disconnect_input("voct");
 
         // Trigger both
         h_low.set_mono("trigger", 1.0);
@@ -261,6 +297,63 @@ mod tests {
         assert!(
             high_crossings > low_crossings,
             "higher pitch should have more zero crossings: low={low_crossings}, high={high_crossings}"
+        );
+    }
+
+    #[test]
+    fn voct_overrides_sweep_start() {
+        // voct value that maps to ~5000 Hz sweep start
+        let voct_for_5000 = (5000.0f32 / 16.351_598).log2();
+
+        // Kick with low sweep param but voct overriding to high sweep start
+        let mut h_voct = ModuleHarness::build::<Kick>(&[
+            ("pitch", ParameterValue::Float(55.0)),
+            ("sweep", ParameterValue::Float(500.0)),
+            ("sweep_time", ParameterValue::Float(0.04)),
+            ("decay", ParameterValue::Float(0.5)),
+            ("drive", ParameterValue::Float(0.0)),
+            ("click", ParameterValue::Float(0.0)),
+        ]);
+        h_voct.set_mono("voct", voct_for_5000);
+
+        // Same kick without voct — sweep starts at 500 Hz
+        let mut h_no_voct = ModuleHarness::build::<Kick>(&[
+            ("pitch", ParameterValue::Float(55.0)),
+            ("sweep", ParameterValue::Float(500.0)),
+            ("sweep_time", ParameterValue::Float(0.04)),
+            ("decay", ParameterValue::Float(0.5)),
+            ("drive", ParameterValue::Float(0.0)),
+            ("click", ParameterValue::Float(0.0)),
+        ]);
+        h_no_voct.disconnect_input("voct");
+
+        // Let periodic update run before triggering
+        for _ in 0..64 { h_voct.tick(); }
+        for _ in 0..64 { h_no_voct.tick(); }
+
+        // Trigger both
+        h_voct.set_mono("trigger", 1.0);
+        h_voct.tick();
+        h_voct.set_mono("trigger", 0.0);
+        h_no_voct.set_mono("trigger", 1.0);
+        h_no_voct.tick();
+        h_no_voct.set_mono("trigger", 0.0);
+
+        // Measure first 200 samples — the sweep transient
+        let voct_samples = h_voct.run_mono(200, "out");
+        let no_voct_samples = h_no_voct.run_mono(200, "out");
+
+        let count_crossings = |s: &[f32]| -> usize {
+            s.windows(2).filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0)).count()
+        };
+
+        let voct_crossings = count_crossings(&voct_samples);
+        let no_voct_crossings = count_crossings(&no_voct_samples);
+
+        // Higher sweep start from voct should produce more crossings in the transient
+        assert!(
+            voct_crossings > no_voct_crossings,
+            "voct sweep start at 5000 Hz should have more transient crossings than 500 Hz: voct={voct_crossings}, no_voct={no_voct_crossings}"
         );
     }
 }

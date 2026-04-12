@@ -32,6 +32,10 @@
 //! | `feedback[i]` | float | 0.0--1.0 | `0.0` | Feedback amount (per tap) |
 //! | `tone[i]` | float | 0.0--1.0 | `1.0` | Tone filter (per tap) |
 //! | `drive[i]` | float | 0.1--10.0 | `1.0` | Feedback saturation drive (per tap) |
+//!
+//! When `high_quality` is set in the module shape, tap reads use cubic
+//! (Catmull-Rom) interpolation; otherwise linear interpolation is used,
+//! which is cheaper but may produce audible artifacts on modulated delays.
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -68,6 +72,7 @@ pub struct Delay {
     instance_id: InstanceId,
     descriptor:  ModuleDescriptor,
     taps:        usize,
+    high_quality: bool,
     sr_ms: f32,
 
     // Audio state
@@ -122,6 +127,7 @@ impl Module for Delay {
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
         let sr   = env.sample_rate;
         let taps = descriptor.shape.channels;
+        let high_quality = descriptor.shape.high_quality;
         let sr_ms = sr * 0.001;
 
         let buffer = DelayBuffer::for_duration(4.0, sr);
@@ -146,6 +152,7 @@ impl Module for Delay {
             instance_id,
             descriptor,
             taps,
+            high_quality,
             sr_ms,
             buffer,
             feedback:     vec![0.0; taps],
@@ -227,7 +234,11 @@ impl Module for Delay {
             let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
             let offset = (self.delay_ms[i] * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
 
-            let tap_raw = self.buffer.read_cubic(offset);
+            let tap_raw = if self.high_quality {
+                self.buffer.read_cubic(offset)
+            } else {
+                self.buffer.read_linear(offset)
+            };
 
             // Send output (pre-gain, pre-return)
             pool.write_mono(&self.send_out[i], tap_raw);
