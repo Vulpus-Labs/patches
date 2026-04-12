@@ -190,7 +190,7 @@ fn layout_graph(snapshot: &PatchSnapshot) -> GraphLayout {
     for (component, _w, _h) in &components {
         let mut comp_max_y: f32 = 0.0;
         for &(idx, (sx, sy)) in component {
-            let i = idx as usize;
+            let i = idx;
             let node = &snapshot.nodes[i];
             let h = node_height(node) as f32;
             // Transpose: Sugiyama x → our y, Sugiyama y → our x.
