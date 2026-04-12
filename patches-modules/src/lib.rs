@@ -48,6 +48,9 @@ pub mod tom;
 pub mod claves;
 pub mod cymbal;
 pub mod midi_drumset;
+pub mod bitcrusher;
+pub mod drive;
+pub mod transient_shaper;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -102,6 +105,9 @@ pub use tom::Tom;
 pub use claves::Claves;
 pub use cymbal::Cymbal;
 pub use midi_drumset::MidiDrumset;
+pub use bitcrusher::Bitcrusher;
+pub use drive::Drive;
+pub use transient_shaper::TransientShaper;
 
 pub fn default_registry() -> patches_core::Registry {
     let mut r = patches_core::Registry::new();
@@ -165,6 +171,9 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Claves>();
     r.register::<Cymbal>();
     r.register::<MidiDrumset>();
+    r.register::<Bitcrusher>();
+    r.register::<Drive>();
+    r.register::<TransientShaper>();
     r
 }
 
@@ -238,6 +247,9 @@ mod tests {
             "Claves",
             "Cymbal",
             "MidiDrumset",
+            "Bitcrusher",
+            "Drive",
+            "TransientShaper",
         ] {
             assert!(
                 r.create(name, &env, &shape, &params, InstanceId::next()).is_ok(),

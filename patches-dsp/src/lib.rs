@@ -58,6 +58,12 @@ pub use sinc_resample::resample;
 mod atomic_f32;
 pub use atomic_f32::AtomicF32;
 
+mod bitcrusher;
+pub use bitcrusher::BitcrusherKernel;
+
+mod envelope_follower;
+pub use envelope_follower::EnvelopeFollower;
+
 pub mod drum;
 pub use drum::{DecayEnvelope, PitchSweep, MetallicTone, BurstGenerator, saturate};
 

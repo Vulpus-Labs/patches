@@ -1,6 +1,7 @@
 # Drum machine demo: exercises all eight E061 drum modules
 # 808-style electronic drum kit driven by the tracker sequencer.
 # Kick, snare, closed hat, open hat, clap, tom, claves, cymbal.
+# Drive, bitcrusher, and transient shaping on individual voices.
 
 # ── Patterns ──────────────────────────────────────────────────────────────
 
@@ -171,6 +172,46 @@ patch {
     cymbal_pp.trigger[hit] -> cymbal_drum.trigger
     cymbal_pp.cv2[hit]     -> cymbal_drum.velocity
 
+    # ── Per-voice effects ──────────────────────────────────────────────────
+
+    # Kick: saturate drive for warmth, transient shaper for punch
+    module kick_drive: Drive {
+        mode: saturate, drive: 3.0, tone: 0.4, bias: 0.1, mix: 0.7
+    }
+    module kick_trans: TransientShaper {
+        attack: 0.6, sustain: -0.2, speed: 10.0, mix: 0.8
+    }
+    kick_drum.out -> kick_drive.in
+    kick_drive.out -> kick_trans.in
+
+    # Snare: fold distortion for edge, transient shaper to tighten
+    module snare_drive: Drive {
+        mode: fold, drive: 2.5, tone: 0.6, bias: 0.0, mix: 0.5
+    }
+    module snare_trans: TransientShaper {
+        attack: 0.4, sustain: -0.3, speed: 8.0, mix: 0.7
+    }
+    snare_drum.out -> snare_drive.in
+    snare_drive.out -> snare_trans.in
+
+    # Closed hat: bitcrusher for lo-fi texture
+    module hat_crush: Bitcrusher {
+        rate: 0.7, depth: 10.0, dry_wet: 0.4
+    }
+    closed_hat.out -> hat_crush.in
+
+    # Clap: crush drive for gritty digital character
+    module clap_drive: Drive {
+        mode: crush, drive: 4.0, tone: 0.5, bias: 0.0, mix: 0.5
+    }
+    clap_drum.out -> clap_drive.in
+
+    # Tom: clip drive for aggression
+    module tom_drive: Drive {
+        mode: clip, drive: 2.0, tone: 0.35, bias: 0.0, mix: 0.4
+    }
+    tom_drum.out -> tom_drive.in
+
     # ── Mixer: 8 channels panned across the stereo field ─────────────────
     module mix: StereoMixer(channels: 8) {
         @0: { level: 0.85, pan: 0.0 },
@@ -183,12 +224,12 @@ patch {
         @7: { level: 0.5,  pan: 0.0,  send_a: 0.15 }
     }
 
-    kick_drum.out   -> mix.in[0]
-    snare_drum.out  -> mix.in[1]
-    closed_hat.out  -> mix.in[2]
+    kick_trans.out  -> mix.in[0]
+    snare_trans.out -> mix.in[1]
+    hat_crush.out   -> mix.in[2]
     open_hat.out    -> mix.in[3]
-    clap_drum.out   -> mix.in[4]
-    tom_drum.out    -> mix.in[5]
+    clap_drive.out  -> mix.in[4]
+    tom_drive.out   -> mix.in[5]
     claves_drum.out -> mix.in[6]
     cymbal_drum.out -> mix.in[7]
 
