@@ -7,10 +7,11 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description                                          |
-/// |-----------|------|------------------------------------------------------|
-/// | `trigger` | mono | Rising edge triggers                                 |
-/// | `voct`    | mono | V/oct pitch CV; overrides `sweep` start frequency if connected |
+/// | Port       | Kind | Description                                          |
+/// |------------|------|------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                 |
+/// | `voct`     | mono | V/oct pitch CV; overrides `sweep` start frequency if connected |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -32,7 +33,8 @@ use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort, PeriodicUpdate, TriggerInput
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
+    MonoInput, MonoOutput, OutputPort, PeriodicUpdate, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
@@ -50,6 +52,7 @@ pub struct Kick {
     drive: f32,
     click: f32,
     voct_connected: bool,
+    latched_velocity: f32,
     // DSP state
     osc: MonoPhaseAccumulator,
     pitch_sweep: PitchSweep,
@@ -57,7 +60,8 @@ pub struct Kick {
     click_env: DecayEnvelope,
     // Ports
     in_trigger: TriggerInput,
-    voct_in : MonoInput,
+    voct_in: MonoInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -66,6 +70,7 @@ impl Module for Kick {
         ModuleDescriptor::new("Kick", shape.clone())
             .mono_in("trigger")
             .mono_in("voct")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 20.0, 200.0, 55.0)
             .float_param("sweep", 0.0, 5000.0, 2500.0)
@@ -89,6 +94,7 @@ impl Module for Kick {
             sample_rate_reciprocal: sr.recip(),
             pitch: 55.0,
             voct_connected: false,
+            latched_velocity: 1.0,
             sweep_start: 2500.0,
             sweep_time: 0.04,
             decay_time: 0.5,
@@ -100,6 +106,7 @@ impl Module for Kick {
             click_env,
             in_trigger: TriggerInput::default(),
             voct_in: MonoInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -133,6 +140,7 @@ impl Module for Kick {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.voct_in = MonoInput::from_ports(inputs, 1);
+        self.in_velocity = MonoInput::from_ports(inputs, 2);
         let was_connected = self.voct_connected;
         self.voct_connected = self.voct_in.is_connected();
         if was_connected && !self.voct_connected {
@@ -145,6 +153,11 @@ impl Module for Kick {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.osc.reset();
             self.pitch_sweep.trigger();
         }
@@ -175,7 +188,7 @@ impl Module for Kick {
             signal
         };
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
@@ -211,7 +224,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.3)),
         ]);
-        h.disconnect_input("voct");
+        h.disconnect_inputs(&["voct", "velocity"]);
         h
     }
 
@@ -235,7 +248,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.3)),
         ]);
-        h.disconnect_input("voct");
+        h.disconnect_inputs(&["voct", "velocity"]);
 
         // Trigger
         h.set_mono("trigger", 1.0);
@@ -263,7 +276,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
-        h_low.disconnect_input("voct");
+        h_low.disconnect_inputs(&["voct", "velocity"]);
 
         // High pitch kick
         let mut h_high = ModuleHarness::build::<Kick>(&[
@@ -274,7 +287,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
-        h_high.disconnect_input("voct");
+        h_high.disconnect_inputs(&["voct", "velocity"]);
 
         // Trigger both
         h_low.set_mono("trigger", 1.0);
@@ -301,6 +314,46 @@ mod tests {
     }
 
     #[test]
+    fn velocity_scales_output() {
+        let mut h_full = make_kick();
+        h_full.set_mono("trigger", 1.0);
+        h_full.tick();
+        h_full.set_mono("trigger", 0.0);
+        let rms_full = h_full.measure_rms(2000, "out");
+
+        let mut h_half = ModuleHarness::build::<Kick>(&[
+            ("pitch", ParameterValue::Float(55.0)),
+            ("sweep", ParameterValue::Float(2500.0)),
+            ("sweep_time", ParameterValue::Float(0.04)),
+            ("decay", ParameterValue::Float(0.5)),
+            ("drive", ParameterValue::Float(0.0)),
+            ("click", ParameterValue::Float(0.3)),
+        ]);
+        h_half.disconnect_input("voct");
+        h_half.set_mono("velocity", 0.5);
+        h_half.set_mono("trigger", 1.0);
+        h_half.tick();
+        h_half.set_mono("trigger", 0.0);
+        let rms_half = h_half.measure_rms(2000, "out");
+
+        let ratio = rms_half / rms_full;
+        assert!(
+            (ratio - 0.5).abs() < 0.1,
+            "half velocity should roughly halve output: ratio = {ratio}"
+        );
+    }
+
+    #[test]
+    fn velocity_disconnected_defaults_to_full() {
+        let mut h = make_kick();
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let rms = h.measure_rms(2000, "out");
+        assert!(rms > 0.01, "disconnected velocity should give full output, rms = {rms}");
+    }
+
+    #[test]
     fn voct_overrides_sweep_start() {
         // voct value that maps to ~5000 Hz sweep start
         let voct_for_5000 = (5000.0f32 / 16.351_598).log2();
@@ -314,6 +367,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
+        h_voct.disconnect_input("velocity");
         h_voct.set_mono("voct", voct_for_5000);
 
         // Same kick without voct — sweep starts at 500 Hz
@@ -325,7 +379,7 @@ mod tests {
             ("drive", ParameterValue::Float(0.0)),
             ("click", ParameterValue::Float(0.0)),
         ]);
-        h_no_voct.disconnect_input("voct");
+        h_no_voct.disconnect_inputs(&["voct", "velocity"]);
 
         // Let periodic update run before triggering
         for _ in 0..64 { h_voct.tick(); }

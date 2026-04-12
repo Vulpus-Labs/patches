@@ -5,9 +5,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -25,7 +26,7 @@
 /// | `filter` | float | 2000–16000 Hz | 8000    | Noise highpass cutoff           |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -39,11 +40,13 @@ pub struct ClosedHiHat {
     decay_time: f32,
     tone: f32,
     filter_freq: f32,
+    latched_velocity: f32,
     metallic: MetallicTone,
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
     prng_state: u64,
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -51,6 +54,7 @@ impl Module for ClosedHiHat {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("ClosedHiHat", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 100.0, 8000.0, 400.0)
             .float_param("decay", 0.005, 0.2, 0.04)
@@ -74,11 +78,13 @@ impl Module for ClosedHiHat {
             decay_time: 0.04,
             tone: 0.5,
             filter_freq: 8000.0,
+            latched_velocity: 1.0,
             metallic,
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
             prng_state: instance_id.as_u64() + 1,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -108,6 +114,7 @@ impl Module for ClosedHiHat {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -115,6 +122,11 @@ impl Module for ClosedHiHat {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.metallic.trigger();
         }
 
@@ -127,7 +139,7 @@ impl Module for ClosedHiHat {
         let mix = metal * self.tone + hp * (1.0 - self.tone);
         let output = mix * amp;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -140,10 +152,11 @@ impl Module for ClosedHiHat {
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description                         |
-/// |-----------|------|-------------------------------------|
-/// | `trigger` | mono | Rising edge triggers                |
-/// | `choke`   | mono | Rising edge chokes (cuts) the sound |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `choke`    | mono | Rising edge chokes (cuts) the sound                                                              |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -167,12 +180,14 @@ pub struct OpenHiHat {
     decay_time: f32,
     tone: f32,
     filter_freq: f32,
+    latched_velocity: f32,
     metallic: MetallicTone,
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
     prng_state: u64,
     in_trigger: TriggerInput,
     in_choke: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -181,6 +196,7 @@ impl Module for OpenHiHat {
         ModuleDescriptor::new("OpenHiHat", shape.clone())
             .mono_in("trigger")
             .mono_in("choke")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 100.0, 8000.0, 400.0)
             .float_param("decay", 0.05, 4.0, 0.5)
@@ -204,12 +220,14 @@ impl Module for OpenHiHat {
             decay_time: 0.5,
             tone: 0.5,
             filter_freq: 8000.0,
+            latched_velocity: 1.0,
             metallic,
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
             prng_state: instance_id.as_u64() + 1,
             in_trigger: TriggerInput::default(),
             in_choke: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -240,6 +258,7 @@ impl Module for OpenHiHat {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.in_choke = TriggerInput::from_ports(inputs, 1);
+        self.in_velocity = MonoInput::from_ports(inputs, 2);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -248,6 +267,11 @@ impl Module for OpenHiHat {
         let choke_rose = self.in_choke.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.metallic.trigger();
         }
 
@@ -264,7 +288,7 @@ impl Module for OpenHiHat {
         let mix = metal * self.tone + hp * (1.0 - self.tone);
         let output = mix * amp;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -278,6 +302,7 @@ mod tests {
     #[test]
     fn closed_hihat_trigger_produces_output() {
         let mut h = ModuleHarness::build::<ClosedHiHat>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -286,10 +311,34 @@ mod tests {
     }
 
     #[test]
+    fn closed_hihat_velocity_scales_output() {
+        let mut h_full = ModuleHarness::build::<ClosedHiHat>(&[]);
+        h_full.disconnect_input("velocity");
+        h_full.set_mono("trigger", 1.0);
+        h_full.tick();
+        h_full.set_mono("trigger", 0.0);
+        let rms_full = h_full.measure_rms(500, "out");
+
+        let mut h_half = ModuleHarness::build::<ClosedHiHat>(&[]);
+        h_half.set_mono("velocity", 0.5);
+        h_half.set_mono("trigger", 1.0);
+        h_half.tick();
+        h_half.set_mono("trigger", 0.0);
+        let rms_half = h_half.measure_rms(500, "out");
+
+        let ratio = rms_half / rms_full;
+        assert!(
+            (ratio - 0.5).abs() < 0.1,
+            "half velocity should roughly halve output: ratio = {ratio}"
+        );
+    }
+
+    #[test]
     fn closed_hihat_short_decay() {
         let mut h = ModuleHarness::build::<ClosedHiHat>(&[
             ("decay", ParameterValue::Float(0.01)),
         ]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -304,6 +353,7 @@ mod tests {
     #[test]
     fn open_hihat_trigger_produces_output() {
         let mut h = ModuleHarness::build::<OpenHiHat>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -316,6 +366,7 @@ mod tests {
         let mut h = ModuleHarness::build::<OpenHiHat>(&[
             ("decay", ParameterValue::Float(2.0)),
         ]);
+        h.disconnect_input("velocity");
         // Trigger
         h.set_mono("trigger", 1.0);
         h.tick();
@@ -345,9 +396,11 @@ mod tests {
         let mut h_closed = ModuleHarness::build::<ClosedHiHat>(&[
             ("decay", ParameterValue::Float(0.04)),
         ]);
+        h_closed.disconnect_input("velocity");
         let mut h_open = ModuleHarness::build::<OpenHiHat>(&[
             ("decay", ParameterValue::Float(0.5)),
         ]);
+        h_open.disconnect_input("velocity");
 
         // Trigger both
         h_closed.set_mono("trigger", 1.0);

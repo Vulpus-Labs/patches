@@ -6,9 +6,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -27,7 +28,7 @@
 /// | `shimmer` | float | 0.0–1.0       | 0.2     | Partial frequency modulation depth |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -43,6 +44,7 @@ pub struct Cymbal {
     filter_freq: f32,
     shimmer: f32,
     mod_depth: f32,
+    latched_velocity: f32,
     metallic: MetallicTone,
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
@@ -50,6 +52,7 @@ pub struct Cymbal {
     lfo_phase: f32,
     lfo_increment: f32,
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -57,6 +60,7 @@ impl Module for Cymbal {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Cymbal", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 200.0, 10000.0, 600.0)
             .float_param("decay", 0.2, 8.0, 2.0)
@@ -85,6 +89,7 @@ impl Module for Cymbal {
             filter_freq: 6000.0,
             shimmer: 0.2,
             mod_depth: 0.2 * 20.0,
+            latched_velocity: 1.0,
             metallic,
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
@@ -92,6 +97,7 @@ impl Module for Cymbal {
             lfo_phase: 0.0,
             lfo_increment,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -125,6 +131,7 @@ impl Module for Cymbal {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -132,6 +139,11 @@ impl Module for Cymbal {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.metallic.trigger();
             self.lfo_phase = 0.0;
         }
@@ -154,7 +166,7 @@ impl Module for Cymbal {
         let mix = metal * self.tone + hp * (1.0 - self.tone);
         let output = mix * amp;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -168,6 +180,7 @@ mod tests {
     #[test]
     fn trigger_produces_output() {
         let mut h = ModuleHarness::build::<Cymbal>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -180,6 +193,7 @@ mod tests {
         let mut h = ModuleHarness::build::<Cymbal>(&[
             ("decay", ParameterValue::Float(4.0)),
         ]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -199,10 +213,12 @@ mod tests {
             ("shimmer", ParameterValue::Float(0.0)),
             ("tone", ParameterValue::Float(1.0)), // all metallic
         ]);
+        h_no.disconnect_input("velocity");
         let mut h_yes = ModuleHarness::build::<Cymbal>(&[
             ("shimmer", ParameterValue::Float(1.0)),
             ("tone", ParameterValue::Float(1.0)),
         ]);
+        h_yes.disconnect_input("velocity");
 
         h_no.set_mono("trigger", 1.0);
         h_no.tick();

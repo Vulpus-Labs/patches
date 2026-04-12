@@ -6,9 +6,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -29,7 +30,7 @@
 /// | `snap`       | float | 0.0–1.0      | 0.5     | Transient snap intensity         |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
@@ -47,6 +48,7 @@ pub struct Snare {
     noise_freq: f32,
     noise_q: f32,
     snap: f32,
+    latched_velocity: f32,
     // DSP state
     osc: MonoPhaseAccumulator,
     pitch_sweep: PitchSweep,
@@ -57,6 +59,7 @@ pub struct Snare {
     prng_state: u64,
     // Ports
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -64,6 +67,7 @@ impl Module for Snare {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Snare", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 80.0, 400.0, 180.0)
             .float_param("tone", 0.0, 1.0, 0.5)
@@ -98,6 +102,7 @@ impl Module for Snare {
             noise_freq: 3000.0,
             noise_q: 0.3,
             snap: 0.5,
+            latched_velocity: 1.0,
             osc: MonoPhaseAccumulator::new(),
             pitch_sweep,
             body_env,
@@ -106,6 +111,7 @@ impl Module for Snare {
             noise_filter,
             prng_state: instance_id.as_u64() + 1,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -145,6 +151,7 @@ impl Module for Snare {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -152,6 +159,11 @@ impl Module for Snare {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.osc.reset();
             self.pitch_sweep.trigger();
         }
@@ -179,7 +191,7 @@ impl Module for Snare {
         let mix = body * (1.0 - self.tone) + noise * self.tone;
         let output = mix + white * snap_amp * self.snap * 0.5;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -191,7 +203,9 @@ mod tests {
     use patches_core::test_support::ModuleHarness;
 
     fn make_snare() -> ModuleHarness {
-        ModuleHarness::build::<Snare>(&[])
+        let mut h = ModuleHarness::build::<Snare>(&[]);
+        h.disconnect_input("velocity");
+        h
     }
 
     #[test]
@@ -210,6 +224,7 @@ mod tests {
             ("body_decay", ParameterValue::Float(0.05)),
             ("noise_decay", ParameterValue::Float(0.05)),
         ]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -223,12 +238,35 @@ mod tests {
     }
 
     #[test]
+    fn velocity_scales_output() {
+        let mut h_full = make_snare();
+        h_full.set_mono("trigger", 1.0);
+        h_full.tick();
+        h_full.set_mono("trigger", 0.0);
+        let rms_full = h_full.measure_rms(2000, "out");
+
+        let mut h_half = ModuleHarness::build::<Snare>(&[]);
+        h_half.set_mono("velocity", 0.5);
+        h_half.set_mono("trigger", 1.0);
+        h_half.tick();
+        h_half.set_mono("trigger", 0.0);
+        let rms_half = h_half.measure_rms(2000, "out");
+
+        let ratio = rms_half / rms_full;
+        assert!(
+            (ratio - 0.5).abs() < 0.1,
+            "half velocity should roughly halve output: ratio = {ratio}"
+        );
+    }
+
+    #[test]
     fn tone_extremes() {
         // All body (tone=0)
         let mut h_body = ModuleHarness::build::<Snare>(&[
             ("tone", ParameterValue::Float(0.0)),
             ("snap", ParameterValue::Float(0.0)),
         ]);
+        h_body.disconnect_input("velocity");
         h_body.set_mono("trigger", 1.0);
         h_body.tick();
         h_body.set_mono("trigger", 0.0);
@@ -239,6 +277,7 @@ mod tests {
             ("tone", ParameterValue::Float(1.0)),
             ("snap", ParameterValue::Float(0.0)),
         ]);
+        h_noise.disconnect_input("velocity");
         h_noise.set_mono("trigger", 1.0);
         h_noise.tick();
         h_noise.set_mono("trigger", 0.0);

@@ -6,9 +6,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -27,7 +28,7 @@
 /// | `bursts` | int   | 1–8         | 4       | Number of noise bursts    |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, BurstGenerator};
@@ -43,6 +44,7 @@ pub struct ClapDrum {
     filter_q: f32,
     spread: f32,
     bursts: usize,
+    latched_velocity: f32,
     // DSP state
     tail_env: DecayEnvelope,
     burst_gen: BurstGenerator,
@@ -50,6 +52,7 @@ pub struct ClapDrum {
     prng_state: u64,
     // Ports
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -57,6 +60,7 @@ impl Module for ClapDrum {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Clap", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("decay", 0.05, 2.0, 0.3)
             .float_param("filter", 500.0, 8000.0, 1200.0)
@@ -83,11 +87,13 @@ impl Module for ClapDrum {
             filter_q: 0.4,
             spread: 0.5,
             bursts: 4,
+            latched_velocity: 1.0,
             tail_env,
             burst_gen,
             noise_filter,
             prng_state: instance_id.as_u64() + 1,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -121,11 +127,20 @@ impl Module for ClapDrum {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let trigger_rose = self.in_trigger.tick(pool);
+
+        if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
+        }
 
         let white = xorshift64(&mut self.prng_state);
         let (_lp, _hp, bp) = self.noise_filter.tick(white);
@@ -139,7 +154,7 @@ impl Module for ClapDrum {
         // Combine: burst transient + filtered noise tail
         let output = burst + bp * tail_amp * 0.5;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -153,6 +168,7 @@ mod tests {
     #[test]
     fn trigger_produces_output() {
         let mut h = ModuleHarness::build::<ClapDrum>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -167,6 +183,7 @@ mod tests {
             ("bursts", ParameterValue::Int(2)),
             ("spread", ParameterValue::Float(0.5)),
         ]);
+        h1.disconnect_input("velocity");
         h1.set_mono("trigger", 1.0);
         h1.tick();
         h1.set_mono("trigger", 0.0);
@@ -176,6 +193,7 @@ mod tests {
             ("bursts", ParameterValue::Int(8)),
             ("spread", ParameterValue::Float(0.5)),
         ]);
+        h2.disconnect_input("velocity");
         h2.set_mono("trigger", 1.0);
         h2.tick();
         h2.set_mono("trigger", 0.0);

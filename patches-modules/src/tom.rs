@@ -6,9 +6,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -27,7 +28,7 @@
 /// | `noise`      | float | 0.0–1.0     | 0.15    | Noise layer amount       |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
@@ -43,6 +44,7 @@ pub struct Tom {
     sweep_time: f32,
     decay_time: f32,
     noise_amt: f32,
+    latched_velocity: f32,
     // DSP state
     osc: MonoPhaseAccumulator,
     pitch_sweep: PitchSweep,
@@ -51,6 +53,7 @@ pub struct Tom {
     prng_state: u64,
     // Ports
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -58,6 +61,7 @@ impl Module for Tom {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Tom", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 40.0, 500.0, 120.0)
             .float_param("sweep", 0.0, 2000.0, 400.0)
@@ -83,12 +87,14 @@ impl Module for Tom {
             sweep_time: 0.03,
             decay_time: 0.3,
             noise_amt: 0.15,
+            latched_velocity: 1.0,
             osc: MonoPhaseAccumulator::new(),
             pitch_sweep,
             amp_env,
             noise_env,
             prng_state: instance_id.as_u64() + 1,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -118,6 +124,7 @@ impl Module for Tom {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -125,6 +132,11 @@ impl Module for Tom {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.osc.reset();
             self.pitch_sweep.trigger();
         }
@@ -146,7 +158,7 @@ impl Module for Tom {
 
         let output = (sine * amp) + noise;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -160,6 +172,7 @@ mod tests {
     #[test]
     fn trigger_produces_output() {
         let mut h = ModuleHarness::build::<Tom>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -174,11 +187,13 @@ mod tests {
             ("sweep", ParameterValue::Float(0.0)),
             ("noise", ParameterValue::Float(0.0)),
         ]);
+        h_low.disconnect_input("velocity");
         let mut h_high = ModuleHarness::build::<Tom>(&[
             ("pitch", ParameterValue::Float(300.0)),
             ("sweep", ParameterValue::Float(0.0)),
             ("noise", ParameterValue::Float(0.0)),
         ]);
+        h_high.disconnect_input("velocity");
 
         h_low.set_mono("trigger", 1.0);
         h_low.tick();
@@ -206,6 +221,7 @@ mod tests {
             ("decay", ParameterValue::Float(0.05)),
             ("noise", ParameterValue::Float(0.0)),
         ]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);

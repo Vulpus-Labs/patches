@@ -47,6 +47,7 @@ pub mod hihat;
 pub mod tom;
 pub mod claves;
 pub mod cymbal;
+pub mod midi_drumset;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -100,6 +101,7 @@ pub use hihat::{ClosedHiHat, OpenHiHat};
 pub use tom::Tom;
 pub use claves::Claves;
 pub use cymbal::Cymbal;
+pub use midi_drumset::MidiDrumset;
 
 pub fn default_registry() -> patches_core::Registry {
     let mut r = patches_core::Registry::new();
@@ -162,6 +164,7 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Tom>();
     r.register::<Claves>();
     r.register::<Cymbal>();
+    r.register::<MidiDrumset>();
     r
 }
 
@@ -234,6 +237,7 @@ mod tests {
             "Tom",
             "Claves",
             "Cymbal",
+            "MidiDrumset",
         ] {
             assert!(
                 r.create(name, &env, &shape, &params, InstanceId::next()).is_ok(),

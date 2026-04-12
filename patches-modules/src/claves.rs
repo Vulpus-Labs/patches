@@ -5,9 +5,10 @@
 ///
 /// # Inputs
 ///
-/// | Port      | Kind | Description          |
-/// |-----------|------|----------------------|
-/// | `trigger` | mono | Rising edge triggers |
+/// | Port       | Kind | Description                                                                                      |
+/// |------------|------|--------------------------------------------------------------------------------------------------|
+/// | `trigger`  | mono | Rising edge triggers                                                                             |
+/// | `velocity` | mono | Velocity (0.0–1.0); latched on trigger, scales output amplitude. Defaults to 1.0 when disconnected |
 ///
 /// # Outputs
 ///
@@ -24,7 +25,7 @@
 /// | `reson` | float | 0.3–1.0      | 0.85    | Bandpass resonance / ring |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::DecayEnvelope;
@@ -37,10 +38,12 @@ pub struct Claves {
     pitch: f32,
     decay_time: f32,
     reson: f32,
+    latched_velocity: f32,
     bp_filter: SvfKernel,
     amp_env: DecayEnvelope,
     impulse_pending: bool,
     in_trigger: TriggerInput,
+    in_velocity: MonoInput,
     out_audio: MonoOutput,
 }
 
@@ -48,6 +51,7 @@ impl Module for Claves {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Claves", shape.clone())
             .mono_in("trigger")
+            .mono_in("velocity")
             .mono_out("out")
             .float_param("pitch", 200.0, 5000.0, 2500.0)
             .float_param("decay", 0.01, 0.5, 0.06)
@@ -67,10 +71,12 @@ impl Module for Claves {
             pitch: 2500.0,
             decay_time: 0.06,
             reson: 0.85,
+            latched_velocity: 1.0,
             bp_filter: SvfKernel::new_static(f, d),
             amp_env,
             impulse_pending: false,
             in_trigger: TriggerInput::default(),
+            in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -96,6 +102,7 @@ impl Module for Claves {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_velocity = MonoInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -103,8 +110,12 @@ impl Module for Claves {
         let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
+            self.latched_velocity = if self.in_velocity.connected {
+                pool.read_mono(&self.in_velocity)
+            } else {
+                1.0
+            };
             self.impulse_pending = true;
-            // Reset filter state for clean attack (coefficients unchanged)
             self.bp_filter.reset_state();
         }
 
@@ -121,7 +132,7 @@ impl Module for Claves {
         let (_lp, _hp, bp) = self.bp_filter.tick(input);
         let output = bp * amp;
 
-        pool.write_mono(&self.out_audio, output);
+        pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -135,6 +146,7 @@ mod tests {
     #[test]
     fn trigger_produces_output() {
         let mut h = ModuleHarness::build::<Claves>(&[]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);
@@ -148,10 +160,12 @@ mod tests {
             ("pitch", ParameterValue::Float(500.0)),
             ("reson", ParameterValue::Float(0.9)),
         ]);
+        h_low.disconnect_input("velocity");
         let mut h_high = ModuleHarness::build::<Claves>(&[
             ("pitch", ParameterValue::Float(4000.0)),
             ("reson", ParameterValue::Float(0.9)),
         ]);
+        h_high.disconnect_input("velocity");
 
         h_low.set_mono("trigger", 1.0);
         h_low.tick();
@@ -178,6 +192,7 @@ mod tests {
         let mut h = ModuleHarness::build::<Claves>(&[
             ("decay", ParameterValue::Float(0.02)),
         ]);
+        h.disconnect_input("velocity");
         h.set_mono("trigger", 1.0);
         h.tick();
         h.set_mono("trigger", 0.0);

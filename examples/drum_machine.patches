@@ -86,19 +86,6 @@ song drums {
     | kick_syncopated | snare_busy  | hat_sixteenths | ohat_fill  | clap_fill  | tom_fill | claves_clave | cymbal_crash |
 }
 
-# ── Velocity VCA template ────────────────────────────────────────────────
-
-template drum_vca() {
-    in:  signal, velocity
-    out: audio
-
-    module vca: Vca
-
-    $.signal   -> vca.in
-    $.velocity -> vca.cv
-    vca.out    -> $.audio
-}
-
 # ── Patch ─────────────────────────────────────────────────────────────────
 
 patch {
@@ -131,82 +118,58 @@ patch {
     seq.clock[claves] -> claves_pp.clock
     seq.clock[cymbal] -> cymbal_pp.clock
 
-    # ── Drum modules ─────────────────────────────────────────────────────
+    # ── Drum modules (velocity wired directly via native velocity input) ─
 
     module kick_drum: Kick {
         pitch: 50, sweep: 3000, sweep_time: 0.04, decay: 0.4, drive: 0.2, click: 0.4
     }
-    module kick_vca: drum_vca
-
     kick_pp.trigger[hit] -> kick_drum.trigger
-    kick_drum.out        -> kick_vca.signal
-    kick_pp.cv2[hit]     -> kick_vca.velocity
+    kick_pp.cv2[hit]     -> kick_drum.velocity
 
     module snare_drum: Snare {
         pitch: 190, tone: 0.55, body_decay: 0.12, noise_decay: 0.18,
         noise_freq: 3500, noise_q: 0.25, snap: 0.6
     }
-    module snare_vca: drum_vca
-
     snare_pp.trigger[hit] -> snare_drum.trigger
-    snare_drum.out        -> snare_vca.signal
-    snare_pp.cv2[hit]     -> snare_vca.velocity
+    snare_pp.cv2[hit]     -> snare_drum.velocity
 
     module closed_hat: ClosedHiHat {
         pitch: 420, decay: 0.035, tone: 0.6, filter: 9000
     }
-    module hat_vca: drum_vca
-
     hat_pp.trigger[hit] -> closed_hat.trigger
-    closed_hat.out      -> hat_vca.signal
-    hat_pp.cv2[hit]     -> hat_vca.velocity
+    hat_pp.cv2[hit]     -> closed_hat.velocity
 
     module open_hat: OpenHiHat {
         pitch: 420, decay: 0.45, tone: 0.55, filter: 8000
     }
-    module ohat_vca: drum_vca
-
     ohat_pp.trigger[hit] -> open_hat.trigger
     # Closed hat chokes the open hat
     hat_pp.trigger[hit]  -> open_hat.choke
-    open_hat.out         -> ohat_vca.signal
-    ohat_pp.cv2[hit]     -> ohat_vca.velocity
+    ohat_pp.cv2[hit]     -> open_hat.velocity
 
     module clap_drum: Clap {
         decay: 0.25, filter: 1400, q: 0.35, spread: 0.5, bursts: 4
     }
-    module clap_vca: drum_vca
-
     clap_pp.trigger[hit] -> clap_drum.trigger
-    clap_drum.out        -> clap_vca.signal
-    clap_pp.cv2[hit]     -> clap_vca.velocity
+    clap_pp.cv2[hit]     -> clap_drum.velocity
 
     module tom_drum: Tom {
         pitch: 100, sweep: 350, sweep_time: 0.025, decay: 0.25, noise: 0.12
     }
-    module tom_vca: drum_vca
-
     tom_pp.trigger[hit] -> tom_drum.trigger
-    tom_drum.out        -> tom_vca.signal
-    tom_pp.cv2[hit]     -> tom_vca.velocity
+    tom_pp.cv2[hit]     -> tom_drum.velocity
 
     module claves_drum: Claves {
         pitch: 2800, decay: 0.05, reson: 0.88
     }
-    module claves_vca: drum_vca
-
     claves_pp.trigger[hit] -> claves_drum.trigger
-    claves_drum.out        -> claves_vca.signal
-    claves_pp.cv2[hit]     -> claves_vca.velocity
+    claves_pp.cv2[hit]     -> claves_drum.velocity
 
     module cymbal_drum: Cymbal {
         pitch: 550, decay: 3.0, tone: 0.5, filter: 5500, shimmer: 0.25
     }
-    module cymbal_vca: drum_vca
-
     cymbal_pp.trigger[hit] -> cymbal_drum.trigger
-    cymbal_drum.out        -> cymbal_vca.signal
-    cymbal_pp.cv2[hit]     -> cymbal_vca.velocity
+    cymbal_pp.cv2[hit]     -> cymbal_drum.velocity
 
     # ── Mixer: 8 channels panned across the stereo field ─────────────────
     module mix: StereoMixer(channels: 8) {
@@ -220,14 +183,14 @@ patch {
         @7: { level: 0.5,  pan: 0.0,  send_a: 0.15 }
     }
 
-    kick_vca.audio   -> mix.in[0]
-    snare_vca.audio  -> mix.in[1]
-    hat_vca.audio    -> mix.in[2]
-    ohat_vca.audio   -> mix.in[3]
-    clap_vca.audio   -> mix.in[4]
-    tom_vca.audio    -> mix.in[5]
-    claves_vca.audio -> mix.in[6]
-    cymbal_vca.audio -> mix.in[7]
+    kick_drum.out   -> mix.in[0]
+    snare_drum.out  -> mix.in[1]
+    closed_hat.out  -> mix.in[2]
+    open_hat.out    -> mix.in[3]
+    clap_drum.out   -> mix.in[4]
+    tom_drum.out    -> mix.in[5]
+    claves_drum.out -> mix.in[6]
+    cymbal_drum.out -> mix.in[7]
 
     # ── FX: stereo delay on send A (clap + claves + cymbal) ──────────────
     module delay: StereoDelay(channels: 2) {
