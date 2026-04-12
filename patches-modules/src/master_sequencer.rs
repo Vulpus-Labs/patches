@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, PolyOutput, ModuleShape, OutputPort,
+    MonoInput, PolyInput, PolyOutput, ModuleShape, OutputPort,
     Song, TrackerData, ReceivesTrackerData,
+    GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -48,6 +49,15 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// | `loop` | bool | — | `true` | Loop at end of song |
 /// | `autostart` | bool | — | `true` | Begin playback on activation |
 /// | `swing` | float | 0.0–1.0 | `0.5` | Swing ratio for alternating steps |
+/// | `sync` | enum | auto/free/host | `auto` | Clock source: auto selects based on hosted flag |
+///
+/// In `auto` mode the sequencer checks `AudioEnvironment::hosted` at
+/// prepare time to select its clock source — host transport if hosted,
+/// internal BPM otherwise. `free` forces the internal clock regardless;
+/// `host` forces host transport regardless. In host mode the sequencer
+/// reads the `GLOBAL_TRANSPORT` backplane slot directly; `bpm` and
+/// `autostart` are ignored. When the host stops, playback freezes rather
+/// than resetting.
 pub struct MasterSequencer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -64,6 +74,18 @@ pub struct MasterSequencer {
     do_loop: bool,
     autostart: bool,
     swing: f32,
+
+    // Host sync
+    /// Cached `AudioEnvironment::hosted` flag for resolving `sync: auto`.
+    hosted: bool,
+    /// Whether to use host transport (resolved from `sync` param + `hosted` flag).
+    use_host_transport: bool,
+    /// Fixed input pointing at the GLOBAL_TRANSPORT backplane slot.
+    transport_in: PolyInput,
+    /// Previous host playing state for edge detection.
+    prev_host_playing: f32,
+    /// Previous host beat position, for detecting beat-grid step changes.
+    prev_host_beat: f64,
 
     // Transport state
     state: TransportState,
@@ -221,6 +243,7 @@ impl Module for MasterSequencer {
             .bool_param("loop", true)
             .bool_param("autostart", true)
             .float_param("swing", 0.0, 1.0, 0.5)
+            .enum_param("sync", &["auto", "free", "host"], "auto")
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -237,6 +260,16 @@ impl Module for MasterSequencer {
             do_loop: true,
             autostart: true,
             swing: 0.5,
+            // Default sync=auto: use host transport if hosted.
+            hosted: env.hosted,
+            use_host_transport: env.hosted,
+            transport_in: PolyInput {
+                cable_idx: GLOBAL_TRANSPORT,
+                scale: 1.0,
+                connected: true,
+            },
+            prev_host_playing: 0.0,
+            prev_host_beat: -1.0,
             state: TransportState::Stopped,
             song_row: 0,
             pattern_step: 0,
@@ -282,6 +315,13 @@ impl Module for MasterSequencer {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("swing") {
             self.swing = *v;
         }
+        if let Some(ParameterValue::Enum(v)) = params.get_scalar("sync") {
+            self.use_host_transport = match *v {
+                "free" => false,
+                "host" => true,
+                _ /* auto */ => self.hosted,
+            };
+        }
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -303,80 +343,16 @@ impl Module for MasterSequencer {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Transport input edge detection
-        let start = pool.read_mono(&self.in_start);
-        let stop = pool.read_mono(&self.in_stop);
-        let pause = pool.read_mono(&self.in_pause);
-        let resume = pool.read_mono(&self.in_resume);
-
-        let start_rose = start >= 0.5 && self.prev_start < 0.5;
-        let stop_rose = stop >= 0.5 && self.prev_stop < 0.5;
-        let pause_rose = pause >= 0.5 && self.prev_pause < 0.5;
-        let resume_rose = resume >= 0.5 && self.prev_resume < 0.5;
-
-        self.prev_start = start;
-        self.prev_stop = stop;
-        self.prev_pause = pause;
-        self.prev_resume = resume;
-
-        // Transport state machine
-        if stop_rose {
-            self.state = TransportState::Stopped;
-            self.reset_position();
-        }
-        if start_rose {
-            self.state = TransportState::Playing;
-            self.reset_position();
-        }
-        if pause_rose && self.state == TransportState::Playing {
-            self.state = TransportState::Paused;
-        }
-        if resume_rose && self.state == TransportState::Paused {
-            self.state = TransportState::Playing;
-        }
-
         // Default: silence on all clock buses
         let mut tick_fired = false;
         let mut reset_fired = false;
         let mut current_tick_duration = self.base_tick_seconds();
         for v in &mut self.bank_indices { *v = 0.0; }
 
-        if self.state == TransportState::Playing && !self.song_ended {
-            let has_song = self.current_song().is_some();
-
-            if has_song {
-                if self.first_tick {
-                    // Emit the first tick immediately
-                    tick_fired = true;
-                    reset_fired = self.pattern_just_reset;
-                    self.pattern_just_reset = false;
-                    self.first_tick = false;
-                    current_tick_duration = self.tick_duration_seconds(self.global_step);
-                    self.samples_until_tick = self.tick_duration_samples(self.global_step);
-
-                    // Read bank indices for current row
-                    self.fill_bank_indices();
-                } else {
-                    self.samples_until_tick -= 1.0;
-
-                    if self.samples_until_tick <= 0.0 {
-                        // Advance to next step
-                        if self.advance_step() {
-                            tick_fired = true;
-                            reset_fired = self.pattern_just_reset;
-                            self.pattern_just_reset = false;
-                            current_tick_duration = self.tick_duration_seconds(self.global_step);
-                            self.samples_until_tick += self.tick_duration_samples(self.global_step);
-
-                            self.fill_bank_indices();
-                        }
-                        // If advance_step returned false, song_ended or emit_stop_sentinel is set
-                    } else {
-                        // Not a tick boundary — read current bank indices for held output
-                        self.fill_bank_indices();
-                    }
-                }
-            }
+        if self.use_host_transport {
+            self.process_host_sync(pool, &mut tick_fired, &mut reset_fired, &mut current_tick_duration);
+        } else {
+            self.process_free_sync(pool, &mut tick_fired, &mut reset_fired, &mut current_tick_duration);
         }
 
         // Write clock bus outputs
@@ -411,6 +387,150 @@ impl Module for MasterSequencer {
 }
 
 impl MasterSequencer {
+    /// Free-running clock logic (original behaviour).
+    fn process_free_sync(
+        &mut self,
+        pool: &mut CablePool<'_>,
+        tick_fired: &mut bool,
+        reset_fired: &mut bool,
+        current_tick_duration: &mut f32,
+    ) {
+        // Transport input edge detection
+        let start = pool.read_mono(&self.in_start);
+        let stop = pool.read_mono(&self.in_stop);
+        let pause = pool.read_mono(&self.in_pause);
+        let resume = pool.read_mono(&self.in_resume);
+
+        let start_rose = start >= 0.5 && self.prev_start < 0.5;
+        let stop_rose = stop >= 0.5 && self.prev_stop < 0.5;
+        let pause_rose = pause >= 0.5 && self.prev_pause < 0.5;
+        let resume_rose = resume >= 0.5 && self.prev_resume < 0.5;
+
+        self.prev_start = start;
+        self.prev_stop = stop;
+        self.prev_pause = pause;
+        self.prev_resume = resume;
+
+        // Transport state machine
+        if stop_rose {
+            self.state = TransportState::Stopped;
+            self.reset_position();
+        }
+        if start_rose {
+            self.state = TransportState::Playing;
+            self.reset_position();
+        }
+        if pause_rose && self.state == TransportState::Playing {
+            self.state = TransportState::Paused;
+        }
+        if resume_rose && self.state == TransportState::Paused {
+            self.state = TransportState::Playing;
+        }
+
+        if self.state == TransportState::Playing && !self.song_ended {
+            let has_song = self.current_song().is_some();
+
+            if has_song {
+                if self.first_tick {
+                    *tick_fired = true;
+                    *reset_fired = self.pattern_just_reset;
+                    self.pattern_just_reset = false;
+                    self.first_tick = false;
+                    *current_tick_duration = self.tick_duration_seconds(self.global_step);
+                    self.samples_until_tick = self.tick_duration_samples(self.global_step);
+                    self.fill_bank_indices();
+                } else {
+                    self.samples_until_tick -= 1.0;
+
+                    if self.samples_until_tick <= 0.0 {
+                        if self.advance_step() {
+                            *tick_fired = true;
+                            *reset_fired = self.pattern_just_reset;
+                            self.pattern_just_reset = false;
+                            *current_tick_duration = self.tick_duration_seconds(self.global_step);
+                            self.samples_until_tick += self.tick_duration_samples(self.global_step);
+                            self.fill_bank_indices();
+                        }
+                    } else {
+                        self.fill_bank_indices();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Host-synced clock logic: derives ticks from host transport beat position.
+    fn process_host_sync(
+        &mut self,
+        pool: &mut CablePool<'_>,
+        tick_fired: &mut bool,
+        reset_fired: &mut bool,
+        current_tick_duration: &mut f32,
+    ) {
+        let transport = pool.read_poly(&self.transport_in);
+        let playing = transport[TRANSPORT_PLAYING];
+        let tempo = transport[TRANSPORT_TEMPO];
+        let beat = transport[TRANSPORT_BEAT] as f64;
+
+        // Detect playing edge: host started
+        let host_started = playing >= 0.5 && self.prev_host_playing < 0.5;
+        // Detect playing edge: host stopped
+        let host_stopped = playing < 0.5 && self.prev_host_playing >= 0.5;
+        self.prev_host_playing = playing;
+
+        if host_started {
+            self.state = TransportState::Playing;
+            self.reset_position();
+        }
+        if host_stopped {
+            // Freeze position — don't reset (matches DAW pause/resume).
+            self.state = TransportState::Paused;
+        }
+
+        if self.state == TransportState::Playing && !self.song_ended && self.current_song().is_some() {
+            let rpb = self.rows_per_beat as f64;
+            // Which sequencer step does the current beat position map to?
+            let host_step = (beat * rpb).floor() as i64;
+            let prev_step = if self.prev_host_beat >= 0.0 {
+                (self.prev_host_beat * rpb).floor() as i64
+            } else {
+                -1
+            };
+
+            if self.first_tick {
+                // First tick after host start — emit immediately.
+                *tick_fired = true;
+                *reset_fired = true;
+                self.pattern_just_reset = false;
+                self.first_tick = false;
+                self.fill_bank_indices();
+            } else if host_step != prev_step {
+                // A new sequencer step boundary has been crossed.
+                // Advance as many steps as needed (usually 1).
+                let steps_to_advance = (host_step - prev_step).unsigned_abs() as usize;
+                for _ in 0..steps_to_advance {
+                    if !self.advance_step() {
+                        break;
+                    }
+                }
+                *tick_fired = true;
+                *reset_fired = self.pattern_just_reset;
+                self.pattern_just_reset = false;
+                self.fill_bank_indices();
+            } else {
+                // No step change — maintain current bank indices.
+                self.fill_bank_indices();
+            }
+
+            // Derive tick duration from host tempo.
+            if tempo > 0.0 {
+                *current_tick_duration = 60.0 / (tempo * self.rows_per_beat as f32);
+            }
+        }
+
+        self.prev_host_beat = beat;
+    }
+
     fn fill_bank_indices(&mut self) {
         let Some(ref data) = self.tracker_data else { return };
         let Some(idx) = self.song_index else { return };
@@ -452,6 +572,7 @@ mod tests {
         sample_rate: SR,
         poly_voices: 16,
         periodic_update_interval: 32,
+        hosted: false,
     };
 
     fn shape(channels: usize) -> ModuleShape {
@@ -652,5 +773,184 @@ mod tests {
         assert!(!result, "should hit end of song");
         assert!(seq.song_ended, "song_ended should be set");
         assert!(seq.emit_stop_sentinel, "should emit stop sentinel");
+    }
+
+    #[test]
+    fn sync_auto_selects_host_when_hosted() {
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let s = shape(1);
+        let desc = MasterSequencer::describe(&s);
+        let seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
+        assert!(seq.use_host_transport, "auto mode should use host transport when hosted");
+    }
+
+    #[test]
+    fn sync_auto_selects_free_when_standalone() {
+        let s = shape(1);
+        let desc = MasterSequencer::describe(&s);
+        let seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
+        assert!(!seq.use_host_transport, "auto mode should not use host transport when standalone");
+    }
+
+    #[test]
+    fn sync_free_overrides_hosted() {
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let s = shape(1);
+        let desc = MasterSequencer::describe(&s);
+        let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
+        let mut params = ParameterMap::new();
+        params.insert("sync".into(), ParameterValue::Enum("free"));
+        seq.update_validated_parameters(&mut params);
+        assert!(!seq.use_host_transport, "sync=free should override hosted");
+    }
+
+    #[test]
+    fn sync_host_overrides_standalone() {
+        let s = shape(1);
+        let desc = MasterSequencer::describe(&s);
+        let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
+        let mut params = ParameterMap::new();
+        params.insert("sync".into(), ParameterValue::Enum("host"));
+        seq.update_validated_parameters(&mut params);
+        assert!(seq.use_host_transport, "sync=host should override standalone");
+    }
+
+    #[test]
+    fn host_sync_starts_on_playing_edge() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("bpm", ParameterValue::Float(120.0)),
+                ("rows_per_beat", ParameterValue::Int(4)),
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        // Provide tracker data.
+        let pattern = Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song { channels: 1, order: vec![vec![Some(0)]], loop_point: 0 };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Tick 1: not playing yet — clock should be silent.
+        let mut lanes = [0.0f32; 16];
+        lanes[TRANSPORT_TEMPO] = 120.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+        let bus = h.read_poly("clock");
+        assert!(bus[2] < 0.5, "no tick trigger when not playing");
+
+        // Tick 2: playing starts (edge 0→1), beat at 0.0.
+        lanes[TRANSPORT_PLAYING] = 1.0;
+        lanes[TRANSPORT_BEAT] = 0.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+        let bus = h.read_poly("clock");
+        assert!(bus[2] >= 0.5, "tick trigger should fire on first playing edge");
+        assert!(bus[0] >= 0.5, "pattern reset should fire on first tick");
+    }
+
+    #[test]
+    fn host_sync_freezes_on_stop() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("bpm", ParameterValue::Float(120.0)),
+                ("rows_per_beat", ParameterValue::Int(4)),
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        let pattern = Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song { channels: 1, order: vec![vec![Some(0)]], loop_point: 0 };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Start playing
+        let mut lanes = [0.0f32; 16];
+        lanes[TRANSPORT_PLAYING] = 1.0;
+        lanes[TRANSPORT_TEMPO] = 120.0;
+        lanes[TRANSPORT_BEAT] = 0.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        // Advance to beat 0.5 (step 2 at rows_per_beat=4 → step index 2).
+        lanes[TRANSPORT_BEAT] = 0.5;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        // Now stop playing — position should freeze (Paused), not reset.
+        lanes[TRANSPORT_PLAYING] = 0.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.state, TransportState::Paused, "should freeze (Paused), not Stop/reset");
+        // Position should not have been reset to 0.
+        assert!(seq.pattern_step > 0 || seq.global_step > 0, "position should be preserved");
     }
 }

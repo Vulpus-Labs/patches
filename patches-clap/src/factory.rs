@@ -95,6 +95,8 @@ unsafe extern "C" fn create_plugin(
         gui_handle: None,
         gui_scale: 1.0,
         sample_rate: 0.0,
+        prev_beat: -1.0,
+        prev_bar: -1,
     });
     let data_ptr = Box::into_raw(plugin_data);
 

@@ -14,7 +14,8 @@ use std::mem;
 use patches_core::{
     BoundedRandomWalk, CablePool, CableValue, MidiEvent,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
-    GLOBAL_CLOCK, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP,
+    GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP,
+    TRANSPORT_SAMPLE_COUNT,
 };
 
 use crate::builder::ExecutionPlan;
@@ -48,8 +49,10 @@ pub struct PatchProcessor {
     cleanup_tx: rtrb::Producer<CleanupAction>,
     /// Ping-pong write index (0 or 1).
     wi: usize,
-    /// Monotonically increasing sample counter, used as `GLOBAL_CLOCK`.
+    /// Monotonically increasing sample counter, written to `GLOBAL_TRANSPORT` lane 0.
     sample_count: usize,
+    /// Poly buffer for `GLOBAL_TRANSPORT`, reused each tick to avoid allocation.
+    transport_poly: [f32; 16],
     global_drift_walk: BoundedRandomWalk,
     periodic_update_interval: u32,
 }
@@ -92,6 +95,7 @@ impl PatchProcessor {
             cleanup_tx,
             wi: 0,
             sample_count: 0,
+            transport_poly: [0.0; 16],
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
         }
@@ -168,7 +172,50 @@ impl PatchProcessor {
 
     /// Advance the patch by one sample.
     ///
-    /// Writes `GLOBAL_CLOCK` and `GLOBAL_DRIFT` to the backplane, runs all
+    /// Write host transport state into the `GLOBAL_TRANSPORT` poly slot.
+    ///
+    /// Call this **before** [`tick`](Self::tick) each sample (or once per
+    /// process buffer if the values are constant across the buffer).
+    /// Lanes not set by the caller retain their previous value.
+    ///
+    /// # Arguments
+    ///
+    /// * `playing` — 1.0 while host transport is playing, 0.0 stopped.
+    /// * `tempo` — host tempo in BPM.
+    /// * `beat` — fractional beat position.
+    /// * `bar` — bar number.
+    /// * `beat_trigger` — 1.0 pulse on beat boundary, 0.0 otherwise.
+    /// * `bar_trigger` — 1.0 pulse on bar boundary, 0.0 otherwise.
+    /// * `tsig_num` — time signature numerator.
+    /// * `tsig_denom` — time signature denominator.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_transport(
+        &mut self,
+        playing: f32,
+        tempo: f32,
+        beat: f32,
+        bar: f32,
+        beat_trigger: f32,
+        bar_trigger: f32,
+        tsig_num: f32,
+        tsig_denom: f32,
+    ) {
+        use patches_core::{
+            TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT, TRANSPORT_BAR,
+            TRANSPORT_BEAT_TRIGGER, TRANSPORT_BAR_TRIGGER, TRANSPORT_TSIG_NUM, TRANSPORT_TSIG_DENOM,
+        };
+        self.transport_poly[TRANSPORT_PLAYING] = playing;
+        self.transport_poly[TRANSPORT_TEMPO] = tempo;
+        self.transport_poly[TRANSPORT_BEAT] = beat;
+        self.transport_poly[TRANSPORT_BAR] = bar;
+        self.transport_poly[TRANSPORT_BEAT_TRIGGER] = beat_trigger;
+        self.transport_poly[TRANSPORT_BAR_TRIGGER] = bar_trigger;
+        self.transport_poly[TRANSPORT_TSIG_NUM] = tsig_num;
+        self.transport_poly[TRANSPORT_TSIG_DENOM] = tsig_denom;
+    }
+
+    /// Writes `GLOBAL_TRANSPORT` and `GLOBAL_DRIFT` to the backplane, runs all
     /// active modules in execution order, reads the `AUDIO_OUT_L` /
     /// `AUDIO_OUT_R` backplane slots, and advances the write index.
     ///
@@ -177,7 +224,8 @@ impl PatchProcessor {
     pub fn tick(&mut self) -> (f32, f32) {
         let wi = self.wi;
 
-        self.buffer_pool[GLOBAL_CLOCK][wi] = CableValue::Mono(self.sample_count as f32);
+        self.transport_poly[TRANSPORT_SAMPLE_COUNT] = self.sample_count as f32;
+        self.buffer_pool[GLOBAL_TRANSPORT][wi] = CableValue::Poly(self.transport_poly);
         self.sample_count = (self.sample_count + 1) & CLOCK_WRAP_MASK;
         self.buffer_pool[GLOBAL_DRIFT][wi] =
             CableValue::Mono(self.global_drift_walk.advance());

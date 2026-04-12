@@ -23,7 +23,7 @@ use crate::ReceivesMidi;
 /// let mut h = ModuleHarness::build::<Oscillator>(&params!["frequency" => 440.0_f32]);
 /// let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3, length: 0, ..Default::default() });
 /// let mut h = ModuleHarness::build_with_env::<Glide>(&params!["glide_ms" => 100.0_f32],
-///     AudioEnvironment { sample_rate: 22050.0, poly_voices: 16, periodic_update_interval: 32 });
+///     AudioEnvironment { sample_rate: 22050.0, poly_voices: 16, periodic_update_interval: 32, hosted: false });
 /// ```
 ///
 /// All ports are marked `connected: true` by default. Use the `disconnect_*` methods
@@ -51,12 +51,12 @@ impl ModuleHarness {
 
     /// Build a harness for module type `M` with the given parameters.
     ///
-    /// Uses `AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 }` and
+    /// Uses `AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }` and
     /// `ModuleShape { channels: 0, length: 0, ..Default::default() }` as defaults. All ports connected.
     pub fn build<M: Module + 'static>(params: &[(&str, ParameterValue)]) -> Self {
         Self::build_full::<M>(
             params,
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             ModuleShape { channels: 0, length: 0, ..Default::default() },
         )
     }
@@ -69,7 +69,7 @@ impl ModuleHarness {
     ) -> Self {
         Self::build_full::<M>(
             params,
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             shape,
         )
     }
@@ -134,6 +134,7 @@ impl ModuleHarness {
         // Poly reserved slots must hold Poly values to avoid kind-mismatch panics.
         pool[POLY_READ_SINK]  = [CableValue::Poly([0.0; 16]); 2];
         pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
+        pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]); 2];
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
@@ -175,6 +176,16 @@ impl ModuleHarness {
     /// Return the module's MIDI receiver if it implements `ReceivesMidi`.
     pub fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
         self.module.as_midi_receiver()
+    }
+
+    /// Return the module's tracker-data receiver if it implements `ReceivesTrackerData`.
+    pub fn as_tracker_data_receiver(&mut self) -> Option<&mut dyn crate::tracker::ReceivesTrackerData> {
+        self.module.as_tracker_data_receiver()
+    }
+
+    /// Downcast the module to a concrete type via `as_any`.
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        self.module.as_any()
     }
 
     /// Apply a partial parameter update, equivalent to calling

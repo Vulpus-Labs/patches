@@ -1,20 +1,21 @@
 use std::thread;
 use std::time::Duration;
 
-use patches_core::{CableValue, POLY_READ_SINK, POLY_WRITE_SINK};
+use patches_core::{CableValue, GLOBAL_TRANSPORT, POLY_READ_SINK, POLY_WRITE_SINK};
 
 use crate::engine::CleanupAction;
 
 /// Allocate and initialise a cable buffer pool.
 ///
-/// All slots are `Mono(0.0)` except `POLY_READ_SINK` and `POLY_WRITE_SINK`
-/// which are `Poly([0.0; 16])` so that disconnected poly inputs and outputs
-/// never see a kind mismatch.
+/// All slots are `Mono(0.0)` except `POLY_READ_SINK`, `POLY_WRITE_SINK`, and
+/// `GLOBAL_TRANSPORT` which are `Poly([0.0; 16])` so that poly reads never
+/// see a kind mismatch.
 pub fn init_buffer_pool(capacity: usize) -> Box<[[CableValue; 2]]> {
     let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(0.0)]; capacity]
         .into_boxed_slice();
     pool[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
     pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+    pool[GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
     pool
 }
 

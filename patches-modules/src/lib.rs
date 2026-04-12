@@ -51,6 +51,7 @@ pub mod midi_drumset;
 pub mod bitcrusher;
 pub mod drive;
 pub mod transient_shaper;
+pub mod host_transport;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -108,6 +109,7 @@ pub use midi_drumset::MidiDrumset;
 pub use bitcrusher::Bitcrusher;
 pub use drive::Drive;
 pub use transient_shaper::TransientShaper;
+pub use host_transport::HostTransport;
 
 pub fn default_registry() -> patches_core::Registry {
     let mut r = patches_core::Registry::new();
@@ -174,6 +176,7 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Bitcrusher>();
     r.register::<Drive>();
     r.register::<TransientShaper>();
+    r.register::<HostTransport>();
     r
 }
 
@@ -185,7 +188,7 @@ mod tests {
     #[test]
     fn default_registry_contains_all_modules() {
         let r = super::default_registry();
-        let env = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 };
+        let env = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
         let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
         let params = ParameterMap::new();
 
