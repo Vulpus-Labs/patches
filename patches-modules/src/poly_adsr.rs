@@ -1,6 +1,6 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyInput, PolyOutput,
+    ModuleShape, OutputPort, PolyGateInput, PolyOutput, PolyTriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::AdsrCore;
@@ -41,8 +41,8 @@ pub struct PolyAdsr {
     sustain: f32,
     release_secs: f32,
     // Port fields
-    in_trigger: PolyInput,
-    in_gate: PolyInput,
+    in_trigger: PolyTriggerInput,
+    in_gate: PolyGateInput,
     out_env: PolyOutput,
 }
 
@@ -68,8 +68,8 @@ impl Module for PolyAdsr {
             decay_secs: 0.0,
             sustain: 0.0,
             release_secs: 0.0,
-            in_trigger: PolyInput::default(),
-            in_gate: PolyInput::default(),
+            in_trigger: PolyTriggerInput::default(),
+            in_gate: PolyGateInput::default(),
             out_env: PolyOutput::default(),
         }
     }
@@ -103,19 +103,19 @@ impl Module for PolyAdsr {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = PolyInput::from_ports(inputs, 0);
-        self.in_gate    = PolyInput::from_ports(inputs, 1);
+        self.in_trigger = PolyTriggerInput::from_ports(inputs, 0);
+        self.in_gate    = PolyGateInput::from_ports(inputs, 1);
         self.out_env    = PolyOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_arr = pool.read_poly(&self.in_trigger);
-        let gate_arr    = pool.read_poly(&self.in_gate);
+        let triggers = self.in_trigger.tick(pool);
+        let gates    = self.in_gate.tick(pool);
 
         let mut out = [0.0f32; 16];
 
-        for i in 0..16 {
-            out[i] = self.voices[i].tick(trigger_arr[i], gate_arr[i]);
+        for (i, level) in out.iter_mut().enumerate() {
+            *level = self.voices[i].tick(triggers[i], gates[i].is_high);
         }
 
         pool.write_poly(&self.out_env, out);

@@ -1,3 +1,5 @@
+use crate::cable_pool::CablePool;
+
 /// Buffer pool index of the permanent mono read-null slot.
 ///
 /// Disconnected [`MonoInput`] ports resolve to this slot. Always
@@ -255,6 +257,191 @@ impl PolyOutput {
     }
 }
 
+// ── Trigger and gate input types ──────────────────────────────────────────
+
+/// Threshold used by all trigger and gate input types.
+///
+/// A signal is considered "high" when `>= TRIGGER_THRESHOLD` and "low" when
+/// `< TRIGGER_THRESHOLD`.
+pub const TRIGGER_THRESHOLD: f32 = 0.5;
+
+/// A mono trigger input with built-in rising-edge detection.
+///
+/// Wraps a [`MonoInput`] and tracks the previous sample value so that
+/// `tick()` returns `true` only on the sample where the signal crosses
+/// the 0.5 threshold upward.
+#[derive(Debug)]
+pub struct TriggerInput {
+    pub inner: MonoInput,
+    prev: f32,
+    value: f32,
+}
+
+impl Default for TriggerInput {
+    fn default() -> Self {
+        Self { inner: MonoInput::default(), prev: 0.0, value: 0.0 }
+    }
+}
+
+impl TriggerInput {
+    pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
+        Self { inner: MonoInput::from_ports(ports, idx), prev: 0.0, value: 0.0 }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_connected()
+    }
+
+    /// Read the trigger input and return `true` if a rising edge occurred.
+    pub fn tick(&mut self, pool: &CablePool<'_>) -> bool {
+        self.value = pool.read_mono(&self.inner);
+        let rose = self.value >= TRIGGER_THRESHOLD && self.prev < TRIGGER_THRESHOLD;
+        self.prev = self.value;
+        rose
+    }
+
+    /// The raw value read by the last `tick()` call.
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+}
+
+/// A poly trigger input with per-voice rising-edge detection.
+#[derive(Debug)]
+pub struct PolyTriggerInput {
+    pub inner: PolyInput,
+    prev: [f32; 16],
+    values: [f32; 16],
+}
+
+impl Default for PolyTriggerInput {
+    fn default() -> Self {
+        Self { inner: PolyInput::default(), prev: [0.0; 16], values: [0.0; 16] }
+    }
+}
+
+impl PolyTriggerInput {
+    pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
+        Self { inner: PolyInput::from_ports(ports, idx), prev: [0.0; 16], values: [0.0; 16] }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_connected()
+    }
+
+    /// Read the trigger input and return per-voice rising-edge flags.
+    pub fn tick(&mut self, pool: &CablePool<'_>) -> [bool; 16] {
+        self.values = pool.read_poly(&self.inner);
+        let mut result = [false; 16];
+        for (i, rose) in result.iter_mut().enumerate() {
+            *rose = self.values[i] >= TRIGGER_THRESHOLD && self.prev[i] < TRIGGER_THRESHOLD;
+            self.prev[i] = self.values[i];
+        }
+        result
+    }
+
+    /// The raw values read by the last `tick()` call.
+    pub fn values(&self) -> [f32; 16] {
+        self.values
+    }
+}
+
+/// Edge information for a gate signal.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GateEdge {
+    pub rose: bool,
+    pub fell: bool,
+    pub is_high: bool,
+}
+
+/// A mono gate input with rising/falling edge and level detection.
+#[derive(Debug)]
+pub struct GateInput {
+    pub inner: MonoInput,
+    prev: f32,
+    value: f32,
+}
+
+impl Default for GateInput {
+    fn default() -> Self {
+        Self { inner: MonoInput::default(), prev: 0.0, value: 0.0 }
+    }
+}
+
+impl GateInput {
+    pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
+        Self { inner: MonoInput::from_ports(ports, idx), prev: 0.0, value: 0.0 }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_connected()
+    }
+
+    /// Read the gate input and return edge/level information.
+    pub fn tick(&mut self, pool: &CablePool<'_>) -> GateEdge {
+        self.value = pool.read_mono(&self.inner);
+        let is_high = self.value >= TRIGGER_THRESHOLD;
+        let was_high = self.prev >= TRIGGER_THRESHOLD;
+        self.prev = self.value;
+        GateEdge {
+            rose: is_high && !was_high,
+            fell: !is_high && was_high,
+            is_high,
+        }
+    }
+
+    /// The raw value read by the last `tick()` call.
+    pub fn value(&self) -> f32 {
+        self.value
+    }
+}
+
+/// A poly gate input with per-voice edge/level detection.
+#[derive(Debug)]
+pub struct PolyGateInput {
+    pub inner: PolyInput,
+    prev: [f32; 16],
+    values: [f32; 16],
+}
+
+impl Default for PolyGateInput {
+    fn default() -> Self {
+        Self { inner: PolyInput::default(), prev: [0.0; 16], values: [0.0; 16] }
+    }
+}
+
+impl PolyGateInput {
+    pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
+        Self { inner: PolyInput::from_ports(ports, idx), prev: [0.0; 16], values: [0.0; 16] }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.inner.is_connected()
+    }
+
+    /// Read the gate input and return per-voice edge/level information.
+    pub fn tick(&mut self, pool: &CablePool<'_>) -> [GateEdge; 16] {
+        self.values = pool.read_poly(&self.inner);
+        let mut result = [GateEdge::default(); 16];
+        for (i, edge) in result.iter_mut().enumerate() {
+            let is_high = self.values[i] >= TRIGGER_THRESHOLD;
+            let was_high = self.prev[i] >= TRIGGER_THRESHOLD;
+            self.prev[i] = self.values[i];
+            *edge = GateEdge {
+                rose: is_high && !was_high,
+                fell: !is_high && was_high,
+                is_high,
+            };
+        }
+        result
+    }
+
+    /// The raw values read by the last `tick()` call.
+    pub fn values(&self) -> [f32; 16] {
+        self.values
+    }
+}
+
 // ── Enum wrappers for heterogeneous port delivery ─────────────────────────
 
 /// Heterogeneous input-port wrapper used by the planner to deliver ports to
@@ -420,6 +607,162 @@ mod tests {
         match pool[0] {
             CableValue::Poly(channels) => assert_eq!(channels, data),
             _ => panic!("expected CableValue::Poly"),
+        }
+    }
+
+    // ── TriggerInput ─────────────────────────────────────────────────────
+
+    fn make_cable_pool(values: &[CableValue]) -> Vec<[CableValue; 2]> {
+        values.iter().map(|&v| [v, v]).collect()
+    }
+
+    #[test]
+    fn trigger_no_edge_on_first_call_below_threshold() {
+        let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+        let cp = CablePool::new(&mut pool, 0);
+        let mut t = TriggerInput::default();
+        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        assert!(!t.tick(&cp));
+    }
+
+    #[test]
+    fn trigger_rising_edge_on_0_to_1() {
+        let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+        let mut t = TriggerInput::default();
+        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+
+        // First tick: low
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            assert!(!t.tick(&cp));
+        }
+
+        // Second tick: high — rising edge
+        pool[0] = [CableValue::Mono(1.0); 2];
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            assert!(t.tick(&cp));
+        }
+    }
+
+    #[test]
+    fn trigger_no_retrigger_when_held_high() {
+        let mut pool = make_cable_pool(&[CableValue::Mono(1.0)]);
+        let mut t = TriggerInput::default();
+        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+
+        // First tick: rising from 0 → 1
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            assert!(t.tick(&cp));
+        }
+        // Second tick: held high — no re-trigger
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            assert!(!t.tick(&cp));
+        }
+    }
+
+    #[test]
+    fn trigger_value_returns_last_read() {
+        let mut pool = make_cable_pool(&[CableValue::Mono(0.75)]);
+        let mut t = TriggerInput::default();
+        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let cp = CablePool::new(&mut pool, 0);
+        t.tick(&cp);
+        assert_eq!(t.value(), 0.75);
+    }
+
+    // ── PolyTriggerInput ─────────────────────────────────────────────────
+
+    #[test]
+    fn poly_trigger_per_voice_edges() {
+        let mut channels = [0.0f32; 16];
+        channels[0] = 1.0; // voice 0 high
+        channels[3] = 1.0; // voice 3 high
+        let mut pool = make_cable_pool(&[CableValue::Poly(channels)]);
+        let mut t = PolyTriggerInput::default();
+        t.inner = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+
+        let cp = CablePool::new(&mut pool, 0);
+        let result = t.tick(&cp);
+        assert!(result[0], "voice 0 should have rising edge");
+        assert!(!result[1], "voice 1 should not have rising edge");
+        assert!(result[3], "voice 3 should have rising edge");
+    }
+
+    // ── GateInput ────────────────────────────────────────────────────────
+
+    #[test]
+    fn gate_rising_and_falling_edges() {
+        let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+        let mut g = GateInput::default();
+        g.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+
+        // Low → no edges
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let e = g.tick(&cp);
+            assert!(!e.rose);
+            assert!(!e.fell);
+            assert!(!e.is_high);
+        }
+
+        // Go high → rising edge
+        pool[0] = [CableValue::Mono(1.0); 2];
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let e = g.tick(&cp);
+            assert!(e.rose);
+            assert!(!e.fell);
+            assert!(e.is_high);
+        }
+
+        // Stay high → no edges, still high
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let e = g.tick(&cp);
+            assert!(!e.rose);
+            assert!(!e.fell);
+            assert!(e.is_high);
+        }
+
+        // Go low → falling edge
+        pool[0] = [CableValue::Mono(0.0); 2];
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let e = g.tick(&cp);
+            assert!(!e.rose);
+            assert!(e.fell);
+            assert!(!e.is_high);
+        }
+    }
+
+    // ── PolyGateInput ────────────────────────────────────────────────────
+
+    #[test]
+    fn poly_gate_per_voice_edges() {
+        let mut pool = make_cable_pool(&[CableValue::Poly([0.0; 16])]);
+        let mut g = PolyGateInput::default();
+        g.inner = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+
+        // All low
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let _ = g.tick(&cp);
+        }
+
+        // Voice 2 goes high
+        let mut channels = [0.0f32; 16];
+        channels[2] = 1.0;
+        pool[0] = [CableValue::Poly(channels); 2];
+        {
+            let cp = CablePool::new(&mut pool, 0);
+            let result = g.tick(&cp);
+            assert!(result[2].rose);
+            assert!(result[2].is_high);
+            assert!(!result[0].rose);
+            assert!(!result[0].is_high);
         }
     }
 }

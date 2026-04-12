@@ -24,7 +24,7 @@
 /// | `reson` | float | 0.3–1.0      | 0.85    | Bandpass resonance / ring |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::DecayEnvelope;
@@ -40,8 +40,7 @@ pub struct Claves {
     bp_filter: SvfKernel,
     amp_env: DecayEnvelope,
     impulse_pending: bool,
-    prev_trigger: f32,
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -71,8 +70,7 @@ impl Module for Claves {
             bp_filter: SvfKernel::new_static(f, d),
             amp_env,
             impulse_pending: false,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -97,27 +95,20 @@ impl Module for Claves {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
+        let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
             self.impulse_pending = true;
-            self.amp_env.set_decay(self.decay_time);
-            // Reset filter state for clean attack
-            self.bp_filter = SvfKernel::new_static(
-                svf_f(self.pitch, self.sample_rate),
-                q_to_damp(self.reson),
-            );
+            // Reset filter state for clean attack (coefficients unchanged)
+            self.bp_filter.reset_state();
         }
 
-        let amp = self.amp_env.tick(trigger);
+        let amp = self.amp_env.tick(trigger_rose);
 
         // Feed impulse (or zero) into resonant bandpass
         let input = if self.impulse_pending {

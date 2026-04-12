@@ -13,7 +13,6 @@ pub enum AdsrStage {
 pub struct AdsrCore {
     pub stage: AdsrStage,
     pub level: f32,
-    prev_trigger: f32,
     attack_inc: f32,
     decay_inc: f32,
     sustain: f32,
@@ -27,7 +26,6 @@ impl AdsrCore {
         Self {
             stage: AdsrStage::Idle,
             level: 0.0,
-            prev_trigger: 0.0,
             attack_inc: 0.0,
             decay_inc: 0.0,
             sustain: 0.0,
@@ -50,7 +48,6 @@ impl AdsrCore {
     pub fn reset(&mut self) {
         self.stage = AdsrStage::Idle;
         self.level = 0.0;
-        self.prev_trigger = 0.0;
     }
 
     /// Transition to Release from the current level.
@@ -67,20 +64,21 @@ impl AdsrCore {
 
     /// Run one sample of the ADSR state machine.
     ///
+    /// `triggered` should be `true` on the single sample where a rising edge
+    /// was detected (via `TriggerInput::tick`). `gate_high` should be `true`
+    /// while the gate signal is above threshold (via `GateInput::tick().is_high`).
+    ///
     /// Returns the envelope level clamped to [0, 1].
-    pub fn tick(&mut self, trigger: f32, gate: f32) -> f32 {
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
-
+    pub fn tick(&mut self, triggered: bool, gate_high: bool) -> f32 {
         // Rising trigger: restart Attack from any state and current level
-        if trigger_rose {
+        if triggered {
             self.stage = AdsrStage::Attack;
         }
 
         match self.stage {
             AdsrStage::Idle => {}
             AdsrStage::Attack => {
-                if gate < 0.5 {
+                if !gate_high {
                     self.enter_release();
                 } else {
                     self.level += self.attack_inc;
@@ -91,7 +89,7 @@ impl AdsrCore {
                 }
             }
             AdsrStage::Decay => {
-                if gate < 0.5 {
+                if !gate_high {
                     self.enter_release();
                 } else {
                     self.level -= self.decay_inc;
@@ -103,7 +101,7 @@ impl AdsrCore {
             }
             AdsrStage::Sustain => {
                 self.level = self.sustain;
-                if gate < 0.5 {
+                if !gate_high {
                     self.enter_release();
                 }
             }
@@ -137,15 +135,20 @@ mod tests {
         let mut core = make_core(0.01, 0.01, 0.5, 0.01, 44100.0);
 
         for _ in 0..50 {
-            // Trigger high, gate high: enter attack
-            for _ in 0..3 {
-                let v = core.tick(1.0, 1.0);
-                assert!(v.is_finite(), "NaN or inf during trigger-high: {v}");
-                assert!((0.0..=1.0).contains(&v), "out of range during trigger-high: {v}");
+            // Trigger + gate high: enter attack (only first sample is a trigger)
+            {
+                let v = core.tick(true, true);
+                assert!(v.is_finite(), "NaN or inf during trigger: {v}");
+                assert!((0.0..=1.0).contains(&v), "out of range during trigger: {v}");
             }
-            // Trigger low, gate low: release
+            for _ in 0..2 {
+                let v = core.tick(false, true);
+                assert!(v.is_finite(), "NaN or inf during gate-high: {v}");
+                assert!((0.0..=1.0).contains(&v), "out of range during gate-high: {v}");
+            }
+            // Gate low: release
             for _ in 0..3 {
-                let v = core.tick(0.0, 0.0);
+                let v = core.tick(false, false);
                 assert!(v.is_finite(), "NaN or inf during gate-low: {v}");
                 assert!((0.0..=1.0).contains(&v), "out of range during gate-low: {v}");
             }
@@ -159,10 +162,10 @@ mod tests {
         let mut core = make_core(0.5, 1.0, 0.5, 0.5, 10.0);
 
         // Trigger the attack
-        let v0 = core.tick(1.0, 1.0);
-        let v1 = core.tick(0.0, 1.0);
-        let v2 = core.tick(0.0, 1.0);
-        let v3 = core.tick(0.0, 1.0);
+        let v0 = core.tick(true, true);
+        let v1 = core.tick(false, true);
+        let v2 = core.tick(false, true);
+        let v3 = core.tick(false, true);
 
         let d0 = v1 - v0;
         let d1 = v2 - v1;
@@ -180,13 +183,13 @@ mod tests {
         let mut core = make_core(0.1, 0.5, 0.5, 0.5, 10.0);
 
         // Complete attack in 1 sample
-        let _v_attack = core.tick(1.0, 1.0);
+        let _v_attack = core.tick(true, true);
 
         // Now in decay: collect values
-        let d0 = core.tick(0.0, 1.0);
-        let d1 = core.tick(0.0, 1.0);
-        let d2 = core.tick(0.0, 1.0);
-        let d3 = core.tick(0.0, 1.0);
+        let d0 = core.tick(false, true);
+        let d1 = core.tick(false, true);
+        let d2 = core.tick(false, true);
+        let d3 = core.tick(false, true);
 
         let diff0 = d0 - d1;
         let diff1 = d1 - d2;
@@ -214,10 +217,10 @@ mod tests {
 
         // Attack phase: trigger + gate high
         let mut peak = 0.0f32;
-        let v = core.tick(1.0, 1.0); // trigger rises
+        let v = core.tick(true, true); // trigger fires
         if v > peak { peak = v; }
         for _ in 1..attack_samples + 10 {
-            let v = core.tick(0.0, 1.0);
+            let v = core.tick(false, true);
             if v > peak { peak = v; }
         }
         assert!(
@@ -227,12 +230,12 @@ mod tests {
 
         // Decay into sustain
         for _ in 0..decay_samples + 10 {
-            core.tick(0.0, 1.0);
+            core.tick(false, true);
         }
 
         // Sustain phase: hold gate high
         for _ in 0..sustain_samples {
-            let v = core.tick(0.0, 1.0);
+            let v = core.tick(false, true);
             assert!(
                 (v - sustain).abs() < 1e-3,
                 "sustain should hold at {sustain}, got {v}"
@@ -241,9 +244,9 @@ mod tests {
 
         // Release phase: drop gate
         for _ in 0..release_samples + 100 {
-            core.tick(0.0, 0.0);
+            core.tick(false, false);
         }
-        let final_val = core.tick(0.0, 0.0);
+        let final_val = core.tick(false, false);
         assert!(
             final_val.abs() < 1e-3,
             "release should reach 0.0, got {final_val}"
@@ -258,14 +261,14 @@ mod tests {
         let mut core = make_core(0.01, 0.01, 0.5, 0.05, sr);
 
         // Trigger, let it reach sustain
-        core.tick(1.0, 1.0);
+        core.tick(true, true);
         for _ in 0..5000 {
-            core.tick(0.0, 1.0);
+            core.tick(false, true);
         }
 
         // Release
         for _ in 0..500 {
-            core.tick(0.0, 0.0);
+            core.tick(false, false);
         }
         let level_before_retrigger = core.level;
         assert!(
@@ -274,7 +277,7 @@ mod tests {
         );
 
         // Re-trigger: attack should start from current level, not 0
-        let v = core.tick(1.0, 1.0);
+        let v = core.tick(true, true);
         assert_eq!(core.stage, AdsrStage::Attack);
         assert!(
             v >= level_before_retrigger,
@@ -290,10 +293,10 @@ mod tests {
         let mut core = make_core(attack, 0.01, 0.5, 0.03, sr);
 
         // Trigger and hold gate for only 100 samples (well within attack phase)
-        core.tick(1.0, 1.0);
+        core.tick(true, true);
         let mut peak = core.level;
         for _ in 1..100 {
-            let v = core.tick(0.0, 1.0);
+            let v = core.tick(false, true);
             if v > peak { peak = v; }
         }
         assert!(peak < 1.0, "short gate should not reach 1.0, peak was {peak}");
@@ -301,9 +304,9 @@ mod tests {
 
         // Release: let the envelope decay
         for _ in 0..5000 {
-            core.tick(0.0, 0.0);
+            core.tick(false, false);
         }
-        let final_val = core.tick(0.0, 0.0);
+        let final_val = core.tick(false, false);
         assert!(
             final_val.abs() < 1e-3,
             "should release to 0.0, got {final_val}"
@@ -313,20 +316,20 @@ mod tests {
     /// T7 — determinism: reset() produces bit-identical output on repeated runs.
     #[test]
     fn t7_reset_produces_identical_output() {
-        let inputs: [(f32, f32); 7] = [
-            (1.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 1.0),
-            (0.0, 0.0),
-            (0.0, 0.0),
-            (1.0, 1.0),
-            (0.0, 1.0),
+        let inputs: [(bool, bool); 7] = [
+            (true, true),
+            (false, true),
+            (false, true),
+            (false, false),
+            (false, false),
+            (true, true),
+            (false, true),
         ];
 
         assert_reset_deterministic!(
             make_core(0.5, 0.5, 0.5, 0.5, 10.0),
             &inputs,
-            |core: &mut AdsrCore, (t, g): (f32, f32)| core.tick(t, g),
+            |core: &mut AdsrCore, (t, g): (bool, bool)| core.tick(t, g),
             |core: &mut AdsrCore| core.reset()
         );
     }

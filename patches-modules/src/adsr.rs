@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, GateInput, InputPort, InstanceId, Module, ModuleDescriptor,
+    MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::AdsrCore;
@@ -42,8 +42,8 @@ pub struct Adsr {
     // Core DSP state
     core: AdsrCore,
     // Port fields
-    in_trigger: MonoInput,
-    in_gate: MonoInput,
+    in_trigger: TriggerInput,
+    in_gate: GateInput,
     out_env: MonoOutput,
 }
 
@@ -68,8 +68,8 @@ impl Module for Adsr {
             sustain: 0.0,
             release_secs: 0.0,
             core: AdsrCore::new(audio_environment.sample_rate),
-            in_trigger: MonoInput::default(),
-            in_gate: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
+            in_gate: GateInput::default(),
             out_env: MonoOutput::default(),
         }
     }
@@ -106,15 +106,15 @@ impl Module for Adsr {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
-        self.in_gate = MonoInput::from_ports(inputs, 1);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_gate = GateInput::from_ports(inputs, 1);
         self.out_env = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-        let gate = pool.read_mono(&self.in_gate);
-        let level = self.core.tick(trigger, gate);
+        let triggered = self.in_trigger.tick(pool);
+        let gate = self.in_gate.tick(pool);
+        let level = self.core.tick(triggered, gate.is_high);
         pool.write_mono(&self.out_env, level);
     }
 

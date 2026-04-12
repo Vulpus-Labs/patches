@@ -27,7 +27,7 @@
 /// | `bursts` | int   | 1–8         | 4       | Number of noise bursts    |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, BurstGenerator};
@@ -48,9 +48,8 @@ pub struct ClapDrum {
     burst_gen: BurstGenerator,
     noise_filter: SvfKernel,
     prng_state: u64,
-    prev_trigger: f32,
     // Ports
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -70,8 +69,8 @@ impl Module for ClapDrum {
         let sr = audio_environment.sample_rate;
         let mut tail_env = DecayEnvelope::new(sr);
         tail_env.set_decay(0.3);
-        let mut burst_gen = BurstGenerator::new();
-        burst_gen.set_params(4, (0.5 * sr * 0.01) as usize, 0.7);
+        let mut burst_gen = BurstGenerator::new(sr);
+        burst_gen.set_params(4, 0.005, 0.7);
         let f = svf_f(1200.0, sr);
         let d = q_to_damp(0.4);
         let noise_filter = SvfKernel::new_static(f, d);
@@ -88,8 +87,7 @@ impl Module for ClapDrum {
             burst_gen,
             noise_filter,
             prng_state: instance_id.as_u64() + 1,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -111,8 +109,8 @@ impl Module for ClapDrum {
         if let Some(ParameterValue::Int(v)) = params.get_scalar("bursts") {
             self.bursts = (*v as usize).clamp(1, 8);
         }
-        let spacing = (self.spread * self.sample_rate * 0.01) as usize;
-        self.burst_gen.set_params(self.bursts, spacing.max(1), 0.7);
+        let spacing_secs = self.spread * 0.01;
+        self.burst_gen.set_params(self.bursts, spacing_secs, 0.7);
         let f = svf_f(self.filter_freq, self.sample_rate);
         let d = q_to_damp(self.filter_q);
         self.noise_filter = SvfKernel::new_static(f, d);
@@ -122,28 +120,21 @@ impl Module for ClapDrum {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
-
-        if trigger_rose {
-            self.tail_env.set_decay(self.decay_time);
-        }
+        let trigger_rose = self.in_trigger.tick(pool);
 
         let white = xorshift64(&mut self.prng_state);
         let (_lp, _hp, bp) = self.noise_filter.tick(white);
 
         // Burst-gated noise for the clap transient
-        let burst = self.burst_gen.tick(trigger, bp);
+        let burst = self.burst_gen.tick(trigger_rose, bp);
 
         // Tail envelope
-        let tail_amp = self.tail_env.tick(trigger);
+        let tail_amp = self.tail_env.tick(trigger_rose);
 
         // Combine: burst transient + filtered noise tail
         let output = burst + bp * tail_amp * 0.5;

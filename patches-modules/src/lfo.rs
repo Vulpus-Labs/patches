@@ -1,6 +1,6 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use crate::common::approximate::lookup_sine;
@@ -53,9 +53,8 @@ pub struct Lfo {
     rate: f32,
     prng_state: u64,
     random_value: f32,
-    prev_sync: f32,
     // Input port fields
-    in_sync: MonoInput,
+    in_sync: TriggerInput,
     in_rate_cv: MonoInput,
     // Output port fields
     out_sine: MonoOutput,
@@ -110,8 +109,7 @@ impl Module for Lfo {
             rate: 1.0,
             prng_state,
             random_value: 0.0,
-            prev_sync: 0.0,
-            in_sync: MonoInput::default(),
+            in_sync: TriggerInput::default(),
             in_rate_cv: MonoInput::default(),
             out_sine: MonoOutput::default(),
             out_triangle: MonoOutput::default(),
@@ -149,7 +147,7 @@ impl Module for Lfo {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_sync = MonoInput::from_ports(inputs, 0);
+        self.in_sync = TriggerInput::from_ports(inputs, 0);
         self.in_rate_cv = MonoInput::from_ports(inputs, 1);
         self.out_sine = MonoOutput::from_ports(outputs, 0);
         self.out_triangle = MonoOutput::from_ports(outputs, 1);
@@ -160,13 +158,9 @@ impl Module for Lfo {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Sync: rising edge (prev <= 0, current > 0) resets phase before advance.
-        if self.in_sync.is_connected() {
-            let sync_val = pool.read_mono(&self.in_sync);
-            if self.prev_sync <= 0.0 && sync_val > 0.0 {
-                self.phase = 0.0;
-            }
-            self.prev_sync = sync_val;
+        // Sync: rising edge resets phase before advance (standard 0.5 threshold).
+        if self.in_sync.is_connected() && self.in_sync.tick(pool) {
+            self.phase = 0.0;
         }
 
         // Rate CV: recompute increment per-sample when connected.

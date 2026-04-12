@@ -27,7 +27,7 @@
 /// | `noise`      | float | 0.0–1.0     | 0.15    | Noise layer amount       |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
@@ -49,9 +49,8 @@ pub struct Tom {
     amp_env: DecayEnvelope,
     noise_env: DecayEnvelope,
     prng_state: u64,
-    prev_trigger: f32,
     // Ports
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -89,8 +88,7 @@ impl Module for Tom {
             amp_env,
             noise_env,
             prng_state: instance_id.as_u64() + 1,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -119,26 +117,21 @@ impl Module for Tom {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
+        let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
             self.osc.reset();
-            self.pitch_sweep.set_params(self.pitch + self.sweep_start, self.pitch, self.sweep_time);
-            self.amp_env.set_decay(self.decay_time);
-            self.noise_env.set_decay(0.01);
+            self.pitch_sweep.trigger();
         }
 
-        let freq = self.pitch_sweep.tick(trigger);
-        let amp = self.amp_env.tick(trigger);
-        let noise_amp = self.noise_env.tick(trigger);
+        let freq = self.pitch_sweep.tick();
+        let amp = self.amp_env.tick(trigger_rose);
+        let noise_amp = self.noise_env.tick(trigger_rose);
 
         // Sine oscillator
         let increment = freq / self.sample_rate;

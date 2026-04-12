@@ -25,7 +25,7 @@
 /// | `filter` | float | 2000–16000 Hz | 8000    | Noise highpass cutoff           |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -43,8 +43,7 @@ pub struct ClosedHiHat {
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
     prng_state: u64,
-    prev_trigger: f32,
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -79,8 +78,7 @@ impl Module for ClosedHiHat {
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
             prng_state: instance_id.as_u64() + 1,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -109,22 +107,18 @@ impl Module for ClosedHiHat {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
+        let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
-            self.metallic.trigger(self.pitch);
-            self.amp_env.set_decay(self.decay_time);
+            self.metallic.trigger();
         }
 
-        let amp = self.amp_env.tick(trigger);
+        let amp = self.amp_env.tick(trigger_rose);
 
         let metal = self.metallic.tick();
         let white = xorshift64(&mut self.prng_state);
@@ -177,10 +171,8 @@ pub struct OpenHiHat {
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
     prng_state: u64,
-    prev_trigger: f32,
-    prev_choke: f32,
-    in_trigger: MonoInput,
-    in_choke: MonoInput,
+    in_trigger: TriggerInput,
+    in_choke: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -216,10 +208,8 @@ impl Module for OpenHiHat {
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
             prng_state: instance_id.as_u64() + 1,
-            prev_trigger: 0.0,
-            prev_choke: 0.0,
-            in_trigger: MonoInput::default(),
-            in_choke: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
+            in_choke: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -248,30 +238,24 @@ impl Module for OpenHiHat {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
-        self.in_choke = MonoInput::from_ports(inputs, 1);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
+        self.in_choke = TriggerInput::from_ports(inputs, 1);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-        let choke = pool.read_mono(&self.in_choke);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        let choke_rose = choke >= 0.5 && self.prev_choke < 0.5;
-        self.prev_trigger = trigger;
-        self.prev_choke = choke;
+        let trigger_rose = self.in_trigger.tick(pool);
+        let choke_rose = self.in_choke.tick(pool);
 
         if trigger_rose {
-            self.metallic.trigger(self.pitch);
-            self.amp_env.set_decay(self.decay_time);
+            self.metallic.trigger();
         }
 
         if choke_rose {
             self.amp_env.choke();
         }
 
-        let amp = self.amp_env.tick(trigger);
+        let amp = self.amp_env.tick(trigger_rose);
 
         let metal = self.metallic.tick();
         let white = xorshift64(&mut self.prng_state);

@@ -29,7 +29,7 @@
 /// | `click`      | float | 0.0–1.0     | 0.3     | Transient click intensity         |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
@@ -51,9 +51,8 @@ pub struct Kick {
     pitch_sweep: PitchSweep,
     amp_env: DecayEnvelope,
     click_env: DecayEnvelope,
-    prev_trigger: f32,
     // Ports
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -92,8 +91,7 @@ impl Module for Kick {
             pitch_sweep,
             amp_env,
             click_env,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -125,27 +123,21 @@ impl Module for Kick {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        // Detect trigger rising edge for local state
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
+        let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
             self.osc.reset();
-            self.pitch_sweep.set_params(self.sweep_start, self.pitch, self.sweep_time);
-            self.amp_env.set_decay(self.decay_time);
-            self.click_env.set_decay(0.003);
+            self.pitch_sweep.trigger();
         }
 
-        let freq = self.pitch_sweep.tick(trigger);
-        let amp = self.amp_env.tick(trigger);
-        let click_amp = self.click_env.tick(trigger);
+        let freq = self.pitch_sweep.tick();
+        let amp = self.amp_env.tick(trigger_rose);
+        let click_amp = self.click_env.tick(trigger_rose);
 
         // Set oscillator frequency
         let increment = freq / self.sample_rate;

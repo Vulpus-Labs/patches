@@ -1,17 +1,14 @@
-use std::f32::consts::TAU;
-
 // ── DecayEnvelope ──────────────────────────────────────────────────────────────
 
-/// Single-stage exponential decay envelope triggered by a rising edge.
+/// Single-stage exponential decay envelope.
 ///
 /// Simpler than `AdsrCore` for drum sounds that only need attack-decay behaviour.
-/// On a rising trigger edge the level resets to 1.0 and decays exponentially
-/// toward zero.
+/// When `triggered` is true the level resets to 1.0 and decays exponentially
+/// toward zero. The caller is responsible for edge detection (via `TriggerInput`).
 pub struct DecayEnvelope {
     level: f32,
     decay_coeff: f32,
     sample_rate: f32,
-    prev_trigger: f32,
 }
 
 impl DecayEnvelope {
@@ -20,7 +17,6 @@ impl DecayEnvelope {
             level: 0.0,
             decay_coeff: 1.0,
             sample_rate,
-            prev_trigger: 0.0,
         }
     }
 
@@ -38,15 +34,13 @@ impl DecayEnvelope {
     /// Reset all state to idle.
     pub fn reset(&mut self) {
         self.level = 0.0;
-        self.prev_trigger = 0.0;
     }
 
     /// Process one sample. Returns envelope level in [0, 1].
-    pub fn tick(&mut self, trigger: f32) -> f32 {
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
-
-        if trigger_rose {
+    /// `triggered` should be `true` on the sample where a rising edge was
+    /// detected (e.g. from `TriggerInput::tick()`).
+    pub fn tick(&mut self, triggered: bool) -> f32 {
+        if triggered {
             self.level = 1.0;
         } else {
             self.level *= self.decay_coeff;
@@ -68,30 +62,33 @@ impl DecayEnvelope {
 /// Used for kick and tom body pitch envelopes. After `sweep_time_secs` the
 /// output frequency settles at `end_hz`.
 pub struct PitchSweep {
+    start_hz: f32,
     current_hz: f32,
     end_hz: f32,
     sweep_coeff: f32,
     sample_rate: f32,
-    prev_trigger: f32,
 }
 
 impl PitchSweep {
     pub fn new(sample_rate: f32) -> Self {
         Self {
+            start_hz: 55.0,
             current_hz: 55.0,
             end_hz: 55.0,
             sweep_coeff: 1.0,
             sample_rate,
-            prev_trigger: 0.0,
         }
     }
 
     /// Configure the sweep. `start_hz` is the initial frequency on trigger,
     /// `end_hz` is the settling frequency, and `sweep_time_secs` is the time
     /// to reach ~99% of the way from start to end.
+    ///
+    /// This is configuration only — it does not reset `current_hz`.
+    /// Call `trigger()` to start the sweep.
     pub fn set_params(&mut self, start_hz: f32, end_hz: f32, sweep_time_secs: f32) {
+        self.start_hz = start_hz;
         self.end_hz = end_hz;
-        self.current_hz = start_hz;
         let samples = sweep_time_secs * self.sample_rate;
         if samples > 0.0 && start_hz > end_hz {
             // Exponential decay of (current - end) toward 0
@@ -104,27 +101,18 @@ impl PitchSweep {
     /// Reset state.
     pub fn reset(&mut self) {
         self.current_hz = self.end_hz;
-        self.prev_trigger = 0.0;
     }
 
-    /// Trigger the sweep (resets to start frequency).
-    pub fn trigger(&mut self, start_hz: f32, end_hz: f32, sweep_time_secs: f32) {
-        self.set_params(start_hz, end_hz, sweep_time_secs);
+    /// Trigger the sweep (resets current frequency to start).
+    pub fn trigger(&mut self) {
+        self.current_hz = self.start_hz;
     }
 
     /// Tick the sweep and return current frequency in Hz.
-    pub fn tick(&mut self, trigger: f32) -> f32 {
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
-
-        if trigger_rose {
-            // current_hz should already be set to start_hz via set_params
-        } else {
-            // Exponentially approach end_hz
-            let diff = self.current_hz - self.end_hz;
-            self.current_hz = self.end_hz + diff * self.sweep_coeff;
-        }
-
+    pub fn tick(&mut self) -> f32 {
+        // Exponentially approach end_hz
+        let diff = self.current_hz - self.end_hz;
+        self.current_hz = self.end_hz + diff * self.sweep_coeff;
         self.current_hz
     }
 }
@@ -159,6 +147,7 @@ pub struct MetallicTone {
     phases: [f32; 6],
     increments: [f32; 6],
     sample_rate: f32,
+    sr_recip: f32,
 }
 
 impl MetallicTone {
@@ -167,6 +156,7 @@ impl MetallicTone {
             phases: [0.0; 6],
             increments: [0.0; 6],
             sample_rate,
+            sr_recip: 1.0 / sample_rate,
         }
     }
 
@@ -182,10 +172,9 @@ impl MetallicTone {
         self.phases = [0.0; 6];
     }
 
-    /// Trigger: reset phases and set frequency.
-    pub fn trigger(&mut self, base_hz: f32) {
+    /// Trigger: reset phases only. Call `set_frequency` separately for configuration.
+    pub fn trigger(&mut self) {
         self.reset();
-        self.set_frequency(base_hz);
     }
 
     /// Process one sample. Returns the summed square-wave output, normalised
@@ -206,14 +195,13 @@ impl MetallicTone {
     /// Process one sample with per-partial frequency modulation (for cymbal shimmer).
     /// `mod_depth` is in Hz, `mod_phase` is a slow LFO phase in [0, 1).
     pub fn tick_with_modulation(&mut self, mod_depth: f32, mod_phase: f32) -> f32 {
-        let mod_signal = (mod_phase * TAU).sin();
-        let sr_recip = 1.0 / self.sample_rate;
+        let mod_base = crate::fast_sine(mod_phase) * mod_depth * self.sr_recip;
         let mut sum = 0.0f32;
         for (i, (phase, &base_inc)) in self.phases.iter_mut().zip(&self.increments).enumerate() {
             let sq = if *phase < 0.5 { 1.0 } else { -1.0 };
             sum += sq;
 
-            let mod_offset = mod_signal * mod_depth * METALLIC_RATIOS[i] * sr_recip;
+            let mod_offset = mod_base * METALLIC_RATIOS[i];
             let inc = (base_inc + mod_offset).clamp(0.0, 0.499);
             *phase += inc;
             if *phase >= 1.0 {
@@ -235,6 +223,7 @@ impl MetallicTone {
 /// separated by `burst_spacing_samples`, with each burst slightly quieter
 /// than the previous.
 pub struct BurstGenerator {
+    sample_rate: f32,
     burst_count: usize,
     burst_spacing: usize,
     burst_decay: f32,
@@ -243,30 +232,29 @@ pub struct BurstGenerator {
     current_burst: usize,
     sample_counter: usize,
     burst_level: f32,
-    prev_trigger: f32,
 }
 
 impl BurstGenerator {
-    pub fn new() -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
+            sample_rate,
             burst_count: 4,
-            burst_spacing: 200,
+            burst_spacing: (0.005 * sample_rate) as usize,
             burst_decay: 0.7,
             active: false,
             current_burst: 0,
             sample_counter: 0,
             burst_level: 0.0,
-            prev_trigger: 0.0,
         }
     }
 
     /// Configure burst parameters.
     /// - `burst_count`: number of bursts (1..=8)
-    /// - `burst_spacing_samples`: samples between burst onsets
+    /// - `burst_spacing_secs`: time in seconds between burst onsets
     /// - `burst_decay`: amplitude multiplier per burst (e.g. 0.7)
-    pub fn set_params(&mut self, burst_count: usize, burst_spacing_samples: usize, burst_decay: f32) {
+    pub fn set_params(&mut self, burst_count: usize, burst_spacing_secs: f32, burst_decay: f32) {
         self.burst_count = burst_count.clamp(1, 8);
-        self.burst_spacing = burst_spacing_samples.max(1);
+        self.burst_spacing = ((burst_spacing_secs * self.sample_rate) as usize).max(1);
         self.burst_decay = burst_decay.clamp(0.0, 1.0);
     }
 
@@ -276,16 +264,14 @@ impl BurstGenerator {
         self.current_burst = 0;
         self.sample_counter = 0;
         self.burst_level = 0.0;
-        self.prev_trigger = 0.0;
     }
 
     /// Process one sample. Takes a noise input and returns the gated/enveloped
     /// output. Returns 0.0 when not in a burst.
-    pub fn tick(&mut self, trigger: f32, noise_sample: f32) -> f32 {
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
-
-        if trigger_rose {
+    /// `triggered` should be `true` on the sample where a rising edge was
+    /// detected (e.g. from `TriggerInput::tick()`).
+    pub fn tick(&mut self, triggered: bool, noise_sample: f32) -> f32 {
+        if triggered {
             self.active = true;
             self.current_burst = 0;
             self.sample_counter = 0;
@@ -326,11 +312,6 @@ impl BurstGenerator {
     }
 }
 
-impl Default for BurstGenerator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -349,11 +330,11 @@ mod tests {
         env.set_decay(0.1);
 
         // Before trigger, level is 0
-        let v = env.tick(0.0);
+        let v = env.tick(false);
         assert_within!(0.0, v, 1e-6);
 
-        // Trigger rising edge
-        let v = env.tick(1.0);
+        // Trigger
+        let v = env.tick(true);
         assert_within!(1.0, v, 1e-6);
     }
 
@@ -364,14 +345,14 @@ mod tests {
         env.set_decay(decay_time);
 
         // Trigger
-        env.tick(1.0);
+        env.tick(true);
 
         // After decay_time seconds, should be near zero (~-60dB = ~0.001)
         let decay_samples = (decay_time * SR) as usize;
         for _ in 0..decay_samples {
-            env.tick(0.0);
+            env.tick(false);
         }
-        let v = env.tick(0.0);
+        let v = env.tick(false);
         assert!(v < 0.01, "after decay time, level should be near zero, got {v}");
     }
 
@@ -381,15 +362,15 @@ mod tests {
         env.set_decay(0.05);
 
         // Trigger and let decay halfway
-        env.tick(1.0);
+        env.tick(true);
         for _ in 0..1000 {
-            env.tick(0.0);
+            env.tick(false);
         }
-        let mid_level = env.tick(0.0);
+        let mid_level = env.tick(false);
         assert!(mid_level < 1.0 && mid_level > 0.0, "should be mid-decay: {mid_level}");
 
         // Retrigger should reset to 1.0
-        let v = env.tick(1.0);
+        let v = env.tick(true);
         assert_within!(1.0, v, 1e-6);
     }
 
@@ -397,11 +378,11 @@ mod tests {
     fn decay_envelope_monotonically_decreasing() {
         let mut env = DecayEnvelope::new(SR);
         env.set_decay(0.2);
-        env.tick(1.0);
+        env.tick(true);
 
         let mut prev = 1.0f32;
         for _ in 0..5000 {
-            let v = env.tick(0.0);
+            let v = env.tick(false);
             assert!(v <= prev + 1e-7, "decay should be monotonically decreasing: {v} > {prev}");
             prev = v;
         }
@@ -413,23 +394,25 @@ mod tests {
     fn pitch_sweep_starts_at_start_freq() {
         let mut sweep = PitchSweep::new(SR);
         sweep.set_params(2500.0, 55.0, 0.04);
+        sweep.trigger();
 
         // On trigger, should return start freq
-        let hz = sweep.tick(1.0);
-        assert_within!(2500.0, hz, 1.0);
+        let hz = sweep.tick();
+        assert_within!(2500.0, hz, 50.0);
     }
 
     #[test]
     fn pitch_sweep_settles_at_end_freq() {
         let mut sweep = PitchSweep::new(SR);
         sweep.set_params(2500.0, 55.0, 0.04);
-        sweep.tick(1.0);
+        sweep.trigger();
+        sweep.tick();
 
         // After many samples, should settle near end freq
         for _ in 0..10000 {
-            sweep.tick(0.0);
+            sweep.tick();
         }
-        let hz = sweep.tick(0.0);
+        let hz = sweep.tick();
         assert!(
             (hz - 55.0).abs() < 1.0,
             "sweep should settle near 55 Hz, got {hz}"
@@ -440,10 +423,11 @@ mod tests {
     fn pitch_sweep_monotonically_decreasing() {
         let mut sweep = PitchSweep::new(SR);
         sweep.set_params(2500.0, 55.0, 0.04);
-        let mut prev = sweep.tick(1.0);
+        sweep.trigger();
+        let mut prev = sweep.tick();
 
         for _ in 0..5000 {
-            let hz = sweep.tick(0.0);
+            let hz = sweep.tick();
             assert!(hz <= prev + 0.01, "sweep should decrease: {hz} > {prev}");
             prev = hz;
         }
@@ -501,7 +485,8 @@ mod tests {
     #[test]
     fn metallic_tone_produces_output_after_trigger() {
         let mut mt = MetallicTone::new(SR);
-        mt.trigger(400.0);
+        mt.set_frequency(400.0);
+        mt.trigger();
 
         let mut sum_sq = 0.0f32;
         for _ in 0..1000 {
@@ -515,7 +500,8 @@ mod tests {
     #[test]
     fn metallic_tone_output_bounded() {
         let mut mt = MetallicTone::new(SR);
-        mt.trigger(800.0);
+        mt.set_frequency(800.0);
+        mt.trigger();
 
         for _ in 0..5000 {
             let v = mt.tick();
@@ -529,7 +515,8 @@ mod tests {
     #[test]
     fn metallic_tone_reset_silences() {
         let mut mt = MetallicTone::new(SR);
-        mt.trigger(400.0);
+        mt.set_frequency(400.0);
+        mt.trigger();
         for _ in 0..100 {
             mt.tick();
         }
@@ -544,37 +531,17 @@ mod tests {
 
     #[test]
     fn burst_generator_produces_correct_burst_count() {
-        let mut bg = BurstGenerator::new();
-        bg.set_params(3, 100, 0.8);
+        // 100 samples at SR = 100/44100 secs
+        let spacing_secs = 100.0 / SR;
+        let mut bg = BurstGenerator::new(SR);
+        bg.set_params(3, spacing_secs, 0.8);
 
-        // Count distinct active periods
-        let mut bursts_seen = 0;
-        let mut was_active = false;
-
-        // Trigger
-        bg.tick(1.0, 0.5);
-        was_active = true;
-
-        for _ in 0..1000 {
-            let v = bg.tick(0.0, 0.5);
-            let now_active = bg.is_active();
-            if !now_active && was_active {
-                // Sequence ended
-            }
-            was_active = now_active;
-            let _ = v;
-        }
-
-        // Count bursts by checking transitions in output
-        // Alternative: just verify the total duration
         let total_expected_samples = 3 * 100;
-        bg.reset();
-        bg.set_params(3, 100, 0.8);
-        bg.tick(1.0, 1.0);
+        bg.tick(true, 1.0);
 
         let mut active_count = 1; // started active
         for i in 0..1000 {
-            bg.tick(0.0, 1.0);
+            bg.tick(false, 1.0);
             if !bg.is_active() {
                 active_count = i + 1;
                 break;
@@ -590,24 +557,25 @@ mod tests {
 
     #[test]
     fn burst_generator_spacing_creates_gaps() {
-        let mut bg = BurstGenerator::new();
-        let spacing = 200_usize;
-        bg.set_params(2, spacing, 1.0);
+        let spacing_samples = 200_usize;
+        let spacing_secs = spacing_samples as f32 / SR;
+        let mut bg = BurstGenerator::new(SR);
+        bg.set_params(2, spacing_secs, 1.0);
 
         // Trigger
-        let v = bg.tick(1.0, 1.0);
+        let v = bg.tick(true, 1.0);
         assert!(v.abs() > 0.0, "first sample should be non-zero");
 
         // Collect output for 2 bursts worth
         let mut output = Vec::new();
         output.push(v);
-        for _ in 1..(spacing * 2) {
-            output.push(bg.tick(0.0, 1.0));
+        for _ in 1..(spacing_samples * 2) {
+            output.push(bg.tick(false, 1.0));
         }
 
         // Second half of first burst should be silent
-        let silent_start = spacing / 2;
-        let silent_end = spacing;
+        let silent_start = spacing_samples / 2;
+        let silent_end = spacing_samples;
         for i in silent_start..silent_end {
             assert_within!(
                 0.0, output[i], 1e-6,
@@ -618,10 +586,10 @@ mod tests {
 
     #[test]
     fn burst_generator_inactive_before_trigger() {
-        let mut bg = BurstGenerator::new();
-        bg.set_params(4, 100, 0.7);
+        let mut bg = BurstGenerator::new(SR);
+        bg.set_params(4, 100.0 / SR, 0.7);
 
-        let v = bg.tick(0.0, 1.0);
+        let v = bg.tick(false, 1.0);
         assert_within!(0.0, v, 1e-6, "should be silent before trigger");
         assert!(!bg.is_active());
     }

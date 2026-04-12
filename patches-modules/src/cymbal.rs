@@ -27,7 +27,7 @@
 /// | `shimmer` | float | 0.0–1.0       | 0.2     | Partial frequency modulation depth |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -42,14 +42,14 @@ pub struct Cymbal {
     tone: f32,
     filter_freq: f32,
     shimmer: f32,
+    mod_depth: f32,
     metallic: MetallicTone,
     amp_env: DecayEnvelope,
     hp_filter: SvfKernel,
     prng_state: u64,
     lfo_phase: f32,
     lfo_increment: f32,
-    prev_trigger: f32,
-    in_trigger: MonoInput,
+    in_trigger: TriggerInput,
     out_audio: MonoOutput,
 }
 
@@ -84,14 +84,14 @@ impl Module for Cymbal {
             tone: 0.5,
             filter_freq: 6000.0,
             shimmer: 0.2,
+            mod_depth: 0.2 * 20.0,
             metallic,
             amp_env,
             hp_filter: SvfKernel::new_static(f, d),
             prng_state: instance_id.as_u64() + 1,
             lfo_phase: 0.0,
             lfo_increment,
-            prev_trigger: 0.0,
-            in_trigger: MonoInput::default(),
+            in_trigger: TriggerInput::default(),
             out_audio: MonoOutput::default(),
         }
     }
@@ -116,6 +116,7 @@ impl Module for Cymbal {
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("shimmer") {
             self.shimmer = *v;
+            self.mod_depth = self.shimmer * 20.0;
         }
     }
 
@@ -123,27 +124,22 @@ impl Module for Cymbal {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_trigger = MonoInput::from_ports(inputs, 0);
+        self.in_trigger = TriggerInput::from_ports(inputs, 0);
         self.out_audio = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger = pool.read_mono(&self.in_trigger);
-
-        let trigger_rose = trigger >= 0.5 && self.prev_trigger < 0.5;
-        self.prev_trigger = trigger;
+        let trigger_rose = self.in_trigger.tick(pool);
 
         if trigger_rose {
-            self.metallic.trigger(self.pitch);
-            self.amp_env.set_decay(self.decay_time);
+            self.metallic.trigger();
             self.lfo_phase = 0.0;
         }
 
-        let amp = self.amp_env.tick(trigger);
+        let amp = self.amp_env.tick(trigger_rose);
 
         // Metallic tone with shimmer modulation
-        let mod_depth = self.shimmer * 20.0; // Hz of frequency modulation
-        let metal = self.metallic.tick_with_modulation(mod_depth, self.lfo_phase);
+        let metal = self.metallic.tick_with_modulation(self.mod_depth, self.lfo_phase);
 
         // Advance LFO
         self.lfo_phase += self.lfo_increment;

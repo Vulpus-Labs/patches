@@ -31,6 +31,7 @@ pub mod registries;
 pub use audio_environment::AudioEnvironment;
 pub use cable_pool::CablePool;
 pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput};
+pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use graphs::{GraphError, ModuleGraph, NodeId};
 pub use midi::{MidiEvent, ReceivesMidi};
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};

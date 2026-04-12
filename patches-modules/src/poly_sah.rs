@@ -1,6 +1,6 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, ModuleShape, OutputPort, PolyInput, PolyOutput,
+    ModuleShape, OutputPort, PolyInput, PolyOutput, TriggerInput,
 };
 use patches_core::parameter_map::ParameterMap;
 
@@ -25,9 +25,8 @@ pub struct PolySah {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     held: [f32; 16],
-    prev_trig: f32,
     in_sig: PolyInput,
-    in_trig: MonoInput,
+    in_trig: TriggerInput,
     out: PolyOutput,
 }
 
@@ -44,9 +43,8 @@ impl Module for PolySah {
             instance_id,
             descriptor,
             held: [0.0; 16],
-            prev_trig: 0.0,
             in_sig: PolyInput::default(),
-            in_trig: MonoInput::default(),
+            in_trig: TriggerInput::default(),
             out: PolyOutput::default(),
         }
     }
@@ -58,16 +56,14 @@ impl Module for PolySah {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_sig  = PolyInput::from_ports(inputs, 0);
-        self.in_trig = MonoInput::from_ports(inputs, 1);
+        self.in_trig = TriggerInput::from_ports(inputs, 1);
         self.out     = PolyOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trig = pool.read_mono(&self.in_trig);
-        if self.prev_trig < 0.5 && trig >= 0.5 {
+        if self.in_trig.tick(pool) {
             self.held = pool.read_poly(&self.in_sig);
         }
-        self.prev_trig = trig;
         pool.write_poly(&self.out, self.held);
     }
 

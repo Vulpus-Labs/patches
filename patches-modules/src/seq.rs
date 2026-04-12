@@ -1,6 +1,6 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::build_error::BuildError;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
@@ -128,16 +128,11 @@ pub struct Seq {
     current_pitch: f32,
     /// Whether to emit trigger=1 on this sample.
     trigger_pending: bool,
-    /// Previous sample values for rising-edge detection.
-    prev_clock: f32,
-    prev_start: f32,
-    prev_stop: f32,
-    prev_reset: f32,
     // Port fields
-    in_clock: MonoInput,
-    in_start: MonoInput,
-    in_stop: MonoInput,
-    in_reset: MonoInput,
+    in_clock: TriggerInput,
+    in_start: TriggerInput,
+    in_stop: TriggerInput,
+    in_reset: TriggerInput,
     out_pitch: MonoOutput,
     out_trigger: MonoOutput,
     out_gate: MonoOutput,
@@ -181,14 +176,10 @@ impl Module for Seq {
             playing: true,
             current_pitch: 0.0,
             trigger_pending: false,
-            prev_clock: 0.0,
-            prev_start: 0.0,
-            prev_stop: 0.0,
-            prev_reset: 0.0,
-            in_clock: MonoInput::default(),
-            in_start: MonoInput::default(),
-            in_stop: MonoInput::default(),
-            in_reset: MonoInput::default(),
+            in_clock: TriggerInput::default(),
+            in_start: TriggerInput::default(),
+            in_stop: TriggerInput::default(),
+            in_reset: TriggerInput::default(),
             out_pitch: MonoOutput::default(),
             out_trigger: MonoOutput::default(),
             out_gate: MonoOutput::default(),
@@ -237,10 +228,10 @@ impl Module for Seq {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_clock = MonoInput::from_ports(inputs, 0);
-        self.in_start = MonoInput::from_ports(inputs, 1);
-        self.in_stop = MonoInput::from_ports(inputs, 2);
-        self.in_reset = MonoInput::from_ports(inputs, 3);
+        self.in_clock = TriggerInput::from_ports(inputs, 0);
+        self.in_start = TriggerInput::from_ports(inputs, 1);
+        self.in_stop = TriggerInput::from_ports(inputs, 2);
+        self.in_reset = TriggerInput::from_ports(inputs, 3);
         self.out_pitch = MonoOutput::from_ports(outputs, 0);
         self.out_trigger = MonoOutput::from_ports(outputs, 1);
         self.out_gate = MonoOutput::from_ports(outputs, 2);
@@ -255,20 +246,10 @@ impl Module for Seq {
             return;
         }
 
-        let clock = pool.read_mono(&self.in_clock);
-        let start = pool.read_mono(&self.in_start);
-        let stop  = pool.read_mono(&self.in_stop);
-        let reset = pool.read_mono(&self.in_reset);
-
-        let clock_rose = clock >= 0.5 && self.prev_clock < 0.5;
-        let start_rose = start >= 0.5 && self.prev_start < 0.5;
-        let stop_rose  = stop  >= 0.5 && self.prev_stop  < 0.5;
-        let reset_rose = reset >= 0.5 && self.prev_reset < 0.5;
-
-        self.prev_clock = clock;
-        self.prev_start = start;
-        self.prev_stop  = stop;
-        self.prev_reset = reset;
+        let clock_rose = self.in_clock.tick(pool);
+        let start_rose = self.in_start.tick(pool);
+        let stop_rose  = self.in_stop.tick(pool);
+        let reset_rose = self.in_reset.tick(pool);
 
         if reset_rose {
             self.step_index = 0;
