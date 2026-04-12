@@ -11,9 +11,13 @@ module.exports = grammar({
     // ─── File root ──────────────────────────────────────────────────────
     file: ($) =>
       seq(
-        repeat(choice($.template, $.pattern_block, $.song_block)),
+        repeat(choice($.include_directive, $.template, $.pattern_block, $.song_block)),
         optional($.patch)
       ),
+
+    // ─── Include directives ────────────────────────────────────────────
+    include_directive: ($) =>
+      seq("include", field("path", $.string_lit)),
 
     // ─── Comments ───────────────────────────────────────────────────────
     comment: (_) => token(seq("#", /[^\n]*/)),

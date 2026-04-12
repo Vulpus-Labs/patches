@@ -23,12 +23,15 @@ mod expand;
 pub mod flat;
 mod parser;
 
+pub mod loader;
+
 pub use ast::{
-    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl, ParamEntry,
-    ParamIndex, ParamType, Patch, PatternChannel, PatternDef, PortGroupDecl, PortIndex, PortLabel,
-    PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef, SongRow, Span, Statement, Step,
-    StepOrGenerator, Template, Value,
+    Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
+    ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
+    PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef,
+    SongRow, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
-pub use parser::{parse, ParseError};
+pub use loader::{load_with, LoadError, LoadResult};
+pub use parser::{parse, parse_include_file, ParseError};

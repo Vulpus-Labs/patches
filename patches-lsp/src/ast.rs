@@ -266,9 +266,18 @@ pub(crate) struct Patch {
     pub span: Span,
 }
 
+/// A parsed `include "path"` directive.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct IncludeDirective {
+    /// The raw path string (quotes stripped).
+    pub path: String,
+    pub span: Span,
+}
+
 /// The root of a parsed `.patches` file.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct File {
+    pub includes: Vec<IncludeDirective>,
     pub templates: Vec<Template>,
     pub patterns: Vec<PatternBlock>,
     pub songs: Vec<SongBlock>,

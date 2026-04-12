@@ -13,6 +13,10 @@
             "members": [
               {
                 "type": "SYMBOL",
+                "name": "include_directive"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "template"
               },
               {
@@ -37,6 +41,23 @@
               "type": "BLANK"
             }
           ]
+        }
+      ]
+    },
+    "include_directive": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "include"
+        },
+        {
+          "type": "FIELD",
+          "name": "path",
+          "content": {
+            "type": "SYMBOL",
+            "name": "string_lit"
+          }
         }
       ]
     },

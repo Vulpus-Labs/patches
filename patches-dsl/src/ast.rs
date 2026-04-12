@@ -307,12 +307,31 @@ pub struct Patch {
     pub span: Span,
 }
 
-/// The root of a parsed `.patches` file.
+/// A parsed `include "path"` directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeDirective {
+    /// The raw path string from the directive (quotes stripped).
+    pub path: String,
+    pub span: Span,
+}
+
+/// The root of a parsed `.patches` file (master file with a `patch {}` block).
 #[derive(Debug, Clone, PartialEq)]
 pub struct File {
+    pub includes: Vec<IncludeDirective>,
     pub templates: Vec<Template>,
     pub patterns: Vec<PatternDef>,
     pub songs: Vec<SongDef>,
     pub patch: Patch,
+    pub span: Span,
+}
+
+/// A parsed library file (no `patch {}` block allowed).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IncludeFile {
+    pub includes: Vec<IncludeDirective>,
+    pub templates: Vec<Template>,
+    pub patterns: Vec<PatternDef>,
+    pub songs: Vec<SongDef>,
     pub span: Span,
 }

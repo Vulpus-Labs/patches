@@ -182,5 +182,9 @@ song_header_row = { "|" ~ (ident ~ "|")+ }
 song_data_row   = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }
 song_block      = { "song" ~ ident ~ "{" ~ song_header_row ~ song_data_row+ ~ "}" }
 
+// ─── Include directives ──────────────────────────────────────────────────────
+include_directive = { "include" ~ string_lit }
+
 // ─── File root ────────────────────────────────────────────────────────────────
-file = { SOI ~ (template | pattern_block | song_block)* ~ patch ~ EOI }
+file         = { SOI ~ (include_directive | template | pattern_block | song_block)* ~ patch ~ EOI }
+include_file = { SOI ~ (include_directive | template | pattern_block | song_block)* ~ EOI }

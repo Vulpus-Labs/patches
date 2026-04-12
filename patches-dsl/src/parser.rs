@@ -2,10 +2,10 @@ use pest::iterators::Pair;
 use pest::Parser as _;
 
 use crate::ast::{
-    Arrow, AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamDecl, ParamEntry,
-    ParamIndex, ParamType, Patch, PatternChannel, PatternDef, PortGroupDecl, PortIndex, PortLabel,
-    PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef, SongRow, Span, Statement, Step,
-    StepOrGenerator, Template, Value,
+    Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
+    ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
+    PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef,
+    SongRow, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 
 // ─── Pest glue ────────────────────────────────────────────────────────────────
@@ -154,6 +154,27 @@ pub fn parse(src: &str) -> Result<File, ParseError> {
     build_file(file_pair)
 }
 
+/// Parse a `.patches` library file (no `patch {}` block) into an AST [`IncludeFile`].
+pub fn parse_include_file(src: &str) -> Result<IncludeFile, ParseError> {
+    let mut pairs = PatchesParser::parse(Rule::include_file, src).map_err(|e| {
+        let span = match e.location {
+            pest::error::InputLocation::Pos(p) => Span { start: p, end: p },
+            pest::error::InputLocation::Span((s, e)) => Span { start: s, end: e },
+        };
+        ParseError {
+            span,
+            message: e.to_string(),
+        }
+    })?;
+
+    let file_pair = pairs.next().ok_or_else(|| ParseError {
+        span: Span { start: 0, end: 0 },
+        message: "internal: no root pair returned by pest".to_owned(),
+    })?;
+
+    build_include_file(file_pair)
+}
+
 // ─── Parse-tree builders ─────────────────────────────────────────────────────
 //
 // These functions walk a pest parse tree that has already been validated by the
@@ -169,8 +190,17 @@ fn span_of(pair: &Pair<'_, Rule>) -> Span {
     }
 }
 
+fn build_include_directive(pair: Pair<'_, Rule>) -> IncludeDirective {
+    let span = span_of(&pair);
+    let string_pair = pair.into_inner().next().unwrap(); // grammar: include_directive = { "include" ~ string_lit }
+    let raw = string_pair.as_str();
+    let path = raw[1..raw.len() - 1].to_owned(); // strip surrounding quotes
+    IncludeDirective { path, span }
+}
+
 fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
     let span = span_of(&pair);
+    let mut includes = Vec::new();
     let mut templates = Vec::new();
     let mut patterns = Vec::new();
     let mut songs = Vec::new();
@@ -178,6 +208,7 @@ fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
+            Rule::include_directive => includes.push(build_include_directive(inner)),
             Rule::template => templates.push(build_template(inner)?),
             Rule::pattern_block => patterns.push(build_pattern_block(inner)?),
             Rule::song_block => songs.push(build_song_block(inner)?),
@@ -188,10 +219,38 @@ fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
     }
 
     Ok(File {
+        includes,
         templates,
         patterns,
         songs,
         patch: patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
+        span,
+    })
+}
+
+fn build_include_file(pair: Pair<'_, Rule>) -> Result<IncludeFile, ParseError> {
+    let span = span_of(&pair);
+    let mut includes = Vec::new();
+    let mut templates = Vec::new();
+    let mut patterns = Vec::new();
+    let mut songs = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::include_directive => includes.push(build_include_directive(inner)),
+            Rule::template => templates.push(build_template(inner)?),
+            Rule::pattern_block => patterns.push(build_pattern_block(inner)?),
+            Rule::song_block => songs.push(build_song_block(inner)?),
+            Rule::EOI => {}
+            _ => unreachable!("unexpected rule in include_file: {:?}", inner.as_rule()),
+        }
+    }
+
+    Ok(IncludeFile {
+        includes,
+        templates,
+        patterns,
+        songs,
         span,
     })
 }

@@ -3,9 +3,11 @@
 //! Usage:
 //!   patch_player <path-to-patch.patches>
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::BufRead;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -17,23 +19,28 @@ use std::time::{Duration, SystemTime};
 use patches_core::AudioEnvironment;
 use patches_engine::{new_event_queue, DeviceConfig, EventScheduler, MidiConnector, OversamplingFactor, PatchEngine, PatchEngineError, enumerate_devices};
 
-fn mtime(path: &str) -> std::io::Result<SystemTime> {
-    fs::metadata(path)?.modified()
+struct LoadedPatch {
+    build_result: patches_interpreter::BuildResult,
+    dependencies: Vec<PathBuf>,
 }
 
 fn load_patch(
     path: &str,
     registry: &patches_core::Registry,
-) -> Result<patches_interpreter::BuildResult, Box<dyn std::error::Error>> {
-    let src = fs::read_to_string(path)?;
-    let file = patches_dsl::parse(&src)?;
-    let result = patches_dsl::expand(&file)?;
+) -> Result<LoadedPatch, Box<dyn std::error::Error>> {
+    let master_path = Path::new(path);
+    let load_result = patches_dsl::load_with(master_path, |p| fs::read_to_string(p))?;
+    let result = patches_dsl::expand(&load_result.file)?;
     for w in &result.warnings {
         eprintln!("dsl warning: {w}");
     }
-    let env = AudioEnvironment { sample_rate: 44_100.0, poly_voices: 16, periodic_update_interval: 32 };
-    let base_dir = std::path::Path::new(path).parent();
-    Ok(patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?)
+    let env = AudioEnvironment { sample_rate: 44_100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
+    let base_dir = master_path.parent();
+    let build_result = patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?;
+    Ok(LoadedPatch {
+        build_result,
+        dependencies: load_result.dependencies,
+    })
 }
 
 /// Push a build result to `engine`, retrying if the plan channel is full.
@@ -63,7 +70,7 @@ fn run(
     device_config: DeviceConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let load_registry = patches_modules::default_registry();
-    let build_result = load_patch(path, &load_registry)?;
+    let loaded = load_patch(path, &load_registry)?;
 
     let engine_registry = patches_modules::default_registry();
     let mut engine = PatchEngine::with_device_config(
@@ -74,8 +81,8 @@ fn run(
 
     let (midi_producer, midi_consumer) = new_event_queue(256);
     engine.start_with_tracker_data(
-        &build_result.graph,
-        build_result.tracker_data.clone(),
+        &loaded.build_result.graph,
+        loaded.build_result.tracker_data.clone(),
         Some(midi_consumer),
         record_path,
     )?;
@@ -115,7 +122,13 @@ fn run(
         });
     }
 
-    let mut last_mtime = mtime(path)?;
+    // Track mtimes for all files in the dependency set.
+    let mut watched: HashMap<PathBuf, SystemTime> = HashMap::new();
+    for dep in &loaded.dependencies {
+        if let Ok(t) = fs::metadata(dep).and_then(|m| m.modified()) {
+            watched.insert(dep.clone(), t);
+        }
+    }
 
     loop {
         thread::sleep(Duration::from_millis(500));
@@ -124,19 +137,35 @@ fn run(
             break;
         }
 
-        let current_mtime = match mtime(path) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("warn: could not stat {path}: {e}");
-                continue;
-            }
-        };
+        // Check if any watched file has changed.
+        let changed = watched.iter().any(|(p, last)| {
+            fs::metadata(p)
+                .and_then(|m| m.modified())
+                .map(|t| t != *last)
+                .unwrap_or(false)
+        });
 
-        if current_mtime != last_mtime {
-            last_mtime = current_mtime;
+        if changed {
             match load_patch(path, &load_registry) {
-                Ok(result) => push_build_result(&mut engine, &result),
-                Err(e) => eprintln!("parse error (keeping current patch): {e}"),
+                Ok(loaded) => {
+                    push_build_result(&mut engine, &loaded.build_result);
+                    // Refresh the watched set from the new dependency list.
+                    watched.clear();
+                    for dep in &loaded.dependencies {
+                        if let Ok(t) = fs::metadata(dep).and_then(|m| m.modified()) {
+                            watched.insert(dep.clone(), t);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("parse error (keeping current patch): {e}");
+                    // Update mtimes so we don't spam errors on every poll.
+                    for (p, last) in watched.iter_mut() {
+                        if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
+                            *last = t;
+                        }
+                    }
+                }
             }
         }
     }

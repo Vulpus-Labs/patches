@@ -23,8 +23,11 @@ macro_rules! dlog {
 }
 
 use clap_sys::events::{
-    clap_event_midi, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI,
+    clap_event_midi, clap_event_transport, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI,
+    CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
+    CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_PLAYING,
 };
+use clap_sys::fixedpoint::CLAP_BEATTIME_FACTOR;
 use clap_sys::host::clap_host;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 use clap_sys::process::{
@@ -74,6 +77,12 @@ pub struct PatchesClapPlugin {
     pub(crate) gui_scale: f64,
 
     pub(crate) sample_rate: f64,
+
+    // ── Transport edge detection ───────────────────────────────────
+    /// Previous beat position, used to detect beat boundary crossings.
+    pub(crate) prev_beat: f64,
+    /// Previous bar number, used to detect bar boundary crossings.
+    pub(crate) prev_bar: i32,
 }
 
 // Safety: PatchesClapPlugin is only accessed according to CLAP's
@@ -89,7 +98,7 @@ impl PatchesClapPlugin {
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), String> {
         let env = self.env.as_ref().ok_or("not activated")?;
-        let file = patches_dsl::parse(&self.dsl_source).map_err(|e| e.to_string())?;
+        let file = self.load_or_parse()?;
         let result = patches_dsl::expand(&file).map_err(|e| e.to_string())?;
         let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
@@ -115,6 +124,24 @@ impl PatchesClapPlugin {
             let _ = tx.push(plan);
         }
         Ok(())
+    }
+
+    /// Load the master file using the include loader (resolving includes) when
+    /// a file path is available on disk, or fall back to parsing `dsl_source`
+    /// directly (e.g. state restored without original files).
+    fn load_or_parse(&self) -> Result<patches_dsl::File, String> {
+        let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
+        if let Some(path) = file_path {
+            if path.exists() {
+                let load_result = patches_dsl::load_with(&path, |p| {
+                    std::fs::read_to_string(p)
+                })
+                .map_err(|e| e.to_string())?;
+                return Ok(load_result.file);
+            }
+        }
+        // Fallback: parse the in-memory source (no include resolution).
+        patches_dsl::parse(&self.dsl_source).map_err(|e| e.to_string())
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.
@@ -231,6 +258,7 @@ unsafe extern "C" fn plugin_activate(
         sample_rate: sample_rate as f32,
         poly_voices: 16,
         periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
+        hosted: true,
     };
     p.env = Some(env);
 
@@ -378,6 +406,54 @@ unsafe extern "C" fn plugin_process(
     };
     let event_count = event_size_fn.map_or(0, |f| f(in_events));
     let mut event_idx: u32 = 0;
+
+    // Read host transport and write it to the processor's GLOBAL_TRANSPORT slot.
+    if !pr.transport.is_null() {
+        let t: &clap_event_transport = &*pr.transport;
+        let playing = if t.flags & CLAP_TRANSPORT_IS_PLAYING != 0 {
+            1.0
+        } else {
+            0.0
+        };
+        let tempo = if t.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 {
+            t.tempo as f32
+        } else {
+            0.0
+        };
+        let (beat, bar, beat_trigger, bar_trigger) =
+            if t.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0 {
+                let beat_f = t.song_pos_beats as f64 / CLAP_BEATTIME_FACTOR as f64;
+                let bar_num = t.bar_number;
+                // Detect beat boundary: integer part of beat changed.
+                let beat_trig = if beat_f.floor() != p.prev_beat.floor()
+                    && p.prev_beat >= 0.0
+                {
+                    1.0
+                } else {
+                    0.0
+                };
+                // Detect bar boundary: bar number changed.
+                let bar_trig = if bar_num != p.prev_bar && p.prev_bar >= 0 {
+                    1.0
+                } else {
+                    0.0
+                };
+                p.prev_beat = beat_f;
+                p.prev_bar = bar_num;
+                (beat_f as f32, bar_num as f32, beat_trig, bar_trig)
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            };
+        let (tsig_num, tsig_denom) =
+            if t.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0 {
+                (t.tsig_num as f32, t.tsig_denom as f32)
+            } else {
+                (0.0, 0.0)
+            };
+        proc.write_transport(
+            playing, tempo, beat, bar, beat_trigger, bar_trigger, tsig_num, tsig_denom,
+        );
+    }
 
     // Sample-accurate processing loop.
     for f in 0..frames {

@@ -127,9 +127,21 @@ fn build_ident(node: Node, source: &str) -> Ident {
 
 // ─── File ───────────────────────────────────────────────────────────────────
 
+fn build_include_directive(node: Node, source: &str) -> Option<crate::ast::IncludeDirective> {
+    let path_node = node.child_by_field_name("path")?;
+    let raw = node_text(path_node, source);
+    // Strip surrounding quotes from string_lit.
+    let path = if raw.len() >= 2 { raw[1..raw.len() - 1].to_owned() } else { raw.to_owned() };
+    Some(crate::ast::IncludeDirective {
+        path,
+        span: span_of(node),
+    })
+}
+
 fn build_file(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> File {
     walk_errors(node, diags);
 
+    let mut includes = Vec::new();
     let mut templates = Vec::new();
     let mut patterns = Vec::new();
     let mut songs = Vec::new();
@@ -138,6 +150,11 @@ fn build_file(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> File {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
+            "include_directive" => {
+                if let Some(inc) = build_include_directive(child, source) {
+                    includes.push(inc);
+                }
+            }
             "template" => templates.push(build_template(child, source, diags)),
             "pattern_block" => patterns.push(build_pattern_block(child, source, diags)),
             "song_block" => songs.push(build_song_block(child, source, diags)),
@@ -147,6 +164,7 @@ fn build_file(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> File {
     }
 
     File {
+        includes,
         templates,
         patterns,
         songs,

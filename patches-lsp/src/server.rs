@@ -4,7 +4,7 @@
 //! and delegates to `completions`, `hover`, and `navigation` modules for
 //! feature logic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use patches_modules::default_registry;
@@ -48,6 +48,9 @@ pub struct PatchesLanguageServer {
     parser: Mutex<Parser>,
     /// Workspace-level navigation index for goto-definition.
     nav_index: Mutex<NavigationIndex>,
+    /// URIs of documents loaded as includes (not opened by the editor).
+    /// These are managed automatically and removed when no longer referenced.
+    include_loaded: Mutex<HashSet<Url>>,
 }
 
 impl PatchesLanguageServer {
@@ -62,6 +65,7 @@ impl PatchesLanguageServer {
             documents: Mutex::new(HashMap::new()),
             parser: Mutex::new(parser),
             nav_index: Mutex::new(NavigationIndex::default()),
+            include_loaded: Mutex::new(HashSet::new()),
         }
     }
 
@@ -77,6 +81,21 @@ impl PatchesLanguageServer {
 
         let lsp_diags =
             lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+
+        // Resolve include directives and load referenced files.
+        let include_diags = self.resolve_includes(&uri, &file.includes);
+
+        let mut all_diags = lsp_diags;
+        all_diags.extend(include_diags.into_iter().map(|(span, msg)| {
+            let start = lsp_util::byte_offset_to_position(&line_index, span.start);
+            let end = lsp_util::byte_offset_to_position(&line_index, span.end);
+            Diagnostic {
+                range: Range::new(start, end),
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: msg,
+                ..Default::default()
+            }
+        }));
 
         {
             let mut docs = self.documents.lock().expect("lock documents");
@@ -96,8 +115,108 @@ impl PatchesLanguageServer {
         }
 
         self.client
-            .publish_diagnostics(uri, lsp_diags, None)
+            .publish_diagnostics(uri, all_diags, None)
             .await;
+    }
+
+    /// Resolve include directives for a document, loading included files into
+    /// the document map. Returns diagnostics for missing/unreadable files.
+    fn resolve_includes(
+        &self,
+        parent_uri: &Url,
+        includes: &[crate::ast::IncludeDirective],
+    ) -> Vec<(crate::ast::Span, String)> {
+        let mut diags = Vec::new();
+
+        let parent_path = match parent_uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return diags, // non-file URI, skip include resolution
+        };
+        let parent_dir = parent_path.parent().unwrap_or(std::path::Path::new("."));
+
+        let mut new_include_uris: HashSet<Url> = HashSet::new();
+
+        for inc in includes {
+            let resolved = parent_dir.join(&inc.path);
+            let resolved = match resolved.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    diags.push((inc.span, format!("cannot read included file: {}", inc.path)));
+                    continue;
+                }
+            };
+
+            let inc_uri = match Url::from_file_path(&resolved) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            new_include_uris.insert(inc_uri.clone());
+
+            // Skip if already in the document map (editor-opened or previously loaded).
+            {
+                let docs = self.documents.lock().expect("lock documents");
+                if docs.contains_key(&inc_uri) {
+                    continue;
+                }
+            }
+
+            // Read and analyse the included file.
+            let source = match std::fs::read_to_string(&resolved) {
+                Ok(s) => s,
+                Err(e) => {
+                    diags.push((inc.span, format!("cannot read {}: {e}", inc.path)));
+                    continue;
+                }
+            };
+
+            let tree = {
+                let mut parser = self.parser.lock().expect("lock parser");
+                parser.parse(&source, None).expect("tree-sitter parse")
+            };
+            let (file, _syntax_diags) = ast_builder::build_ast(&tree, &source);
+
+            // Recursively resolve includes in the included file.
+            let _nested_diags = self.resolve_includes(&inc_uri, &file.includes);
+
+            let model = analysis::analyse(&file, &self.registry);
+            let line_index = lsp_util::build_line_index(&source);
+
+            {
+                let mut docs = self.documents.lock().expect("lock documents");
+                docs.insert(inc_uri.clone(), DocumentState {
+                    source,
+                    tree,
+                    model,
+                    line_index,
+                });
+            }
+
+            {
+                let mut inc_set = self.include_loaded.lock().expect("lock include_loaded");
+                inc_set.insert(inc_uri);
+            }
+        }
+
+        // Clean up stale include-loaded documents that are no longer referenced
+        // by this parent's include directives.
+        {
+            let mut inc_set = self.include_loaded.lock().expect("lock include_loaded");
+            let stale: Vec<Url> = inc_set
+                .iter()
+                .filter(|u| !new_include_uris.contains(*u))
+                .cloned()
+                .collect();
+            let mut docs = self.documents.lock().expect("lock documents");
+            for uri in stale {
+                // Only remove if it was include-loaded (not editor-opened).
+                if inc_set.remove(&uri) {
+                    docs.remove(&uri);
+                }
+            }
+        }
+
+        diags
     }
 }
 
@@ -154,8 +273,16 @@ impl LanguageServer for PatchesLanguageServer {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.clone();
         {
+            // Only remove from documents if it's not an include-loaded file
+            // (include-loaded files stay until no longer referenced).
+            let is_include = {
+                let inc_set = self.include_loaded.lock().expect("lock include_loaded");
+                inc_set.contains(&params.text_document.uri)
+            };
             let mut docs = self.documents.lock().expect("lock documents");
-            docs.remove(&params.text_document.uri);
+            if !is_include {
+                docs.remove(&params.text_document.uri);
+            }
 
             // Purge stale definitions from the closed file.
             let mut nav = self.nav_index.lock().expect("lock nav_index");

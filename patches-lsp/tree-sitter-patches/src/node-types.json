@@ -161,6 +161,10 @@
       "required": false,
       "types": [
         {
+          "type": "include_directive",
+          "named": true
+        },
+        {
           "type": "patch",
           "named": true
         },
@@ -226,6 +230,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "include_directive",
+    "named": true,
+    "fields": {
+      "path": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "string_lit",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1136,6 +1156,10 @@
   },
   {
     "type": "in",
+    "named": false
+  },
+  {
+    "type": "include",
     "named": false
   },
   {
