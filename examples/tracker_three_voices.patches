@@ -45,7 +45,7 @@ pattern lead2_fill {
 song demo {
     | bass        | lead1        | lead2        |
     | bass_verse  | lead1_verse  | lead2_verse  |
-    | bass_verse  | lead1_verse  | lead2_verse   | @loop
+    | bass_verse  | lead1_verse  | lead2_verse   |
     | bass_chorus  | lead1_chorus | lead2_chorus |
     | bass_chorus | lead2_fill | lead2_fill   |
 }

@@ -4,10 +4,21 @@ This is the complete syntax reference for `.patches` files. It assumes familiari
 
 ## File structure
 
-A patch file contains zero or more template definitions followed by exactly one `patch` block. Comments run from `#` to end of line. Whitespace is insignificant.
+A patch file contains zero or more top-level blocks followed by exactly one `patch` block. Comments run from `#` to end of line. Whitespace is insignificant.
 
 ```patches
-# optional templates
+# optional: pattern definitions for the tracker sequencer
+pattern kick_basic {
+    hit: x:1.0 . . . x:1.0 . . .
+}
+
+# optional: song definitions referencing patterns
+song my_song {
+    | kick           | bass       |
+    | kick_basic     | bass_verse |
+}
+
+# optional: templates
 template voice(...) {
     ...
 }
@@ -58,24 +69,24 @@ When the module shape defines named aliases, those can be used instead of numeri
 
 ```patches
 module mix : Mixer(channels: [drums, bass, lead]) {
-    @drums: { level: 0.8 },
-    @bass:  { level: 0.6 }
+    @drums { level: 0.8 },
+    @bass  { level: 0.6 }
 }
 ```
 
 ### Parameter value types
 
-| Syntax | Type | Notes |
-|--------|------|-------|
-| `440.0` | float | bare decimal |
-| `2` | int | bare integer |
-| `440Hz` | frequency | converted to V/oct; also `2.5kHz` |
-| `-6dB` | amplitude | converted to linear (0 dB = 1.0, -6 dB ≈ 0.5) |
-| `C4`, `A#3`, `Bb2` | note name | converted to V/oct |
-| `true` / `false` | boolean | |
-| `linear` | string | unquoted; `"linear"` also works |
-| `"hello world"` | string | quotes required if value contains spaces |
-| `[1, 2, 3]` | array | |
+| Syntax             | Type      | Notes                                         |
+| ------------------ | --------- | --------------------------------------------- |
+| `440.0`            | float     | bare decimal                                  |
+| `2`                | int       | bare integer                                  |
+| `440Hz`            | frequency | converted to V/oct; also `2.5kHz`             |
+| `-6dB`             | amplitude | converted to linear (0 dB = 1.0, -6 dB ≈ 0.5) |
+| `C4`, `A#3`, `Bb2` | note name | converted to V/oct                            |
+| `true` / `false`   | boolean   |                                               |
+| `linear`           | string    | unquoted; `"linear"` also works               |
+| `"hello world"`    | string    | quotes required if value contains spaces      |
+| `[1, 2, 3]`        | array     |                                               |
 
 Frequency, note, and dB literals are case-insensitive. There is no time-unit suffix; durations are bare floats in seconds.
 
@@ -170,12 +181,12 @@ Each instantiation expands to a separate copy of the template's modules with man
 
 ### Parameter types
 
-| Type | Accepts |
-|------|---------|
+| Type    | Accepts                                        |
+| ------- | ---------------------------------------------- |
 | `float` | numeric values (int-to-float coercion allowed) |
-| `int` | integer values |
-| `str` | string values |
-| `bool` | `true` / `false` |
+| `int`   | integer values                                 |
+| `str`   | string values                                  |
+| `bool`  | `true` / `false`                               |
 
 Type checking is strict. A `float` parameter rejects `true`; a `bool` rejects `0`.
 
@@ -204,3 +215,82 @@ When a scaled connection crosses a template boundary, the scales are multiplied.
 ### Nesting
 
 Templates can instantiate other templates. A `filtered_voice` template can contain `module v : voice(...)` and add further processing. Expansion is recursive — the outermost template is fully flattened before the patch is built.
+
+## Patterns
+
+Pattern blocks define step data for the tracker sequencer. Each pattern has
+one or more named channels, and each channel has a row of step values.
+
+```patches
+pattern bass_line {
+    note: C2  .  Eb2 .  G1  .  Ab1 .
+    vel:  1.0 .  0.8 .  0.9 .  0.7 .
+}
+```
+
+- **Channel names** (`note`, `vel`, `hit`, etc.) are identifiers. They must
+  match the `channels` list on the `PatternPlayer` that reads this pattern.
+- All channels in a pattern must have the **same number of steps**.
+- Steps are separated by whitespace.
+
+### Step notation
+
+Each step produces up to four signals: `cv1`, `cv2`, `trigger`, and `gate`.
+
+| Syntax      | cv1   | cv2   | trigger   | gate   | Description                      |
+| ----------- | ----- | ----- | --------- | ------ | -------------------------------- |
+| `C4`, `A#3` | V/oct | —     | yes       | yes    | Note (pitch to cv1)              |
+| `x`         | —     | —     | yes       | yes    | Trigger hit                      |
+| `x:0.8`     | —     | 0.8   | yes       | yes    | Trigger with cv2 (velocity)      |
+| `0.5`       | 0.5   | —     | yes       | yes    | Float value to cv1               |
+| `0.5:0.3`   | 0.5   | 0.3   | yes       | yes    | Float cv1 and cv2                |
+| `.`         | —     | —     | no        | no     | Rest                             |
+| `~`         | —     | —     | no        | yes    | Tie (sustain gate, no retrigger) |
+
+Values support the same unit suffixes as module parameters: `440Hz`,
+`2.5kHz`, `-6dB`, and note names are all valid.
+
+### Slides
+
+A slide interpolates cv1 (and optionally cv2) linearly over the tick
+duration:
+
+```patches
+note: C4>E4  .  G4:0.5>0.8  .
+```
+
+The `>` separates start and end values. The gate stays high through the
+slide. Slides work with notes, floats, and cv1:cv2 pairs.
+
+### Repeats
+
+A repeat subdivides a single tick into multiple sub-triggers:
+
+```patches
+hit: x*3  .  x*2  .
+```
+
+`x*3` fires three evenly-spaced triggers within the tick, each with an ~80%
+duty cycle gate.
+
+## Songs
+
+A song block defines a playback order — a sequence of rows, each assigning a
+pattern to every song channel.
+
+```patches
+song my_song {
+    | bass       | lead        | drums      |
+    | bass_verse | lead_verse  | drums_a    |
+    | bass_verse | lead_verse  | drums_b    |
+    | bass_chor  | lead_chor   | drums_a    |  @loop
+}
+```
+
+- The **first row** is the header: it names the song channels. These must
+  match the `channels` shape argument on the `MasterSequencer`.
+- Each subsequent row assigns one pattern per channel. The pattern name must
+  match a `pattern` block defined earlier in the file.
+- The `@loop` marker (optional) on a row indicates the loop-back point when
+  the `MasterSequencer` has `loop: true`. If omitted, the song loops from
+  the beginning.

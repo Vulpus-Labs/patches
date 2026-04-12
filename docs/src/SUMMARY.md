@@ -13,6 +13,8 @@
   - [Mixers](modules/mixers.md)
   - [Noise](modules/noise.md)
   - [Sequencers & clocks](modules/sequencers.md)
+  - [Tracker sequencer](modules/tracker.md)
+  - [Drum synthesis](modules/drum-synthesis.md)
   - [MIDI](modules/midi.md)
   - [Delays & reverb](modules/delays.md)
   - [Dynamics](modules/dynamics.md)
