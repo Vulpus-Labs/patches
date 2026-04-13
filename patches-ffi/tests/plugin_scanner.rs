@@ -54,7 +54,7 @@ fn scan_and_register_gain_plugin() {
     assert!(names.contains(&"Gain"), "Gain not found in registry; got: {names:?}");
 
     // Verify it's buildable
-    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32 };
+    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let shape = ModuleShape::default();
     let params = ParameterMap::new();
     let module = registry.create("Gain", &env, &shape, &params, InstanceId::next());

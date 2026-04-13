@@ -464,6 +464,7 @@ impl SoundEngine {
             sample_rate,
             poly_voices: 16,
             periodic_update_interval: patches_core::BASE_PERIODIC_UPDATE_INTERVAL * self.oversampling_factor as u32,
+            hosted: false,
         })
     }
 

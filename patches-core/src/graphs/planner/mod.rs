@@ -11,7 +11,7 @@ pub mod graph_index;
 pub use alloc::{
     allocate_buffers, BufferAllocState, BufferAllocation, ModuleAllocDiff, ModuleAllocState,
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
-    AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT,
+    AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
 pub use graph_index::{GraphIndex, ResolvedGraph};
 

@@ -132,10 +132,6 @@ impl Module for DylibModule {
         self
     }
 
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn patches_core::ReceivesMidi> {
-        None
-    }
-
     fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
         if self.vtable.supports_periodic != 0 {
             Some(self)

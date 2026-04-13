@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, ReceivesMidi,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiFrame, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, PolyInput, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -23,6 +23,8 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 pub struct MidiCc {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
+    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
+    midi_in: PolyInput,
     cc_number: u8,
     value: f32,
     out: MonoOutput,
@@ -43,6 +45,11 @@ impl Module for MidiCc {
         Self {
             instance_id,
             descriptor,
+            midi_in: PolyInput {
+                cable_idx: GLOBAL_MIDI,
+                scale: 1.0,
+                connected: true,
+            },
             cc_number: 1,
             value: -1.0,
             out: MonoOutput::default(),
@@ -68,38 +75,42 @@ impl Module for MidiCc {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
+        // Read MIDI events from the GLOBAL_MIDI backplane slot.
+        let frame = pool.read_poly(&self.midi_in);
+        let event_count = MidiFrame::event_count(&frame);
+        for i in 0..event_count {
+            let event = MidiFrame::read_event(&frame, i);
+            let status = event.bytes[0] & 0xF0;
+            if status == 0xB0 && event.bytes[1] == self.cc_number {
+                self.value = event.bytes[2] as f32 / 127.0 * 2.0 - 1.0;
+            }
+        }
+
         pool.write_mono(&self.out, self.value);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
-        Some(self)
-    }
-}
-
-impl ReceivesMidi for MidiCc {
-    fn receive_midi(&mut self, event: MidiEvent) {
-        let status = event.bytes[0] & 0xF0;
-        let b1 = event.bytes[1];
-        let b2 = event.bytes[2];
-
-        if status == 0xB0 && b1 == self.cc_number {
-            self.value = b2 as f32 / 127.0 * 2.0 - 1.0;
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::MidiEvent;
+    use patches_core::{CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 
     fn cc(number: u8, value: u8) -> MidiEvent {
         MidiEvent { bytes: [0xB0, number, value] }
+    }
+
+    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, events.len());
+        for (i, &event) in events.iter().enumerate() {
+            MidiFrame::write_event(&mut frame, i, event);
+        }
+        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
     }
 
     #[test]
@@ -118,7 +129,7 @@ mod tests {
     #[test]
     fn cc_zero_maps_to_minus_one() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
-        h.as_midi_receiver().unwrap().receive_midi(cc(7, 0));
+        send_midi(&mut h, &[cc(7, 0)]);
         h.tick();
         assert_eq!(h.read_mono("out"), -1.0);
     }
@@ -126,7 +137,7 @@ mod tests {
     #[test]
     fn cc_127_maps_to_plus_one() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
-        h.as_midi_receiver().unwrap().receive_midi(cc(7, 127));
+        send_midi(&mut h, &[cc(7, 127)]);
         h.tick();
         assert_eq!(h.read_mono("out"), 1.0);
     }
@@ -134,7 +145,7 @@ mod tests {
     #[test]
     fn cc_64_maps_to_approximately_zero() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
-        h.as_midi_receiver().unwrap().receive_midi(cc(7, 64));
+        send_midi(&mut h, &[cc(7, 64)]);
         h.tick();
         let expected = 64.0 / 127.0 * 2.0 - 1.0;
         assert_within!(expected, h.read_mono("out"), 1e-10_f32);
@@ -143,7 +154,7 @@ mod tests {
     #[test]
     fn ignores_other_cc_numbers() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
-        h.as_midi_receiver().unwrap().receive_midi(cc(10, 127));
+        send_midi(&mut h, &[cc(10, 127)]);
         h.tick();
         assert_eq!(h.read_mono("out"), -1.0, "should ignore CC 10 when listening for CC 7");
     }
@@ -152,7 +163,7 @@ mod tests {
     fn ignores_non_cc_messages() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 1i64]);
         // Note on
-        h.as_midi_receiver().unwrap().receive_midi(MidiEvent { bytes: [0x90, 60, 100] });
+        send_midi(&mut h, &[MidiEvent { bytes: [0x90, 60, 100] }]);
         h.tick();
         assert_eq!(h.read_mono("out"), -1.0, "should ignore note-on");
     }

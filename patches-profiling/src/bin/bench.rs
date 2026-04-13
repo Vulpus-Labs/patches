@@ -37,7 +37,7 @@ fn load_plan(path: &str) -> ExecutionPlan {
     for w in &result.warnings {
         eprintln!("dsl warning: {w}");
     }
-    let env = AudioEnvironment { sample_rate: SAMPLE_RATE, poly_voices: 16, periodic_update_interval: 32 };
+    let env = AudioEnvironment { sample_rate: SAMPLE_RATE, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let build_result = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
         eprintln!("interpreter error: {e}");
         process::exit(1);

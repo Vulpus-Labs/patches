@@ -85,6 +85,7 @@ fn env_1x() -> AudioEnvironment {
         sample_rate: 44100.0,
         poly_voices: 16,
         periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
+        hosted: false,
     }
 }
 
@@ -93,6 +94,7 @@ fn env_2x() -> AudioEnvironment {
         sample_rate: 88200.0,
         poly_voices: 16,
         periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL * 2,
+        hosted: false,
     }
 }
 

@@ -2,7 +2,6 @@ use crate::audio_environment::AudioEnvironment;
 use crate::build_error::BuildError;
 use crate::cable_pool::CablePool;
 use crate::cables::{InputPort, OutputPort};
-use crate::midi::ReceivesMidi;
 use super::instance_id::InstanceId;
 use super::module_descriptor::{ModuleDescriptor, ModuleShape, ParameterKind};
 use super::parameter_map::{ParameterMap, ParameterValue};
@@ -310,18 +309,6 @@ pub trait Module: Send {
     fn set_ports(&mut self, _inputs: &[InputPort], _outputs: &[OutputPort]) {}
 
     fn as_any(&self) -> &dyn std::any::Any;
-
-    /// Returns `Some(self)` if this module implements [`ReceivesMidi`], `None` otherwise.
-    ///
-    /// Override this to return `Some(self)` in modules that implement [`ReceivesMidi`].
-    /// The planner uses this during plan construction to build the `midi_receiver_indices`
-    /// list; the audio callback uses that list to route events without per-tick dynamic
-    /// dispatch on modules that do not receive MIDI.
-    ///
-    /// The default implementation returns `None`.
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
-        None
-    }
 
     /// Returns `Some(self)` if this module implements [`ReceivesTrackerData`], `None` otherwise.
     ///

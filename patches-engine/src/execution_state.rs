@@ -1,23 +1,15 @@
 use std::ptr::NonNull;
 
-use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, MidiEvent, Module, PeriodicUpdate, ReceivesMidi};
+use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, Module, PeriodicUpdate};
 
 use crate::builder::ExecutionPlan;
-use crate::midi::EventQueueConsumer;
 use crate::pool::ModulePool;
 
 /// Number of samples per MIDI sub-block.
 ///
 /// Every `SUB_BLOCK_SIZE` samples the audio callback drains the MIDI event
-/// queue and delivers pending events to all MIDI-receiving modules.
+/// queue and delivers pending events via the `GLOBAL_MIDI` backplane slot.
 pub(crate) const SUB_BLOCK_SIZE: u64 = 64;
-
-/// Maximum number of MIDI-receiving modules permitted in a single patch.
-///
-/// `ReadyState` pre-allocates exactly this many pointer slots for MIDI
-/// receivers. The planner enforces the limit at plan-build time so the audio
-/// thread never needs a bounds check.
-pub(crate) const MIDI_RECEIVER_CAPACITY: usize = 16;
 
 // ── PtrArray ──────────────────────────────────────────────────────────────────
 
@@ -101,7 +93,6 @@ pub struct StaleState {
     periodic_update_interval: u32,
     active_modules: PtrArray<dyn Module>,
     periodic_modules: PtrArray<dyn PeriodicUpdate>,
-    midi_modules: PtrArray<dyn ReceivesMidi>,
 }
 
 // SAFETY: `StaleState` lives exclusively on the audio thread.
@@ -125,14 +116,12 @@ impl StaleState {
         self.periodic_update_interval = interval;
         self.active_modules.rebuild(&plan.active_indices, |idx| self.module_pool.as_ptr(idx));
         self.periodic_modules.rebuild(&plan.periodic_indices, |idx| self.module_pool.as_periodic_ptr(idx));
-        self.midi_modules.rebuild(&plan.midi_receiver_indices, |idx| self.module_pool.as_midi_receiver_ptr(idx));
         ReadyState {
             module_pool: self.module_pool,
             sample_counter: self.sample_counter,
             periodic_update_interval: self.periodic_update_interval,
             active_modules: self.active_modules,
             periodic_modules: self.periodic_modules,
-            midi_modules: self.midi_modules,
         }
     }
 
@@ -148,9 +137,8 @@ impl StaleState {
 /// Audio-thread-only execution state with valid, pre-resolved raw module
 /// pointers that drive the per-sample tick loop.
 ///
-/// Created from [`StaleState::rebuild`]. You can call [`tick`](Self::tick),
-/// [`dispatch_midi_events`](Self::dispatch_midi_events), and
-/// [`deliver_midi`](Self::deliver_midi) on this state.
+/// Created from [`StaleState::rebuild`]. You can call [`tick`](Self::tick)
+/// on this state.
 ///
 /// Adopting a new plan requires calling [`make_stale`](Self::make_stale),
 /// which consumes this `ReadyState` and returns a [`StaleState`], shuttling
@@ -161,7 +149,6 @@ pub struct ReadyState {
     periodic_update_interval: u32,
     active_modules: PtrArray<dyn Module>,
     periodic_modules: PtrArray<dyn PeriodicUpdate>,
-    midi_modules: PtrArray<dyn ReceivesMidi>,
 }
 
 // SAFETY: `ReadyState` lives exclusively on the audio thread.
@@ -189,7 +176,6 @@ impl ReadyState {
             periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
             active_modules: PtrArray::with_capacity(capacity),
             periodic_modules: PtrArray::with_capacity(capacity),
-            midi_modules: PtrArray::with_capacity(MIDI_RECEIVER_CAPACITY),
         }
     }
 
@@ -200,14 +186,12 @@ impl ReadyState {
     pub fn make_stale(mut self) -> StaleState {
         self.active_modules.ptrs.clear();
         self.periodic_modules.ptrs.clear();
-        self.midi_modules.ptrs.clear();
         StaleState {
             module_pool: self.module_pool,
             sample_counter: self.sample_counter,
             periodic_update_interval: self.periodic_update_interval,
             active_modules: self.active_modules,
             periodic_modules: self.periodic_modules,
-            midi_modules: self.midi_modules,
         }
     }
 
@@ -233,27 +217,6 @@ impl ReadyState {
         unsafe { self.active_modules.for_each(|m| m.process(cable_pool)); }
     }
 
-    /// Drain the MIDI event queue for the current sub-block and deliver each
-    /// event to all MIDI-receiving modules.
-    pub fn dispatch_midi_events(
-        &mut self,
-        event_queue: &mut Option<EventQueueConsumer>,
-        sample_counter: u64,
-        window_size: u64,
-    ) {
-        if let Some(eq) = event_queue {
-            for (_offset, event) in eq.drain_window(sample_counter, window_size) {
-                // SAFETY: same invariant as tick.
-                unsafe { self.midi_modules.for_each(|m| m.receive_midi(event)); }
-            }
-        }
-    }
-
-    /// Deliver a single MIDI event directly to all MIDI-receiving modules.
-    pub fn deliver_midi(&mut self, event: MidiEvent) {
-        // SAFETY: same invariant as tick.
-        unsafe { self.midi_modules.for_each(|m| m.receive_midi(event)); }
-    }
 }
 
 // ── Legacy alias ─────────────────────────────────────────────────────────────
@@ -450,7 +413,6 @@ mod tests {
         // Record capacities after first rebuild.
         let cap_active = ready.active_modules.capacity();
         let cap_periodic = ready.periodic_modules.capacity();
-        let cap_midi = ready.midi_modules.capacity();
 
         assert!(cap_active >= 4, "active capacity should be at least 4");
 
@@ -462,7 +424,6 @@ mod tests {
 
         assert_eq!(ready2.active_modules.capacity(), cap_active, "active capacity should be preserved");
         assert_eq!(ready2.periodic_modules.capacity(), cap_periodic, "periodic capacity should be preserved");
-        assert_eq!(ready2.midi_modules.capacity(), cap_midi, "midi capacity should be preserved");
     }
 
     #[test]

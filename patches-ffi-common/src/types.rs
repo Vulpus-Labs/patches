@@ -84,6 +84,7 @@ impl From<FfiAudioEnvironment> for patches_core::AudioEnvironment {
             sample_rate: ffi.sample_rate,
             poly_voices: ffi.poly_voices,
             periodic_update_interval: ffi.periodic_update_interval,
+            hosted: false,
         }
     }
 }
@@ -221,6 +222,7 @@ mod tests {
             sample_rate: 48000.0,
             poly_voices: 8,
             periodic_update_interval: 64,
+            hosted: false,
         };
         let ffi: FfiAudioEnvironment = (&orig).into();
         let back: patches_core::AudioEnvironment = ffi.into();

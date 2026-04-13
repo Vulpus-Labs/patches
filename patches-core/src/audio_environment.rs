@@ -8,6 +8,11 @@
 /// hold 16 channels (`[f32; 16]`) regardless of this value; modules should use
 /// `poly_voices` to know how many of those channels carry live data.
 ///
+/// `hosted` indicates whether the engine is running inside a plugin host (e.g. a
+/// DAW via CLAP). When `true`, host transport state is available on the
+/// `GLOBAL_TRANSPORT` backplane slot. Modules like `MasterSequencer` use this to
+/// decide whether to synchronise with the host or run their own clock.
+///
 /// `periodic_update_interval` is the number of inner ticks between successive
 /// [`PeriodicUpdate::periodic_update`] calls. At 1× oversampling this equals
 /// [`BASE_PERIODIC_UPDATE_INTERVAL`] (32); at N× oversampling it equals
@@ -23,4 +28,5 @@ pub struct AudioEnvironment {
     pub sample_rate: f32,
     pub poly_voices: usize,
     pub periodic_update_interval: u32,
+    pub hosted: bool,
 }

@@ -309,7 +309,7 @@ mod tests {
         let pv = vec![("steps", ParameterValue::Array(step_strs.into()))];
         ModuleHarness::build_full::<Seq>(
             &pv,
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             ModuleShape { channels: 0, length: 32, ..Default::default() },
         )
     }
@@ -389,7 +389,7 @@ mod tests {
         r.register::<Seq>();
         let result = r.create(
             "StepSequencer",
-            &AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            &AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             &ModuleShape { channels: 0, length: 32, ..Default::default() },
             &params,
             InstanceId::next(),

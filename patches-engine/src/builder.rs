@@ -25,8 +25,6 @@ pub enum BuildError {
     ModulePoolExhausted,
     /// Module creation failed (unknown module name or parameter validation error).
     ModuleCreationError(String),
-    /// The number of MIDI-receiving modules exceeds [`MIDI_RECEIVER_CAPACITY`].
-    TooManyMidiReceivers(usize),
 }
 
 impl fmt::Display for BuildError {
@@ -36,11 +34,6 @@ impl fmt::Display for BuildError {
             BuildError::PoolExhausted => write!(f, "buffer pool exhausted: too many output ports"),
             BuildError::ModulePoolExhausted => write!(f, "module pool exhausted: too many modules"),
             BuildError::ModuleCreationError(msg) => write!(f, "module creation failed: {msg}"),
-            BuildError::TooManyMidiReceivers(n) => write!(
-                f,
-                "too many MIDI receivers: {n} exceeds limit of {}",
-                crate::execution_state::MIDI_RECEIVER_CAPACITY,
-            ),
         }
     }
 }
@@ -118,12 +111,6 @@ pub struct ExecutionPlan {
     /// New modules (in `new_modules`) do not appear here; their parameters are
     /// set during construction. Empty when no surviving module changed parameters.
     pub parameter_updates: Vec<(usize, ParameterMap)>,
-    /// Pool indices of modules that receive MIDI events in the current plan.
-    ///
-    /// The audio callback delivers MIDI events to each of these slots via
-    /// [`ModulePool::receive_midi`] once per 64-sample sub-block. Empty until
-    /// modules implementing the `ReceiveMidi` trait (T-0111) are added to the graph.
-    pub midi_receiver_indices: Vec<usize>,
     /// Pool indices of modules that implement [`PeriodicUpdate`].
     ///
     /// Populated during plan activation (not at build time) by calling
@@ -166,7 +153,6 @@ impl ExecutionPlan {
             new_modules: vec![],
             tombstones: vec![],
             parameter_updates: vec![],
-            midi_receiver_indices: vec![],
             periodic_indices: vec![],
             active_indices: vec![],
             port_updates: vec![],
@@ -423,7 +409,6 @@ impl PatchBuilder {
                 new_modules,
                 tombstones,
                 parameter_updates,
-                midi_receiver_indices: Vec::new(),
                 periodic_indices,
                 active_indices,
                 port_updates,
@@ -556,7 +541,7 @@ mod tests {
     }
 
     fn default_env() -> AudioEnvironment {
-        AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 }
+        AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
     }
 
     fn default_builder() -> PatchBuilder {

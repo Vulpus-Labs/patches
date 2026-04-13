@@ -167,7 +167,7 @@ mod tests {
     fn make_clock_sr(bpm: f32, beats_per_bar: i64, quavers_per_beat: i64, sample_rate: f32) -> ModuleHarness {
         ModuleHarness::build_with_env::<Clock>(
             params!["bpm" => bpm, "beats_per_bar" => beats_per_bar, "quavers_per_beat" => quavers_per_beat],
-            AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         )
     }
 

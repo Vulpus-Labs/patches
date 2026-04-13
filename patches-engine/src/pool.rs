@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use patches_core::{CablePool, InputPort, MidiEvent, Module, OutputPort, PeriodicUpdate, ReceivesMidi, TrackerData};
+use patches_core::{CablePool, InputPort, Module, OutputPort, PeriodicUpdate, TrackerData};
 use patches_core::parameter_map::ParameterMap;
 
 /// Audio-thread-owned pool of module instances.
@@ -33,17 +33,6 @@ impl ModulePool {
     /// remains valid as long as the slot is occupied and `ModulePool` is not moved or dropped.
     pub fn as_ptr(&mut self, idx: usize) -> Option<*mut dyn Module> {
         self.modules[idx].as_mut().map(|m| &mut **m as *mut dyn Module)
-    }
-
-    /// Return a raw mutable pointer to the [`ReceivesMidi`] impl of the module at `idx`,
-    /// or `None` if the slot is empty or the module does not implement [`ReceivesMidi`].
-    pub fn as_midi_receiver_ptr(&mut self, idx: usize) -> Option<*mut dyn ReceivesMidi> {
-        self.modules[idx].as_mut().and_then(|m| {
-            m.as_midi_receiver().map(|r| {
-                let r_lt: *mut (dyn ReceivesMidi + '_) = r;
-                unsafe { std::mem::transmute::<*mut (dyn ReceivesMidi + '_), *mut dyn ReceivesMidi>(r_lt) }
-            })
-        })
     }
 
     /// Return a raw mutable pointer to the [`PeriodicUpdate`] impl of the module at `idx`,
@@ -114,18 +103,6 @@ impl ModulePool {
         if let Some(m) = self.modules[idx].as_mut() {
             if let Some(updater) = m.as_periodic() {
                 updater.periodic_update(cable_pool);
-            }
-        }
-    }
-
-    /// Deliver a MIDI event to the module at `idx`.
-    ///
-    /// Does nothing if the slot is empty or if the module does not implement
-    /// [`ReceivesMidi`].
-    pub fn receive_midi(&mut self, idx: usize, event: MidiEvent) {
-        if let Some(m) = self.modules[idx].as_mut() {
-            if let Some(recv) = m.as_midi_receiver() {
-                recv.receive_midi(event);
             }
         }
     }

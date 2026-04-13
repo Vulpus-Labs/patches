@@ -51,35 +51,11 @@ pub const AUDIO_IN_R: usize = 7;
 
 /// Buffer pool index of the global transport backplane slot.
 ///
-/// Written by the audio callback each tick as `CableValue::Poly`. Lane 0
-/// carries the wrapped sample counter; lanes 1–8 carry host transport state
-/// (playing, tempo, beat, bar, triggers, time signature). In standalone mode
-/// only lane 0 is populated; the rest default to 0.0.
-///
-/// See [`TRANSPORT_SAMPLE_COUNT`] through [`TRANSPORT_TSIG_DENOM`] for lane
-/// indices.
+/// Written by the audio callback each tick as `CableValue::Poly`. Lane layout
+/// is defined by [`TransportFrame`](crate::TransportFrame) (ADR 0033). In
+/// standalone mode only lane 0 (sample count) is populated; the rest default
+/// to 0.0.
 pub const GLOBAL_TRANSPORT: usize = 8;
-
-// ── Transport lane indices ───────────────────────────────────────────────────
-
-/// Lane 0: monotonic sample counter (wraps at 2^16).
-pub const TRANSPORT_SAMPLE_COUNT: usize = 0;
-/// Lane 1: 1.0 while host transport is playing, 0.0 when stopped.
-pub const TRANSPORT_PLAYING: usize = 1;
-/// Lane 2: host tempo in BPM.
-pub const TRANSPORT_TEMPO: usize = 2;
-/// Lane 3: fractional beat position.
-pub const TRANSPORT_BEAT: usize = 3;
-/// Lane 4: bar number.
-pub const TRANSPORT_BAR: usize = 4;
-/// Lane 5: 1.0 pulse on beat boundary (one sample), 0.0 otherwise.
-pub const TRANSPORT_BEAT_TRIGGER: usize = 5;
-/// Lane 6: 1.0 pulse on bar boundary (one sample), 0.0 otherwise.
-pub const TRANSPORT_BAR_TRIGGER: usize = 6;
-/// Lane 7: time signature numerator.
-pub const TRANSPORT_TSIG_NUM: usize = 7;
-/// Lane 8: time signature denominator.
-pub const TRANSPORT_TSIG_DENOM: usize = 8;
 
 /// Buffer pool index of the global drift backplane slot.
 ///
@@ -88,7 +64,15 @@ pub const TRANSPORT_TSIG_DENOM: usize = 8;
 /// to implement globally correlated analogue pitch drift.
 pub const GLOBAL_DRIFT: usize = 9;
 
-// Slots 10–15 are reserved for future backplane use.
+/// Buffer pool index of the global MIDI backplane slot.
+///
+/// Written by the audio callback each tick as `CableValue::Poly`. Lane layout
+/// is defined by [`MidiFrame`](crate::MidiFrame) (ADR 0033). Carries up to 5
+/// packed MIDI events per sample. Cleared to zero (count = 0) at the start of
+/// each tick before writing.
+pub const GLOBAL_MIDI: usize = 10;
+
+// Slots 11–15 are reserved for future backplane use.
 
 /// Number of buffer pool slots reserved for infrastructure.
 ///

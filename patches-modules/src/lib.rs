@@ -36,6 +36,7 @@ pub mod quant_util;
 pub mod quant;
 pub mod poly_quant;
 pub mod limiter;
+pub mod stereo_limiter;
 pub mod pitch_shift;
 pub mod convolution_reverb;
 pub mod master_sequencer;
@@ -52,6 +53,8 @@ pub mod bitcrusher;
 pub mod drive;
 pub mod transient_shaper;
 pub mod host_transport;
+pub mod tempo_sync;
+pub mod ms_ticker;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -93,6 +96,7 @@ pub use poly_sah::PolySah;
 pub use quant::Quant;
 pub use poly_quant::PolyQuant;
 pub use limiter::Limiter;
+pub use stereo_limiter::StereoLimiter;
 pub use pitch_shift::PitchShift;
 pub use convolution_reverb::ConvolutionReverb;
 pub use convolution_reverb::StereoConvReverb;
@@ -110,6 +114,8 @@ pub use bitcrusher::Bitcrusher;
 pub use drive::Drive;
 pub use transient_shaper::TransientShaper;
 pub use host_transport::HostTransport;
+pub use tempo_sync::TempoSync;
+pub use ms_ticker::MsTicker;
 
 pub fn default_registry() -> patches_core::Registry {
     let mut r = patches_core::Registry::new();
@@ -157,6 +163,7 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Quant>();
     r.register::<PolyQuant>();
     r.register::<Limiter>();
+    r.register::<StereoLimiter>();
     r.register::<PitchShift>();
     r.register::<ConvolutionReverb>();
     r.register_file_processor::<ConvolutionReverb>();
@@ -177,6 +184,8 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<Drive>();
     r.register::<TransientShaper>();
     r.register::<HostTransport>();
+    r.register::<TempoSync>();
+    r.register::<MsTicker>();
     r
 }
 
@@ -253,6 +262,8 @@ mod tests {
             "Bitcrusher",
             "Drive",
             "TransientShaper",
+            "TempoSync",
+            "MsTicker",
         ] {
             assert!(
                 r.create(name, &env, &shape, &params, InstanceId::next()).is_ok(),

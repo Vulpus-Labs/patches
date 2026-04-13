@@ -10,6 +10,7 @@
 //! |------|------|-------------|
 //! | `in` | mono | Audio input |
 //! | `drywet_cv` | mono | Additive CV for dry/wet |
+//! | `sync_ms[i]` | mono | When connected, overrides delay time for tap i in ms (i in 0..N-1, N = channels) |
 //! | `delay_cv[i]` | mono | Additive CV for delay time (i in 0..N-1, N = channels) |
 //! | `gain_cv[i]` | mono | Additive CV for tap gain (i in 0..N-1, N = channels) |
 //! | `fb_cv[i]` | mono | Additive CV for feedback (i in 0..N-1, N = channels) |
@@ -97,6 +98,7 @@ pub struct Delay {
     drywet_cv:  MonoInput,
     out_port:   MonoOutput,
     // Port fields (per tap)
+    sync_ms:    Vec<MonoInput>,
     delay_cv:   Vec<MonoInput>,
     gain_cv:    Vec<MonoInput>,
     fb_cv:      Vec<MonoInput>,
@@ -110,6 +112,7 @@ impl Module for Delay {
         ModuleDescriptor::new("Delay", shape.clone())
             .mono_in("in")
             .mono_in("drywet_cv")
+            .mono_in_multi("sync_ms",  n)
             .mono_in_multi("delay_cv", n)
             .mono_in_multi("gain_cv",  n)
             .mono_in_multi("fb_cv",    n)
@@ -167,6 +170,7 @@ impl Module for Delay {
             in_port:   MonoInput::default(),
             drywet_cv: MonoInput::default(),
             out_port:  MonoOutput::default(),
+            sync_ms:   vec![MonoInput::default(); taps],
             delay_cv:  vec![MonoInput::default(); taps],
             gain_cv:   vec![MonoInput::default(); taps],
             fb_cv:     vec![MonoInput::default(); taps],
@@ -201,12 +205,13 @@ impl Module for Delay {
         // Global inputs: in(0), drywet_cv(1)
         self.in_port   = MonoInput::from_ports(inputs, 0);
         self.drywet_cv = MonoInput::from_ports(inputs, 1);
-        // Per-tap inputs: delay_cv[0..n], gain_cv[0..n], fb_cv[0..n], return[0..n]
+        // Per-tap inputs: sync_ms[0..n], delay_cv[0..n], gain_cv[0..n], fb_cv[0..n], return[0..n]
         for i in 0..n {
-            self.delay_cv[i]  = MonoInput::from_ports(inputs, 2 + i);
-            self.gain_cv[i]   = MonoInput::from_ports(inputs, 2 + n + i);
-            self.fb_cv[i]     = MonoInput::from_ports(inputs, 2 + 2 * n + i);
-            self.return_in[i] = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            self.sync_ms[i]   = MonoInput::from_ports(inputs, 2 + i);
+            self.delay_cv[i]  = MonoInput::from_ports(inputs, 2 + n + i);
+            self.gain_cv[i]   = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            self.fb_cv[i]     = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            self.return_in[i] = MonoInput::from_ports(inputs, 2 + 4 * n + i);
         }
         // Outputs: out(0), send[0..n]
         self.out_port = MonoOutput::from_ports(outputs, 0);
@@ -230,9 +235,14 @@ impl Module for Delay {
         let mut wet_sum = 0.0_f32;
 
         for i in 0..self.taps {
-            // Effective delay
+            // sync_ms overrides the tap's delay_ms when connected
+            let base_ms = if self.sync_ms[i].is_connected() {
+                pool.read_mono(&self.sync_ms[i]).clamp(0.0, 4000.0)
+            } else {
+                self.delay_ms[i]
+            };
             let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
-            let offset = (self.delay_ms[i] * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
+            let offset = (base_ms * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
 
             let tap_raw = if self.high_quality {
                 self.buffer.read_cubic(offset)
@@ -277,7 +287,7 @@ mod tests {
     use patches_core::test_support::{ModuleHarness, params};
 
     const SR: f32 = 44_100.0;
-    const ENV: AudioEnvironment = AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32 };
+    const ENV: AudioEnvironment = AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false };
 
     fn shape(taps: usize) -> ModuleShape {
         ModuleShape { channels: taps, length: 0, ..Default::default() }
@@ -317,6 +327,7 @@ mod tests {
         h.update_params_map(&pm);
 
         h.disconnect_input("drywet_cv");
+        h.disconnect_input_at("sync_ms", 0);
         h.disconnect_input_at("delay_cv", 0);
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
@@ -383,6 +394,7 @@ mod tests {
         pm.insert_param("gain",     0, ParameterValue::Float(1.0));
         h.update_params_map(&pm);
         h.disconnect_input("drywet_cv");
+        h.disconnect_input_at("sync_ms", 0);
         h.disconnect_input_at("delay_cv", 0);
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
@@ -421,6 +433,7 @@ mod tests {
         pm.insert_param("gain",     0, ParameterValue::Float(1.0));
         h.update_params_map(&pm);
         h.disconnect_input("drywet_cv");
+        h.disconnect_input_at("sync_ms", 0);
         h.disconnect_input_at("delay_cv", 0);
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
@@ -444,6 +457,7 @@ mod tests {
         pm.insert_param("dry_wet",  0, ParameterValue::Float(1.0));
         h.update_params_map(&pm);
         h.disconnect_input("drywet_cv");
+        h.disconnect_input_at("sync_ms", 0);
         h.disconnect_input_at("delay_cv", 0);
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
@@ -453,5 +467,43 @@ mod tests {
         h.tick();
         // Buffer was cold → wet=0; dry excluded at dw=1 → output 0.0
         assert_eq!(h.read_mono("out"), 0.0, "dry_wet=1 first tick should be silent");
+    }
+
+    #[test]
+    fn sync_ms_overrides_delay_time() {
+        let sync_ms = 10.0_f32;
+        let expected_sample = (sync_ms * SR / 1000.0) as usize;
+
+        let mut h = ModuleHarness::build_full::<Delay>(params![], ENV, shape(1));
+        let mut pm = ParameterMap::new();
+        // Set a long delay_ms that would normally be used
+        pm.insert_param("delay_ms", 0, ParameterValue::Int(500));
+        pm.insert_param("dry_wet",  0, ParameterValue::Float(1.0));
+        h.update_params_map(&pm);
+
+        h.disconnect_input("drywet_cv");
+        h.disconnect_input_at("delay_cv", 0);
+        h.disconnect_input_at("gain_cv", 0);
+        h.disconnect_input_at("fb_cv", 0);
+        h.disconnect_input_at("return", 0);
+        // Connect sync_ms[0] and set it to 10 ms — should override delay_ms
+        h.set_mono_at("sync_ms", 0, sync_ms);
+
+        h.set_mono("in", 1.0);
+        h.tick();
+        h.set_mono("in", 0.0);
+
+        let out: Vec<f32> = (1..=expected_sample + 2)
+            .map(|_| { h.tick(); h.read_mono("out") })
+            .collect();
+
+        let peak_idx = out.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        let deviation = (peak_idx as isize - (expected_sample - 1) as isize).abs();
+        assert!(deviation <= 1,
+            "sync_ms=10: peak at sample {} but expected ~{} (±1)", peak_idx + 1, expected_sample);
     }
 }

@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn build_a_module() {
-        let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 };
+        let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
         let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
         let params = ParameterMap::new();
         let builder = Builder::<TestModule>(PhantomData);

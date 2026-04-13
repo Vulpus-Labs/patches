@@ -231,7 +231,7 @@ mod tests {
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 
     fn env(sample_rate: f32) -> AudioEnvironment {
-        AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32 }
+        AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false }
     }
 
     fn make_osc(frequency: f32, sample_rate: f32) -> ModuleHarness {

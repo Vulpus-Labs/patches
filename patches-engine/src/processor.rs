@@ -12,10 +12,9 @@
 use std::mem;
 
 use patches_core::{
-    BoundedRandomWalk, CablePool, CableValue, MidiEvent,
+    BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TransportFrame,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
-    GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP,
-    TRANSPORT_SAMPLE_COUNT,
+    GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
 };
 
 use crate::builder::ExecutionPlan;
@@ -53,6 +52,13 @@ pub struct PatchProcessor {
     sample_count: usize,
     /// Poly buffer for `GLOBAL_TRANSPORT`, reused each tick to avoid allocation.
     transport_poly: [f32; 16],
+    /// Poly buffer for `GLOBAL_MIDI`, reused each tick to avoid allocation.
+    midi_poly: [f32; 16],
+    /// Pre-allocated overflow buffer for MIDI events that exceed `MidiFrame::MAX_EVENTS`
+    /// per sample. Deferred events are written to the next sample's frame.
+    midi_overflow: [MidiEvent; MidiFrame::MAX_EVENTS],
+    /// Number of valid events in `midi_overflow`.
+    midi_overflow_count: usize,
     global_drift_walk: BoundedRandomWalk,
     periodic_update_interval: u32,
 }
@@ -96,6 +102,9 @@ impl PatchProcessor {
             wi: 0,
             sample_count: 0,
             transport_poly: [0.0; 16],
+            midi_poly: [0.0; 16],
+            midi_overflow: [MidiEvent { bytes: [0; 3] }; MidiFrame::MAX_EVENTS],
+            midi_overflow_count: 0,
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
         }
@@ -201,18 +210,40 @@ impl PatchProcessor {
         tsig_num: f32,
         tsig_denom: f32,
     ) {
-        use patches_core::{
-            TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT, TRANSPORT_BAR,
-            TRANSPORT_BEAT_TRIGGER, TRANSPORT_BAR_TRIGGER, TRANSPORT_TSIG_NUM, TRANSPORT_TSIG_DENOM,
-        };
-        self.transport_poly[TRANSPORT_PLAYING] = playing;
-        self.transport_poly[TRANSPORT_TEMPO] = tempo;
-        self.transport_poly[TRANSPORT_BEAT] = beat;
-        self.transport_poly[TRANSPORT_BAR] = bar;
-        self.transport_poly[TRANSPORT_BEAT_TRIGGER] = beat_trigger;
-        self.transport_poly[TRANSPORT_BAR_TRIGGER] = bar_trigger;
-        self.transport_poly[TRANSPORT_TSIG_NUM] = tsig_num;
-        self.transport_poly[TRANSPORT_TSIG_DENOM] = tsig_denom;
+        TransportFrame::set_playing_raw(&mut self.transport_poly, playing);
+        TransportFrame::set_tempo(&mut self.transport_poly, tempo);
+        TransportFrame::set_beat(&mut self.transport_poly, beat);
+        TransportFrame::set_bar(&mut self.transport_poly, bar);
+        TransportFrame::set_beat_trigger(&mut self.transport_poly, beat_trigger);
+        TransportFrame::set_bar_trigger(&mut self.transport_poly, bar_trigger);
+        TransportFrame::set_tsig_num(&mut self.transport_poly, tsig_num);
+        TransportFrame::set_tsig_denom(&mut self.transport_poly, tsig_denom);
+    }
+
+    /// Write MIDI events into the `GLOBAL_MIDI` backplane slot.
+    ///
+    /// Packs up to [`MidiFrame::MAX_EVENTS`] events into the current frame.
+    /// Any events beyond that limit are stored in an internal overflow buffer
+    /// and will be written at the start of the next sample's frame.
+    ///
+    /// Call this **before** [`tick`](Self::tick) each sample. The `tick` method
+    /// flushes `midi_poly` to the backplane and then clears it for the next
+    /// sample.
+    #[inline]
+    pub fn write_midi(&mut self, events: &[MidiEvent]) {
+        // Start from current count (may include overflow from previous sample).
+        let mut count = MidiFrame::event_count(&self.midi_poly);
+        for &event in events {
+            if count < MidiFrame::MAX_EVENTS {
+                MidiFrame::write_event(&mut self.midi_poly, count, event);
+                count += 1;
+            } else if self.midi_overflow_count < MidiFrame::MAX_EVENTS {
+                self.midi_overflow[self.midi_overflow_count] = event;
+                self.midi_overflow_count += 1;
+            }
+            // Events beyond overflow capacity are dropped (extremely rare).
+        }
+        MidiFrame::set_event_count(&mut self.midi_poly, count);
     }
 
     /// Writes `GLOBAL_TRANSPORT` and `GLOBAL_DRIFT` to the backplane, runs all
@@ -224,11 +255,22 @@ impl PatchProcessor {
     pub fn tick(&mut self) -> (f32, f32) {
         let wi = self.wi;
 
-        self.transport_poly[TRANSPORT_SAMPLE_COUNT] = self.sample_count as f32;
+        TransportFrame::set_sample_count(&mut self.transport_poly, self.sample_count as f32);
         self.buffer_pool[GLOBAL_TRANSPORT][wi] = CableValue::Poly(self.transport_poly);
         self.sample_count = (self.sample_count + 1) & CLOCK_WRAP_MASK;
         self.buffer_pool[GLOBAL_DRIFT][wi] =
             CableValue::Mono(self.global_drift_walk.advance());
+
+        // Flush MIDI frame to backplane, then prepare for next sample.
+        self.buffer_pool[GLOBAL_MIDI][wi] = CableValue::Poly(self.midi_poly);
+        MidiFrame::clear(&mut self.midi_poly);
+        // Drain overflow from previous sample into the fresh frame.
+        let overflow_n = self.midi_overflow_count;
+        for i in 0..overflow_n {
+            MidiFrame::write_event(&mut self.midi_poly, i, self.midi_overflow[i]);
+        }
+        MidiFrame::set_event_count(&mut self.midi_poly, overflow_n);
+        self.midi_overflow_count = 0;
 
         {
             let mut cable_pool = CablePool::new(&mut self.buffer_pool, wi);
@@ -249,20 +291,27 @@ impl PatchProcessor {
         (out_l, out_r)
     }
 
-    /// Deliver a single MIDI event to all MIDI-receiving modules.
-    pub fn deliver_midi(&mut self, event: MidiEvent) {
-        self.state.deliver_midi(event);
-    }
-
-    /// Drain the MIDI event queue for a sub-block window and deliver events
-    /// to all MIDI-receiving modules.
+    /// Drain the MIDI event queue for a sub-block window and write events
+    /// to the `GLOBAL_MIDI` backplane slot via [`write_midi`](Self::write_midi).
     pub fn dispatch_midi(
         &mut self,
         queue: &mut Option<EventQueueConsumer>,
         sample_counter: u64,
         window_size: u64,
     ) {
-        self.state.dispatch_midi_events(queue, sample_counter, window_size);
+        if let Some(eq) = queue {
+            let mut batch = [MidiEvent { bytes: [0; 3] }; 16];
+            let mut count = 0;
+            for (_offset, event) in eq.drain_window(sample_counter, window_size) {
+                if count < batch.len() {
+                    batch[count] = event;
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                self.write_midi(&batch[..count]);
+            }
+        }
     }
 
     /// Inspect a raw cable buffer pool slot (both ping-pong frames).

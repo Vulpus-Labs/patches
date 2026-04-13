@@ -3,8 +3,8 @@ use std::sync::Arc;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, PolyInput, PolyOutput, ModuleShape, OutputPort,
-    Song, TrackerData, ReceivesTrackerData,
-    GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT,
+    Song, TrackerData, ReceivesTrackerData, TransportFrame,
+    GLOBAL_TRANSPORT,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -38,6 +38,8 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// | 1 | pattern bank index | float-encoded integer (−1 = stop sentinel) |
 /// | 2 | tick trigger | 1.0 on each step |
 /// | 3 | tick duration | seconds per tick |
+/// | 4 | step index | absolute step within pattern (0-based) |
+/// | 5 | step fraction | fractional position within step (0.0..1.0) |
 ///
 /// # Parameters
 ///
@@ -84,8 +86,6 @@ pub struct MasterSequencer {
     transport_in: PolyInput,
     /// Previous host playing state for edge detection.
     prev_host_playing: f32,
-    /// Previous host beat position, for detecting beat-grid step changes.
-    prev_host_beat: f64,
 
     // Transport state
     state: TransportState,
@@ -107,6 +107,9 @@ pub struct MasterSequencer {
     emit_stop_sentinel: bool,
     /// Pre-allocated bank index buffer (one entry per song channel).
     bank_indices: Vec<f32>,
+    /// Fractional position within the current step (0.0..1.0).
+    /// Non-zero only in host sync mode when the DAW is mid-step.
+    step_fraction: f32,
 
     // Rising-edge detection
     prev_start: f32,
@@ -206,18 +209,18 @@ impl MasterSequencer {
         true
     }
 
-    /// Get the step count of the pattern(s) at the current song row.
-    fn current_pattern_length(&self) -> usize {
+    /// Get the step count of the pattern(s) at the given song row.
+    fn pattern_length_at_row(&self, row: usize) -> usize {
         let Some(ref data) = self.tracker_data else { return 0 };
         let Some(idx) = self.song_index else { return 0 };
         let Some(song) = data.songs.songs.get(idx) else { return 0 };
 
-        if self.song_row >= song.order.len() {
+        if row >= song.order.len() {
             return 0;
         }
 
         // Find the first non-None pattern in this row and use its step count.
-        for idx in song.order[self.song_row].iter().flatten() {
+        for idx in song.order[row].iter().flatten() {
             if let Some(pattern) = data.patterns.patterns.get(*idx) {
                 return pattern.steps;
             }
@@ -225,6 +228,34 @@ impl MasterSequencer {
 
         // All channels are silent — use a default of 1 to advance.
         1
+    }
+
+    /// Get the step count of the pattern(s) at the current song row.
+    fn current_pattern_length(&self) -> usize {
+        self.pattern_length_at_row(self.song_row)
+    }
+
+    /// Map an absolute bar number to a song row index, respecting `loop_point`.
+    ///
+    /// Returns `None` if the bar is past the end of a non-looping song.
+    fn resolve_song_row(&self, bar: usize) -> Option<usize> {
+        let song = self.current_song()?;
+        let song_len = song.order.len();
+        if song_len == 0 {
+            return None;
+        }
+        if bar < song_len {
+            Some(bar)
+        } else if self.do_loop {
+            let loop_point = song.loop_point;
+            let loop_len = song_len - loop_point;
+            if loop_len == 0 {
+                return None;
+            }
+            Some(loop_point + (bar - song_len) % loop_len)
+        } else {
+            None
+        }
     }
 }
 
@@ -269,7 +300,6 @@ impl Module for MasterSequencer {
                 connected: true,
             },
             prev_host_playing: 0.0,
-            prev_host_beat: -1.0,
             state: TransportState::Stopped,
             song_row: 0,
             pattern_step: 0,
@@ -280,6 +310,7 @@ impl Module for MasterSequencer {
             song_ended: false,
             emit_stop_sentinel: false,
             bank_indices: vec![0.0; channels],
+            step_fraction: 0.0,
             prev_start: 0.0,
             prev_stop: 0.0,
             prev_pause: 0.0,
@@ -348,6 +379,7 @@ impl Module for MasterSequencer {
         let mut reset_fired = false;
         let mut current_tick_duration = self.base_tick_seconds();
         for v in &mut self.bank_indices { *v = 0.0; }
+        self.step_fraction = 0.0;
 
         if self.use_host_transport {
             self.process_host_sync(pool, &mut tick_fired, &mut reset_fired, &mut current_tick_duration);
@@ -372,6 +404,8 @@ impl Module for MasterSequencer {
                 bus[1] = self.bank_indices.get(i).copied().unwrap_or(0.0);
                 bus[2] = if tick_fired { 1.0 } else { 0.0 };
                 bus[3] = current_tick_duration;
+                bus[4] = self.pattern_step as f32;
+                bus[5] = self.step_fraction;
                 pool.write_poly(&self.clock_out[i], bus);
             }
         }
@@ -459,7 +493,10 @@ impl MasterSequencer {
         }
     }
 
-    /// Host-synced clock logic: derives ticks from host transport beat position.
+    /// Host-synced clock logic: uses absolute bar position from host transport
+    /// to set the sequencer's position directly. One DAW bar = one sequencer
+    /// pattern; the pattern's steps spread across the bar regardless of time
+    /// signature.
     fn process_host_sync(
         &mut self,
         pool: &mut CablePool<'_>,
@@ -468,9 +505,11 @@ impl MasterSequencer {
         current_tick_duration: &mut f32,
     ) {
         let transport = pool.read_poly(&self.transport_in);
-        let playing = transport[TRANSPORT_PLAYING];
-        let tempo = transport[TRANSPORT_TEMPO];
-        let beat = transport[TRANSPORT_BEAT] as f64;
+        let playing = TransportFrame::playing_raw(&transport);
+        let tempo = TransportFrame::tempo(&transport);
+        let beat = TransportFrame::beat(&transport) as f64;
+        let tsig_num = TransportFrame::tsig_num(&transport) as f64;
+        let tsig_denom = TransportFrame::tsig_denom(&transport) as f64;
 
         // Detect playing edge: host started
         let host_started = playing >= 0.5 && self.prev_host_playing < 0.5;
@@ -480,7 +519,9 @@ impl MasterSequencer {
 
         if host_started {
             self.state = TransportState::Playing;
-            self.reset_position();
+            self.first_tick = true;
+            self.song_ended = false;
+            self.emit_stop_sentinel = false;
         }
         if host_stopped {
             // Freeze position — don't reset (matches DAW pause/resume).
@@ -488,47 +529,72 @@ impl MasterSequencer {
         }
 
         if self.state == TransportState::Playing && !self.song_ended && self.current_song().is_some() {
-            let rpb = self.rows_per_beat as f64;
-            // Which sequencer step does the current beat position map to?
-            let host_step = (beat * rpb).floor() as i64;
-            let prev_step = if self.prev_host_beat >= 0.0 {
-                (self.prev_host_beat * rpb).floor() as i64
+            // Compute beats per bar from time signature. Default to 4/4 if
+            // the host doesn't provide time signature data.
+            let beats_per_bar = if tsig_num > 0.0 && tsig_denom > 0.0 {
+                tsig_num * (4.0 / tsig_denom)
             } else {
-                -1
+                4.0
             };
 
+            // Derive bar number and fractional position within the bar from
+            // the continuous beat position.
+            let beat_clamped = beat.max(0.0);
+            let bar_pos = beat_clamped / beats_per_bar;
+            let bar_number = bar_pos.floor() as usize;
+            let bar_fraction = bar_pos - bar_number as f64;
+
+            // Map bar to song row, respecting loop point.
+            let Some(target_row) = self.resolve_song_row(bar_number) else {
+                self.song_ended = true;
+                self.emit_stop_sentinel = true;
+                self.fill_bank_indices();
+                return;
+            };
+
+            // Map bar fraction to step within the pattern at the target row.
+            let pattern_len = self.pattern_length_at_row(target_row);
+            let target_step = if pattern_len > 0 {
+                ((bar_fraction * pattern_len as f64).floor() as usize).min(pattern_len - 1)
+            } else {
+                0
+            };
+
+            // Fractional position within the step (for mid-step seeks).
+            self.step_fraction = if pattern_len > 0 {
+                ((bar_fraction * pattern_len as f64) - target_step as f64) as f32
+            } else {
+                0.0
+            };
+
+            // Detect position changes.
+            let row_changed = target_row != self.song_row;
+            let step_changed = target_step != self.pattern_step || row_changed;
+
             if self.first_tick {
-                // First tick after host start — emit immediately.
+                // First tick after host start — set position absolutely.
+                self.song_row = target_row;
+                self.pattern_step = target_step;
                 *tick_fired = true;
                 *reset_fired = true;
-                self.pattern_just_reset = false;
                 self.first_tick = false;
                 self.fill_bank_indices();
-            } else if host_step != prev_step {
-                // A new sequencer step boundary has been crossed.
-                // Advance as many steps as needed (usually 1).
-                let steps_to_advance = (host_step - prev_step).unsigned_abs() as usize;
-                for _ in 0..steps_to_advance {
-                    if !self.advance_step() {
-                        break;
-                    }
-                }
+            } else if step_changed {
+                self.song_row = target_row;
+                self.pattern_step = target_step;
                 *tick_fired = true;
-                *reset_fired = self.pattern_just_reset;
-                self.pattern_just_reset = false;
+                *reset_fired = row_changed;
                 self.fill_bank_indices();
             } else {
-                // No step change — maintain current bank indices.
                 self.fill_bank_indices();
             }
 
-            // Derive tick duration from host tempo.
-            if tempo > 0.0 {
-                *current_tick_duration = 60.0 / (tempo * self.rows_per_beat as f32);
+            // Tick duration: one pattern step in seconds.
+            if tempo > 0.0 && pattern_len > 0 {
+                let bar_duration_secs = (beats_per_bar as f32 / tempo) * 60.0;
+                *current_tick_duration = bar_duration_secs / pattern_len as f32;
             }
         }
-
-        self.prev_host_beat = beat;
     }
 
     fn fill_bank_indices(&mut self) {
@@ -828,7 +894,7 @@ mod tests {
     #[test]
     fn host_sync_starts_on_playing_edge() {
         use patches_core::test_support::ModuleHarness;
-        use patches_core::{CableValue, GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT};
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
 
         let hosted_env = AudioEnvironment {
             sample_rate: SR,
@@ -871,15 +937,17 @@ mod tests {
 
         // Tick 1: not playing yet — clock should be silent.
         let mut lanes = [0.0f32; 16];
-        lanes[TRANSPORT_TEMPO] = 120.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
         let bus = h.read_poly("clock");
         assert!(bus[2] < 0.5, "no tick trigger when not playing");
 
         // Tick 2: playing starts (edge 0→1), beat at 0.0.
-        lanes[TRANSPORT_PLAYING] = 1.0;
-        lanes[TRANSPORT_BEAT] = 0.0;
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::BEAT] = 0.0;
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
         let bus = h.read_poly("clock");
@@ -890,7 +958,7 @@ mod tests {
     #[test]
     fn host_sync_freezes_on_stop() {
         use patches_core::test_support::ModuleHarness;
-        use patches_core::{CableValue, GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT};
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
 
         let hosted_env = AudioEnvironment {
             sample_rate: SR,
@@ -930,27 +998,416 @@ mod tests {
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
 
-        // Start playing
+        // Start playing at beat 0.
         let mut lanes = [0.0f32; 16];
-        lanes[TRANSPORT_PLAYING] = 1.0;
-        lanes[TRANSPORT_TEMPO] = 120.0;
-        lanes[TRANSPORT_BEAT] = 0.0;
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 0.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
 
-        // Advance to beat 0.5 (step 2 at rows_per_beat=4 → step index 2).
-        lanes[TRANSPORT_BEAT] = 0.5;
+        // Advance to beat 1.0 in 4/4 → bar fraction 0.25 → step 1 of 4.
+        lanes[TransportFrame::BEAT] = 1.0;
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
 
         // Now stop playing — position should freeze (Paused), not reset.
-        lanes[TRANSPORT_PLAYING] = 0.0;
+        lanes[TransportFrame::PLAYING] = 0.0;
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
 
         let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
         assert_eq!(seq.state, TransportState::Paused, "should freeze (Paused), not Stop/reset");
         // Position should not have been reset to 0.
-        assert!(seq.pattern_step > 0 || seq.global_step > 0, "position should be preserved");
+        assert_eq!(seq.pattern_step, 1, "position should be preserved at step 1");
+    }
+
+    #[test]
+    fn host_sync_mid_song_start() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        // 4 rows of 4-step patterns.
+        let make_pattern = || Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song {
+            channels: 1,
+            order: vec![vec![Some(0)], vec![Some(1)], vec![Some(2)], vec![Some(3)]],
+            loop_point: 0,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![make_pattern(), make_pattern(), make_pattern(), make_pattern()] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Start playing at beat 8.0 in 4/4 → bar 2, step 0.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 8.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 2, "should start at song row 2");
+        assert_eq!(seq.pattern_step, 0, "should start at step 0 of the pattern");
+
+        let bus = h.read_poly("clock");
+        assert!(bus[2] >= 0.5, "tick trigger should fire");
+        assert!(bus[0] >= 0.5, "pattern reset should fire on first tick");
+        assert_eq!(bus[1].round() as usize, 2, "bank index should be 2");
+    }
+
+    #[test]
+    fn host_sync_mid_bar_start() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        // 8-step pattern.
+        let pattern = Pattern {
+            channels: 1,
+            steps: 8,
+            data: vec![vec![
+                simple_step(1.0, true, true), simple_step(2.0, true, true),
+                simple_step(3.0, true, true), simple_step(4.0, true, true),
+                simple_step(5.0, true, true), simple_step(6.0, true, true),
+                simple_step(7.0, true, true), simple_step(8.0, true, true),
+            ]],
+        };
+        let song = Song {
+            channels: 1,
+            order: vec![vec![Some(0)], vec![Some(0)], vec![Some(0)]],
+            loop_point: 0,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Beat 9.7 in 4/4: bar 2, fraction 1.7/4 = 0.425, step = floor(0.425*8) = 3.
+        // step_fraction = (0.425*8) - 3 = 0.4.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 9.7;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 2, "should be at song row 2");
+        assert_eq!(seq.pattern_step, 3, "should be at step 3 of 8");
+
+        let bus = h.read_poly("clock");
+        assert_eq!(bus[4].round() as usize, 3, "bus[4] should carry step index 3");
+        assert!(bus[5] > 0.3, "bus[5] should carry step fraction ~0.4");
+    }
+
+    #[test]
+    fn host_sync_three_four_time() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        let pattern = Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song {
+            channels: 1,
+            order: vec![vec![Some(0)], vec![Some(0)], vec![Some(0)]],
+            loop_point: 0,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // 3/4 time: beats_per_bar = 3. Beat 7.5 → bar 2 (7.5/3=2.5),
+        // bar_fraction = 0.5, step = floor(0.5*4) = 2.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 7.5;
+        lanes[TransportFrame::TSIG_NUM] = 3.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 2, "should be at song row 2 in 3/4");
+        assert_eq!(seq.pattern_step, 2, "should be at step 2 of 4");
+    }
+
+    #[test]
+    fn host_sync_loop_wrapping() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        let pattern = Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        // 3 rows, loop_point=1. Bars 0,1,2 → rows 0,1,2.
+        // Bar 3 → loops: loop_point + (3-3)%2 = 1.
+        // Bar 4 → loop_point + (4-3)%2 = 2.
+        // Bar 5 → loop_point + (5-3)%2 = 1.
+        let song = Song {
+            channels: 1,
+            order: vec![vec![Some(0)], vec![Some(0)], vec![Some(0)]],
+            loop_point: 1,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Bar 5 in 4/4: beat = 20.0.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 20.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 1, "bar 5 should wrap to row 1 (loop_point=1)");
+    }
+
+    #[test]
+    fn host_sync_non_looping_end() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(false)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        let pattern = Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song {
+            channels: 1,
+            order: vec![vec![Some(0)], vec![Some(0)]],
+            loop_point: 0,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![pattern] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Bar 3 in 4/4 (beat=12.0): past the 2-row song, not looping.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 12.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert!(seq.song_ended, "song should have ended");
+    }
+
+    #[test]
+    fn host_sync_daw_seek() {
+        use patches_core::test_support::ModuleHarness;
+        use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
+
+        let hosted_env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
+        };
+        let mut h = ModuleHarness::build_full::<MasterSequencer>(
+            &[
+                ("song", ParameterValue::Int(0)),
+                ("loop", ParameterValue::Bool(true)),
+                ("autostart", ParameterValue::Bool(false)),
+            ],
+            hosted_env,
+            shape(1),
+        );
+
+        let make_pattern = || Pattern {
+            channels: 1,
+            steps: 4,
+            data: vec![vec![
+                simple_step(1.0, true, true),
+                simple_step(2.0, true, true),
+                simple_step(3.0, true, true),
+                simple_step(4.0, true, true),
+            ]],
+        };
+        let song = Song {
+            channels: 1,
+            order: (0..12).map(|i| vec![Some(i % 4)]).collect(),
+            loop_point: 0,
+        };
+        let data = Arc::new(TrackerData {
+            patterns: PatternBank { patterns: vec![make_pattern(), make_pattern(), make_pattern(), make_pattern()] },
+            songs: SongBank {
+                songs: vec![song],
+                name_to_index: HashMap::from([("test".to_string(), 0)]),
+            },
+        });
+        h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
+
+        // Start at bar 1.
+        let mut lanes = [0.0f32; 16];
+        lanes[TransportFrame::PLAYING] = 1.0;
+        lanes[TransportFrame::TEMPO] = 120.0;
+        lanes[TransportFrame::BEAT] = 4.0;
+        lanes[TransportFrame::TSIG_NUM] = 4.0;
+        lanes[TransportFrame::TSIG_DENOM] = 4.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 1);
+
+        // Seek to bar 10 in a single tick.
+        lanes[TransportFrame::BEAT] = 40.0;
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.tick();
+
+        let seq = h.as_any().downcast_ref::<MasterSequencer>().unwrap();
+        assert_eq!(seq.song_row, 10, "should jump directly to row 10");
+        assert_eq!(seq.pattern_step, 0, "should be at step 0 of the bar");
+
+        let bus = h.read_poly("clock");
+        assert!(bus[2] >= 0.5, "tick trigger should fire on seek");
+        assert!(bus[0] >= 0.5, "pattern reset should fire on row change");
     }
 }

@@ -47,6 +47,7 @@ pub fn env_at(sample_rate: f32) -> AudioEnvironment {
         sample_rate,
         poly_voices: 16,
         periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
+        hosted: false,
     }
 }
 
@@ -278,9 +279,9 @@ impl HeadlessEngine {
         self.processor.adopt_plan(plan);
     }
 
-    /// Deliver a MIDI event to all MIDI-receiving modules in the current plan.
+    /// Write a MIDI event to the GLOBAL_MIDI backplane slot.
     pub fn send_midi(&mut self, event: MidiEvent) {
-        self.processor.deliver_midi(event);
+        self.processor.write_midi(&[event]);
     }
 
     /// Advance the plan by one sample.

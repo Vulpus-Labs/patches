@@ -58,6 +58,7 @@ macro_rules! export_wasm_module {
                 sample_rate,
                 poly_voices: poly_voices as usize,
                 periodic_update_interval: periodic_interval as u32,
+                hosted: false,
             };
             let id_raw = (instance_id_lo as u32 as u64) | ((instance_id_hi as u32 as u64) << 32);
             let instance_id = $crate::__reexport::InstanceId::from_raw(id_raw);

@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor, ReceivesMidi,
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleShape, MidiFrame, MonoOutput, OutputPort, PolyInput, PolyOutput, PortDescriptor,
+    GLOBAL_MIDI,
 };
 use patches_core::CableKind;
 use patches_core::parameter_map::ParameterMap;
@@ -48,6 +49,8 @@ pub struct PolyMidiIn {
     tick_count: u64,
     mod_value: f32,
     pitch_value: f32,
+    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
+    midi_in: PolyInput,
     // Output port fields
     out_v_oct: PolyOutput,
     out_trigger: PolyOutput,
@@ -75,6 +78,41 @@ impl PolyMidiIn {
             }
         }
         steal_idx
+    }
+
+    /// Process a single MIDI event through the voice allocator.
+    fn handle_midi_event(&mut self, status: u8, b1: u8, b2: u8) {
+        match status {
+            // Note On (velocity 0 treated as Note Off per MIDI spec)
+            0x90 if b2 > 0 => {
+                let idx = self.find_or_steal_voice();
+                let v = &mut self.voices[idx];
+                v.note = b1;
+                v.velocity = b2 as f32 / 127.0;
+                v.active = true;
+                v.allocation_tick = self.tick_count;
+                v.trigger_armed = true;
+            }
+            // Note Off (or Note On velocity 0)
+            0x80 | 0x90 => {
+                for i in 0..self.voice_count {
+                    if self.voices[i].active && self.voices[i].note == b1 {
+                        self.voices[i].active = false;
+                        break;
+                    }
+                }
+            }
+            // Control Change — mod wheel (CC 1)
+            0xB0 if b1 == 1 => {
+                self.mod_value = b2 as f32 / 127.0;
+            }
+            // Pitch Bend: 14-bit value, LSB in b1, MSB in b2; centre = 8192
+            0xE0 => {
+                let raw = ((b2 as u16) << 7) | (b1 as u16);
+                self.pitch_value = (raw as f32 - 8192.0) / 8192.0;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -105,6 +143,11 @@ impl Module for PolyMidiIn {
             tick_count: 0,
             mod_value: 0.0,
             pitch_value: 0.0,
+            midi_in: PolyInput {
+                cable_idx: GLOBAL_MIDI,
+                scale: 1.0,
+                connected: true,
+            },
             out_v_oct: PolyOutput::default(),
             out_trigger: PolyOutput::default(),
             out_gate: PolyOutput::default(),
@@ -130,6 +173,15 @@ impl Module for PolyMidiIn {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
+        // Read MIDI events from the GLOBAL_MIDI backplane slot.
+        let frame = pool.read_poly(&self.midi_in);
+        let event_count = MidiFrame::event_count(&frame);
+        for i in 0..event_count {
+            let event = MidiFrame::read_event(&frame, i);
+            let status = event.bytes[0] & 0xF0;
+            self.handle_midi_event(status, event.bytes[1], event.bytes[2]);
+        }
+
         let mut v_oct    = [0.0f32; 16];
         let mut trigger  = [0.0f32; 16];
         let mut gate     = [0.0f32; 16];
@@ -160,69 +212,38 @@ impl Module for PolyMidiIn {
 
     fn as_any(&self) -> &dyn std::any::Any { self }
 
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> { Some(self) }
-}
-
-impl ReceivesMidi for PolyMidiIn {
-    fn receive_midi(&mut self, event: MidiEvent) {
-        let status = event.bytes[0] & 0xF0;
-        let b1 = event.bytes[1];
-        let b2 = event.bytes[2];
-
-        match status {
-            // Note On (velocity 0 treated as Note Off per MIDI spec)
-            0x90 if b2 > 0 => {
-                let idx = self.find_or_steal_voice();
-                let v = &mut self.voices[idx];
-                v.note = b1;
-                v.velocity = b2 as f32 / 127.0;
-                v.active = true;
-                v.allocation_tick = self.tick_count;
-                v.trigger_armed = true;
-            }
-            // Note Off (or Note On velocity 0)
-            0x80 | 0x90 => {
-                for i in 0..self.voice_count {
-                    if self.voices[i].active && self.voices[i].note == b1 {
-                        self.voices[i].active = false;
-                        break;
-                    }
-                }
-            }
-            // Control Change
-            0xB0 if b1 == 1 => {
-                self.mod_value = b2 as f32 / 127.0;
-            }
-            // Pitch Bend: 14-bit value, LSB in b1, MSB in b2; centre = 8192
-            0xE0 => {
-                let raw = ((b2 as u16) << 7) | (b1 as u16);
-                self.pitch_value = (raw as f32 - 8192.0) / 8192.0;
-            }
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{AudioEnvironment, MidiEvent};
+    use patches_core::{AudioEnvironment, CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
     use patches_core::test_support::{assert_within, ModuleHarness};
 
     fn make_kbd(poly_voices: usize) -> ModuleHarness {
         ModuleHarness::build_with_env::<PolyMidiIn>(
             &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices, periodic_update_interval: 32, hosted: false },
         )
     }
 
     fn note_on(note: u8, vel: u8) -> MidiEvent { MidiEvent { bytes: [0x90, note, vel] } }
     fn note_off(note: u8) -> MidiEvent { MidiEvent { bytes: [0x80, note, 0] } }
 
+    /// Write MIDI events to the GLOBAL_MIDI backplane slot.
+    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, events.len());
+        for (i, &event) in events.iter().enumerate() {
+            MidiFrame::write_event(&mut frame, i, event);
+        }
+        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
+    }
+
     #[test]
     fn note_on_sets_v_oct_gate_trigger_for_voice_zero() {
         let mut h = make_kbd(4);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
         let v_oct   = h.read_poly("voct");
         let trigger = h.read_poly("trigger");
@@ -238,8 +259,10 @@ mod tests {
     #[test]
     fn trigger_clears_after_one_tick() {
         let mut h = make_kbd(4);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
-        h.tick(); // consume trigger
+        send_midi(&mut h, &[note_on(60, 100)]);
+        h.tick();
+        // Clear MIDI for next tick (no new events).
+        send_midi(&mut h, &[]);
         h.tick();
         assert_eq!(h.read_poly("trigger")[0], 0.0, "trigger should clear after first tick");
     }
@@ -247,9 +270,9 @@ mod tests {
     #[test]
     fn two_notes_go_to_separate_voices() {
         let mut h = make_kbd(4);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 100));
+        send_midi(&mut h, &[note_on(64, 100)]);
         h.tick();
         let v_oct = h.read_poly("voct");
         let gate  = h.read_poly("gate");
@@ -262,9 +285,9 @@ mod tests {
     #[test]
     fn note_off_drops_gate_for_that_voice() {
         let mut h = make_kbd(4);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
+        send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_eq!(h.read_poly("gate")[0], 0.0, "gate should drop after note-off");
     }
@@ -272,9 +295,9 @@ mod tests {
     #[test]
     fn velocity_per_voice() {
         let mut h = make_kbd(4);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 50));
+        send_midi(&mut h, &[note_on(64, 50)]);
         h.tick();
         let vel = h.read_poly("velocity");
         assert_within!(100.0 / 127.0, vel[0], 1e-6_f32);
@@ -284,12 +307,12 @@ mod tests {
     #[test]
     fn lifo_steal_takes_most_recently_allocated() {
         let mut h = make_kbd(2);
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100)); // voice 0
+        send_midi(&mut h, &[note_on(60, 100)]); // voice 0
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 100)); // voice 1
+        send_midi(&mut h, &[note_on(64, 100)]); // voice 1
         h.tick();
         // Both voices full — next note steals voice 1 (most recent, LIFO)
-        h.as_midi_receiver().unwrap().receive_midi(note_on(67, 100));
+        send_midi(&mut h, &[note_on(67, 100)]);
         h.tick();
         let v_oct = h.read_poly("voct");
         assert_within!(67.0 / 12.0, v_oct[1], 1e-10_f32);

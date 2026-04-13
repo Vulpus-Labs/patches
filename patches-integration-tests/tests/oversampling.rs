@@ -14,7 +14,7 @@ use patches_modules::{AudioOut, Oscillator};
 
 /// Build a simple oscillator → AudioOut graph at the given (oversampled) sample rate.
 fn sine_out_graph(sample_rate: f32) -> (patches_core::ModuleGraph, AudioEnvironment) {
-    let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32 };
+    let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let mut graph = ModuleGraph::new();
 
     let mut params = ParameterMap::new();

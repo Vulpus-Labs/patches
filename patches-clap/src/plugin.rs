@@ -472,7 +472,7 @@ unsafe extern "C" fn plugin_process(
                     && (*header).type_ == CLAP_EVENT_MIDI
                 {
                     let midi = &*(header as *const clap_event_midi);
-                    proc.deliver_midi(MidiEvent { bytes: midi.data });
+                    proc.write_midi(&[MidiEvent { bytes: midi.data }]);
                 }
                 event_idx += 1;
             }

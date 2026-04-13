@@ -120,7 +120,7 @@ mod tests {
     fn make_glide_harness(glide_ms: f32, sample_rate: f32) -> ModuleHarness {
         ModuleHarness::build_with_env::<Glide>(
             params!["glide_ms" => glide_ms],
-            AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         )
     }
 

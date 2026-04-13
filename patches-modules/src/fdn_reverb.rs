@@ -592,7 +592,7 @@ mod tests {
     fn make_fdn(char_name: &'static str, size: f32, brightness: f32) -> ModuleHarness {
         ModuleHarness::build_with_env::<FdnReverb>(
             params!["size" => size, "brightness" => brightness, "character" => char_name],
-            AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         )
     }
 

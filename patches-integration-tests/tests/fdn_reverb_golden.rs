@@ -49,6 +49,7 @@ fn make_harness() -> ModuleHarness {
         sample_rate: SR,
         poly_voices: 16,
         periodic_update_interval: 32,
+        hosted: false,
     };
     let mut h = ModuleHarness::build_with_env::<FdnReverb>(
         params!["size" => 0.5_f32, "brightness" => 0.5_f32, "character" => "plate"],

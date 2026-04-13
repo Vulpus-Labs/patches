@@ -44,8 +44,8 @@
 /// |-----------|------|-------|---------|--------------------------------------------------------|
 /// | `channel` | int  | 0–16  | 0       | MIDI channel filter (1–16); 0 = respond to all channels |
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, ReceivesMidi,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiFrame, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, PolyInput, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -92,6 +92,8 @@ static NOTE_TO_SLOT: [u8; 128] = build_note_to_slot();
 pub struct MidiDrumset {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
+    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
+    midi_in: PolyInput,
     /// MIDI channel filter: 0 = any, 1–16 = specific channel.
     channel: u8,
     /// Per-drum state: trigger armed flag and velocity.
@@ -118,6 +120,11 @@ impl Module for MidiDrumset {
         Self {
             instance_id,
             descriptor,
+            midi_in: PolyInput {
+                cable_idx: GLOBAL_MIDI,
+                scale: 1.0,
+                connected: true,
+            },
             channel: 0,
             trigger_armed: [false; NUM_DRUMS],
             velocity: [0.0; NUM_DRUMS],
@@ -146,6 +153,34 @@ impl Module for MidiDrumset {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
+        // Read MIDI events from the GLOBAL_MIDI backplane slot.
+        let frame = pool.read_poly(&self.midi_in);
+        let event_count = MidiFrame::event_count(&frame);
+        for i in 0..event_count {
+            let event = MidiFrame::read_event(&frame, i);
+            let status = event.bytes[0] & 0xF0;
+            let ch = (event.bytes[0] & 0x0F) + 1; // 1-based channel
+            let note = event.bytes[1];
+            let vel = event.bytes[2];
+
+            if self.channel != 0 && ch != self.channel {
+                continue;
+            }
+            if note > 127 {
+                continue;
+            }
+            let slot = NOTE_TO_SLOT[note as usize];
+            if slot == 0xFF {
+                continue;
+            }
+            let slot = slot as usize;
+
+            if status == 0x90 && vel > 0 {
+                self.trigger_armed[slot] = true;
+                self.velocity[slot] = vel as f32 / 127.0;
+            }
+        }
+
         for i in 0..NUM_DRUMS {
             let trig_val = if self.trigger_armed[i] {
                 self.trigger_armed[i] = false;
@@ -161,50 +196,12 @@ impl Module for MidiDrumset {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
-        Some(self)
-    }
-}
-
-impl ReceivesMidi for MidiDrumset {
-    fn receive_midi(&mut self, event: MidiEvent) {
-        let status = event.bytes[0] & 0xF0;
-        let ch = (event.bytes[0] & 0x0F) + 1; // 1-based channel
-        let note = event.bytes[1];
-        let vel = event.bytes[2];
-
-        // Channel filter: 0 = any channel
-        if self.channel != 0 && ch != self.channel {
-            return;
-        }
-
-        if note > 127 {
-            return;
-        }
-
-        let slot = NOTE_TO_SLOT[note as usize];
-        if slot == 0xFF {
-            return; // unmapped note
-        }
-        let slot = slot as usize;
-
-        match status {
-            // Note On (velocity 0 treated as Note Off per MIDI spec)
-            0x90 if vel > 0 => {
-                self.trigger_armed[slot] = true;
-                self.velocity[slot] = vel as f32 / 127.0;
-            }
-            // Note Off or Note On with velocity 0 — no action needed
-            // (triggers are one-shot pulses, no gate to release)
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use patches_core::{CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
     use patches_core::test_support::ModuleHarness;
 
     fn make_drumset() -> ModuleHarness {
@@ -219,10 +216,19 @@ mod tests {
         MidiEvent { bytes: [0x90 | (ch - 1), note, vel] }
     }
 
+    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, events.len());
+        for (i, &event) in events.iter().enumerate() {
+            MidiFrame::write_event(&mut frame, i, event);
+        }
+        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
+    }
+
     #[test]
     fn kick_note_triggers_and_velocity() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(36, 100));
+        send_midi(&mut h, &[note_on(36, 100)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_kick"), 1.0);
         let vel = h.read_mono("velocity_kick");
@@ -232,7 +238,7 @@ mod tests {
     #[test]
     fn kick_alias_note_35() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(35, 80));
+        send_midi(&mut h, &[note_on(35, 80)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_kick"), 1.0);
     }
@@ -240,9 +246,10 @@ mod tests {
     #[test]
     fn trigger_clears_after_one_tick() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(38, 100));
+        send_midi(&mut h, &[note_on(38, 100)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_snare"), 1.0);
+        send_midi(&mut h, &[]);
         h.tick();
         assert_eq!(h.read_mono("trigger_snare"), 0.0);
     }
@@ -250,8 +257,9 @@ mod tests {
     #[test]
     fn velocity_persists_after_trigger() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(42, 64));
+        send_midi(&mut h, &[note_on(42, 64)]);
         h.tick();
+        send_midi(&mut h, &[]);
         h.tick();
         let vel = h.read_mono("velocity_closed_hh");
         assert!((vel - 64.0 / 127.0).abs() < 1e-5);
@@ -260,7 +268,7 @@ mod tests {
     #[test]
     fn unmapped_note_ignored() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100)); // C4 — not mapped
+        send_midi(&mut h, &[note_on(60, 100)]); // C4 — not mapped
         h.tick();
         // All triggers should be 0
         for &(_, trig_name, _) in &DRUM_MAP {
@@ -271,7 +279,7 @@ mod tests {
     #[test]
     fn note_on_velocity_zero_no_trigger() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(36, 0));
+        send_midi(&mut h, &[note_on(36, 0)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_kick"), 0.0);
     }
@@ -282,12 +290,12 @@ mod tests {
             ("channel", ParameterValue::Int(10)),
         ]);
         // Note on channel 10 — should trigger
-        h.as_midi_receiver().unwrap().receive_midi(note_on_ch(10, 36, 100));
+        send_midi(&mut h, &[note_on_ch(10, 36, 100)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_kick"), 1.0);
 
         // Note on channel 1 — should be ignored
-        h.as_midi_receiver().unwrap().receive_midi(note_on_ch(1, 38, 100));
+        send_midi(&mut h, &[note_on_ch(1, 38, 100)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_snare"), 0.0);
     }
@@ -312,9 +320,7 @@ mod tests {
     #[test]
     fn multiple_simultaneous_drums() {
         let mut h = make_drumset();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(36, 127));
-        h.as_midi_receiver().unwrap().receive_midi(note_on(38, 80));
-        h.as_midi_receiver().unwrap().receive_midi(note_on(42, 50));
+        send_midi(&mut h, &[note_on(36, 127), note_on(38, 80), note_on(42, 50)]);
         h.tick();
         assert_eq!(h.read_mono("trigger_kick"), 1.0);
         assert_eq!(h.read_mono("trigger_snare"), 1.0);

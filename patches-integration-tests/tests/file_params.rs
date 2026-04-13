@@ -6,7 +6,7 @@ use patches_dsl::ast::{Span, Value};
 use patches_dsl::flat::{FlatModule, FlatPatch};
 
 fn env() -> AudioEnvironment {
-    AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 }
+    AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
 fn registry() -> patches_core::Registry {

@@ -25,17 +25,17 @@ counter and is not read by any module.
 `GLOBAL_TRANSPORT`.** The poly slot carries both the existing sample
 counter and host transport state in a fixed lane layout:
 
-| Lane | Name         | Description                                   |
-|------|--------------|-----------------------------------------------|
-| 0    | sample_count | Monotonic sample counter (was GLOBAL_CLOCK)   |
-| 1    | playing      | 1.0 while transport is playing, 0.0 stopped   |
-| 2    | tempo        | Host tempo in BPM                              |
-| 3    | beat         | Fractional beat position                       |
-| 4    | bar          | Bar number                                     |
-| 5    | beat_trigger | 1.0 pulse on beat boundary, 0.0 otherwise     |
-| 6    | bar_trigger  | 1.0 pulse on bar boundary, 0.0 otherwise      |
-| 7    | tsig_num     | Time signature numerator                       |
-| 8    | tsig_denom   | Time signature denominator                     |
+| Lane   | Name           | Description                                     |
+| ------ | -------------- | ----------------------------------------------- |
+| 0      | sample_count   | Monotonic sample counter (was GLOBAL_CLOCK)     |
+| 1      | playing        | 1.0 while transport is playing, 0.0 stopped     |
+| 2      | tempo          | Host tempo in BPM                               |
+| 3      | beat           | Fractional beat position                        |
+| 4      | bar            | Bar number                                      |
+| 5      | beat_trigger   | 1.0 pulse on beat boundary, 0.0 otherwise       |
+| 6      | bar_trigger    | 1.0 pulse on bar boundary, 0.0 otherwise        |
+| 7      | tsig_num       | Time signature numerator                        |
+| 8      | tsig_denom     | Time signature denominator                      |
 
 Lanes 9–15 are reserved for future use.
 
@@ -48,10 +48,18 @@ are derived by detecting position crossings between process calls.
 `tick()`, regardless of host. In standalone mode lanes 1–8 remain
 at 0.0.
 
+**`AudioEnvironment` gains a `hosted: bool` flag.** The CLAP plugin
+sets `hosted: true`; standalone sets `false`. This is a static,
+pre-resolved signal — no runtime detection needed.
+
 **Modules read the backplane directly.** `MasterSequencer` gains a
-`sync` parameter (`free` | `host`). In `host` mode it reads
-`GLOBAL_TRANSPORT` from the backplane — no wiring required. In
-`free` mode (the default) it ignores the transport lanes and runs
+`sync` parameter (`auto` | `free` | `host`). In `auto` mode (the
+default) it checks `AudioEnvironment::hosted` once in `prepare` to
+decide its clock source: host transport if hosted, internal BPM
+otherwise. `free` forces the internal clock regardless; `host`
+forces host transport regardless. In host-derived modes the
+sequencer reads `GLOBAL_TRANSPORT` from the backplane — no wiring
+required. In `free` mode it ignores the transport lanes and runs
 its own BPM clock as before.
 
 **A separate `HostTransport` module** unpacks the backplane slot

@@ -133,7 +133,7 @@ mod tests {
     fn make_adsr(attack: f32, decay: f32, sustain: f32, release: f32, voices: usize) -> ModuleHarness {
         ModuleHarness::build_with_env::<PolyAdsr>(
             params!["attack" => attack, "decay" => decay, "sustain" => sustain, "release" => release],
-            AudioEnvironment { sample_rate: 10.0, poly_voices: voices, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 10.0, poly_voices: voices, periodic_update_interval: 32, hosted: false },
         )
     }
 

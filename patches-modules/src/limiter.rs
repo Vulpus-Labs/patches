@@ -239,6 +239,7 @@ mod tests {
         sample_rate: SR,
         poly_voices: 16,
         periodic_update_interval: 32,
+        hosted: false,
     };
 
     /// Number of samples to push before the output is valid: the dry path is

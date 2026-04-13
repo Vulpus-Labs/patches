@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, ReceivesMidi,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiFrame, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, PolyInput, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::ParameterMap;
 
@@ -78,6 +78,8 @@ impl NoteStack {
 pub struct MonoMidiIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
+    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
+    midi_in: PolyInput,
 
     /// Stack of physically held keys, oldest at index 0, newest at top.
     stack: NoteStack,
@@ -103,6 +105,44 @@ pub struct MonoMidiIn {
     out_velocity: MonoOutput,
 }
 
+impl MonoMidiIn {
+    /// Process a single MIDI event through the note stack and controller state.
+    fn handle_midi_event(&mut self, status: u8, b1: u8, b2: u8) {
+        match status {
+            // Note On (velocity 0 treated as Note Off per MIDI spec)
+            0x90 if b2 > 0 => {
+                self.stack.push(b1);
+                self.current_note = b1;
+                self.trigger_armed = true;
+                self.velocity = b2 as f32 / 127.0;
+            }
+            // Note Off (or Note On with velocity 0)
+            0x80 | 0x90 => {
+                self.stack.remove(b1);
+                if let Some(prev) = self.stack.top() {
+                    self.current_note = prev;
+                }
+            }
+            // Control Change
+            0xB0 => match b1 {
+                1 => {
+                    self.mod_value = b2 as f32 / 127.0;
+                }
+                64 => {
+                    self.sustain = b2 >= 64;
+                }
+                _ => {}
+            },
+            // Pitch Bend: 14-bit value, LSB in b1, MSB in b2; centre = 8192
+            0xE0 => {
+                let raw = ((b2 as u16) << 7) | (b1 as u16);
+                self.pitch_value = (raw as f32 - 8192.0) / 8192.0;
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Module for MonoMidiIn {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("MidiIn", shape.clone())
@@ -122,6 +162,11 @@ impl Module for MonoMidiIn {
         Self {
             instance_id,
             descriptor,
+            midi_in: PolyInput {
+                cable_idx: GLOBAL_MIDI,
+                scale: 1.0,
+                connected: true,
+            },
             stack: NoteStack::new(),
             current_note: 60, // sensible middle-range default; overwritten on first note-on
             sustain: false,
@@ -158,6 +203,15 @@ impl Module for MonoMidiIn {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
+        // Read MIDI events from the GLOBAL_MIDI backplane slot.
+        let frame = pool.read_poly(&self.midi_in);
+        let event_count = MidiFrame::event_count(&frame);
+        for i in 0..event_count {
+            let event = MidiFrame::read_event(&frame, i);
+            let status = event.bytes[0] & 0xF0;
+            self.handle_midi_event(status, event.bytes[1], event.bytes[2]);
+        }
+
         pool.write_mono(&self.out_v_oct, self.current_note as f32 * VOCT_SCALING);
 
         let trigger_val = if self.trigger_armed {
@@ -179,60 +233,12 @@ impl Module for MonoMidiIn {
         self
     }
 
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
-        Some(self)
-    }
-}
-
-impl ReceivesMidi for MonoMidiIn {
-    fn receive_midi(&mut self, event: MidiEvent) {
-        let status = event.bytes[0] & 0xF0;
-        let b1 = event.bytes[1];
-        let b2 = event.bytes[2];
-
-        match status {
-            // Note On (velocity 0 treated as Note Off per MIDI spec)
-            0x90 if b2 > 0 => {
-                self.stack.push(b1);
-                self.current_note = b1;
-                self.trigger_armed = true;
-                self.velocity = b2 as f32 / 127.0;
-            }
-            // Note Off (or Note On with velocity 0)
-            0x80 | 0x90 => {
-                self.stack.remove(b1);
-                // Fall back to the previously held key (if any), without retriggering.
-                if let Some(prev) = self.stack.top() {
-                    self.current_note = prev;
-                }
-                // If stack is now empty, current_note holds its last value so
-                // the oscillator pitch does not jump to 0.
-            }
-            // Control Change
-            0xB0 => match b1 {
-                1 => {
-                    self.mod_value = b2 as f32 / 127.0;
-                }
-                64 => {
-                    // Sustain pedal: >= 64 = on
-                    self.sustain = b2 >= 64;
-                }
-                _ => {}
-            },
-            // Pitch Bend: 14-bit value, LSB in b1, MSB in b2; centre = 8192
-            0xE0 => {
-                let raw = ((b2 as u16) << 7) | (b1 as u16);
-                self.pitch_value = (raw as f32 - 8192.0) / 8192.0;
-            }
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::MidiEvent;
+    use patches_core::{CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
     use patches_core::test_support::{assert_within, ModuleHarness};
 
     fn make_keyboard() -> ModuleHarness {
@@ -244,6 +250,16 @@ mod tests {
     fn cc(number: u8, value: u8) -> MidiEvent { MidiEvent { bytes: [0xB0, number, value] } }
     fn pitch_bend(raw: u16) -> MidiEvent {
         MidiEvent { bytes: [0xE0, (raw & 0x7F) as u8, ((raw >> 7) & 0x7F) as u8] }
+    }
+
+    /// Write MIDI events to the GLOBAL_MIDI backplane slot.
+    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, events.len());
+        for (i, &event) in events.iter().enumerate() {
+            MidiFrame::write_event(&mut frame, i, event);
+        }
+        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
     }
 
     // ── NoteStack unit tests ─────────────────────────────────────────────────
@@ -321,7 +337,7 @@ mod tests {
     #[test]
     fn note_on_sets_voct_gate_trigger() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
         assert_eq!(h.read_mono("voct"),   5.0, "v_oct: note 60 should be 5.0");
         assert_eq!(h.read_mono("trigger"), 1.0, "trigger should be high on first tick after note-on");
@@ -331,8 +347,9 @@ mod tests {
     #[test]
     fn trigger_clears_after_one_tick() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(69, 100));
+        send_midi(&mut h, &[note_on(69, 100)]);
         h.tick(); // consume trigger
+        send_midi(&mut h, &[]);
         h.tick();
         assert_eq!(h.read_mono("trigger"), 0.0, "trigger should be 0 on the second tick");
         assert_eq!(h.read_mono("gate"),    1.0, "gate should still be high");
@@ -349,7 +366,7 @@ mod tests {
         ];
         for &(note, expected) in cases {
             let mut h = make_keyboard();
-            h.as_midi_receiver().unwrap().receive_midi(note_on(note, 100));
+            send_midi(&mut h, &[note_on(note, 100)]);
             h.tick();
             let v = h.read_mono("voct");
             assert_within!(expected, v, 1e-10_f32);
@@ -359,9 +376,9 @@ mod tests {
     #[test]
     fn note_off_drops_gate_when_no_sustain() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
+        send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_eq!(h.read_mono("gate"), 0.0, "gate should drop after note-off with no sustain");
     }
@@ -369,11 +386,11 @@ mod tests {
     #[test]
     fn releasing_top_note_falls_back_to_previous_note() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 100));
+        send_midi(&mut h, &[note_on(64, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(64));
+        send_midi(&mut h, &[note_off(64)]);
         h.tick();
         assert_eq!(h.read_mono("gate"),    1.0, "gate should stay high (60 is still held)");
         assert_eq!(h.read_mono("voct"),   5.0, "v_oct should revert to note 60 (5.0 V)");
@@ -383,10 +400,9 @@ mod tests {
     #[test]
     fn releasing_non_top_note_does_not_change_pitch() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 100));
+        send_midi(&mut h, &[note_on(60, 100), note_on(64, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
+        send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_eq!(h.read_mono("gate"),  1.0,                 "gate stays high");
         assert_eq!(h.read_mono("voct"), 64.0 * VOCT_SCALING, "v_oct stays at 64");
@@ -395,10 +411,9 @@ mod tests {
     #[test]
     fn sustain_holds_gate_after_note_off() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(cc(64, 127)); // sustain on
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[cc(64, 127), note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
+        send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_eq!(h.read_mono("gate"), 1.0, "gate should remain high while sustain is active");
     }
@@ -406,11 +421,9 @@ mod tests {
     #[test]
     fn sustain_release_drops_gate_when_no_note_held() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(cc(64, 127));
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[cc(64, 127), note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
-        h.as_midi_receiver().unwrap().receive_midi(cc(64, 0));
+        send_midi(&mut h, &[note_off(60), cc(64, 0)]);
         h.tick();
         assert_eq!(h.read_mono("gate"), 0.0, "gate should drop when sustain released with no note held");
     }
@@ -418,15 +431,15 @@ mod tests {
     #[test]
     fn mod_wheel_updates_mod_output() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(cc(1, 127));
+        send_midi(&mut h, &[cc(1, 127)]);
         h.tick();
         assert_eq!(h.read_mono("mod"), 1.0, "mod at CC 127 should be 1.0");
 
-        h.as_midi_receiver().unwrap().receive_midi(cc(1, 0));
+        send_midi(&mut h, &[cc(1, 0)]);
         h.tick();
         assert_eq!(h.read_mono("mod"), 0.0, "mod at CC 0 should be 0.0");
 
-        h.as_midi_receiver().unwrap().receive_midi(cc(1, 64));
+        send_midi(&mut h, &[cc(1, 64)]);
         h.tick();
         let expected = 64.0 / 127.0;
         let got = h.read_mono("mod");
@@ -437,17 +450,17 @@ mod tests {
     fn pitchbend_normalises_correctly() {
         let mut h = make_keyboard();
 
-        h.as_midi_receiver().unwrap().receive_midi(pitch_bend(8192));
+        send_midi(&mut h, &[pitch_bend(8192)]);
         h.tick();
         assert_eq!(h.read_mono("pitch"), 0.0, "pitchbend centre should be 0.0");
 
-        h.as_midi_receiver().unwrap().receive_midi(pitch_bend(16383));
+        send_midi(&mut h, &[pitch_bend(16383)]);
         h.tick();
         let expected = (16383.0 - 8192.0) / 8192.0;
         let got = h.read_mono("pitch");
         assert_within!(expected, got, 1e-10_f32);
 
-        h.as_midi_receiver().unwrap().receive_midi(pitch_bend(0));
+        send_midi(&mut h, &[pitch_bend(0)]);
         h.tick();
         assert_eq!(h.read_mono("pitch"), -1.0, "pitchbend full-down should be -1.0");
     }
@@ -455,7 +468,7 @@ mod tests {
     #[test]
     fn unknown_cc_is_ignored() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(cc(7, 100));
+        send_midi(&mut h, &[cc(7, 100)]);
         h.tick();
         assert_eq!(h.read_mono("mod"), 0.0, "unknown CC should not affect mod output");
     }
@@ -463,11 +476,11 @@ mod tests {
     #[test]
     fn velocity_output_tracks_last_note_on() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
         assert_within!(100.0 / 127.0, h.read_mono("velocity"), 1e-6_f32);
 
-        h.as_midi_receiver().unwrap().receive_midi(note_on(64, 50));
+        send_midi(&mut h, &[note_on(64, 50)]);
         h.tick();
         assert_within!(50.0 / 127.0, h.read_mono("velocity"), 1e-6_f32);
     }
@@ -475,9 +488,9 @@ mod tests {
     #[test]
     fn velocity_persists_after_note_off() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(note_off(60));
+        send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_within!(100.0 / 127.0, h.read_mono("velocity"), 1e-6_f32);
     }
@@ -485,9 +498,9 @@ mod tests {
     #[test]
     fn note_on_velocity_zero_treated_as_note_off() {
         let mut h = make_keyboard();
-        h.as_midi_receiver().unwrap().receive_midi(note_on(60, 100));
+        send_midi(&mut h, &[note_on(60, 100)]);
         h.tick();
-        h.as_midi_receiver().unwrap().receive_midi(MidiEvent { bytes: [0x90, 60, 0] });
+        send_midi(&mut h, &[MidiEvent { bytes: [0x90, 60, 0] }]);
         h.tick();
         assert_eq!(h.read_mono("gate"),    0.0, "NoteOn vel=0 should drop gate");
         assert_eq!(h.read_mono("trigger"), 0.0, "NoteOn vel=0 should not fire trigger");

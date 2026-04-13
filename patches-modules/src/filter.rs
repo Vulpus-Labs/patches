@@ -593,7 +593,7 @@ mod tests {
     fn make_lowpass(cutoff_voct: f32, resonance: f32, sr: f32) -> ModuleHarness {
         let mut h = ModuleHarness::build_with_env::<ResonantLowpass>(
             params!["cutoff" => cutoff_voct, "resonance" => resonance],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         h.disconnect_inputs(&["voct", "fm", "resonance_cv"]);
         h
@@ -602,7 +602,7 @@ mod tests {
     fn make_highpass(cutoff_voct: f32, resonance: f32, sr: f32) -> ModuleHarness {
         let mut h = ModuleHarness::build_with_env::<ResonantHighpass>(
             params!["cutoff" => cutoff_voct, "resonance" => resonance],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         h.disconnect_inputs(&["voct", "fm", "resonance_cv"]);
         h
@@ -611,7 +611,7 @@ mod tests {
     fn make_bandpass(center_voct: f32, bandwidth_q: f32, sr: f32) -> ModuleHarness {
         let mut h = ModuleHarness::build_with_env::<ResonantBandpass>(
             params!["center" => center_voct, "bandwidth_q" => bandwidth_q],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         h.disconnect_inputs(&["voct", "fm", "resonance_cv"]);
         h
@@ -683,7 +683,7 @@ mod tests {
         let mut no_cv = make_lowpass(base_cutoff, 0.0, sr);
         let mut with_cv = ModuleHarness::build_with_env::<ResonantLowpass>(
             params!["cutoff" => base_cutoff, "resonance" => 0.0_f32],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
 
         // Settle with_cv with +1V/oct offset on voct.
@@ -784,7 +784,7 @@ mod tests {
         let mut no_cv = make_highpass(base_cutoff, 0.0, sr);
         let mut with_cv = ModuleHarness::build_with_env::<ResonantHighpass>(
             params!["cutoff" => base_cutoff, "resonance" => 0.0_f32],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         with_cv.set_mono("voct", 1.0);
         with_cv.set_mono("resonance_cv", 0.0);
@@ -869,7 +869,7 @@ mod tests {
         let mut no_cv = make_bandpass(base_center, 3.0, sr);
         let mut with_cv = ModuleHarness::build_with_env::<ResonantBandpass>(
             params!["center" => base_center, "bandwidth_q" => 3.0_f32],
-            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         with_cv.set_mono("voct", 1.0);
         with_cv.set_mono("resonance_cv", 0.0);

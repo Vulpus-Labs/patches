@@ -1,9 +1,7 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoOutput, ModuleShape, OutputPort, PolyInput,
-    GLOBAL_TRANSPORT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT,
-    TRANSPORT_BAR, TRANSPORT_BEAT_TRIGGER, TRANSPORT_BAR_TRIGGER,
-    TRANSPORT_TSIG_NUM, TRANSPORT_TSIG_DENOM,
+    MonoOutput, ModuleShape, OutputPort, PolyInput, TransportFrame,
+    GLOBAL_TRANSPORT,
 };
 use patches_core::parameter_map::ParameterMap;
 
@@ -105,14 +103,14 @@ impl Module for HostTransport {
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let lanes = pool.read_poly(&self.transport_in);
-        pool.write_mono(&self.out_playing, lanes[TRANSPORT_PLAYING]);
-        pool.write_mono(&self.out_tempo, lanes[TRANSPORT_TEMPO]);
-        pool.write_mono(&self.out_beat, lanes[TRANSPORT_BEAT]);
-        pool.write_mono(&self.out_bar, lanes[TRANSPORT_BAR]);
-        pool.write_mono(&self.out_beat_trigger, lanes[TRANSPORT_BEAT_TRIGGER]);
-        pool.write_mono(&self.out_bar_trigger, lanes[TRANSPORT_BAR_TRIGGER]);
-        pool.write_mono(&self.out_tsig_num, lanes[TRANSPORT_TSIG_NUM]);
-        pool.write_mono(&self.out_tsig_denom, lanes[TRANSPORT_TSIG_DENOM]);
+        pool.write_mono(&self.out_playing, TransportFrame::playing_raw(&lanes));
+        pool.write_mono(&self.out_tempo, TransportFrame::tempo(&lanes));
+        pool.write_mono(&self.out_beat, TransportFrame::beat(&lanes));
+        pool.write_mono(&self.out_bar, TransportFrame::bar(&lanes));
+        pool.write_mono(&self.out_beat_trigger, TransportFrame::beat_trigger(&lanes));
+        pool.write_mono(&self.out_bar_trigger, TransportFrame::bar_trigger(&lanes));
+        pool.write_mono(&self.out_tsig_num, TransportFrame::tsig_num(&lanes));
+        pool.write_mono(&self.out_tsig_denom, TransportFrame::tsig_denom(&lanes));
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -123,7 +121,7 @@ impl Module for HostTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableValue, GLOBAL_TRANSPORT};
+    use patches_core::{CableValue, TransportFrame, GLOBAL_TRANSPORT};
     use patches_core::test_support::ModuleHarness;
 
     #[test]
@@ -131,14 +129,14 @@ mod tests {
         let mut h = ModuleHarness::build::<HostTransport>(&[]);
 
         let mut lanes = [0.0f32; 16];
-        lanes[TRANSPORT_PLAYING] = 1.0;
-        lanes[TRANSPORT_TEMPO] = 120.0;
-        lanes[TRANSPORT_BEAT] = 2.5;
-        lanes[TRANSPORT_BAR] = 3.0;
-        lanes[TRANSPORT_BEAT_TRIGGER] = 1.0;
-        lanes[TRANSPORT_BAR_TRIGGER] = 0.0;
-        lanes[TRANSPORT_TSIG_NUM] = 4.0;
-        lanes[TRANSPORT_TSIG_DENOM] = 4.0;
+        TransportFrame::set_playing(&mut lanes, true);
+        TransportFrame::set_tempo(&mut lanes, 120.0);
+        TransportFrame::set_beat(&mut lanes, 2.5);
+        TransportFrame::set_bar(&mut lanes, 3.0);
+        TransportFrame::set_beat_trigger(&mut lanes, 1.0);
+        TransportFrame::set_bar_trigger(&mut lanes, 0.0);
+        TransportFrame::set_tsig_num(&mut lanes, 4.0);
+        TransportFrame::set_tsig_denom(&mut lanes, 4.0);
         h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
         h.tick();
 

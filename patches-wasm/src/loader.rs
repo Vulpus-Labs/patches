@@ -395,10 +395,6 @@ impl Module for WasmModule {
         self
     }
 
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn patches_core::ReceivesMidi> {
-        None
-    }
-
     fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
         if self.supports_periodic {
             Some(self)

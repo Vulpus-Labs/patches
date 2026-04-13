@@ -688,7 +688,7 @@ mod tests {
     }
 
     fn env() -> AudioEnvironment {
-        AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 }
+        AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
     }
 
     /// Build a ParameterMap with indexed entries.

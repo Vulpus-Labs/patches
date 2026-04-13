@@ -16,6 +16,8 @@ use patches_dsp::xorshift64;
 /// The `sync` input resets the phase to 0 on each rising edge (transition from <= 0 to > 0).
 /// The `rate_cv` input adds an offset in Hz to the base `rate` parameter; the result is
 /// clamped to [0.001, 40.0] Hz before use.
+/// The `sync_ms` input, when connected, fully overrides the rate parameter by treating
+/// the value as a period in milliseconds (converted to Hz internally).
 ///
 /// # Inputs
 ///
@@ -23,6 +25,7 @@ use patches_dsp::xorshift64;
 /// |------|------|-------------|
 /// | `sync` | mono | Rising-edge sync resets phase to 0 |
 /// | `rate_cv` | mono | Additive rate offset in Hz |
+/// | `sync_ms` | mono | When connected, overrides rate with period in ms |
 ///
 /// # Outputs
 ///
@@ -56,6 +59,7 @@ pub struct Lfo {
     // Input port fields
     in_sync: TriggerInput,
     in_rate_cv: MonoInput,
+    in_sync_ms: MonoInput,
     // Output port fields
     out_sine: MonoOutput,
     out_triangle: MonoOutput,
@@ -85,6 +89,7 @@ impl Module for Lfo {
         ModuleDescriptor::new("Lfo", shape.clone())
             .mono_in("sync")
             .mono_in("rate_cv")
+            .mono_in("sync_ms")
             .mono_out("sine")
             .mono_out("triangle")
             .mono_out("saw_up")
@@ -111,6 +116,7 @@ impl Module for Lfo {
             random_value: 0.0,
             in_sync: TriggerInput::default(),
             in_rate_cv: MonoInput::default(),
+            in_sync_ms: MonoInput::default(),
             out_sine: MonoOutput::default(),
             out_triangle: MonoOutput::default(),
             out_saw_up: MonoOutput::default(),
@@ -149,6 +155,7 @@ impl Module for Lfo {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_sync = TriggerInput::from_ports(inputs, 0);
         self.in_rate_cv = MonoInput::from_ports(inputs, 1);
+        self.in_sync_ms = MonoInput::from_ports(inputs, 2);
         self.out_sine = MonoOutput::from_ports(outputs, 0);
         self.out_triangle = MonoOutput::from_ports(outputs, 1);
         self.out_saw_up = MonoOutput::from_ports(outputs, 2);
@@ -163,8 +170,11 @@ impl Module for Lfo {
             self.phase = 0.0;
         }
 
-        // Rate CV: recompute increment per-sample when connected.
-        let increment = if self.in_rate_cv.is_connected() {
+        // sync_ms overrides rate entirely when connected (ms → Hz).
+        let increment = if self.in_sync_ms.is_connected() {
+            let ms = pool.read_mono(&self.in_sync_ms).max(0.01);
+            (1000.0 / ms).clamp(0.001, 40.0) / self.sample_rate
+        } else if self.in_rate_cv.is_connected() {
             (self.rate + pool.read_mono(&self.in_rate_cv)).clamp(0.001, 40.0) / self.sample_rate
         } else {
             self.phase_increment
@@ -214,7 +224,7 @@ mod tests {
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 
     fn env(sample_rate: f32) -> AudioEnvironment {
-        AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32 }
+        AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false }
     }
 
     fn make_lfo(rate: f32, sample_rate: f32) -> ModuleHarness {
@@ -228,11 +238,13 @@ mod tests {
     }
 
     fn make_lfo_with_cv(rate: f32, sample_rate: f32) -> ModuleHarness {
-        // All ports connected (harness default).
-        ModuleHarness::build_with_env::<Lfo>(
+        let mut h = ModuleHarness::build_with_env::<Lfo>(
             params!["rate" => rate],
             env(sample_rate),
-        )
+        );
+        // sync_ms not used in most CV tests — disconnect to avoid overriding rate.
+        h.disconnect_input("sync_ms");
+        h
     }
 
     #[test]
@@ -429,5 +441,28 @@ mod tests {
             (second - first).abs() > 1e-10,
             "rate_cv=-1000 clamped to minimum should still advance phase; got first={first}, second={second}"
         );
+    }
+
+    #[test]
+    fn sync_ms_overrides_rate() {
+        // sync_ms = 500 ms → 2 Hz.  At sample_rate 200, period = 100 samples.
+        let sample_rate = 200.0_f32;
+        let mut h = ModuleHarness::build_with_env::<Lfo>(
+            params!["rate" => 10.0_f32], // rate param is 10 Hz, but sync_ms overrides
+            env(sample_rate),
+        );
+        h.set_mono("sync", 0.0);
+        h.set_mono("rate_cv", 0.0);
+        h.set_mono("sync_ms", 500.0); // 500 ms → 2 Hz
+
+        let cycle1 = h.run_mono(100, "sine");
+        let cycle2 = h.run_mono(100, "sine");
+
+        for (i, (a, b)) in cycle1.iter().zip(cycle2.iter()).enumerate() {
+            assert!(
+                (*a - *b).abs() < 1e-4,
+                "sync_ms=500 should give 100-sample period; mismatch at {i}: {a} vs {b}"
+            );
+        }
     }
 }

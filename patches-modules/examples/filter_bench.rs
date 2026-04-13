@@ -72,7 +72,7 @@ fn time_process(module: &mut dyn Module, pool: &mut Vec<[CableValue; 2]>, n: u64
 // ── PolyLowpass bench ─────────────────────────────────────────────────────
 
 fn bench_poly_lowpass(saturate: bool) {
-    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32 };
+    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let mut params = ParameterMap::new();
     params.insert("cutoff".to_string(), patches_core::ParameterValue::Float(6.0));
     params.insert("resonance".to_string(), patches_core::ParameterValue::Float(0.5));
@@ -112,7 +112,7 @@ fn bench_poly_lowpass(saturate: bool) {
 // ── PolySvf bench ─────────────────────────────────────────────────────────
 
 fn bench_poly_svf() {
-    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32 };
+    let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let mut params = ParameterMap::new();
     params.insert("cutoff".to_string(), patches_core::ParameterValue::Float(6.0));
     params.insert("q".to_string(), patches_core::ParameterValue::Float(0.5));

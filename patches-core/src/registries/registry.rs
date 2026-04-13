@@ -175,7 +175,7 @@ mod tests {
 
         let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
         let params = ParameterMap::new();
-        let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 };
+        let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
         let module = registry.create("TestModule", &audio_environment, &shape, &params, InstanceId::next()).unwrap();
 
         assert_eq!(module.descriptor().module_name, "TestModule");

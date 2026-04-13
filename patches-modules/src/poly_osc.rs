@@ -277,7 +277,7 @@ mod tests {
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 
     fn env(sample_rate: f32, voices: usize) -> AudioEnvironment {
-        AudioEnvironment { sample_rate, poly_voices: voices, periodic_update_interval: 32 }
+        AudioEnvironment { sample_rate, poly_voices: voices, periodic_update_interval: 32, hosted: false }
     }
 
     /// Build a harness with all CV inputs disconnected. Most tests don't need modulation.

@@ -30,6 +30,7 @@ fn default_env() -> AudioEnvironment {
         sample_rate: 48000.0,
         poly_voices: 16,
         periodic_update_interval: 32,
+        hosted: false,
     }
 }
 

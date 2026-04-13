@@ -8,7 +8,6 @@ use crate::cables::{
 use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue};
 use crate::COEFF_UPDATE_INTERVAL;
 use crate::modules::parameter_map::ParameterMap;
-use crate::ReceivesMidi;
 
 /// A single-module test fixture that owns the module and its cable pool, derives
 /// port-to-cable assignments from the descriptor, and exposes a named-port interface.
@@ -135,6 +134,7 @@ impl ModuleHarness {
         pool[POLY_READ_SINK]  = [CableValue::Poly([0.0; 16]); 2];
         pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
         pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]); 2];
+        pool[crate::cables::GLOBAL_MIDI] = [CableValue::Poly([0.0; 16]); 2];
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
@@ -171,11 +171,6 @@ impl ModuleHarness {
     /// Return a reference to the module's descriptor.
     pub fn descriptor(&self) -> &crate::modules::ModuleDescriptor {
         self.module.descriptor()
-    }
-
-    /// Return the module's MIDI receiver if it implements `ReceivesMidi`.
-    pub fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> {
-        self.module.as_midi_receiver()
     }
 
     /// Return the module's tracker-data receiver if it implements `ReceivesTrackerData`.

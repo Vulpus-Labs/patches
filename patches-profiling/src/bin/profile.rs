@@ -61,6 +61,7 @@ fn main() {
         sample_rate: SAMPLE_RATE,
         poly_voices: 16,
         periodic_update_interval: patches_core::BASE_PERIODIC_UPDATE_INTERVAL * OVERSAMPLING_FACTOR as u32,
+        hosted: false,
     };
     let build_result = patches_interpreter::build(&result.patch, &registry, &env).unwrap_or_else(|e| {
         eprintln!("interpreter error: {e}");

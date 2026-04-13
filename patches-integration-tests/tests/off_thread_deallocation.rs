@@ -78,7 +78,7 @@ impl Module for ThreadIdDropSpy {
 
 const POOL_CAP: usize = 256;
 const MODULE_CAP: usize = 64;
-const ENV: AudioEnvironment = AudioEnvironment { sample_rate: 48_000.0, poly_voices: 16, periodic_update_interval: 32 };
+const ENV: AudioEnvironment = AudioEnvironment { sample_rate: 48_000.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
 
 fn sine_out_graph() -> patches_core::ModuleGraph {
     use patches_core::{ModuleGraph, NodeId, PortRef};

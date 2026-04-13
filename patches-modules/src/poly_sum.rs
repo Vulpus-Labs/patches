@@ -83,7 +83,7 @@ mod tests {
     fn two_inputs_summed_per_voice() {
         let mut h = ModuleHarness::build_full::<PolySum>(
             &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 4, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 4, periodic_update_interval: 32, hosted: false },
             ModuleShape { channels: 2, length: 0, ..Default::default() },
         );
 

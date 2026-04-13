@@ -1,7 +1,7 @@
 use std::thread;
 use std::time::Duration;
 
-use patches_core::{CableValue, GLOBAL_TRANSPORT, POLY_READ_SINK, POLY_WRITE_SINK};
+use patches_core::{CableValue, GLOBAL_MIDI, GLOBAL_TRANSPORT, POLY_READ_SINK, POLY_WRITE_SINK};
 
 use crate::engine::CleanupAction;
 
@@ -16,6 +16,7 @@ pub fn init_buffer_pool(capacity: usize) -> Box<[[CableValue; 2]]> {
     pool[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
     pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
     pool[GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+    pool[GLOBAL_MIDI] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
     pool
 }
 

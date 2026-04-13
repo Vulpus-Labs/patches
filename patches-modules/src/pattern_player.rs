@@ -29,6 +29,8 @@ use patches_core::parameter_map::ParameterMap;
 /// | 1 | pattern bank index | float-encoded integer (−1 = stop sentinel) |
 /// | 2 | tick trigger | 1.0 on each step |
 /// | 3 | tick duration | seconds per tick |
+/// | 4 | step index | absolute step within pattern (0-based) |
+/// | 5 | step fraction | fractional position within step (0.0..1.0) |
 ///
 /// # Outputs
 ///
@@ -111,7 +113,7 @@ impl PatternPlayer {
         self.stopped = true;
     }
 
-    fn apply_step(&mut self, channel: usize, bank_index: usize) {
+    fn apply_step(&mut self, channel: usize, bank_index: usize, step_fraction: f32) {
         let Some(ref data) = self.tracker_data else { return };
         let Some(pattern) = data.patterns.patterns.get(bank_index) else { return };
 
@@ -146,10 +148,11 @@ impl PatternPlayer {
         }
 
         // Normal step with trigger
-        self.cv1[channel] = step.cv1;
-        self.cv2[channel] = step.cv2;
         self.gate[channel] = true;
         self.trigger_pending[channel] = true;
+
+        // Pre-advance amount in samples for mid-step seeks.
+        let elapsed_samples = step_fraction * self.current_tick_duration_samples;
 
         // Check for slides
         if step.cv1_end.is_some() || step.cv2_end.is_some() {
@@ -159,23 +162,39 @@ impl PatternPlayer {
             self.slide_cv2_start[channel] = step.cv2;
             self.slide_cv2_end[channel] = step.cv2_end.unwrap_or(step.cv2);
             self.slide_samples_total[channel] = self.current_tick_duration_samples;
-            self.slide_samples_elapsed[channel] = 0.0;
+            self.slide_samples_elapsed[channel] = elapsed_samples;
+            // Set cv to the interpolated position at step_fraction.
+            let t = if self.current_tick_duration_samples > 0.0 {
+                (elapsed_samples / self.current_tick_duration_samples).min(1.0)
+            } else {
+                0.0
+            };
+            self.cv1[channel] = step.cv1 + t * (step.cv1_end.unwrap_or(step.cv1) - step.cv1);
+            self.cv2[channel] = step.cv2 + t * (step.cv2_end.unwrap_or(step.cv2) - step.cv2);
         } else {
             self.slide_active[channel] = false;
+            self.cv1[channel] = step.cv1;
+            self.cv2[channel] = step.cv2;
         }
 
         // Check for repeats
         if step.repeat > 1 {
             self.repeat_active[channel] = true;
             self.repeat_count[channel] = step.repeat;
-            self.repeat_index[channel] = 1; // first trigger already fired
             let interval =
                 self.current_tick_duration_samples / step.repeat as f32;
             self.repeat_interval_samples[channel] = interval;
-            self.repeat_samples_elapsed[channel] = 0.0;
-            // Gate-off at 80% of the first sub-interval so the ADSR releases
-            // briefly before the next sub-trigger.
-            self.repeat_gate_off_at[channel] = interval * 0.8;
+            self.repeat_samples_elapsed[channel] = elapsed_samples;
+            // Skip past repeat pulses that have already elapsed.
+            let repeat_idx = if interval > 0.0 {
+                ((elapsed_samples / interval).floor() as u8 + 1).min(step.repeat)
+            } else {
+                1
+            };
+            self.repeat_index[channel] = repeat_idx;
+            // Schedule gate-off relative to the most recent sub-trigger.
+            let last_trigger_at = (repeat_idx.saturating_sub(1)) as f32 * interval;
+            self.repeat_gate_off_at[channel] = last_trigger_at + interval * 0.8;
         } else {
             self.repeat_active[channel] = false;
             self.repeat_gate_off_at[channel] = f32::MAX;
@@ -258,7 +277,6 @@ impl Module for PatternPlayer {
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let clock = pool.read_poly(&self.clock_in);
-        let pattern_reset = clock[0];
         let bank_index_f = clock[1];
         let tick_trigger = clock[2];
         let tick_duration_secs = clock[3];
@@ -276,20 +294,16 @@ impl Module for PatternPlayer {
                 self.current_bank_index = Some(bank_index);
                 self.current_tick_duration_samples = tick_duration_secs * self.sample_rate;
 
-                // Handle pattern reset
-                if pattern_reset >= 0.5 {
-                    for i in 0..self.channels {
-                        self.step_index[i] = 0;
-                    }
-                } else {
-                    for i in 0..self.channels {
-                        self.step_index[i] += 1;
-                    }
+                // Use absolute step index from bus[4].
+                let step_index = clock[4].round() as usize;
+                let step_fraction = clock[5];
+                for i in 0..self.channels {
+                    self.step_index[i] = step_index;
                 }
 
                 // Apply step data for each channel
                 for ch in 0..self.channels {
-                    self.apply_step(ch, bank_index);
+                    self.apply_step(ch, bank_index, step_fraction);
                 }
             }
         } else if !self.stopped {
@@ -385,6 +399,7 @@ mod tests {
         sample_rate: SR,
         poly_voices: 16,
         periodic_update_interval: 32,
+        hosted: false,
     };
 
     fn shape(channels: usize) -> ModuleShape {
@@ -477,7 +492,7 @@ mod tests {
         player.prev_tick_trigger = 0.0;
         player.current_tick_duration_samples = 0.125 * SR;
         player.step_index[0] = 0;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
 
         assert_eq!(player.cv1[0], 1.0, "cv1 should be 1.0 at step 0");
         assert_eq!(player.cv2[0], 0.5, "cv2 should be 0.5 at step 0");
@@ -486,7 +501,7 @@ mod tests {
 
         // Step 1
         player.step_index[0] = 1;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
         assert_eq!(player.cv1[0], 2.0);
         assert_eq!(player.cv2[0], 0.8);
         assert!(player.gate[0]);
@@ -494,7 +509,7 @@ mod tests {
 
         // Step 2 (rest)
         player.step_index[0] = 2;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
         assert!(!player.gate[0], "gate should be low at rest");
         assert!(!player.trigger_pending[0], "no trigger at rest");
     }
@@ -525,14 +540,14 @@ mod tests {
 
         // Step 0: note
         player.step_index[0] = 0;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
         assert_eq!(player.cv1[0], 3.0);
         assert!(player.gate[0]);
         assert!(player.trigger_pending[0]);
 
         // Step 1: tie — gate stays high, no trigger, cv carries over
         player.step_index[0] = 1;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
         assert!(player.gate[0], "tie should keep gate high");
         assert!(!player.trigger_pending[0], "tie should not trigger");
         assert_eq!(player.cv1[0], 3.0, "cv should carry over on tie");
@@ -562,7 +577,7 @@ mod tests {
         // Set tick duration to 100 samples for easy testing
         player.current_tick_duration_samples = 100.0;
         player.step_index[0] = 0;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
 
         assert!(player.slide_active[0], "slide should be active");
         assert_eq!(player.slide_cv1_start[0], 0.0);
@@ -601,7 +616,7 @@ mod tests {
 
         player.current_tick_duration_samples = 300.0;
         player.step_index[0] = 0;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
 
         assert!(player.repeat_active[0]);
         assert_eq!(player.repeat_count[0], 3);
@@ -657,7 +672,7 @@ mod tests {
         player.current_tick_duration_samples = 100.0;
 
         player.step_index[0] = 0;
-        player.apply_step(0, 0);
+        player.apply_step(0, 0, 0.0);
         assert_eq!(player.cv1[0], 1.0, "channel 0 should get its data");
     }
 
@@ -686,8 +701,8 @@ mod tests {
 
         player.step_index[0] = 0;
         player.step_index[1] = 0;
-        player.apply_step(0, 0);
-        player.apply_step(1, 0);
+        player.apply_step(0, 0, 0.0);
+        player.apply_step(1, 0, 0.0);
 
         assert_eq!(player.cv1[0], 1.0, "channel 0 should have data");
         assert!(!player.gate[1], "surplus channel should be silent");

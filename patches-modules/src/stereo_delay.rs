@@ -352,7 +352,7 @@ mod tests {
     use patches_core::test_support::{ModuleHarness, params};
 
     const SR: f32 = 44_100.0;
-    const ENV: AudioEnvironment = AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32 };
+    const ENV: AudioEnvironment = AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false };
 
     fn shape(taps: usize) -> ModuleShape {
         ModuleShape { channels: taps, length: 0, ..Default::default() }

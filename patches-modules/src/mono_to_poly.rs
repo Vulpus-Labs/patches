@@ -74,7 +74,7 @@ mod tests {
     fn broadcasts_mono_value_to_all_channels() {
         let mut h = ModuleHarness::build_with_env::<MonoToPoly>(
             &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         h.set_mono("in", 0.75);
         h.tick();
@@ -88,7 +88,7 @@ mod tests {
     fn disconnected_input_broadcasts_zero() {
         let mut h = ModuleHarness::build_with_env::<MonoToPoly>(
             &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         );
         h.disconnect_input("in");
         h.tick();

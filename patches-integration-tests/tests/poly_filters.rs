@@ -25,7 +25,7 @@ const MODULE_CAP: usize = 32;
 const SAMPLE_RATE: f32 = 44_100.0;
 
 fn env() -> AudioEnvironment {
-    AudioEnvironment { sample_rate: SAMPLE_RATE, poly_voices: 16, periodic_update_interval: 32 }
+    AudioEnvironment { sample_rate: SAMPLE_RATE, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
 fn p(name: &'static str) -> PortRef {

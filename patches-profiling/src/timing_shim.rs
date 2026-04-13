@@ -75,10 +75,6 @@ impl Module for TimingShim {
         self
     }
 
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn patches_core::midi::ReceivesMidi> {
-        self.inner.as_midi_receiver()
-    }
-
     fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
         if self.inner.as_periodic().is_some() {
             Some(self)

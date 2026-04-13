@@ -566,7 +566,7 @@ mod tests {
         r.register::<PolyResonantLowpass>();
         r.create(
             "PolyLowpass",
-            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             &ModuleShape { channels: 0, length: 0, ..Default::default() },
             &params,
             InstanceId::next(),
@@ -582,7 +582,7 @@ mod tests {
         r.register::<PolyResonantHighpass>();
         r.create(
             "PolyHighpass",
-            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             &ModuleShape { channels: 0, length: 0, ..Default::default() },
             &params,
             InstanceId::next(),
@@ -598,7 +598,7 @@ mod tests {
         r.register::<PolyResonantBandpass>();
         r.create(
             "PolyBandpass",
-            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32 },
+            &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
             &ModuleShape { channels: 0, length: 0, ..Default::default() },
             &params,
             InstanceId::next(),

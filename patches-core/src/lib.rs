@@ -17,6 +17,7 @@ pub mod audio_environment;
 pub mod build_error;
 pub mod cable_pool;
 pub mod cables;
+pub mod frames;
 pub mod graphs;
 pub mod midi;
 pub mod modules;
@@ -32,13 +33,9 @@ pub use audio_environment::AudioEnvironment;
 pub use cable_pool::CablePool;
 pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
-pub use cables::{
-    TRANSPORT_SAMPLE_COUNT, TRANSPORT_PLAYING, TRANSPORT_TEMPO, TRANSPORT_BEAT,
-    TRANSPORT_BAR, TRANSPORT_BEAT_TRIGGER, TRANSPORT_BAR_TRIGGER,
-    TRANSPORT_TSIG_NUM, TRANSPORT_TSIG_DENOM,
-};
+pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, NodeId};
-pub use midi::{MidiEvent, ReceivesMidi};
+pub use midi::MidiEvent;
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
 pub use tracker::Step as TrackerStep;
 pub use modules::{validate_parameters, Module, PeriodicUpdate, PortConnectivity};
@@ -55,5 +52,5 @@ pub use graphs::planner::{
     BufferAllocState, BufferAllocation, GraphIndex, ModuleAllocState, NodeDecision, NodeState,
     PlanDecisions, PlanError, PlannerState, ResolvedGraph,
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
-    AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT,
+    AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };

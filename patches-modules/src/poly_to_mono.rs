@@ -74,7 +74,7 @@ mod tests {
     fn make_collapse(poly_voices: usize) -> ModuleHarness {
         ModuleHarness::build_with_env::<PolyToMono>(
             &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices, periodic_update_interval: 32 },
+            AudioEnvironment { sample_rate: 44100.0, poly_voices, periodic_update_interval: 32, hosted: false },
         )
     }
 
