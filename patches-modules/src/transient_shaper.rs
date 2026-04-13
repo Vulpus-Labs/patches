@@ -198,16 +198,29 @@ mod tests {
     }
 
     #[test]
-    fn output_stays_finite_under_extreme_settings() {
+    fn output_stays_bounded_under_extreme_settings() {
         let mut h = ModuleHarness::build::<TransientShaper>(
             params!["attack" => 1.0_f32, "sustain" => 1.0_f32, "speed" => 1.0_f32, "mix" => 1.0_f32],
         );
+        // Bound: the shaper is a gain modulator on |input|; with input ∈ {0, 1}
+        // and full attack+sustain boost, output magnitude should stay within a
+        // small multiple of the peak input. A loose finite-only check would
+        // accept ±1e30; assert a real envelope here.
+        const MAX_GAIN: f32 = 8.0;
+        let mut max_seen = 0.0_f32;
         for i in 0..1000 {
             let x = if i < 10 { 1.0 } else { 0.0 };
             h.set_mono("in", x);
             h.tick();
             let out = h.read_mono("out");
             assert!(out.is_finite(), "non-finite output at sample {i}");
+            assert!(
+                out.abs() <= MAX_GAIN,
+                "output {out} at sample {i} exceeds bound {MAX_GAIN}"
+            );
+            max_seen = max_seen.max(out.abs());
         }
+        // Sanity: with attack=1.0 the burst must produce some boost above input.
+        assert!(max_seen > 1.0, "expected attack boost, peak was {max_seen}");
     }
 }

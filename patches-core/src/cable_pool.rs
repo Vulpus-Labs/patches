@@ -177,10 +177,10 @@ mod tests {
         {
             let mut cp = CablePool::new(&mut pool, 1);
             let output = MonoOutput { cable_idx: 0, connected: true };
-            cp.write_mono(&output, 3.14);
+            cp.write_mono(&output, 2.5);
         }
         match pool[0][1] {
-            CableValue::Mono(v) => assert_eq!(v, 3.14),
+            CableValue::Mono(v) => assert_eq!(v, 2.5),
             _ => panic!("expected CableValue::Mono at write index"),
         }
     }

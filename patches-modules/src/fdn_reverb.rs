@@ -618,8 +618,9 @@ mod tests {
         assert!(names.contains(&"character"));
     }
 
-    /// An impulse sent through every character produces non-zero, finite output
-    /// that decays to near-zero within twice the expected RT60.
+    /// An impulse through every character: output stays bounded, is non-zero,
+    /// and the late tail has lower RMS than the early tail (proper decay,
+    /// not divergence or sustain).
     #[test]
     fn impulse_decays_for_all_characters() {
         for char_name in ["plate", "room", "chamber", "hall", "cathedral"] {
@@ -631,18 +632,35 @@ mod tests {
             h.disconnect_input("mix_cv");
             h.disconnect_output("out_right");
 
-            // Send one impulse.
             h.set_mono("in_left", 1.0);
             h.tick();
             h.set_mono("in_left", 0.0);
 
-            // Run for 4096 samples; enough for the signal to travel through pre-delay
-            // and at least one full delay-line pass for all characters (cathedral at
-            // size=0.5 needs ~3074 samples of pre-delay + minimum delay line).
-            let warmup: Vec<f32> = (0..4096).map(|_| { h.tick(); h.read_mono("out_left") }).collect();
-            let peak = warmup.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
+            // 32k samples ≈ 0.74 s — enough for cathedral pre-delay plus
+            // multiple delay-line passes; long enough to see clear decay.
+            let n = 32_768;
+            let out: Vec<f32> = (0..n).map(|_| { h.tick(); h.read_mono("out_left") }).collect();
+
+            let peak = out.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
             assert!(peak.is_finite(), "character={char_name}: non-finite output");
             assert!(peak > 0.0, "character={char_name}: zero output after impulse");
+            // Bounded response: with mix=0.5 and a unit impulse, output must
+            // not exceed unity by more than a small headroom; runaway feedback
+            // would blow past this.
+            assert!(
+                peak < 2.0,
+                "character={char_name}: peak {peak} exceeds bounded-response limit"
+            );
+
+            // Decay check: RMS of the last quarter must be measurably smaller
+            // than RMS of the first quarter after the pre-delay region.
+            let q = n / 4;
+            let early: f32 = out[q..2 * q].iter().map(|v| v * v).sum::<f32>() / q as f32;
+            let late: f32 = out[3 * q..].iter().map(|v| v * v).sum::<f32>() / q as f32;
+            assert!(
+                early > 0.0 && late < early * 0.5,
+                "character={char_name}: late RMS² ({late:.6e}) must be < 50% of early RMS² ({early:.6e}) — no decay"
+            );
         }
     }
 
@@ -658,14 +676,31 @@ mod tests {
         h.disconnect_input("mix_cv");
         h.disconnect_output("out_right");
 
-        h.set_mono("in_left", 0.1);
-        // Run 4096 samples and collect to check all outputs are finite.
+        let dc = 0.1_f32;
+        h.set_mono("in_left", dc);
         let outputs: Vec<f32> = (0..4096).map(|_| { h.tick(); h.read_mono("out_left") }).collect();
         for (i, &v) in outputs.iter().enumerate() {
             assert!(v.is_finite(), "output[{i}] is not finite: {v}");
         }
         let max_out = outputs.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
         assert!(max_out > 0.0, "DC input produced no output");
+        // A passive reverb driven by DC=0.1 must not amplify beyond a small
+        // multiple of the input — guards against unstable feedback gain.
+        assert!(
+            max_out < dc * 10.0,
+            "DC input {dc} produced unbounded output {max_out}"
+        );
+        // Steady state: last 256 samples should have small variance compared
+        // to a comparable input excursion (system has settled, not oscillating
+        // wildly).
+        let tail = &outputs[outputs.len() - 256..];
+        let mean = tail.iter().sum::<f32>() / tail.len() as f32;
+        let var = tail.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / tail.len() as f32;
+        assert!(
+            var < (dc * dc),
+            "DC steady-state variance {var:.6} too large vs input² {:.6}",
+            dc * dc
+        );
     }
 
     /// In mono mode (out_r disconnected), out_r's pool slot is never written.

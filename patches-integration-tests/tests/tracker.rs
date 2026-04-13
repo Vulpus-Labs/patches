@@ -66,19 +66,23 @@ fn tracker_basic_round_trip() {
     //
     // There's a 2-sample pipeline delay (1-sample cable delay × 2 hops:
     // MasterSequencer → PatternPlayer → AudioOut).
-    let mut saw_trigger = false;
-    for _ in 0..5 {
-        engine.tick();
-        if engine.last_left() >= 0.5 {
-            saw_trigger = true;
-            break;
-        }
-    }
-    assert!(saw_trigger, "first step 'x' should trigger within pipeline delay");
-
-    // After the trigger sample, it should be 0.0 (one-sample pulse).
-    engine.tick();
-    assert_eq!(engine.last_left(), 0.0, "trigger is a one-sample pulse");
+    // Collect a window covering the pipeline delay; assert the trigger is a
+    // single-sample pulse at a deterministic position (not "somewhere within").
+    let window: Vec<f32> = (0..6).map(|_| { engine.tick(); engine.last_left() }).collect();
+    let high: Vec<usize> = window.iter().enumerate()
+        .filter_map(|(i, &v)| if v >= 0.5 { Some(i) } else { None })
+        .collect();
+    assert_eq!(
+        high.len(), 1,
+        "expected exactly one trigger sample in window, got {high:?} (window={window:?})"
+    );
+    let idx = high[0];
+    assert!(
+        idx <= 4,
+        "trigger sample at {idx} too late; pipeline delay is 2 samples (window={window:?})"
+    );
+    // Sample just after the pulse must be exactly 0.0 (one-sample pulse).
+    assert_eq!(window[idx + 1], 0.0, "pulse at {idx} bled into next sample");
 }
 
 /// Verify that the tracker pipeline builds and runs without panicking with
@@ -141,34 +145,14 @@ patch {
 "#;
     let mut engine = build_engine(src);
 
-    // There's a 2-sample pipeline delay: MasterSequencer writes clock at sample 0,
-    // PatternPlayer reads it at sample 1 and writes trigger, AudioOut reads at sample 2.
+    // 2-sample pipeline delay (MasterSequencer → PatternPlayer → AudioOut).
     let tick_samples = (44100.0 * 60.0 / (120.0 * 4.0)) as usize;
 
-    // Tick a few samples to get past the pipeline delay.
-    for _ in 0..3 {
-        engine.tick();
-    }
-    // By sample 2, the first trigger should have appeared on out.in_right.
-    // Check that we saw a trigger in the first few samples.
-    let trigger_first = engine.last_right();
-    // The trigger is a 1-sample pulse, so check the pipeline produced it.
-    // We may need to scan a small window.
-    let mut saw_trigger = trigger_first >= 0.5;
-    // Also check cv1 for a_pat step 0 = 0.0 (x)
-    let _cv1_first = engine.last_left();
-
-    if !saw_trigger {
-        // Trigger might have been on sample 1 or 2
-        for _ in 0..3 {
-            engine.tick();
-            if engine.last_right() >= 0.5 {
-                saw_trigger = true;
-                break;
-            }
-        }
-    }
-    assert!(saw_trigger, "a_pat step 0 should trigger within first few samples");
+    // First trigger: scan a small window, assert exactly one pulse.
+    let win: Vec<f32> = (0..6).map(|_| { engine.tick(); engine.last_right() }).collect();
+    let high: Vec<usize> = win.iter().enumerate()
+        .filter_map(|(i, &v)| if v >= 0.5 { Some(i) } else { None }).collect();
+    assert_eq!(high.len(), 1, "a_pat step 0: expected one trigger pulse, got {high:?}");
 
     // Advance to the second tick boundary (step 1 of a_pat = rest)
     for _ in 0..tick_samples {

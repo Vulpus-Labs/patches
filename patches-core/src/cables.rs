@@ -633,9 +633,9 @@ mod tests {
     fn mono_output_write_round_trip() {
         let mut pool = vec![CableValue::Mono(0.0)];
         let port = MonoOutput { cable_idx: 0, connected: true };
-        port.write(&mut pool, 3.14);
+        port.write(&mut pool, 2.5);
         match pool[0] {
-            CableValue::Mono(v) => assert_eq!(v, 3.14),
+            CableValue::Mono(v) => assert_eq!(v, 2.5),
             _ => panic!("expected CableValue::Mono"),
         }
     }
