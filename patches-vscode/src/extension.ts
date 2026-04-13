@@ -42,7 +42,7 @@ function resolveServerPath(context: vscode.ExtensionContext): string {
   return "patches-lsp";
 }
 
-function isPatchesDoc(doc: vscode.TextDocument | undefined): boolean {
+function isPatchesDoc(doc: vscode.TextDocument | undefined): doc is vscode.TextDocument {
   return !!doc && doc.languageId === "patches";
 }
 
@@ -283,24 +283,25 @@ function ensurePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
 function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("patches.showPatchGraph", async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!isPatchesDoc(editor?.document)) {
+      const doc = vscode.window.activeTextEditor?.document;
+      if (!isPatchesDoc(doc)) {
         void vscode.window.showInformationMessage(
           "Open a .patches file to show the patch graph.",
         );
         return;
       }
       ensurePanel(context);
-      await refreshPanel(editor!.document.uri);
+      await refreshPanel(doc.uri);
     }),
   );
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      if (!graphPanel || !isPatchesDoc(editor?.document)) {
+      const doc = editor?.document;
+      if (!graphPanel || !isPatchesDoc(doc)) {
         return;
       }
-      scheduleRefresh(editor!.document.uri);
+      scheduleRefresh(doc.uri);
     }),
   );
 
