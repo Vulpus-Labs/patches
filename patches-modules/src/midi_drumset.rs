@@ -7,36 +7,36 @@
 ///
 /// # Outputs
 ///
-/// | Port               | Kind | Description                                |
-/// |--------------------|------|--------------------------------------------|
-/// | `trigger_kick`     | mono | 1.0 pulse on note 35 or 36                 |
-/// | `velocity_kick`    | mono | Velocity of last kick note-on (0.0–1.0)    |
-/// | `trigger_snare`    | mono | 1.0 pulse on note 38                       |
-/// | `velocity_snare`   | mono | Velocity of last snare note-on             |
-/// | `trigger_clap`     | mono | 1.0 pulse on note 39                       |
-/// | `velocity_clap`    | mono | Velocity of last clap note-on              |
-/// | `trigger_closed_hh`| mono | 1.0 pulse on note 42                       |
-/// | `velocity_closed_hh`| mono | Velocity of last closed hi-hat note-on    |
-/// | `trigger_pedal_hh` | mono | 1.0 pulse on note 44                       |
-/// | `velocity_pedal_hh`| mono | Velocity of last pedal hi-hat note-on      |
-/// | `trigger_open_hh`  | mono | 1.0 pulse on note 46                       |
-/// | `velocity_open_hh` | mono | Velocity of last open hi-hat note-on       |
-/// | `trigger_tom_low`  | mono | 1.0 pulse on note 41                       |
-/// | `velocity_tom_low` | mono | Velocity of last low tom note-on           |
-/// | `trigger_tom_mid`  | mono | 1.0 pulse on note 45                       |
-/// | `velocity_tom_mid` | mono | Velocity of last mid tom note-on           |
-/// | `trigger_tom_high` | mono | 1.0 pulse on note 48                       |
-/// | `velocity_tom_high`| mono | Velocity of last high tom note-on          |
-/// | `trigger_crash`    | mono | 1.0 pulse on note 49                       |
-/// | `velocity_crash`   | mono | Velocity of last crash note-on             |
-/// | `trigger_ride`     | mono | 1.0 pulse on note 51                       |
-/// | `velocity_ride`    | mono | Velocity of last ride note-on              |
-/// | `trigger_claves`   | mono | 1.0 pulse on note 75                       |
-/// | `velocity_claves`  | mono | Velocity of last claves note-on            |
-/// | `trigger_cowbell`  | mono | 1.0 pulse on note 56                       |
-/// | `velocity_cowbell` | mono | Velocity of last cowbell note-on           |
-/// | `trigger_rimshot`  | mono | 1.0 pulse on note 37                       |
-/// | `velocity_rimshot` | mono | Velocity of last rimshot note-on           |
+/// | Port                 | Kind | Description                                |
+/// |----------------------|------|--------------------------------------------|
+/// | `kick_trigger`       | mono | 1.0 pulse on note 35 or 36                 |
+/// | `kick_velocity`      | mono | Velocity of last kick note-on (0.0–1.0)    |
+/// | `snare_trigger`      | mono | 1.0 pulse on note 38                       |
+/// | `snare_velocity`     | mono | Velocity of last snare note-on             |
+/// | `clap_trigger`       | mono | 1.0 pulse on note 39                       |
+/// | `clap_velocity`      | mono | Velocity of last clap note-on              |
+/// | `closed_hh_trigger`  | mono | 1.0 pulse on note 42                       |
+/// | `closed_hh_velocity` | mono | Velocity of last closed hi-hat note-on     |
+/// | `pedal_hh_trigger`   | mono | 1.0 pulse on note 44                       |
+/// | `pedal_hh_velocity`  | mono | Velocity of last pedal hi-hat note-on      |
+/// | `open_hh_trigger`    | mono | 1.0 pulse on note 46                       |
+/// | `open_hh_velocity`   | mono | Velocity of last open hi-hat note-on       |
+/// | `tom_low_trigger`    | mono | 1.0 pulse on note 41                       |
+/// | `tom_low_velocity`   | mono | Velocity of last low tom note-on           |
+/// | `tom_mid_trigger`    | mono | 1.0 pulse on note 45                       |
+/// | `tom_mid_velocity`   | mono | Velocity of last mid tom note-on           |
+/// | `tom_high_trigger`   | mono | 1.0 pulse on note 48                       |
+/// | `tom_high_velocity`  | mono | Velocity of last high tom note-on          |
+/// | `crash_trigger`      | mono | 1.0 pulse on note 49                       |
+/// | `crash_velocity`     | mono | Velocity of last crash note-on             |
+/// | `ride_trigger`       | mono | 1.0 pulse on note 51                       |
+/// | `ride_velocity`      | mono | Velocity of last ride note-on              |
+/// | `claves_trigger`     | mono | 1.0 pulse on note 75                       |
+/// | `claves_velocity`    | mono | Velocity of last claves note-on            |
+/// | `cowbell_trigger`    | mono | 1.0 pulse on note 56                       |
+/// | `cowbell_velocity`   | mono | Velocity of last cowbell note-on           |
+/// | `rimshot_trigger`    | mono | 1.0 pulse on note 37                       |
+/// | `rimshot_velocity`   | mono | Velocity of last rimshot note-on           |
 ///
 /// # Parameters
 ///
@@ -54,20 +54,20 @@ const NUM_DRUMS: usize = 14;
 
 /// GM drum mapping: (MIDI note, trigger output name, velocity output name).
 const DRUM_MAP: [(u8, &str, &str); NUM_DRUMS] = [
-    (36, "trigger_kick",      "velocity_kick"),
-    (38, "trigger_snare",     "velocity_snare"),
-    (39, "trigger_clap",      "velocity_clap"),
-    (42, "trigger_closed_hh", "velocity_closed_hh"),
-    (44, "trigger_pedal_hh",  "velocity_pedal_hh"),
-    (46, "trigger_open_hh",   "velocity_open_hh"),
-    (41, "trigger_tom_low",   "velocity_tom_low"),
-    (45, "trigger_tom_mid",   "velocity_tom_mid"),
-    (48, "trigger_tom_high",  "velocity_tom_high"),
-    (49, "trigger_crash",     "velocity_crash"),
-    (51, "trigger_ride",      "velocity_ride"),
-    (75, "trigger_claves",    "velocity_claves"),
-    (56, "trigger_cowbell",   "velocity_cowbell"),
-    (37, "trigger_rimshot",   "velocity_rimshot"),
+    (36, "kick_trigger",      "kick_velocity"),
+    (38, "snare_trigger",     "snare_velocity"),
+    (39, "clap_trigger",      "clap_velocity"),
+    (42, "closed_hh_trigger", "closed_hh_velocity"),
+    (44, "pedal_hh_trigger",  "pedal_hh_velocity"),
+    (46, "open_hh_trigger",   "open_hh_velocity"),
+    (41, "tom_low_trigger",   "tom_low_velocity"),
+    (45, "tom_mid_trigger",   "tom_mid_velocity"),
+    (48, "tom_high_trigger",  "tom_high_velocity"),
+    (49, "crash_trigger",     "crash_velocity"),
+    (51, "ride_trigger",      "ride_velocity"),
+    (75, "claves_trigger",    "claves_velocity"),
+    (56, "cowbell_trigger",   "cowbell_velocity"),
+    (37, "rimshot_trigger",   "rimshot_velocity"),
 ];
 
 /// Note 35 (Acoustic Bass Drum) is an alias for kick.
@@ -211,8 +211,8 @@ mod tests {
         let mut h = make_drumset();
         send_midi(&mut h, &[note_on(36, 100)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_kick"), 1.0);
-        let vel = h.read_mono("velocity_kick");
+        assert_eq!(h.read_mono("kick_trigger"), 1.0);
+        let vel = h.read_mono("kick_velocity");
         assert!((vel - 100.0 / 127.0).abs() < 1e-5, "velocity = {vel}");
     }
 
@@ -221,7 +221,7 @@ mod tests {
         let mut h = make_drumset();
         send_midi(&mut h, &[note_on(35, 80)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_kick"), 1.0);
+        assert_eq!(h.read_mono("kick_trigger"), 1.0);
     }
 
     #[test]
@@ -229,10 +229,10 @@ mod tests {
         let mut h = make_drumset();
         send_midi(&mut h, &[note_on(38, 100)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_snare"), 1.0);
+        assert_eq!(h.read_mono("snare_trigger"), 1.0);
         send_midi(&mut h, &[]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_snare"), 0.0);
+        assert_eq!(h.read_mono("snare_trigger"), 0.0);
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
         h.tick();
         send_midi(&mut h, &[]);
         h.tick();
-        let vel = h.read_mono("velocity_closed_hh");
+        let vel = h.read_mono("closed_hh_velocity");
         assert!((vel - 64.0 / 127.0).abs() < 1e-5);
     }
 
@@ -262,7 +262,7 @@ mod tests {
         let mut h = make_drumset();
         send_midi(&mut h, &[note_on(36, 0)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_kick"), 0.0);
+        assert_eq!(h.read_mono("kick_trigger"), 0.0);
     }
 
     #[test]
@@ -273,12 +273,12 @@ mod tests {
         // Note on channel 10 — should trigger
         send_midi(&mut h, &[note_on_ch(10, 36, 100)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_kick"), 1.0);
+        assert_eq!(h.read_mono("kick_trigger"), 1.0);
 
         // Note on channel 1 — should be ignored
         send_midi(&mut h, &[note_on_ch(1, 38, 100)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_snare"), 0.0);
+        assert_eq!(h.read_mono("snare_trigger"), 0.0);
     }
 
     #[test]
@@ -303,8 +303,8 @@ mod tests {
         let mut h = make_drumset();
         send_midi(&mut h, &[note_on(36, 127), note_on(38, 80), note_on(42, 50)]);
         h.tick();
-        assert_eq!(h.read_mono("trigger_kick"), 1.0);
-        assert_eq!(h.read_mono("trigger_snare"), 1.0);
-        assert_eq!(h.read_mono("trigger_closed_hh"), 1.0);
+        assert_eq!(h.read_mono("kick_trigger"), 1.0);
+        assert_eq!(h.read_mono("snare_trigger"), 1.0);
+        assert_eq!(h.read_mono("closed_hh_trigger"), 1.0);
     }
 }

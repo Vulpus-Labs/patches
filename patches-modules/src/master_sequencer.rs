@@ -30,17 +30,6 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// |------|------|-------------|
 /// | `clock[i]` | poly | Clock bus per channel (i in 0..N−1, N = channels) |
 ///
-/// Clock bus voices:
-///
-/// | Voice | Signal | Description |
-/// |-------|--------|-------------|
-/// | 0 | pattern reset | 1.0 on first tick of a new pattern |
-/// | 1 | pattern bank index | float-encoded integer (−1 = stop sentinel) |
-/// | 2 | tick trigger | 1.0 on each step |
-/// | 3 | tick duration | seconds per tick |
-/// | 4 | step index | absolute step within pattern (0-based) |
-/// | 5 | step fraction | fractional position within step (0.0..1.0) |
-///
 /// # Parameters
 ///
 /// | Name | Type | Range | Default | Description |
@@ -52,6 +41,19 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// | `autostart` | bool | — | `true` | Begin playback on activation |
 /// | `swing` | float | 0.0–1.0 | `0.5` | Swing ratio for alternating steps |
 /// | `sync` | enum | auto/free/host | `auto` | Clock source: auto selects based on hosted flag |
+///
+/// # Notes
+///
+/// Clock bus voices:
+///
+/// | Voice | Signal | Description |
+/// |-------|--------|-------------|
+/// | 0 | pattern reset | 1.0 on first tick of a new pattern |
+/// | 1 | pattern bank index | float-encoded integer (−1 = stop sentinel) |
+/// | 2 | tick trigger | 1.0 on each step |
+/// | 3 | tick duration | seconds per tick |
+/// | 4 | step index | absolute step within pattern (0-based) |
+/// | 5 | step fraction | fractional position within step (0.0..1.0) |
 ///
 /// In `auto` mode the sequencer checks `AudioEnvironment::hosted` at
 /// prepare time to select its clock source — host transport if hosted,

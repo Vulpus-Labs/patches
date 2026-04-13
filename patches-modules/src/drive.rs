@@ -47,10 +47,12 @@ enum DriveMode {
 
 fn parse_mode(s: &str) -> DriveMode {
     match s {
+        "saturate" => DriveMode::Saturate,
         "fold" => DriveMode::Fold,
         "clip" => DriveMode::Clip,
         "crush" => DriveMode::Crush,
-        _ => DriveMode::Saturate,
+        // Descriptor's enum_param validates variants before reaching here.
+        other => unreachable!("unexpected drive mode variant: {other}"),
     }
 }
 
