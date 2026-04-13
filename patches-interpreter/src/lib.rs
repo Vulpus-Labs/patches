@@ -72,7 +72,9 @@ impl std::fmt::Debug for BuildResult {
 /// within a single patch are not errors.
 ///
 /// Returns an [`InterpretError`] with the source span of the offending
-/// declaration on the first validation failure encountered.
+/// declaration on the first validation failure encountered. On error, any
+/// partially-constructed graph is discarded — callers must not attempt to
+/// recover from a half-built state.
 pub fn build(
     flat: &FlatPatch,
     registry: &Registry,
@@ -116,7 +118,7 @@ pub fn build_with_base_dir(
     }
 
     // Stage 3 — build tracker data from pattern and song blocks.
-    let tracker_data = build_tracker_data(flat, &graph)?;
+    let tracker_data = build_tracker_data(flat, &graph, &song_name_to_index)?;
 
     Ok(BuildResult { graph, tracker_data })
 }
@@ -129,6 +131,7 @@ pub fn build_with_base_dir(
 fn build_tracker_data(
     flat: &FlatPatch,
     graph: &ModuleGraph,
+    song_name_to_index: &HashMap<String, usize>,
 ) -> Result<Option<TrackerData>, InterpretError> {
     if flat.patterns.is_empty() && flat.songs.is_empty() {
         return Ok(None);
@@ -178,7 +181,6 @@ fn build_tracker_data(
     let mut sorted_song_defs: Vec<&_> = flat.songs.iter().collect();
     sorted_song_defs.sort_by_key(|s| &s.name.name);
     let mut song_list: Vec<Song> = Vec::new();
-    let mut song_name_to_index: HashMap<String, usize> = HashMap::new();
     for song_def in &sorted_song_defs {
         // Validate: every pattern name in the song must exist.
         for (row_idx, row) in song_def.rows.iter().enumerate() {
@@ -258,16 +260,14 @@ fn build_tracker_data(
             order,
             loop_point: song_def.loop_point.unwrap_or(0),
         };
-        let song_idx = song_list.len();
         song_list.push(song);
-        song_name_to_index.insert(song_def.name.name.clone(), song_idx);
     }
 
     let song_bank = SongBank { songs: song_list };
 
     // Validate: MasterSequencer song references and channel matching.
-    // `song_name_to_index` is consumed here — names never enter `TrackerData`.
-    validate_sequencer_songs(graph, &song_bank, &song_name_to_index, flat)?;
+    // `song_name_to_index` is the shared map computed once by the caller.
+    validate_sequencer_songs(graph, &song_bank, song_name_to_index, flat)?;
 
     Ok(Some(TrackerData {
         patterns: PatternBank { patterns },
