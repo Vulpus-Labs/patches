@@ -1339,3 +1339,352 @@ fn expand_round_trip_patterns_and_songs() {
     assert_eq!(flat.songs.len(), 1);
     assert_eq!(flat.songs[0].name.name, "arrangement");
 }
+
+// ─── Songs and patterns in templates ─────────────────────────────────────────
+
+#[test]
+fn song_in_template_namespaced() {
+    let src = r#"
+        pattern kick { trig: x . x . }
+
+        template seq_voice(pat: pattern) {
+            in: dummy
+            out: dummy
+
+            song my_song {
+                | ch   |
+                | <pat> |
+            }
+
+            module seq : MasterSequencer(channels: [ch]) { song: my_song }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module v : seq_voice(pat: kick)
+        }
+    "#;
+    let flat = parse_expand(src);
+
+    // Song should be namespaced under the instance.
+    assert_eq!(flat.songs.len(), 1);
+    assert_eq!(flat.songs[0].name.name, "v/my_song");
+
+    // The song cell should resolve <pat> to the file-level "kick".
+    let cell = &flat.songs[0].rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "kick"),
+        "song cell should resolve to file-level pattern 'kick', got {:?}",
+        cell,
+    );
+
+    // The module param `song: my_song` should be namespaced to `v/my_song`.
+    let seq = find_module(&flat, "v/seq");
+    let song_param = seq.params.iter().find(|(k, _)| k == "song").unwrap();
+    assert_eq!(song_param.1, Value::Scalar(Scalar::Str("v/my_song".to_owned())));
+}
+
+#[test]
+fn pattern_in_template_namespaced() {
+    let src = r#"
+        template drumkit() {
+            in: dummy
+            out: dummy
+
+            pattern local_kick { trig: x . x . }
+
+            song drums {
+                | ch         |
+                | local_kick |
+            }
+
+            module seq : MasterSequencer(channels: [ch]) { song: drums }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module d : drumkit
+        }
+    "#;
+    let flat = parse_expand(src);
+
+    // Pattern namespaced.
+    assert_eq!(flat.patterns.len(), 1);
+    assert_eq!(flat.patterns[0].name, "d/local_kick");
+
+    // Song cell resolves to namespaced pattern.
+    let cell = &flat.songs[0].rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "d/local_kick"),
+        "song cell should resolve to 'd/local_kick', got {:?}",
+        cell,
+    );
+}
+
+#[test]
+fn nested_template_scoping() {
+    // Two levels of nesting: outer defines a pattern, inner defines
+    // its own pattern with the same name. Each song should resolve
+    // to its own scope's version.
+    let src = r#"
+        pattern foo { trig: x . }
+
+        template inner() {
+            in: dummy
+            out: dummy
+
+            pattern foo { trig: . x . x }
+
+            song inner_song {
+                | ch  |
+                | foo |
+            }
+
+            module seq : MasterSequencer(channels: [ch]) { song: inner_song }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        template outer() {
+            in: dummy
+            out: dummy
+
+            pattern foo { trig: . x }
+
+            song outer_song {
+                | ch  |
+                | foo |
+            }
+
+            module i : inner
+            module seq : MasterSequencer(channels: [ch]) { song: outer_song }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module o : outer
+        }
+    "#;
+    let flat = parse_expand(src);
+
+    // Three patterns: file-level foo, o/foo, o/i/foo.
+    let pat_names: Vec<&str> = flat.patterns.iter().map(|p| p.name.as_str()).collect();
+    assert!(pat_names.contains(&"foo"), "file-level foo missing");
+    assert!(pat_names.contains(&"o/foo"), "outer's foo missing");
+    assert!(pat_names.contains(&"o/i/foo"), "inner's foo missing");
+
+    // outer_song's cell should resolve to o/foo (outer's local pattern).
+    let outer_song = flat.songs.iter().find(|s| s.name.name == "o/outer_song").unwrap();
+    let cell = &outer_song.rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/foo"),
+        "outer_song cell should be 'o/foo', got {:?}",
+        cell,
+    );
+
+    // inner_song's cell should resolve to o/i/foo (inner's local pattern).
+    let inner_song = flat.songs.iter().find(|s| s.name.name == "o/i/inner_song").unwrap();
+    let cell = &inner_song.rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/i/foo"),
+        "inner_song cell should be 'o/i/foo', got {:?}",
+        cell,
+    );
+}
+
+#[test]
+fn template_song_cell_resolves_to_outer_scope() {
+    // A template references a pattern it doesn't define locally.
+    // The name should resolve through the scope chain to the file level.
+    let src = r#"
+        pattern global_beat { trig: x x x x }
+
+        template player() {
+            in: dummy
+            out: dummy
+
+            song my_song {
+                | ch          |
+                | global_beat |
+            }
+
+            module seq : MasterSequencer(channels: [ch]) { song: my_song }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module p : player
+        }
+    "#;
+    let flat = parse_expand(src);
+
+    // global_beat is file-level, no namespacing.
+    let cell = &flat.songs[0].rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "global_beat"),
+        "should resolve to file-level 'global_beat', got {:?}",
+        cell,
+    );
+}
+
+// ─── Typed param enforcement ─────────────────────────────────────────────────
+
+#[test]
+fn song_cell_rejects_str_typed_param() {
+    let src = r#"
+        pattern kick { trig: x . }
+
+        template bad(pat: str) {
+            in: d out: d
+            song s {
+                | ch    |
+                | <pat> |
+            }
+            module seq : MasterSequencer(channels: [ch]) { song: s }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module b : bad(pat: kick)
+        }
+    "#;
+    let err = parse_expand_err(src);
+    assert!(
+        err.contains("expected pattern"),
+        "should reject str-typed param in song cell, got: {err}",
+    );
+}
+
+#[test]
+fn song_cell_rejects_song_typed_param() {
+    let src = r#"
+        pattern kick { trig: x . }
+        song my_song {
+            | ch   |
+            | kick |
+        }
+
+        template bad(s: song) {
+            in: d out: d
+            song s2 {
+                | ch  |
+                | <s> |
+            }
+            module seq : MasterSequencer(channels: [ch]) { song: s2 }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module b : bad(s: my_song)
+        }
+    "#;
+    let err = parse_expand_err(src);
+    assert!(
+        err.contains("expected pattern"),
+        "should reject song-typed param in song cell, got: {err}",
+    );
+}
+
+#[test]
+fn pattern_typed_param_rejects_unknown_name() {
+    let src = r#"
+        template t(pat: pattern) {
+            in: d out: d
+            song s {
+                | ch    |
+                | <pat> |
+            }
+            module seq : MasterSequencer(channels: [ch]) { song: s }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module t : t(pat: nonexistent)
+        }
+    "#;
+    let err = parse_expand_err(src);
+    assert!(
+        err.contains("not a known pattern"),
+        "should reject unknown pattern name, got: {err}",
+    );
+}
+
+#[test]
+fn song_typed_param_rejects_unknown_name() {
+    let src = r#"
+        template t(s: song) {
+            in: d out: d
+            module seq : MasterSequencer(channels: [ch]) { song: <s> }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module t : t(s: nonexistent)
+        }
+    "#;
+    let err = parse_expand_err(src);
+    assert!(
+        err.contains("not a known song"),
+        "should reject unknown song name, got: {err}",
+    );
+}
+
+#[test]
+fn song_typed_param_rejects_pattern_name() {
+    let src = r#"
+        pattern kick { trig: x . }
+
+        template t(s: song) {
+            in: d out: d
+            module seq : MasterSequencer(channels: [ch]) { song: <s> }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module t : t(s: kick)
+        }
+    "#;
+    let err = parse_expand_err(src);
+    assert!(
+        err.contains("not a known song"),
+        "should reject pattern name for song-typed param, got: {err}",
+    );
+}
+
+#[test]
+fn pattern_typed_param_accepts_known_pattern() {
+    let src = r#"
+        pattern kick { trig: x . }
+
+        template t(pat: pattern) {
+            in: d out: d
+            song s {
+                | ch    |
+                | <pat> |
+            }
+            module seq : MasterSequencer(channels: [ch]) { song: s }
+            module out : AudioOut
+            seq.clock[ch] -> out.in_left
+        }
+
+        patch {
+            module t : t(pat: kick)
+        }
+    "#;
+    let flat = parse_expand(src);
+    let cell = &flat.songs[0].rows[0].cells[0];
+    assert!(
+        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "kick"),
+        "should resolve to 'kick', got {:?}",
+        cell,
+    );
+}

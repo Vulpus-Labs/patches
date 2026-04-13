@@ -144,10 +144,10 @@ module.exports = grammar({
     arrow: ($) => choice($.forward_arrow, $.backward_arrow),
 
     // ─── Connections ────────────────────────────────────────────────────
-    connection: ($) => seq($.port_ref, $.arrow, $.port_ref),
+    connection: ($) => seq($.port_ref, $.arrow, $.port_ref, repeat(seq(",", $.port_ref))),
 
     // ─── Statements ─────────────────────────────────────────────────────
-    statement: ($) => choice($.module_decl, $.connection),
+    statement: ($) => choice($.module_decl, $.song_block, $.pattern_block, $.connection),
 
     // ─── Port declarations (inside templates) ───────────────────────────
     port_group_decl: ($) =>
@@ -160,7 +160,7 @@ module.exports = grammar({
     port_decls: ($) => seq($.in_decl, $.out_decl),
 
     // ─── Template parameter declarations ────────────────────────────────
-    type_name: (_) => choice("float", "int", "bool", "str"),
+    type_name: (_) => choice("float", "int", "bool", "pattern", "song", "str"),
 
     param_decl: ($) =>
       seq(
@@ -281,7 +281,7 @@ module.exports = grammar({
         optional($.loop_annotation)
       ),
 
-    song_cell: ($) => choice($.ident, "_"),
+    song_cell: ($) => choice($.param_ref, $.ident, "_"),
 
     loop_annotation: (_) => token(seq("@", "loop")),
 

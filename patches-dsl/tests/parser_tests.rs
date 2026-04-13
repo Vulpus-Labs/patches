@@ -598,10 +598,10 @@ fn song_pattern_refs() {
     let file = parse(src).unwrap();
     let song = &file.songs[0];
     // First row: verse_drums, bass_a
-    assert_eq!(song.rows[0].patterns[0].as_ref().unwrap().name, "verse_drums");
-    assert_eq!(song.rows[0].patterns[1].as_ref().unwrap().name, "bass_a");
+    assert!(matches!(&song.rows[0].cells[0], patches_dsl::SongCell::Pattern(id) if id.name == "verse_drums"));
+    assert!(matches!(&song.rows[0].cells[1], patches_dsl::SongCell::Pattern(id) if id.name == "bass_a"));
     // Third row: fill_drums, bass_a
-    assert_eq!(song.rows[2].patterns[0].as_ref().unwrap().name, "fill_drums");
+    assert!(matches!(&song.rows[2].cells[0], patches_dsl::SongCell::Pattern(id) if id.name == "fill_drums"));
 }
 
 #[test]
@@ -619,11 +619,11 @@ fn song_silence_marker() {
     let file = parse(src).expect("song_silence should parse");
     let song = &file.songs[0];
     // Row 0: a, _
-    assert!(song.rows[0].patterns[0].is_some());
-    assert!(song.rows[0].patterns[1].is_none(), "_ should parse as None");
+    assert!(matches!(&song.rows[0].cells[0], patches_dsl::SongCell::Pattern(_)));
+    assert!(matches!(&song.rows[0].cells[1], patches_dsl::SongCell::Silence), "_ should parse as Silence");
     // Row 1: _, a
-    assert!(song.rows[1].patterns[0].is_none());
-    assert!(song.rows[1].patterns[1].is_some());
+    assert!(matches!(&song.rows[1].cells[0], patches_dsl::SongCell::Silence));
+    assert!(matches!(&song.rows[1].cells[1], patches_dsl::SongCell::Pattern(_)));
 }
 
 #[test]

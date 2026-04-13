@@ -25,7 +25,7 @@ use patches_core::{
     PortRef,
     TrackerData, PatternBank, SongBank, Pattern, Song, TrackerStep,
 };
-use patches_dsl::ast::{Scalar, Span, Value};
+use patches_dsl::ast::{Scalar, SongCell, Span, Value};
 use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch};
 
 /// An error produced during interpretation of a [`FlatPatch`].
@@ -182,8 +182,8 @@ fn build_tracker_data(
     for song_def in &sorted_song_defs {
         // Validate: every pattern name in the song must exist.
         for (row_idx, row) in song_def.rows.iter().enumerate() {
-            for (col_idx, cell) in row.patterns.iter().enumerate() {
-                if let Some(ref pat_name) = cell {
+            for (col_idx, cell) in row.cells.iter().enumerate() {
+                if let SongCell::Pattern(ref pat_name) = cell {
                     if !name_to_index.contains_key(pat_name.name.as_str()) {
                         return Err(InterpretError {
                             span: song_def.span,
@@ -207,7 +207,7 @@ fn build_tracker_data(
             let mut col_step_count: Option<(usize, &str)> = None;
             let mut col_chan_count: Option<(usize, &str)> = None;
             for row in &song_def.rows {
-                if let Some(Some(ref pat_name)) = row.patterns.get(col_idx) {
+                if let Some(SongCell::Pattern(ref pat_name)) = row.cells.get(col_idx) {
                     let bank_idx = name_to_index[pat_name.name.as_str()];
                     let pat = &patterns[bank_idx];
                     if let Some((expected_steps, first_name)) = col_step_count {
@@ -245,8 +245,11 @@ fn build_tracker_data(
         }
 
         let order: Vec<Vec<Option<usize>>> = song_def.rows.iter().map(|row| {
-            row.patterns.iter().map(|cell| {
-                cell.as_ref().map(|pat_name| name_to_index[pat_name.name.as_str()])
+            row.cells.iter().map(|cell| {
+                match cell {
+                    SongCell::Pattern(pat_name) => Some(name_to_index[pat_name.name.as_str()]),
+                    _ => None,
+                }
             }).collect()
         }).collect();
 
@@ -648,7 +651,7 @@ fn value_kind_name(value: &Value) -> &'static str {
 mod tests {
     use super::*;
     use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternDef, FlatPatternChannel};
-    use patches_dsl::ast::{Ident, Scalar, SongDef, SongRow, Span, Step, Value};
+    use patches_dsl::ast::{Ident, Scalar, SongCell, SongDef, SongRow, Span, Step, Value};
 
     fn span() -> Span {
         Span { start: 0, end: 0 }
@@ -1002,9 +1005,9 @@ mod tests {
             name: ident("my_song"),
             channels: vec![ident("drums")],
             rows: vec![
-                SongRow { patterns: vec![Some(ident("pat_a"))] },
-                SongRow { patterns: vec![Some(ident("pat_b"))] },
-                SongRow { patterns: vec![None] },
+                SongRow { cells: vec![SongCell::Pattern(ident("pat_a"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("pat_b"))] },
+                SongRow { cells: vec![SongCell::Silence] },
             ],
             loop_point: Some(1),
             span: span(),
@@ -1035,7 +1038,7 @@ mod tests {
         flat.songs = vec![SongDef {
             name: ident("song"),
             channels: vec![ident("col")],
-            rows: vec![SongRow { patterns: vec![Some(ident("no_such_pattern"))] }],
+            rows: vec![SongRow { cells: vec![SongCell::Pattern(ident("no_such_pattern"))] }],
             loop_point: None,
             span: Span { start: 10, end: 20 },
         }];
@@ -1068,8 +1071,8 @@ mod tests {
             name: ident("song"),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { patterns: vec![Some(ident("four_steps"))] },
-                SongRow { patterns: vec![Some(ident("two_steps"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("four_steps"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("two_steps"))] },
             ],
             loop_point: None,
             span: span(),
@@ -1103,8 +1106,8 @@ mod tests {
             name: ident("song"),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { patterns: vec![Some(ident("one_ch"))] },
-                SongRow { patterns: vec![Some(ident("two_ch"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("one_ch"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("two_ch"))] },
             ],
             loop_point: None,
             span: span(),

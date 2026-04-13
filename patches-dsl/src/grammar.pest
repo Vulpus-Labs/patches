@@ -109,10 +109,11 @@ backward_arrow = ${ ("<-[" ~ scale_val ~ "]-") | "<-" }
 arrow          = { forward_arrow | backward_arrow }
 
 // ─── Connections ──────────────────────────────────────────────────────────────
-connection = { port_ref ~ arrow ~ port_ref }
+// Fan-out: `a.out -> b.in, c.in` desugars to two connections.
+connection = { port_ref ~ arrow ~ port_ref ~ ("," ~ port_ref)* }
 
 // ─── Statements ───────────────────────────────────────────────────────────────
-statement = { module_decl | connection }
+statement = { module_decl | song_block | pattern_block | connection }
 
 // ─── Port declarations (inside templates) ────────────────────────────────────
 // Port group declarations support optional arity: `audio[n]` or plain `freq`.
@@ -123,7 +124,7 @@ out_decl     = { "out:" ~ comma_port_decls }
 port_decls   = { in_decl ~ out_decl }
 
 // ─── Template parameter declarations ─────────────────────────────────────────
-type_name   = { "float" | "int" | "bool" | "str" }
+type_name   = { "float" | "int" | "bool" | "pattern" | "song" | "str" }
 // param_decl supports optional arity: `level[size]: float = 1.0` or `freq: float`
 param_decl  = { ident ~ ("[" ~ ident ~ "]")? ~ ":" ~ type_name ~ ("=" ~ scalar)? }
 param_decls = { "(" ~ (param_decl ~ ","?)* ~ ")" }
@@ -176,7 +177,7 @@ pattern_block      = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
 //   | col1 | col2 | ... |          (header)
 //   | pat1 | pat2 | ... |  @loop   (data row with optional loop annotation)
 song_silence    = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
-song_cell       = { song_silence | ident }
+song_cell       = { song_silence | param_ref | ident }
 song_loop       = { "@loop" }
 song_header_row = { "|" ~ (ident ~ "|")+ }
 song_data_row   = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }

@@ -773,6 +773,10 @@
         {
           "type": "ident",
           "named": true
+        },
+        {
+          "type": "param_ref",
+          "named": true
         }
       ]
     }
@@ -810,6 +814,14 @@
         },
         {
           "type": "module_decl",
+          "named": true
+        },
+        {
+          "type": "pattern_block",
+          "named": true
+        },
+        {
+          "type": "song_block",
           "named": true
         }
       ]

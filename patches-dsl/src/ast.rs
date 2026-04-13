@@ -185,6 +185,8 @@ pub struct Connection {
 pub enum Statement {
     Module(ModuleDecl),
     Connection(Connection),
+    Song(SongDef),
+    Pattern(PatternDef),
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -196,6 +198,10 @@ pub enum ParamType {
     Int,
     Bool,
     Str,
+    /// A pattern name (resolved via scope chain during expansion).
+    Pattern,
+    /// A song name (resolved via scope chain during expansion).
+    Song,
 }
 
 /// One `ident[arity]: type [= default]` declaration inside a template's param list.
@@ -278,11 +284,22 @@ pub struct PatternDef {
     pub span: Span,
 }
 
+/// A single cell in a song data row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SongCell {
+    /// Silence marker (`_`).
+    Silence,
+    /// A concrete pattern name.
+    Pattern(Ident),
+    /// A `<param>` reference (resolved during template expansion).
+    ParamRef { name: String, span: Span },
+}
+
 /// One row in a song order table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SongRow {
-    /// Pattern name per channel; `None` means silence (`_`).
-    pub patterns: Vec<Option<Ident>>,
+    /// Cells per channel: pattern name, silence, or param ref.
+    pub cells: Vec<SongCell>,
 }
 
 /// A `song <name> { ... }` block.

@@ -1,3 +1,35 @@
+pattern sandstorm {
+    trig: x x x . x x x . x x x x x x x .
+}
+
+template stutter(rhythm: pattern) {
+    in: in_left, in_right
+    out: out_left, out_right
+
+    song pattern {
+        | trigger      |
+        | <rhythm>    |
+    }
+
+    module seq : MasterSequencer(channels: [trigger]) { song: pattern }
+    module player : PatternPlayer(channels: 1)
+    seq.clock[trigger] -> player.clock
+
+
+    module adsr : Adsr { attack: 0.01, release: 0.1, sustain: 0.1, release: 0.001 }
+    module left_vca : Vca
+    module right_vca : Vca
+
+    player.trigger -> adsr.trigger
+    player.gate -> adsr.gate
+    adsr.out -> left_vca.cv, right_vca.cv
+
+    left_vca.in <- $.in_left
+    right_vca.in <- $.in_right
+    left_vca.out -> $.out_left
+    right_vca.out -> $.out_right
+}
+
 template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0) {
     in: voct, fm
     out: out
@@ -34,6 +66,8 @@ template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0)
 }
 
 patch {
+
+    module stutter : stutter(rhythm: sandstorm)
 
     module midi : PolyMidiIn
     module tuner : PolyTuner { octave: 1 }
@@ -85,14 +119,20 @@ patch {
     vca.out -> collapse.in
     module short_delay : Delay(channels: 1) { delay_ms: 20, dry_wet: 1.0 }
     module delay : StereoDelay(channels: 1) { delay_ms: 750, feedback: 0.2, dry_wet: 0.5, pingpong: true, tone: 0.6 }
-
-    collapse.out -[0.3]-> delay.in_left
-    collapse.out -[0.3]-> short_delay.in
+    collapse.out -[0.3]-> stutter.in_left
+    collapse.out -[0.3]-> stutter.in_right
+    stutter.out_left -> delay.in_left
+    stutter.out_right -> short_delay.in
     short_delay.out -> delay.in_right
 
     delay.out_left -> verb.in_left
     delay.out_right -> verb.in_right
     
-    verb.out_left -> audio.in_left
-    verb.out_right -> audio.in_right
+    module lim : StereoLimiter
+
+    verb.out_left -> lim.in_left
+    verb.out_right -> lim.in_right
+    
+    lim.out_left -> audio.in_left
+    lim.out_right -> audio.in_right
 }

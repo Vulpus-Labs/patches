@@ -4,8 +4,8 @@ use pest::Parser as _;
 use crate::ast::{
     Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
     ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
-    PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongDef,
-    SongRow, Span, Statement, Step, StepOrGenerator, Template, Value,
+    PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongCell,
+    SongDef, SongRow, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 
 // ─── Pest glue ────────────────────────────────────────────────────────────────
@@ -132,47 +132,35 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// Parse a `.patches` source string into an AST [`File`].
-pub fn parse(src: &str) -> Result<File, ParseError> {
-    let mut pairs = PatchesParser::parse(Rule::file, src).map_err(|e| {
-        let span = match e.location {
-            pest::error::InputLocation::Pos(p) => Span { start: p, end: p },
-            pest::error::InputLocation::Span((s, e)) => Span { start: s, end: e },
-        };
-        ParseError {
-            span,
-            message: e.to_string(),
-        }
-    })?;
+/// Convert a pest error into a [`ParseError`] with a byte-offset span.
+fn pest_error_to_parse_error(e: pest::error::Error<Rule>) -> ParseError {
+    let span = match e.location {
+        pest::error::InputLocation::Pos(p) => Span { start: p, end: p },
+        pest::error::InputLocation::Span((s, e)) => Span { start: s, end: e },
+    };
+    ParseError {
+        span,
+        message: e.to_string(),
+    }
+}
 
-    // pest guarantees exactly one pair for the root rule when parsing succeeds
-    let file_pair = pairs.next().ok_or_else(|| ParseError {
+/// Parse a pest result for a given rule and extract the single root pair.
+fn parse_root(rule: Rule, src: &str) -> Result<Pair<'_, Rule>, ParseError> {
+    let mut pairs = PatchesParser::parse(rule, src).map_err(pest_error_to_parse_error)?;
+    pairs.next().ok_or_else(|| ParseError {
         span: Span { start: 0, end: 0 },
         message: "internal: no root pair returned by pest".to_owned(),
-    })?;
+    })
+}
 
-    build_file(file_pair)
+/// Parse a `.patches` source string into an AST [`File`].
+pub fn parse(src: &str) -> Result<File, ParseError> {
+    build_file(parse_root(Rule::file, src)?)
 }
 
 /// Parse a `.patches` library file (no `patch {}` block) into an AST [`IncludeFile`].
 pub fn parse_include_file(src: &str) -> Result<IncludeFile, ParseError> {
-    let mut pairs = PatchesParser::parse(Rule::include_file, src).map_err(|e| {
-        let span = match e.location {
-            pest::error::InputLocation::Pos(p) => Span { start: p, end: p },
-            pest::error::InputLocation::Span((s, e)) => Span { start: s, end: e },
-        };
-        ParseError {
-            span,
-            message: e.to_string(),
-        }
-    })?;
-
-    let file_pair = pairs.next().ok_or_else(|| ParseError {
-        span: Span { start: 0, end: 0 },
-        message: "internal: no root pair returned by pest".to_owned(),
-    })?;
-
-    build_include_file(file_pair)
+    build_include_file(parse_root(Rule::include_file, src)?)
 }
 
 // ─── Parse-tree builders ─────────────────────────────────────────────────────
@@ -198,60 +186,63 @@ fn build_include_directive(pair: Pair<'_, Rule>) -> IncludeDirective {
     IncludeDirective { path, span }
 }
 
-fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
+/// Shared state accumulated while building either a [`File`] or [`IncludeFile`].
+struct FileItems {
+    includes: Vec<IncludeDirective>,
+    templates: Vec<Template>,
+    patterns: Vec<PatternDef>,
+    songs: Vec<SongDef>,
+    patch: Option<Patch>,
+    span: Span,
+}
+
+/// Walk the inner pairs of a file or include_file rule and collect all items.
+fn build_file_items(pair: Pair<'_, Rule>) -> Result<FileItems, ParseError> {
     let span = span_of(&pair);
-    let mut includes = Vec::new();
-    let mut templates = Vec::new();
-    let mut patterns = Vec::new();
-    let mut songs = Vec::new();
-    let mut patch = None;
+    let mut items = FileItems {
+        includes: Vec::new(),
+        templates: Vec::new(),
+        patterns: Vec::new(),
+        songs: Vec::new(),
+        patch: None,
+        span,
+    };
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
-            Rule::include_directive => includes.push(build_include_directive(inner)),
-            Rule::template => templates.push(build_template(inner)?),
-            Rule::pattern_block => patterns.push(build_pattern_block(inner)?),
-            Rule::song_block => songs.push(build_song_block(inner)?),
-            Rule::patch => patch = Some(build_patch(inner)?),
+            Rule::include_directive => items.includes.push(build_include_directive(inner)),
+            Rule::template => items.templates.push(build_template(inner)?),
+            Rule::pattern_block => items.patterns.push(build_pattern_block(inner)?),
+            Rule::song_block => items.songs.push(build_song_block(inner)?),
+            Rule::patch => items.patch = Some(build_patch(inner)?),
             Rule::EOI => {}
-            _ => unreachable!("unexpected rule in file: {:?}", inner.as_rule()),
+            _ => unreachable!("unexpected rule: {:?}", inner.as_rule()),
         }
     }
 
+    Ok(items)
+}
+
+fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
+    let items = build_file_items(pair)?;
     Ok(File {
-        includes,
-        templates,
-        patterns,
-        songs,
-        patch: patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
-        span,
+        includes: items.includes,
+        templates: items.templates,
+        patterns: items.patterns,
+        songs: items.songs,
+        patch: items.patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
+        span: items.span,
     })
 }
 
 fn build_include_file(pair: Pair<'_, Rule>) -> Result<IncludeFile, ParseError> {
-    let span = span_of(&pair);
-    let mut includes = Vec::new();
-    let mut templates = Vec::new();
-    let mut patterns = Vec::new();
-    let mut songs = Vec::new();
-
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::include_directive => includes.push(build_include_directive(inner)),
-            Rule::template => templates.push(build_template(inner)?),
-            Rule::pattern_block => patterns.push(build_pattern_block(inner)?),
-            Rule::song_block => songs.push(build_song_block(inner)?),
-            Rule::EOI => {}
-            _ => unreachable!("unexpected rule in include_file: {:?}", inner.as_rule()),
-        }
-    }
-
+    let items = build_file_items(pair)?;
     Ok(IncludeFile {
-        includes,
-        templates,
-        patterns,
-        songs,
-        span,
+        includes: items.includes,
+        templates: items.templates,
+        patterns: items.patterns,
+        songs: items.songs,
+        span: items.span,
     })
 }
 
@@ -594,22 +585,38 @@ fn build_arrow(pair: Pair<'_, Rule>) -> Result<Arrow, ParseError> {
     }
 }
 
-fn build_connection(pair: Pair<'_, Rule>) -> Result<Connection, ParseError> {
+fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, ParseError> {
     // pair.as_rule() == Rule::connection
+    // Grammar: port_ref ~ arrow ~ port_ref ~ ("," ~ port_ref)*
     let span = span_of(&pair);
     let mut it = pair.into_inner();
     let lhs = build_port_ref(it.next().unwrap())?;
     let arrow = build_arrow(it.next().unwrap())?;
-    let rhs = build_port_ref(it.next().unwrap())?;
-    Ok(Connection { lhs, arrow, rhs, span })
+    let first_rhs = build_port_ref(it.next().unwrap())?;
+
+    let mut connections = vec![Connection { lhs: lhs.clone(), arrow: arrow.clone(), rhs: first_rhs, span }];
+    for extra in it {
+        connections.push(Connection {
+            lhs: lhs.clone(),
+            arrow: arrow.clone(),
+            rhs: build_port_ref(extra)?,
+            span,
+        });
+    }
+    Ok(connections)
 }
 
-fn build_statement(pair: Pair<'_, Rule>) -> Result<Statement, ParseError> {
+fn build_statements(pair: Pair<'_, Rule>) -> Result<Vec<Statement>, ParseError> {
     // pair.as_rule() == Rule::statement
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
-        Rule::module_decl => Ok(Statement::Module(build_module_decl(inner)?)),
-        Rule::connection => Ok(Statement::Connection(build_connection(inner)?)),
+        Rule::module_decl => Ok(vec![Statement::Module(build_module_decl(inner)?)]),
+        Rule::song_block => Ok(vec![Statement::Song(build_song_block(inner)?)]),
+        Rule::pattern_block => Ok(vec![Statement::Pattern(build_pattern_block(inner)?)]),
+        Rule::connection => Ok(build_connection(inner)?
+            .into_iter()
+            .map(Statement::Connection)
+            .collect()),
         _ => unreachable!("unexpected rule in statement: {:?}", inner.as_rule()),
     }
 }
@@ -645,6 +652,8 @@ fn build_param_decl(pair: Pair<'_, Rule>) -> Result<ParamDecl, ParseError> {
         "int" => ParamType::Int,
         "bool" => ParamType::Bool,
         "str" => ParamType::Str,
+        "pattern" => ParamType::Pattern,
+        "song" => ParamType::Song,
         other => unreachable!("unexpected type_name: {other}"),
     };
     pos += 1;
@@ -701,7 +710,7 @@ fn build_template(pair: Pair<'_, Rule>) -> Result<Template, ParseError> {
                 let out_ci = out_decl.into_inner().next().unwrap(); // comma_port_decls
                 out_ports = out_ci.into_inner().map(build_port_group_decl).collect();
             }
-            Rule::statement => body.push(build_statement(next)?),
+            Rule::statement => body.extend(build_statements(next)?),
             _ => unreachable!("unexpected rule in template: {:?}", next.as_rule()),
         }
     }
@@ -712,7 +721,13 @@ fn build_template(pair: Pair<'_, Rule>) -> Result<Template, ParseError> {
 fn build_patch(pair: Pair<'_, Rule>) -> Result<Patch, ParseError> {
     // pair.as_rule() == Rule::patch
     let span = span_of(&pair);
-    let body = pair.into_inner().map(build_statement).collect::<Result<_, _>>()?;
+    let body = pair
+        .into_inner()
+        .map(build_statements)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     Ok(Patch { body, span })
 }
 
@@ -936,8 +951,22 @@ fn build_song_block(pair: Pair<'_, Rule>) -> Result<SongDef, ParseError> {
                 Rule::song_cell => {
                     let cell_inner = child.into_inner().next().unwrap();
                     match cell_inner.as_rule() {
-                        Rule::ident => patterns.push(Some(build_ident(cell_inner))),
-                        Rule::song_silence => patterns.push(None),
+                        Rule::ident => {
+                            patterns.push(SongCell::Pattern(build_ident(cell_inner)));
+                        }
+                        Rule::song_silence => {
+                            patterns.push(SongCell::Silence);
+                        }
+                        Rule::param_ref => {
+                            let span = span_of(&cell_inner);
+                            let name = cell_inner
+                                .into_inner()
+                                .next()
+                                .unwrap()
+                                .as_str()
+                                .to_owned();
+                            patterns.push(SongCell::ParamRef { name, span });
+                        }
                         _ => unreachable!(
                             "unexpected rule in song_cell: {:?}",
                             cell_inner.as_rule()
@@ -961,7 +990,7 @@ fn build_song_block(pair: Pair<'_, Rule>) -> Result<SongDef, ParseError> {
             loop_point = Some(rows.len());
         }
 
-        rows.push(SongRow { patterns });
+        rows.push(SongRow { cells: patterns });
     }
 
     Ok(SongDef { name, channels, rows, loop_point, span })

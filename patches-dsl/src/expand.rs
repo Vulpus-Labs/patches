@@ -7,8 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    AtBlockIndex, Connection, Direction, File, ModuleDecl, ParamEntry, ParamIndex, ParamType,
-    PortIndex, PortLabel, Scalar, ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
+    AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamEntry, ParamIndex,
+    ParamType, PortIndex, PortLabel, Scalar, ShapeArg, ShapeArgValue, SongCell, SongDef, SongRow,
+    Span, Statement, Template, Value,
 };
 use crate::ast::{PatternDef, Step, StepOrGenerator};
 use crate::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
@@ -69,13 +70,16 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     let templates: HashMap<&str, &Template> =
         file.templates.iter().map(|t| (t.name.name.as_str(), t)).collect();
 
+    let root_scope = NameScope::root(&file.songs, &file.patterns);
     let result =
-        Expander::new(&templates).expand_body(&file.patch.body, None, &HashMap::new())?;
+        Expander::new(&templates).expand_body(&file.patch.body, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
 
-    // Expand patterns: resolve slide generators into concrete steps.
-    let patterns = file.patterns.iter().map(expand_pattern_def).collect();
-    // Songs pass through unchanged.
-    let songs = file.songs.clone();
+    // Expand patterns: merge top-level with template-local, resolve generators.
+    let mut patterns: Vec<FlatPatternDef> = file.patterns.iter().map(expand_pattern_def).collect();
+    patterns.extend(result.patterns);
+    // Songs: merge top-level songs with songs collected from template bodies.
+    let mut songs = file.songs.clone();
+    songs.extend(result.songs);
 
     Ok(ExpandResult {
         patch: FlatPatch {
@@ -136,6 +140,195 @@ fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
     out
 }
 
+/// Expand a song definition: namespace its name, resolve `<param>` references
+/// in cells, and resolve literal pattern names through the scope chain.
+///
+/// `param_types` maps parameter names to their declared types, used to enforce
+/// that only `pattern`-typed params appear in song cells.
+fn expand_song_def(
+    song: &SongDef,
+    namespace: Option<&str>,
+    param_env: &HashMap<String, Scalar>,
+    param_types: &HashMap<String, ParamType>,
+    scope: &NameScope<'_>,
+) -> Result<SongDef, ExpandError> {
+    let name = Ident {
+        name: qualify(namespace, &song.name.name),
+        span: song.name.span,
+    };
+    let rows = song
+        .rows
+        .iter()
+        .map(|row| {
+            let cells = row
+                .cells
+                .iter()
+                .map(|cell| match cell {
+                    SongCell::Silence => Ok(SongCell::Silence),
+                    SongCell::Pattern(ident) => {
+                        // Literal pattern name — resolve via pattern scope.
+                        let resolved = scope
+                            .resolve_pattern(&ident.name)
+                            .unwrap_or_else(|| ident.name.clone());
+                        Ok(SongCell::Pattern(Ident {
+                            name: resolved,
+                            span: ident.span,
+                        }))
+                    }
+                    SongCell::ParamRef { name, span } => {
+                        // Verify the param is pattern-typed.
+                        if let Some(ty) = param_types.get(name.as_str()) {
+                            if *ty != ParamType::Pattern {
+                                return Err(ExpandError {
+                                    span: *span,
+                                    message: format!(
+                                        "song cell '<{}>': param is {}-typed, expected pattern",
+                                        name,
+                                        param_type_name(ty),
+                                    ),
+                                });
+                            }
+                        }
+                        if let Some(val) = param_env.get(name.as_str()) {
+                            match val {
+                                Scalar::Str(s) => {
+                                    // Resolve through the pattern scope.
+                                    let resolved = scope
+                                        .resolve_pattern(s)
+                                        .unwrap_or_else(|| s.clone());
+                                    Ok(SongCell::Pattern(Ident {
+                                        name: resolved,
+                                        span: *span,
+                                    }))
+                                }
+                                other => Err(ExpandError {
+                                    span: *span,
+                                    message: format!(
+                                        "song cell param '<{}>': expected a pattern name, got {:?}",
+                                        name, other,
+                                    ),
+                                }),
+                            }
+                        } else {
+                            Err(ExpandError {
+                                span: *span,
+                                message: format!(
+                                    "unresolved param '<{}>' in song cell",
+                                    name,
+                                ),
+                            })
+                        }
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SongRow { cells })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(SongDef {
+        name,
+        channels: song.channels.clone(),
+        rows,
+        loop_point: song.loop_point,
+        span: song.span,
+    })
+}
+
+fn param_type_name(ty: &ParamType) -> &'static str {
+    match ty {
+        ParamType::Float => "float",
+        ParamType::Int => "int",
+        ParamType::Bool => "bool",
+        ParamType::Str => "str",
+        ParamType::Pattern => "pattern",
+        ParamType::Song => "song",
+    }
+}
+
+/// A scope that maps unqualified song/pattern names to their fully-qualified
+/// names. Each template instantiation introduces a new scope; references
+/// resolve by walking from innermost scope to outermost (file level).
+///
+/// Songs and patterns occupy separate namespaces so that a pattern named `foo`
+/// cannot accidentally resolve as a song (or vice versa).
+struct NameScope<'a> {
+    songs: HashMap<String, String>,
+    patterns: HashMap<String, String>,
+    parent: Option<&'a NameScope<'a>>,
+}
+
+impl<'a> NameScope<'a> {
+    /// Build a root scope from file-level song and pattern names (identity mapping).
+    fn root(songs: &[SongDef], patterns: &[PatternDef]) -> Self {
+        NameScope {
+            songs: songs.iter().map(|s| (s.name.name.clone(), s.name.name.clone())).collect(),
+            patterns: patterns.iter().map(|p| (p.name.name.clone(), p.name.name.clone())).collect(),
+            parent: None,
+        }
+    }
+
+    /// Build a child scope from the songs and patterns defined in a template
+    /// body, qualified under `namespace`.
+    fn child(
+        parent: &'a NameScope<'a>,
+        stmts: &[Statement],
+        namespace: Option<&str>,
+    ) -> Self {
+        let mut songs = HashMap::new();
+        let mut patterns = HashMap::new();
+        for stmt in stmts {
+            match stmt {
+                Statement::Song(sd) => {
+                    songs.insert(sd.name.name.clone(), qualify(namespace, &sd.name.name));
+                }
+                Statement::Pattern(pd) => {
+                    patterns.insert(pd.name.name.clone(), qualify(namespace, &pd.name.name));
+                }
+                _ => {}
+            }
+        }
+        NameScope { songs, patterns, parent: Some(parent) }
+    }
+
+    /// Resolve a pattern name through the scope chain.
+    /// Returns `None` if not found in any scope.
+    fn resolve_pattern(&self, name: &str) -> Option<String> {
+        if let Some(qualified) = self.patterns.get(name) {
+            return Some(qualified.clone());
+        }
+        self.parent.and_then(|p| p.resolve_pattern(name))
+    }
+
+    /// Resolve a song name through the scope chain.
+    /// Returns `None` if not found in any scope.
+    fn resolve_song(&self, name: &str) -> Option<String> {
+        if let Some(qualified) = self.songs.get(name) {
+            return Some(qualified.clone());
+        }
+        self.parent.and_then(|p| p.resolve_song(name))
+    }
+
+    /// Resolve a name that could be either a song or a pattern (for untyped
+    /// contexts like module params where the expander can't know which).
+    /// Songs are checked first, then patterns.
+    fn resolve_any(&self, name: &str) -> Option<String> {
+        self.resolve_song(name).or_else(|| self.resolve_pattern(name))
+    }
+
+    /// Resolve song/pattern references in module params in-place.
+    /// Uses `resolve_any` since the expander doesn't know which params are
+    /// song-typed vs pattern-typed (that's a module descriptor concern).
+    fn resolve_params(&self, params: &mut [(String, Value)]) {
+        for (_key, value) in params.iter_mut() {
+            if let Value::Scalar(Scalar::Str(ref mut s)) = value {
+                if let Some(resolved) = self.resolve_any(s) {
+                    *s = resolved;
+                }
+            }
+        }
+    }
+}
+
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 /// A resolved port endpoint: (module_id, port_name, index, scale).
@@ -160,6 +353,10 @@ struct BodyResult {
     connections: Vec<FlatConnection>,
     /// Port maps (only meaningful when this result comes from a template body).
     ports: TemplatePorts,
+    /// Songs defined inside the body (collected from templates).
+    songs: Vec<SongDef>,
+    /// Patterns defined inside the body (collected from templates).
+    patterns: Vec<FlatPatternDef>,
 }
 
 // ─── Index resolution ─────────────────────────────────────────────────────────
@@ -453,27 +650,36 @@ impl<'a> Expander<'a> {
         stmts: &[Statement],
         namespace: Option<&str>,
         param_env: &HashMap<String, Scalar>,
+        param_types: &HashMap<String, ParamType>,
+        parent_scope: &NameScope<'_>,
     ) -> Result<BodyResult, ExpandError> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
         let mut instance_ports: HashMap<String, TemplatePorts> = HashMap::new();
+        let mut songs: Vec<SongDef> = Vec::new();
+        let mut patterns: Vec<FlatPatternDef> = Vec::new();
+
+        // Build a scope for this body's local song/pattern definitions.
+        let scope = NameScope::child(parent_scope, stmts, namespace);
 
         // ── Pass 1: module declarations ──────────────────────────────────────
 
         for stmt in stmts {
             let decl = match stmt {
                 Statement::Module(d) => d,
-                Statement::Connection(_) => continue,
+                Statement::Connection(_) | Statement::Song(_) | Statement::Pattern(_) => continue,
             };
 
             let type_name = &decl.type_name.name;
 
             if self.templates.contains_key(type_name.as_str()) {
-                let (mods, conns, ports) =
-                    self.expand_template_instance(decl, namespace, param_env)?;
-                flat_modules.extend(mods);
-                flat_connections.extend(conns);
-                instance_ports.insert(decl.name.name.clone(), ports);
+                let sub =
+                    self.expand_template_instance(decl, namespace, param_env, &scope)?;
+                flat_modules.extend(sub.modules);
+                flat_connections.extend(sub.connections);
+                songs.extend(sub.songs);
+                patterns.extend(sub.patterns);
+                instance_ports.insert(decl.name.name.clone(), sub.ports);
             } else {
                 let inst_id = qualify(namespace, &decl.name.name);
                 let instance_alias_map = build_alias_map(&decl.shape);
@@ -496,12 +702,14 @@ impl<'a> Expander<'a> {
                 } else {
                     &empty_alias_map
                 };
-                let params = self.expand_param_entries_with_enum(
+                let mut params = self.expand_param_entries_with_enum(
                     &decl.params,
                     param_env,
                     &decl.span,
                     alias_map_ref,
                 )?;
+                // Resolve song/pattern references via the scope chain.
+                scope.resolve_params(&mut params);
                 flat_modules.push(FlatModule {
                     id: inst_id,
                     type_name: type_name.clone(),
@@ -522,7 +730,7 @@ impl<'a> Expander<'a> {
         for stmt in stmts {
             let conn = match stmt {
                 Statement::Connection(c) => c,
-                Statement::Module(_) => continue,
+                Statement::Module(_) | Statement::Song(_) | Statement::Pattern(_) => continue,
             };
             self.expand_connection(
                 conn,
@@ -534,10 +742,34 @@ impl<'a> Expander<'a> {
             )?;
         }
 
+        // ── Pass 3: songs ────────────────────────────────────────────────────
+
+        for stmt in stmts {
+            let song_def = match stmt {
+                Statement::Song(sd) => sd,
+                _ => continue,
+            };
+            songs.push(expand_song_def(song_def, namespace, param_env, param_types, &scope)?);
+        }
+
+        // ── Pass 4: patterns ─────────────────────────────────────────────────
+
+        for stmt in stmts {
+            let pat_def = match stmt {
+                Statement::Pattern(pd) => pd,
+                _ => continue,
+            };
+            let mut flat = expand_pattern_def(pat_def);
+            flat.name = qualify(namespace, &flat.name);
+            patterns.push(flat);
+        }
+
         Ok(BodyResult {
             modules: flat_modules,
             connections: flat_connections,
             ports: boundary,
+            songs,
+            patterns,
         })
     }
 
@@ -550,7 +782,8 @@ impl<'a> Expander<'a> {
         decl: &ModuleDecl,
         namespace: Option<&str>,
         param_env: &HashMap<String, Scalar>,
-    ) -> Result<(Vec<FlatModule>, Vec<FlatConnection>, TemplatePorts), ExpandError> {
+        scope: &NameScope<'_>,
+    ) -> Result<BodyResult, ExpandError> {
         let type_name = &decl.type_name.name;
         let template = self.templates[type_name.as_str()];
 
@@ -794,13 +1027,59 @@ impl<'a> Expander<'a> {
             }
         }
 
+        // Build the param type map for the child scope.
+        let sub_param_types: HashMap<String, ParamType> = template
+            .params
+            .iter()
+            .map(|p| (p.name.name.clone(), p.ty.clone()))
+            .collect();
+
+        // Validate song/pattern-typed params at the call site: the provided
+        // value must name a known song or pattern in the current scope.
+        for param_decl in &template.params {
+            let name = &param_decl.name.name;
+            if let Some(Scalar::Str(ref val)) = sub_param_env.get(name.as_str()).cloned() {
+                match param_decl.ty {
+                    ParamType::Pattern => {
+                        if scope.resolve_pattern(val).is_none() {
+                            return Err(ExpandError {
+                                span: decl.span,
+                                message: format!(
+                                    "template '{}' param '{}': '{}' is not a known pattern",
+                                    type_name, name, val,
+                                ),
+                            });
+                        }
+                    }
+                    ParamType::Song => {
+                        if scope.resolve_song(val).is_none() {
+                            return Err(ExpandError {
+                                span: decl.span,
+                                message: format!(
+                                    "template '{}' param '{}': '{}' is not a known song",
+                                    type_name, name, val,
+                                ),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let child_namespace = child_ns(namespace, &decl.name.name);
         self.call_stack.insert(type_name.clone());
-        let sub = self.expand_body(&template.body, Some(&child_namespace), &sub_param_env);
+        let sub = self.expand_body(
+            &template.body,
+            Some(&child_namespace),
+            &sub_param_env,
+            &sub_param_types,
+            scope,
+        );
         self.call_stack.remove(type_name.as_str());
         let sub = sub?;
 
-        Ok((sub.modules, sub.connections, sub.ports))
+        Ok(sub)
     }
 
     /// Expand a single connection statement in the current scope.
@@ -1140,17 +1419,15 @@ fn check_param_type(
         (ParamType::Int, Scalar::Int(_)) => true,
         (ParamType::Bool, Scalar::Bool(_)) => true,
         (ParamType::Str, Scalar::Str(_)) => true,
+        // pattern/song params carry their name as a Str.
+        (ParamType::Pattern, Scalar::Str(_)) => true,
+        (ParamType::Song, Scalar::Str(_)) => true,
         _ => false,
     };
     if ok {
         Ok(())
     } else {
-        let expected = match ty {
-            ParamType::Float => "float",
-            ParamType::Int => "int",
-            ParamType::Bool => "bool",
-            ParamType::Str => "str",
-        };
+        let expected = param_type_name(ty);
         Err(ExpandError {
             span: *span,
             message: format!(

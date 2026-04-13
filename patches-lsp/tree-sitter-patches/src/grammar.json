@@ -1125,6 +1125,22 @@
         {
           "type": "SYMBOL",
           "name": "port_ref"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "port_ref"
+              }
+            ]
+          }
         }
       ]
     },
@@ -1134,6 +1150,14 @@
         {
           "type": "SYMBOL",
           "name": "module_decl"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "song_block"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "pattern_block"
         },
         {
           "type": "SYMBOL",
@@ -1268,6 +1292,14 @@
         {
           "type": "STRING",
           "value": "bool"
+        },
+        {
+          "type": "STRING",
+          "value": "pattern"
+        },
+        {
+          "type": "STRING",
+          "value": "song"
         },
         {
           "type": "STRING",
@@ -1964,6 +1996,10 @@
     "song_cell": {
       "type": "CHOICE",
       "members": [
+        {
+          "type": "SYMBOL",
+          "name": "param_ref"
+        },
         {
           "type": "SYMBOL",
           "name": "ident"
