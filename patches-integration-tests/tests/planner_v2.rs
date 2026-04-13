@@ -309,6 +309,72 @@ fn state_preserved_across_parameter_update() {
     }
 }
 
+/// Phase continuity across a parameter-only replan: the oscillator's output
+/// must not snap back to sin(0) when frequency changes via replan.
+///
+/// Without this guarantee, every parameter tweak during live coding would
+/// produce an audible click as oscillators re-zero their phase.
+#[test]
+fn oscillator_phase_continuous_across_parameter_replan() {
+    let registry = patches_modules::default_registry();
+
+    // Use a low frequency (≈ 1 Hz at 44.1 kHz) so consecutive samples differ
+    // by a tiny phase increment, making a phase-reset jump easy to detect.
+    let graph_a = sine_out_graph("osc", 0.0); // 0.0 V/oct = C0 ≈ 16.35 Hz
+    let (mut plan_a, state_a) =
+        build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
+
+    let pool = ModulePool::new(MODULE_CAP);
+    let mut bufs = make_buffer_pool();
+    let mut stale = ReadyState::new_stale(pool);
+    adopt_plan(&mut plan_a, &mut stale);
+    let mut state = stale.rebuild(&plan_a, 32);
+
+    // Tick until the oscillator's output magnitude is well above zero — guarantees
+    // a re-zero would be visible. 2000 ticks ≈ 0.045 s, around half a cycle.
+    const TICKS: usize = 2000;
+    for i in 0..TICKS {
+        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        state.tick(&mut cable_pool);
+    }
+    let last_wi = (TICKS - 1) % 2;
+    let pre_replan = match bufs[AUDIO_OUT_L][last_wi] {
+        CableValue::Mono(v) => v,
+        _ => panic!("AUDIO_OUT_L must be Mono"),
+    };
+    assert!(
+        pre_replan.abs() > 0.1,
+        "test premise: pre-replan sample should be well above zero, got {pre_replan}"
+    );
+
+    // Parameter-only replan to a different frequency.
+    let graph_b = sine_out_graph("osc", 1.0);
+    let (mut plan_b, _) =
+        build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
+    assert!(plan_b.new_modules.is_empty(), "must be a parameter-only replan");
+    let mut stale = state.make_stale();
+    adopt_plan(&mut plan_b, &mut stale);
+    let mut state = stale.rebuild(&plan_b, 32);
+
+    // Tick once more.
+    let next_wi = TICKS % 2;
+    {
+        let mut cable_pool = CablePool::new(&mut bufs, next_wi);
+        state.tick(&mut cable_pool);
+    }
+    let post_replan = match bufs[AUDIO_OUT_L][next_wi] {
+        CableValue::Mono(v) => v,
+        _ => panic!("AUDIO_OUT_L must be Mono"),
+    };
+    // Phase continuity: the jump must be small relative to the pre-replan
+    // magnitude. A reset would land near 0, producing a large jump.
+    let jump = (post_replan - pre_replan).abs();
+    assert!(
+        jump < 0.05,
+        "phase reset detected: pre={pre_replan}, post={post_replan}, jump={jump}"
+    );
+}
+
 /// A plan built with a real (non-zero) sample rate produces modules that use it correctly.
 ///
 /// Verifies that the AudioEnvironment's sample_rate flows into module construction:
