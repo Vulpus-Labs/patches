@@ -774,7 +774,6 @@ fn analyse_tracker_modules(
                             continue;
                         }
                         let song_name = match value {
-                            ast::Value::Scalar(ast::Scalar::Ident(s)) => s.as_str(),
                             ast::Value::Scalar(ast::Scalar::Str(s)) => s.as_str(),
                             _ => continue,
                         };

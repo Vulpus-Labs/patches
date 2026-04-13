@@ -479,7 +479,7 @@ fn build_scalar(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Scalar
                 if looks_like_note(text) {
                     return Scalar::Float(parse_note_voct(text));
                 }
-                return Scalar::Ident(text.to_string());
+                return Scalar::Str(text.to_string());
             }
             _ => {}
         }

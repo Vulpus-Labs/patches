@@ -49,6 +49,7 @@ pub enum EnterResult {
 pub struct IncludeFrontier<K: Eq + Hash + Clone> {
     visited: HashSet<K>,
     stack: Vec<K>,
+    on_stack: HashSet<K>,
 }
 
 impl<K: Eq + Hash + Clone> IncludeFrontier<K> {
@@ -58,6 +59,7 @@ impl<K: Eq + Hash + Clone> IncludeFrontier<K> {
         Self {
             visited: HashSet::new(),
             stack: Vec::new(),
+            on_stack: HashSet::new(),
         }
     }
 
@@ -67,19 +69,21 @@ impl<K: Eq + Hash + Clone> IncludeFrontier<K> {
     pub fn with_root(root: K) -> Self {
         let mut f = Self::new();
         f.visited.insert(root.clone());
+        f.on_stack.insert(root.clone());
         f.stack.push(root);
         f
     }
 
     /// Attempt to enter a node. See [`EnterResult`].
     pub fn enter(&mut self, key: K) -> EnterResult {
-        if self.stack.iter().any(|k| k == &key) {
+        if self.on_stack.contains(&key) {
             return EnterResult::Cycle;
         }
         if self.visited.contains(&key) {
             return EnterResult::AlreadyVisited;
         }
         self.visited.insert(key.clone());
+        self.on_stack.insert(key.clone());
         self.stack.push(key);
         EnterResult::Fresh
     }
@@ -93,6 +97,9 @@ impl<K: Eq + Hash + Clone> IncludeFrontier<K> {
             popped.as_ref() == Some(key),
             "IncludeFrontier::leave mismatched key"
         );
+        if let Some(k) = popped {
+            self.on_stack.remove(&k);
+        }
     }
 
     /// The active stack of nodes currently being walked, root-first.

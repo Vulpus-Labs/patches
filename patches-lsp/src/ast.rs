@@ -35,8 +35,6 @@ pub(crate) enum Scalar {
     Str(String),
     /// `<ident>` template-parameter reference.
     ParamRef(Ident),
-    /// A bare identifier used as a string value (e.g. `ir: room`).
-    Ident(String),
 }
 
 /// A value in a param block.
