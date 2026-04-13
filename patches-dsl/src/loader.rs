@@ -22,10 +22,67 @@ pub struct LoadResult {
     pub dependencies: Vec<PathBuf>,
 }
 
+/// The specific cause of a [`LoadError`].
+#[derive(Debug)]
+pub enum LoadErrorKind {
+    /// Failed to read a source file from disk (or the in-memory reader).
+    Io {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+    /// A file failed to parse.
+    Parse {
+        path: PathBuf,
+        error: ParseError,
+    },
+    /// Following an include would form a cycle.
+    Cycle {
+        parent: PathBuf,
+        target: PathBuf,
+    },
+    /// Two files define the same template/pattern/song name.
+    NameCollision {
+        kind: &'static str,
+        name: String,
+        existing: PathBuf,
+        new: PathBuf,
+    },
+}
+
+impl std::fmt::Display for LoadErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadErrorKind::Io { path, error } => {
+                write!(f, "cannot read {}: {}", path.display(), error)
+            }
+            LoadErrorKind::Parse { path, error } => {
+                write!(f, "parse error in {}: {}", path.display(), error.message)
+            }
+            LoadErrorKind::Cycle { parent, target } => write!(
+                f,
+                "include cycle detected: {} includes {}",
+                parent.display(),
+                target.display()
+            ),
+            LoadErrorKind::NameCollision {
+                kind,
+                name,
+                existing,
+                new,
+            } => write!(
+                f,
+                "{kind} \"{name}\" defined in both {} and {}",
+                existing.display(),
+                new.display()
+            ),
+        }
+    }
+}
+
 /// An error encountered while loading an include tree.
 #[derive(Debug)]
 pub struct LoadError {
-    pub message: String,
+    pub kind: LoadErrorKind,
     /// The chain of includes that led to the error, innermost last.
     /// Each entry is (file path, span of the include directive in that file).
     pub include_chain: Vec<(PathBuf, Span)>,
@@ -33,7 +90,7 @@ pub struct LoadError {
 
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)?;
+        write!(f, "{}", self.kind)?;
         for (path, span) in &self.include_chain {
             write!(
                 f,
@@ -50,26 +107,25 @@ impl std::fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 impl LoadError {
-    fn from_parse_error(e: ParseError, path: &Path) -> Self {
+    fn new(kind: LoadErrorKind) -> Self {
         LoadError {
-            message: format!(
-                "parse error in {}: {}",
-                path.display(),
-                e.message
-            ),
+            kind,
             include_chain: vec![],
         }
     }
 
+    fn from_parse_error(e: ParseError, path: &Path) -> Self {
+        Self::new(LoadErrorKind::Parse {
+            path: path.to_path_buf(),
+            error: e,
+        })
+    }
+
     fn from_io_error(e: std::io::Error, path: &Path) -> Self {
-        LoadError {
-            message: format!(
-                "cannot read {}: {}",
-                path.display(),
-                e
-            ),
-            include_chain: vec![],
-        }
+        Self::new(LoadErrorKind::Io {
+            path: path.to_path_buf(),
+            error: e,
+        })
     }
 }
 
@@ -146,11 +202,10 @@ where
         match ctx.frontier.enter(resolved.clone()) {
             EnterResult::Cycle => {
                 return Err(LoadError {
-                    message: format!(
-                        "include cycle detected: {} includes {}",
-                        parent_path.display(),
-                        resolved.display()
-                    ),
+                    kind: LoadErrorKind::Cycle {
+                        parent: parent_path.to_path_buf(),
+                        target: resolved.clone(),
+                    },
                     include_chain: vec![(parent_path.to_path_buf(), inc.span)],
                 });
             }
@@ -225,20 +280,18 @@ fn register_names(
 
 fn check_collision(
     name: &str,
-    kind: &str,
+    kind: &'static str,
     path: &Path,
     defined: &mut HashMap<String, PathBuf>,
 ) -> Result<(), LoadError> {
     let key = format!("{kind}:{name}");
     if let Some(existing) = defined.get(&key) {
-        return Err(LoadError {
-            message: format!(
-                "{kind} \"{name}\" defined in both {} and {}",
-                existing.display(),
-                path.display()
-            ),
-            include_chain: vec![],
-        });
+        return Err(LoadError::new(LoadErrorKind::NameCollision {
+            kind,
+            name: name.to_string(),
+            existing: existing.clone(),
+            new: path.to_path_buf(),
+        }));
     }
     defined.insert(key, path.to_path_buf());
     Ok(())
@@ -346,7 +399,7 @@ mod tests {
             "#),
         ]);
         let err = load_with(Path::new("a.patches"), make_reader(files)).unwrap_err();
-        assert!(err.message.contains("cycle"), "expected cycle error, got: {}", err.message);
+        assert!(matches!(err.kind, LoadErrorKind::Cycle { .. }), "expected cycle error, got: {err}");
     }
 
     #[test]
@@ -358,7 +411,7 @@ mod tests {
             "#),
         ]);
         let err = load_with(Path::new("a.patches"), make_reader(files)).unwrap_err();
-        assert!(err.message.contains("cycle"), "expected cycle error, got: {}", err.message);
+        assert!(matches!(err.kind, LoadErrorKind::Cycle { .. }), "expected cycle error, got: {err}");
     }
 
     #[test]
@@ -370,7 +423,7 @@ mod tests {
             "#),
         ]);
         let err = load_with(Path::new("a.patches"), make_reader(files)).unwrap_err();
-        assert!(err.message.contains("cannot read"), "expected IO error, got: {}", err.message);
+        assert!(matches!(err.kind, LoadErrorKind::Io { .. }), "expected IO error, got: {err}");
     }
 
     #[test]
@@ -386,7 +439,10 @@ mod tests {
             "#),
         ]);
         let err = load_with(Path::new("a.patches"), make_reader(files)).unwrap_err();
-        assert!(err.message.contains("voice"), "expected collision error, got: {}", err.message);
+        assert!(
+            matches!(&err.kind, LoadErrorKind::NameCollision { name, .. } if name == "voice"),
+            "expected collision error for 'voice', got: {err}"
+        );
     }
 
     #[test]
@@ -401,7 +457,7 @@ mod tests {
             "#),
         ]);
         let err = load_with(Path::new("a.patches"), make_reader(files)).unwrap_err();
-        assert!(err.message.contains("parse error"), "expected parse error, got: {}", err.message);
+        assert!(matches!(err.kind, LoadErrorKind::Parse { .. }), "expected parse error, got: {err}");
     }
 
     #[test]

@@ -35,5 +35,5 @@ pub use ast::{
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
 pub use include_frontier::{normalize_path, EnterResult, IncludeFrontier};
-pub use loader::{load_with, LoadError, LoadResult};
+pub use loader::{load_with, LoadError, LoadErrorKind, LoadResult};
 pub use parser::{parse, parse_include_file, ParseError};
