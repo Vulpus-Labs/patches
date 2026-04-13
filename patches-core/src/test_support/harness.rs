@@ -451,6 +451,80 @@ impl ModuleHarness {
         }
     }
 
+    /// Send a unit impulse on `input` and collect `n` samples of `output`.
+    ///
+    /// Drives `input` to 1.0 for the first tick, then 0.0 for the rest. The
+    /// returned vector has length `n` starting at the first sample after the
+    /// impulse is presented (i.e. `out[0]` is the module's response to the
+    /// impulse on the same tick).
+    pub fn impulse_response(&mut self, input: &str, output: &str, n: usize) -> Vec<f32> {
+        let mut out = Vec::with_capacity(n);
+        self.set_mono(input, 1.0);
+        self.tick();
+        out.push(self.read_mono(output));
+        self.set_mono(input, 0.0);
+        for _ in 1..n {
+            self.tick();
+            out.push(self.read_mono(output));
+        }
+        out
+    }
+
+    /// Hold `input` at 1.0 and collect `n` samples of `output` (step response).
+    pub fn step_response(&mut self, input: &str, output: &str, n: usize) -> Vec<f32> {
+        self.set_mono(input, 1.0);
+        self.run_mono(n, output)
+    }
+
+    /// For each value in `values`, update parameter `name`, run `settle` ticks
+    /// to let the module respond, then run `measure` more ticks collecting
+    /// `output`, and pass the collected samples to `measure_fn`. Returns one
+    /// scalar per input value.
+    ///
+    /// Useful for sweeping cutoff/gain/depth and asserting a monotonic or
+    /// bounded relationship between parameter and measured output.
+    pub fn sweep_parameter<F>(
+        &mut self,
+        name: &str,
+        values: &[f32],
+        settle: usize,
+        measure: usize,
+        output: &str,
+        measure_fn: F,
+    ) -> Vec<f32>
+    where
+        F: Fn(&[f32]) -> f32,
+    {
+        let mut results = Vec::with_capacity(values.len());
+        for &v in values {
+            self.update_validated_parameters(&[(name, ParameterValue::Float(v))]);
+            for _ in 0..settle { self.tick(); }
+            let samples = self.run_mono(measure, output);
+            results.push(measure_fn(&samples));
+        }
+        results
+    }
+
+    /// Run `warmup` ticks then `measure` ticks; assert the variance of the
+    /// measurement window stays below `max_variance`. Catches systems that
+    /// have not settled (oscillating, drifting) but pass naive bound checks.
+    pub fn assert_steady_state_bounded(
+        &mut self,
+        warmup: usize,
+        measure: usize,
+        output: &str,
+        max_variance: f32,
+    ) {
+        for _ in 0..warmup { self.tick(); }
+        let samples = self.run_mono(measure, output);
+        let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+        let var = samples.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / samples.len() as f32;
+        assert!(
+            var <= max_variance,
+            "steady-state variance for '{output}' = {var:.6e}, exceeds bound {max_variance:.6e} (mean={mean})"
+        );
+    }
+
     /// Disconnect a list of input ports by name (all at index 0).
     ///
     /// Convenience for tests that need to isolate a module from CV inputs:
@@ -756,6 +830,57 @@ mod tests {
     fn unknown_output_panics() {
         let h = ModuleHarness::build::<Doubler>(&[]);
         let _ = h.read_mono("missing");
+    }
+
+    #[test]
+    fn impulse_response_emits_pulse_then_silence() {
+        // Doubler: out = in * 2 → impulse response is [2.0, 0.0, 0.0, ...].
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        let ir = h.impulse_response("in", "out", 4);
+        assert_eq!(ir, vec![2.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn step_response_holds_input() {
+        // Doubler: out = in * 2 → step response is constant 2.0.
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        let sr = h.step_response("in", "out", 4);
+        assert_eq!(sr, vec![2.0, 2.0, 2.0, 2.0]);
+    }
+
+    #[test]
+    fn assert_steady_state_bounded_passes_for_constant() {
+        let mut h = ModuleHarness::build::<Doubler>(&[]);
+        h.set_mono("in", 0.5);
+        h.assert_steady_state_bounded(8, 32, "out", 1e-12);
+    }
+
+    #[test]
+    #[should_panic(expected = "steady-state variance")]
+    fn assert_steady_state_bounded_fails_for_alternating() {
+        // Module that toggles output between 1.0 and -1.0 each tick: high variance.
+        struct Toggle { id: InstanceId, descriptor: ModuleDescriptor, output: MonoOutput, sign: f32 }
+        impl Module for Toggle {
+            fn describe(s: &ModuleShape) -> ModuleDescriptor {
+                ModuleDescriptor::new("Toggle", s.clone()).mono_out("out")
+            }
+            fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+                Self { id, descriptor: d, output: MonoOutput::default(), sign: 1.0 }
+            }
+            fn update_validated_parameters(&mut self, _: &mut ParameterMap) {}
+            fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
+            fn instance_id(&self) -> InstanceId { self.id }
+            fn set_ports(&mut self, _i: &[InputPort], o: &[OutputPort]) {
+                self.output = MonoOutput::from_ports(o, 0);
+            }
+            fn process(&mut self, pool: &mut CablePool<'_>) {
+                pool.write_mono(&self.output, self.sign);
+                self.sign = -self.sign;
+            }
+            fn as_any(&self) -> &dyn std::any::Any { self }
+        }
+        let mut h = ModuleHarness::build::<Toggle>(&[]);
+        h.assert_steady_state_bounded(0, 32, "out", 1e-3);
     }
 
     #[test]
