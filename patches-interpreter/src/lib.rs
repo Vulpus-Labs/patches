@@ -829,6 +829,12 @@ mod tests {
         ];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert_eq!(err.span, Span { start: 50, end: 60 });
+        // Two outputs feeding "mix.in/0" — must surface as the
+        // already-connected GraphError, not a generic "build failed".
+        assert!(
+            err.message.to_lowercase().contains("already"),
+            "expected input-already-connected error, got: {}", err.message
+        );
     }
 
     #[test]
@@ -884,6 +890,109 @@ mod tests {
         let build_result = build(&result.patch, &registry(), &env()).expect("build failed");
         assert_eq!(build_result.graph.node_ids().len(), 11);
         assert_eq!(build_result.graph.edge_list().len(), 16);
+    }
+
+    // ── GraphError variants surfaced via the build pipeline ─────────────
+
+    #[test]
+    fn duplicate_module_id_is_error() {
+        let mut flat = empty_flat();
+        flat.modules = vec![
+            osc_module("dup"),
+            FlatModule {
+                id: "dup".to_string(),
+                type_name: "Osc".to_string(),
+                shape: vec![],
+                params: vec![],
+                span: Span { start: 30, end: 33 },
+            },
+        ];
+        let err = build(&flat, &registry(), &env()).unwrap_err();
+        assert!(
+            err.message.contains("dup") && err.message.to_lowercase().contains("duplicate"),
+            "expected duplicate-id error mentioning 'dup', got: {}", err.message
+        );
+        assert_eq!(err.span, Span { start: 30, end: 33 });
+    }
+
+    #[test]
+    fn input_already_connected_is_error() {
+        // Two outputs feeding the same input port: second connect must fail.
+        let mut flat = empty_flat();
+        flat.modules = vec![osc_module("a"), osc_module("b"), sum_module("mix", 1)];
+        flat.connections = vec![
+            connection("a", "sine", 0, "mix", "in", 0),
+            FlatConnection {
+                from_module: "b".to_string(),
+                from_port: "sine".to_string(),
+                from_index: 0,
+                to_module: "mix".to_string(),
+                to_port: "in".to_string(),
+                to_index: 0,
+                scale: 1.0,
+                span: Span { start: 77, end: 88 },
+            },
+        ];
+        let err = build(&flat, &registry(), &env()).unwrap_err();
+        assert!(
+            err.message.to_lowercase().contains("already"),
+            "expected input-already-connected error, got: {}", err.message
+        );
+        assert_eq!(err.span, Span { start: 77, end: 88 });
+    }
+
+    #[test]
+    fn scale_out_of_range_is_error() {
+        let mut flat = empty_flat();
+        flat.modules = vec![osc_module("osc"), sum_module("mix", 1)];
+        flat.connections = vec![FlatConnection {
+            from_module: "osc".to_string(),
+            from_port: "sine".to_string(),
+            from_index: 0,
+            to_module: "mix".to_string(),
+            to_port: "in".to_string(),
+            to_index: 0,
+            scale: 2.5,
+            span: Span { start: 11, end: 19 },
+        }];
+        let err = build(&flat, &registry(), &env()).unwrap_err();
+        assert!(
+            err.message.to_lowercase().contains("scale"),
+            "expected scale-out-of-range error, got: {}", err.message
+        );
+        assert_eq!(err.span, Span { start: 11, end: 19 });
+    }
+
+    #[test]
+    fn cable_kind_mismatch_mono_to_poly_is_error() {
+        // Osc.sine (mono out) → PolyOsc.voct (poly in): kind mismatch.
+        let mut flat = empty_flat();
+        flat.modules = vec![
+            osc_module("mono_src"),
+            FlatModule {
+                id: "poly_dst".to_string(),
+                type_name: "PolyOsc".to_string(),
+                shape: vec![],
+                params: vec![],
+                span: span(),
+            },
+        ];
+        flat.connections = vec![FlatConnection {
+            from_module: "mono_src".to_string(),
+            from_port: "sine".to_string(),
+            from_index: 0,
+            to_module: "poly_dst".to_string(),
+            to_port: "voct".to_string(),
+            to_index: 0,
+            scale: 1.0,
+            span: Span { start: 100, end: 120 },
+        }];
+        let err = build(&flat, &registry(), &env()).unwrap_err();
+        assert!(
+            err.message.to_lowercase().contains("kind") || err.message.to_lowercase().contains("arit"),
+            "expected cable-kind-mismatch error, got: {}", err.message
+        );
+        assert_eq!(err.span, Span { start: 100, end: 120 });
     }
 
     #[test]
