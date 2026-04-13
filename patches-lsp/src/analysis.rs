@@ -263,14 +263,13 @@ fn extract_type_refs(body: &[ast::Statement]) -> Vec<String> {
         .collect()
 }
 
-/// Build a scoped key for a module instance: `"scope::name"` or just `"name"`
-/// when scope is empty.
-fn scoped_key(scope: &str, name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{scope}::{name}")
-    }
+/// Key identifying a module instance within its scope (template name or
+/// empty for the top-level patch body). Replaces the former `"scope::name"`
+/// string concatenation.
+pub(crate) type ScopeKey = (String, String);
+
+fn make_key(scope: &str, name: &str) -> ScopeKey {
+    (scope.to_string(), name.to_string())
 }
 
 // ─── Dependency resolution (phase 2) ────────────────────────────────────────
@@ -393,12 +392,12 @@ impl ResolvedDescriptor {
 pub(crate) fn instantiate_descriptors(
     decl_map: &DeclarationMap,
     registry: &Registry,
-) -> (HashMap<String, ResolvedDescriptor>, Vec<Diagnostic>) {
+) -> (HashMap<ScopeKey, ResolvedDescriptor>, Vec<Diagnostic>) {
     let mut descriptors = HashMap::new();
     let mut diagnostics = Vec::new();
 
     for module in &decl_map.modules {
-        let key = scoped_key(&module.scope, &module.name);
+        let key = make_key(&module.scope, &module.name);
 
         // Skip if this is a template instance
         if decl_map.templates.contains_key(&module.type_name) {
@@ -468,7 +467,7 @@ fn build_module_shape(shape_args: &[(String, ShapeValue)]) -> ModuleShape {
 /// Phase 4: validate connections and parameters against resolved descriptors.
 pub(crate) fn analyse_body(
     file: &ast::File,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     decl_map: &DeclarationMap,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -490,7 +489,7 @@ pub(crate) fn analyse_body(
 fn validate_body(
     body: &[ast::Statement],
     scope: &str,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     decl_map: &DeclarationMap,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -509,14 +508,14 @@ fn validate_body(
 fn validate_module_params(
     m: &ast::ModuleDecl,
     scope: &str,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let name = match &m.name {
         Some(id) => &id.name,
         None => return,
     };
-    let key = scoped_key(scope, name);
+    let key = make_key(scope, name);
     let desc = match descriptors.get(&key) {
         Some(d) => d,
         None => return,
@@ -552,7 +551,7 @@ fn validate_module_params(
 fn validate_connection(
     conn: &ast::Connection,
     scope: &str,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     decl_map: &DeclarationMap,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -580,7 +579,7 @@ fn validate_connection(
 fn validate_port_ref_as_output(
     port_ref: &ast::PortRef,
     scope: &str,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     decl_map: &DeclarationMap,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -599,7 +598,7 @@ fn validate_port_ref_as_output(
         _ => return, // param refs can't be statically validated
     };
 
-    let key = scoped_key(scope, module_name);
+    let key = make_key(scope, module_name);
     if let Some(desc) = descriptors.get(&key) {
         if !desc.has_output(port_name) {
             diags.push(Diagnostic {
@@ -620,7 +619,7 @@ fn validate_port_ref_as_output(
 fn validate_port_ref_as_input(
     port_ref: &ast::PortRef,
     scope: &str,
-    descriptors: &HashMap<String, ResolvedDescriptor>,
+    descriptors: &HashMap<ScopeKey, ResolvedDescriptor>,
     decl_map: &DeclarationMap,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -638,7 +637,7 @@ fn validate_port_ref_as_input(
         _ => return,
     };
 
-    let key = scoped_key(scope, module_name);
+    let key = make_key(scope, module_name);
     if let Some(desc) = descriptors.get(&key) {
         if !desc.has_input(port_name) {
             diags.push(Diagnostic {
@@ -828,26 +827,25 @@ fn analyse_tracker_modules(
 #[derive(Debug)]
 pub(crate) struct SemanticModel {
     pub declarations: DeclarationMap,
-    pub descriptors: HashMap<String, ResolvedDescriptor>,
-    /// Secondary index: unscoped name -> scoped key, for O(1) fallback lookups.
-    unscoped_index: HashMap<String, String>,
+    pub descriptors: HashMap<ScopeKey, ResolvedDescriptor>,
+    /// Secondary index: unscoped name -> full scope key, for O(1) fallback
+    /// lookups when a caller only knows the module-instance name.
+    unscoped_index: HashMap<String, ScopeKey>,
     pub diagnostics: Vec<Diagnostic>,
     /// Navigation data for goto-definition support.
     pub navigation: crate::navigation::FileNavigation,
 }
 
 impl SemanticModel {
-    /// Look up a descriptor by module instance name, optionally scoped.
-    /// Tries exact key first, then falls back to the unscoped index.
+    /// Look up a descriptor by module-instance name.
+    ///
+    /// First tries the top-level scope (`scope == ""`); on miss, falls back
+    /// through the unscoped secondary index.
     pub fn get_descriptor(&self, name: &str) -> Option<&ResolvedDescriptor> {
-        self.descriptors.get(name).or_else(|| {
-            if !name.contains("::") {
-                let scoped_key = self.unscoped_index.get(name)?;
-                self.descriptors.get(scoped_key)
-            } else {
-                None
-            }
-        })
+        let top_key = (String::new(), name.to_string());
+        self.descriptors
+            .get(&top_key)
+            .or_else(|| self.descriptors.get(self.unscoped_index.get(name)?))
     }
 }
 
@@ -878,12 +876,13 @@ pub(crate) fn analyse(file: &ast::File, registry: &Registry) -> SemanticModel {
     let defs = collect_definitions(file);
     let refs = collect_references(file, &decl_map);
 
-    // Build secondary index: unscoped name -> scoped key
-    let mut unscoped_index = HashMap::new();
+    // Build secondary index: unscoped instance name -> full scope key.
+    // Only scoped entries (scope != "") need an index entry — top-level
+    // lookups hit the primary map directly.
+    let mut unscoped_index: HashMap<String, ScopeKey> = HashMap::new();
     for key in descriptors.keys() {
-        if let Some(pos) = key.rfind("::") {
-            let unscoped = &key[pos + 2..];
-            unscoped_index.insert(unscoped.to_string(), key.clone());
+        if !key.0.is_empty() {
+            unscoped_index.insert(key.1.clone(), key.clone());
         }
     }
 
@@ -1308,8 +1307,8 @@ patch {
 }
 "#,
         );
-        assert!(model.descriptors.contains_key("osc"));
-        assert!(model.descriptors.contains_key("out"));
+        assert!(model.get_descriptor("osc").is_some());
+        assert!(model.get_descriptor("out").is_some());
         // No unknown-module diagnostics
         let type_diags: Vec<_> = model
             .diagnostics
@@ -1356,8 +1355,8 @@ patch {
 "#,
         );
         // v should have a template descriptor
-        assert!(model.descriptors.contains_key("v"));
-        if let Some(ResolvedDescriptor::Template { out_ports, .. }) = model.descriptors.get("v") {
+        assert!(model.get_descriptor("v").is_some());
+        if let Some(ResolvedDescriptor::Template { out_ports, .. }) = model.get_descriptor("v") {
             assert!(out_ports.contains(&"audio".to_string()));
         } else {
             panic!("expected template descriptor for v");
