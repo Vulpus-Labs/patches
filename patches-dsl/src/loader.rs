@@ -237,7 +237,8 @@ fn check_collision(
     path: &Path,
     defined: &mut HashMap<String, PathBuf>,
 ) -> Result<(), LoadError> {
-    if let Some(existing) = defined.get(name) {
+    let key = format!("{kind}:{name}");
+    if let Some(existing) = defined.get(&key) {
         return Err(LoadError {
             message: format!(
                 "{kind} \"{name}\" defined in both {} and {}",
@@ -247,7 +248,7 @@ fn check_collision(
             include_chain: vec![],
         });
     }
-    defined.insert(name.to_owned(), path.to_path_buf());
+    defined.insert(key, path.to_path_buf());
     Ok(())
 }
 

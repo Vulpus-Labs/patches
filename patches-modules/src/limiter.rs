@@ -56,7 +56,7 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_dsp::{DelayBuffer, HalfbandInterpolator, PeakWindow};
+use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples};
 
 /// Maximum `attack_ms` value supported at construction time.
 /// Must match the upper bound of the `attack_ms` float_param.
@@ -68,27 +68,9 @@ const MAX_ATTACK_MS: f32 = 50.0;
 pub struct Limiter {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-
-    // Audio state
     dry_delay: DelayBuffer,
     interpolator: HalfbandInterpolator,
-    peak_window: PeakWindow,
-    current_gain: f32,
-
-    // Derived from attack_ms; updated without allocation when the parameter changes.
-    lookahead_samples: usize,
-
-    // Cached parameters
-    threshold_internal: f32,
-    attack_coeff: f32,
-    release_coeff: f32,
-
-    // Used when attack_ms / release_ms change to recompute coefficients
-    sample_rate: f32,
-    attack_ms: f32,
-    release_ms: f32,
-
-    // Port fields
+    core: LimiterCore,
     in_port: MonoInput,
     out_port: MonoOutput,
 }
@@ -104,36 +86,16 @@ impl Module for Limiter {
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
-        let attack_ms = 2.0_f32;
-        let release_ms = 100.0_f32;
-        let attack_coeff = compute_time_coeff(attack_ms, env.sample_rate);
-        let release_coeff = compute_time_coeff(release_ms, env.sample_rate);
-        let lookahead_samples = ms_to_samples(attack_ms, env.sample_rate);
-
-        // Pre-allocate for the maximum possible lookahead so attack_ms can
-        // be changed at runtime without any allocation.
+        let core = LimiterCore::new(env.sample_rate, 0.9, 2.0, 100.0, MAX_ATTACK_MS);
         let max_lookahead = ms_to_samples(MAX_ATTACK_MS, env.sample_rate);
         let dry_delay = DelayBuffer::new(max_lookahead + HalfbandInterpolator::GROUP_DELAY_BASE_RATE + 1);
-        // Peak window in oversampled samples: 2*(L+1) covers exactly [t-L .. t],
-        // i.e. L+1 base-rate samples.  Allocate for max_lookahead so the window
-        // can be resized at runtime without allocation.
-        let mut peak_window = PeakWindow::new(2 * (max_lookahead + 1));
-        peak_window.set_window(2 * (lookahead_samples + 1));
 
         Self {
             instance_id,
             descriptor,
             dry_delay,
             interpolator: HalfbandInterpolator::default(),
-            peak_window,
-            current_gain: 1.0,
-            lookahead_samples,
-            threshold_internal: 0.98, // default threshold 1.0 * 0.98
-            attack_coeff,
-            release_coeff,
-            sample_rate: env.sample_rate,
-            attack_ms,
-            release_ms,
+            core,
             in_port: MonoInput::default(),
             out_port: MonoOutput::default(),
         }
@@ -141,23 +103,13 @@ impl Module for Limiter {
 
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("threshold") {
-            self.threshold_internal = v.max(0.0) * 0.98;
+            self.core.set_threshold(*v);
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("attack_ms") {
-            let new_ms = v.clamp(0.1, MAX_ATTACK_MS);
-            if (new_ms - self.attack_ms).abs() > f32::EPSILON {
-                self.attack_ms = new_ms;
-                self.attack_coeff = compute_time_coeff(new_ms, self.sample_rate);
-                self.lookahead_samples = ms_to_samples(new_ms, self.sample_rate);
-                self.peak_window.set_window(2 * (self.lookahead_samples + 1));
-            }
+            self.core.set_attack_ms(*v, MAX_ATTACK_MS);
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("release_ms") {
-            let new_ms = v.max(1.0);
-            if (new_ms - self.release_ms).abs() > f32::EPSILON {
-                self.release_ms = new_ms;
-                self.release_coeff = compute_time_coeff(new_ms, self.sample_rate);
-            }
+            self.core.set_release_ms(*v);
         }
     }
 
@@ -177,55 +129,20 @@ impl Module for Limiter {
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let input = pool.read_mono(&self.in_port);
 
-        // Dry path: delay by lookahead + FIR group delay so the output sample
-        // is time-aligned with the gain computed lookahead_samples steps earlier.
         self.dry_delay.push(input);
 
-        // Detector path: upsample to catch inter-sample peaks, then find the
-        // peak over the lookahead window [t-L .. t] (2*(L+1) oversampled samples).
         let [over_a, over_b] = self.interpolator.process(input);
-        self.peak_window.push(over_a.abs());
-        self.peak_window.push(over_b.abs());
-        let peak = self.peak_window.peak();
+        self.core.push_magnitude(over_a.abs());
+        self.core.push_magnitude(over_b.abs());
+        self.core.update_gain();
 
-        // Gain computation: smoothed attack and release.
-        // The `peak > threshold` guard also excludes zero/subnormal peaks,
-        // since threshold_internal is always positive.
-        let target_gain = if peak > self.threshold_internal {
-            (self.threshold_internal / peak).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        let coeff = if target_gain < self.current_gain {
-            self.attack_coeff
-        } else {
-            self.release_coeff
-        };
-        self.current_gain += coeff * (target_gain - self.current_gain);
-
-        // Output: time-aligned delayed input scaled by current gain, then soft-clipped.
-        let read_offset = self.lookahead_samples + HalfbandInterpolator::GROUP_DELAY_BASE_RATE;
-        let delayed = self.dry_delay.read_nearest(read_offset);
-        pool.write_mono(&self.out_port, (delayed * self.current_gain).clamp(-1.0, 1.0));
+        let delayed = self.dry_delay.read_nearest(self.core.read_offset());
+        pool.write_mono(&self.out_port, (delayed * self.core.current_gain()).clamp(-1.0, 1.0));
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-}
-
-/// Convert milliseconds to a whole number of samples.
-///
-/// Clamps negative and NaN inputs to zero.
-#[inline]
-fn ms_to_samples(ms: f32, sample_rate: f32) -> usize {
-    let raw = ms * 0.001 * sample_rate;
-    if raw > 0.0 { raw.round() as usize } else { 0 }
-}
-
-#[inline]
-fn compute_time_coeff(time_ms: f32, sample_rate: f32) -> f32 {
-    1.0 - (-1.0_f32 / (time_ms * 0.001 * sample_rate)).exp()
 }
 
 #[cfg(test)]

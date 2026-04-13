@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiFrame, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, PolyInput, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::ParameterMap;
 
@@ -78,8 +78,8 @@ impl NoteStack {
 pub struct MonoMidiIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
-    midi_in: PolyInput,
+    /// Debounced MIDI input from the GLOBAL_MIDI backplane slot.
+    midi_in: MidiInput,
 
     /// Stack of physically held keys, oldest at index 0, newest at top.
     stack: NoteStack,
@@ -162,11 +162,7 @@ impl Module for MonoMidiIn {
         Self {
             instance_id,
             descriptor,
-            midi_in: PolyInput {
-                cable_idx: GLOBAL_MIDI,
-                scale: 1.0,
-                connected: true,
-            },
+            midi_in: MidiInput::backplane(GLOBAL_MIDI),
             stack: NoteStack::new(),
             current_note: 60, // sensible middle-range default; overwritten on first note-on
             sustain: false,
@@ -203,11 +199,8 @@ impl Module for MonoMidiIn {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Read MIDI events from the GLOBAL_MIDI backplane slot.
-        let frame = pool.read_poly(&self.midi_in);
-        let event_count = MidiFrame::event_count(&frame);
-        for i in 0..event_count {
-            let event = MidiFrame::read_event(&frame, i);
+        let events = self.midi_in.read(pool);
+        for event in events.iter() {
             let status = event.bytes[0] & 0xF0;
             self.handle_midi_event(status, event.bytes[1], event.bytes[2]);
         }
@@ -238,28 +231,15 @@ impl Module for MonoMidiIn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
-    use patches_core::test_support::{assert_within, ModuleHarness};
+    use patches_core::MidiEvent;
+    use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, cc, send_midi};
 
     fn make_keyboard() -> ModuleHarness {
         ModuleHarness::build::<MonoMidiIn>(&[])
     }
 
-    fn note_on(note: u8, vel: u8) -> MidiEvent { MidiEvent { bytes: [0x90, note, vel] } }
-    fn note_off(note: u8) -> MidiEvent { MidiEvent { bytes: [0x80, note, 0] } }
-    fn cc(number: u8, value: u8) -> MidiEvent { MidiEvent { bytes: [0xB0, number, value] } }
     fn pitch_bend(raw: u16) -> MidiEvent {
         MidiEvent { bytes: [0xE0, (raw & 0x7F) as u8, ((raw >> 7) & 0x7F) as u8] }
-    }
-
-    /// Write MIDI events to the GLOBAL_MIDI backplane slot.
-    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
-        let mut frame = [0.0f32; 16];
-        MidiFrame::set_event_count(&mut frame, events.len());
-        for (i, &event) in events.iter().enumerate() {
-            MidiFrame::write_event(&mut frame, i, event);
-        }
-        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
     }
 
     // ── NoteStack unit tests ─────────────────────────────────────────────────

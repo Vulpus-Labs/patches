@@ -1,0 +1,13 @@
+[package]
+name = "patches-layout"
+version = "0.1.0"
+edition = "2021"
+description = "Backend-agnostic Sugiyama layout for patch graphs"
+publish = false
+
+[lib]
+name = "patches_layout"
+path = "src/lib.rs"
+
+[dependencies]
+rust-sugiyama = "0.4"

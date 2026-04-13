@@ -26,12 +26,38 @@ impl MidiFrame {
     /// Maximum number of MIDI events per frame.
     pub const MAX_EVENTS: usize = 5;
 
-    /// Read the event count from a frame.
-    pub fn event_count(frame: &[f32; 16]) -> usize {
+    /// Read the total event count from a frame.
+    ///
+    /// This may exceed [`MAX_EVENTS`](Self::MAX_EVENTS) when the producer has
+    /// more events queued for delivery in subsequent samples.
+    pub fn total_count(frame: &[f32; 16]) -> usize {
         frame[Self::EVENT_COUNT] as usize
     }
 
+    /// Number of events actually packed into lanes 1–15.
+    ///
+    /// Always `<= MAX_EVENTS`. Use this (not [`total_count`](Self::total_count))
+    /// when indexing into the frame.
+    pub fn packed_count(frame: &[f32; 16]) -> usize {
+        Self::total_count(frame).min(Self::MAX_EVENTS)
+    }
+
+    /// Returns `true` when the producer has more events queued beyond this frame.
+    pub fn has_more(frame: &[f32; 16]) -> bool {
+        Self::total_count(frame) > Self::MAX_EVENTS
+    }
+
+    /// Alias for [`total_count`](Self::total_count) — prefer `total_count` or
+    /// `packed_count` in new code.
+    #[deprecated(note = "use total_count or packed_count")]
+    pub fn event_count(frame: &[f32; 16]) -> usize {
+        Self::total_count(frame)
+    }
+
     /// Set the event count in a frame.
+    ///
+    /// May be set to a value greater than [`MAX_EVENTS`](Self::MAX_EVENTS) to
+    /// signal that additional events will follow in subsequent samples.
     pub fn set_event_count(frame: &mut [f32; 16], count: usize) {
         frame[Self::EVENT_COUNT] = count as f32;
     }
@@ -64,6 +90,16 @@ impl MidiFrame {
         frame[base + 2] = event.bytes[2] as f32;
     }
 
+    /// Iterate over the events packed in a frame.
+    ///
+    /// Yields up to [`MAX_EVENTS`](Self::MAX_EVENTS) `MidiEvent` values
+    /// regardless of `total_count`. Channel stripping remains the caller's
+    /// responsibility.
+    pub fn iter_events(frame: &[f32; 16]) -> impl Iterator<Item = MidiEvent> + '_ {
+        let count = Self::packed_count(frame);
+        (0..count).map(move |i| Self::read_event(frame, i))
+    }
+
     /// Reset a frame to zero events (all lanes zeroed).
     pub fn clear(frame: &mut [f32; 16]) {
         *frame = [0.0; 16];
@@ -86,7 +122,7 @@ mod tests {
     fn round_trip_zero_events() {
         let mut frame = [0.0f32; 16];
         MidiFrame::set_event_count(&mut frame, 0);
-        assert_eq!(MidiFrame::event_count(&frame), 0);
+        assert_eq!(MidiFrame::total_count(&frame), 0);
     }
 
     #[test]
@@ -95,7 +131,7 @@ mod tests {
         let event = note_on(60, 100);
         MidiFrame::set_event_count(&mut frame, 1);
         MidiFrame::write_event(&mut frame, 0, event);
-        assert_eq!(MidiFrame::event_count(&frame), 1);
+        assert_eq!(MidiFrame::total_count(&frame), 1);
         assert_eq!(MidiFrame::read_event(&frame, 0), event);
     }
 
@@ -113,7 +149,7 @@ mod tests {
         for (i, &event) in events.iter().enumerate() {
             MidiFrame::write_event(&mut frame, i, event);
         }
-        assert_eq!(MidiFrame::event_count(&frame), 5);
+        assert_eq!(MidiFrame::total_count(&frame), 5);
         for (i, &expected) in events.iter().enumerate() {
             assert_eq!(MidiFrame::read_event(&frame, i), expected, "event {i} mismatch");
         }
@@ -127,7 +163,7 @@ mod tests {
         MidiFrame::write_event(&mut frame, 1, note_on(64, 100));
         MidiFrame::write_event(&mut frame, 2, note_off(60));
         MidiFrame::clear(&mut frame);
-        assert_eq!(MidiFrame::event_count(&frame), 0);
+        assert_eq!(MidiFrame::total_count(&frame), 0);
         assert_eq!(frame, [0.0; 16]);
     }
 
@@ -158,5 +194,44 @@ mod tests {
     fn write_event_panics_out_of_range() {
         let mut frame = [0.0f32; 16];
         MidiFrame::write_event(&mut frame, 5, note_on(60, 100));
+    }
+
+    #[test]
+    fn total_count_can_exceed_max_events() {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, 12);
+        assert_eq!(MidiFrame::total_count(&frame), 12);
+        assert_eq!(MidiFrame::packed_count(&frame), 5);
+        assert!(MidiFrame::has_more(&frame));
+    }
+
+    #[test]
+    fn packed_count_clamps_at_max_events() {
+        let mut frame = [0.0f32; 16];
+        MidiFrame::set_event_count(&mut frame, 3);
+        assert_eq!(MidiFrame::packed_count(&frame), 3);
+        assert!(!MidiFrame::has_more(&frame));
+    }
+
+    #[test]
+    fn iter_events_safe_with_count_above_max() {
+        let mut frame = [0.0f32; 16];
+        let events = [
+            note_on(60, 100),
+            note_on(64, 80),
+            note_on(67, 90),
+            note_off(60),
+            note_off(64),
+        ];
+        for (i, &event) in events.iter().enumerate() {
+            MidiFrame::write_event(&mut frame, i, event);
+        }
+        // Signal that 12 total events exist (7 more coming later).
+        MidiFrame::set_event_count(&mut frame, 12);
+
+        let collected: Vec<_> = MidiFrame::iter_events(&frame).collect();
+        assert_eq!(collected.len(), 5, "iter_events should yield at most MAX_EVENTS");
+        assert_eq!(collected[0], events[0]);
+        assert_eq!(collected[4], events[4]);
     }
 }

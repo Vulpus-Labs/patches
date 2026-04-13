@@ -40,7 +40,7 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_dsp::{DelayBuffer, HalfbandInterpolator, PeakWindow};
+use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples};
 
 /// Maximum `attack_ms` value supported at construction time.
 const MAX_ATTACK_MS: f32 = 50.0;
@@ -51,29 +51,11 @@ const MAX_ATTACK_MS: f32 = 50.0;
 pub struct StereoLimiter {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-
-    // Per-channel audio state
     dry_delay_l: DelayBuffer,
     dry_delay_r: DelayBuffer,
     interpolator_l: HalfbandInterpolator,
     interpolator_r: HalfbandInterpolator,
-
-    // Shared linked sidechain
-    peak_window: PeakWindow,
-    current_gain: f32,
-
-    lookahead_samples: usize,
-
-    // Cached parameters
-    threshold_internal: f32,
-    attack_coeff: f32,
-    release_coeff: f32,
-
-    sample_rate: f32,
-    attack_ms: f32,
-    release_ms: f32,
-
-    // Ports
+    core: LimiterCore,
     in_l: MonoInput,
     in_r: MonoInput,
     out_l: MonoOutput,
@@ -93,36 +75,18 @@ impl Module for StereoLimiter {
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
-        let attack_ms = 2.0_f32;
-        let release_ms = 100.0_f32;
-        let attack_coeff = compute_time_coeff(attack_ms, env.sample_rate);
-        let release_coeff = compute_time_coeff(release_ms, env.sample_rate);
-        let lookahead_samples = ms_to_samples(attack_ms, env.sample_rate);
-
+        let core = LimiterCore::new(env.sample_rate, 0.9, 2.0, 100.0, MAX_ATTACK_MS);
         let max_lookahead = ms_to_samples(MAX_ATTACK_MS, env.sample_rate);
         let delay_len = max_lookahead + HalfbandInterpolator::GROUP_DELAY_BASE_RATE + 1;
-        let dry_delay_l = DelayBuffer::new(delay_len);
-        let dry_delay_r = DelayBuffer::new(delay_len);
-
-        let mut peak_window = PeakWindow::new(2 * (max_lookahead + 1));
-        peak_window.set_window(2 * (lookahead_samples + 1));
 
         Self {
             instance_id,
             descriptor,
-            dry_delay_l,
-            dry_delay_r,
+            dry_delay_l: DelayBuffer::new(delay_len),
+            dry_delay_r: DelayBuffer::new(delay_len),
             interpolator_l: HalfbandInterpolator::default(),
             interpolator_r: HalfbandInterpolator::default(),
-            peak_window,
-            current_gain: 1.0,
-            lookahead_samples,
-            threshold_internal: 0.98,
-            attack_coeff,
-            release_coeff,
-            sample_rate: env.sample_rate,
-            attack_ms,
-            release_ms,
+            core,
             in_l: MonoInput::default(),
             in_r: MonoInput::default(),
             out_l: MonoOutput::default(),
@@ -132,23 +96,13 @@ impl Module for StereoLimiter {
 
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("threshold") {
-            self.threshold_internal = v.max(0.0) * 0.98;
+            self.core.set_threshold(*v);
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("attack_ms") {
-            let new_ms = v.clamp(0.1, MAX_ATTACK_MS);
-            if (new_ms - self.attack_ms).abs() > f32::EPSILON {
-                self.attack_ms = new_ms;
-                self.attack_coeff = compute_time_coeff(new_ms, self.sample_rate);
-                self.lookahead_samples = ms_to_samples(new_ms, self.sample_rate);
-                self.peak_window.set_window(2 * (self.lookahead_samples + 1));
-            }
+            self.core.set_attack_ms(*v, MAX_ATTACK_MS);
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("release_ms") {
-            let new_ms = v.max(1.0);
-            if (new_ms - self.release_ms).abs() > f32::EPSILON {
-                self.release_ms = new_ms;
-                self.release_coeff = compute_time_coeff(new_ms, self.sample_rate);
-            }
+            self.core.set_release_ms(*v);
         }
     }
 
@@ -171,52 +125,27 @@ impl Module for StereoLimiter {
         let input_l = pool.read_mono(&self.in_l);
         let input_r = pool.read_mono(&self.in_r);
 
-        // Dry path: delay both channels
         self.dry_delay_l.push(input_l);
         self.dry_delay_r.push(input_r);
 
-        // Detector path: upsample both channels, push max magnitude
+        // Linked sidechain: push max magnitude from both channels
         let [over_l_a, over_l_b] = self.interpolator_l.process(input_l);
         let [over_r_a, over_r_b] = self.interpolator_r.process(input_r);
-        self.peak_window.push(over_l_a.abs().max(over_r_a.abs()));
-        self.peak_window.push(over_l_b.abs().max(over_r_b.abs()));
-        let peak = self.peak_window.peak();
+        self.core.push_magnitude(over_l_a.abs().max(over_r_a.abs()));
+        self.core.push_magnitude(over_l_b.abs().max(over_r_b.abs()));
+        self.core.update_gain();
 
-        // Gain computation: single linked gain for both channels
-        let target_gain = if peak > self.threshold_internal {
-            (self.threshold_internal / peak).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-        let coeff = if target_gain < self.current_gain {
-            self.attack_coeff
-        } else {
-            self.release_coeff
-        };
-        self.current_gain += coeff * (target_gain - self.current_gain);
-
-        // Output: time-aligned delayed signals scaled by linked gain
-        let read_offset = self.lookahead_samples + HalfbandInterpolator::GROUP_DELAY_BASE_RATE;
+        let read_offset = self.core.read_offset();
+        let gain = self.core.current_gain();
         let delayed_l = self.dry_delay_l.read_nearest(read_offset);
         let delayed_r = self.dry_delay_r.read_nearest(read_offset);
-        pool.write_mono(&self.out_l, (delayed_l * self.current_gain).clamp(-1.0, 1.0));
-        pool.write_mono(&self.out_r, (delayed_r * self.current_gain).clamp(-1.0, 1.0));
+        pool.write_mono(&self.out_l, (delayed_l * gain).clamp(-1.0, 1.0));
+        pool.write_mono(&self.out_r, (delayed_r * gain).clamp(-1.0, 1.0));
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-}
-
-#[inline]
-fn ms_to_samples(ms: f32, sample_rate: f32) -> usize {
-    let raw = ms * 0.001 * sample_rate;
-    if raw > 0.0 { raw.round() as usize } else { 0 }
-}
-
-#[inline]
-fn compute_time_coeff(time_ms: f32, sample_rate: f32) -> f32 {
-    1.0 - (-1.0_f32 / (time_ms * 0.001 * sample_rate)).exp()
 }
 
 #[cfg(test)]

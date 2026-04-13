@@ -1,0 +1,17 @@
+[package]
+name = "patches-svg"
+version = "0.1.0"
+edition = "2021"
+description = "SVG renderer for Patches DSL FlatPatch graphs"
+publish = false
+
+[lib]
+name = "patches_svg"
+path = "src/lib.rs"
+
+[dependencies]
+patches-dsl = { path = "../patches-dsl" }
+patches-layout = { path = "../patches-layout" }
+
+[dev-dependencies]
+quick-xml = "0.36"

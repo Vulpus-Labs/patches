@@ -31,22 +31,14 @@ impl EnvelopeFollower {
         }
     }
 
-    /// Compute the smoothing coefficient for a given time constant.
-    fn time_coeff(time_ms: f32, sample_rate: f32) -> f32 {
-        if time_ms <= 0.0 {
-            return 1.0; // instant
-        }
-        1.0 - (-1.0 / (time_ms * 0.001 * sample_rate)).exp()
-    }
-
     /// Set the attack time in milliseconds.
     pub fn set_attack_ms(&mut self, ms: f32, sample_rate: f32) {
-        self.attack_coeff = Self::time_coeff(ms, sample_rate);
+        self.attack_coeff = crate::compute_time_coeff(ms, sample_rate);
     }
 
     /// Set the release time in milliseconds.
     pub fn set_release_ms(&mut self, ms: f32, sample_rate: f32) {
-        self.release_coeff = Self::time_coeff(ms, sample_rate);
+        self.release_coeff = crate::compute_time_coeff(ms, sample_rate);
     }
 
     /// Process one sample, returning the current envelope value.
@@ -59,6 +51,10 @@ impl EnvelopeFollower {
             self.release_coeff
         };
         self.envelope += coeff * (abs_input - self.envelope);
+        // Flush subnormals to zero to avoid denormal stalls on the audio thread.
+        if !self.envelope.is_normal() && self.envelope != 0.0 {
+            self.envelope = 0.0;
+        }
         self.envelope
     }
 
@@ -159,6 +155,28 @@ mod tests {
             ef.tick(-0.7);
         }
         assert_within!(0.7, ef.current(), 0.05);
+    }
+
+    #[test]
+    fn prolonged_silence_does_not_produce_denormals() {
+        let mut ef = EnvelopeFollower::new();
+        ef.set_attack_ms(1.0, SR);
+        ef.set_release_ms(200.0, SR);
+
+        // Charge to ~1.0
+        for _ in 0..441 {
+            ef.tick(1.0);
+        }
+
+        // Release into silence for 30 seconds (~1.3M samples)
+        for i in 0..(SR as usize * 30) {
+            let val = ef.tick(0.0);
+            assert!(
+                val == 0.0 || val.is_normal(),
+                "denormal at sample {i}: {val:e} (bits: {:#010x})",
+                val.to_bits()
+            );
+        }
     }
 
     #[test]

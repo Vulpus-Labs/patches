@@ -27,6 +27,7 @@ struct LoadedPatch {
 fn load_patch(
     path: &str,
     registry: &patches_core::Registry,
+    sample_rate: f32,
 ) -> Result<LoadedPatch, Box<dyn std::error::Error>> {
     let master_path = Path::new(path);
     let load_result = patches_dsl::load_with(master_path, |p| fs::read_to_string(p))?;
@@ -34,7 +35,7 @@ fn load_patch(
     for w in &result.warnings {
         eprintln!("dsl warning: {w}");
     }
-    let env = AudioEnvironment { sample_rate: 44_100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
+    let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let base_dir = master_path.parent();
     let build_result = patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?;
     Ok(LoadedPatch {
@@ -69,8 +70,11 @@ fn run(
     no_stdin: bool,
     device_config: DeviceConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let load_registry = patches_modules::default_registry();
-    let loaded = load_patch(path, &load_registry)?;
+    let registry = patches_modules::default_registry();
+
+    // Build with a placeholder rate; we rebuild after starting the engine to
+    // use the actual device sample rate.
+    let loaded = load_patch(path, &registry, 44_100.0)?;
 
     let engine_registry = patches_modules::default_registry();
     let mut engine = PatchEngine::with_device_config(
@@ -88,6 +92,14 @@ fn run(
     )?;
 
     let sample_rate = engine.sample_rate().unwrap_or(44_100.0);
+
+    // Rebuild with the actual device sample rate if it differs from the placeholder.
+    if (sample_rate - 44_100.0).abs() > 1.0 {
+        match load_patch(path, &registry, sample_rate) {
+            Ok(reloaded) => push_build_result(&mut engine, &reloaded.build_result),
+            Err(e) => eprintln!("warn: rebuild at device sample rate failed: {e}"),
+        }
+    }
     let scheduler = EventScheduler::new(sample_rate, 128);
     let _midi_connector = match MidiConnector::open(engine.clock(), midi_producer, scheduler) {
         Ok(c) => {
@@ -146,7 +158,7 @@ fn run(
         });
 
         if changed {
-            match load_patch(path, &load_registry) {
+            match load_patch(path, &registry, sample_rate) {
                 Ok(loaded) => {
                     push_build_result(&mut engine, &loaded.build_result);
                     // Refresh the watched set from the new dependency list.

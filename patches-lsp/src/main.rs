@@ -16,7 +16,9 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(PatchesLanguageServer::new);
+    let (service, socket) = LspService::build(PatchesLanguageServer::new)
+        .custom_method("patches/renderSvg", PatchesLanguageServer::render_svg)
+        .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }

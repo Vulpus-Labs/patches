@@ -74,7 +74,7 @@ pub struct ModuleSlot {
 ///
 /// This struct is a pure data-transfer object sent from the planner to the audio thread
 /// over the lock-free plan channel. The audio thread drives per-sample processing via
-/// [`ExecutionState`](crate::ExecutionState), which it rebuilds from this plan after
+/// [`ReadyState`](crate::ReadyState), which it rebuilds from this plan after
 /// each adoption.
 pub struct ExecutionPlan {
     pub slots: Vec<ModuleSlot>,
@@ -120,7 +120,7 @@ pub struct ExecutionPlan {
     /// Pool indices in execution order — one entry per slot, parallel to
     /// [`slots`](Self::slots).
     ///
-    /// A flat `Vec<usize>` so that [`ExecutionState::rebuild`] can use the same
+    /// A flat `Vec<usize>` so that [`ReadyState::rebuild`] can use the same
     /// `rebuild(&[usize], resolve)` call for all three module categories.
     pub active_indices: Vec<usize>,
     /// Port updates to deliver to surviving modules on plan adoption.

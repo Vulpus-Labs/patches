@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MidiFrame, MonoOutput, OutputPort, PolyInput, PolyOutput, PortDescriptor,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
     GLOBAL_MIDI,
 };
 use patches_core::{CableKind, PolyLayout};
@@ -50,7 +50,7 @@ pub struct PolyMidiIn {
     mod_value: f32,
     pitch_value: f32,
     /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
-    midi_in: PolyInput,
+    midi_in: MidiInput,
     // Output port fields
     out_v_oct: PolyOutput,
     out_trigger: PolyOutput,
@@ -143,11 +143,7 @@ impl Module for PolyMidiIn {
             tick_count: 0,
             mod_value: 0.0,
             pitch_value: 0.0,
-            midi_in: PolyInput {
-                cable_idx: GLOBAL_MIDI,
-                scale: 1.0,
-                connected: true,
-            },
+            midi_in: MidiInput::backplane(GLOBAL_MIDI),
             out_v_oct: PolyOutput::default(),
             out_trigger: PolyOutput::default(),
             out_gate: PolyOutput::default(),
@@ -173,11 +169,8 @@ impl Module for PolyMidiIn {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Read MIDI events from the GLOBAL_MIDI backplane slot.
-        let frame = pool.read_poly(&self.midi_in);
-        let event_count = MidiFrame::event_count(&frame);
-        for i in 0..event_count {
-            let event = MidiFrame::read_event(&frame, i);
+        let events = self.midi_in.read(pool);
+        for event in events.iter() {
             let status = event.bytes[0] & 0xF0;
             self.handle_midi_event(status, event.bytes[1], event.bytes[2]);
         }
@@ -218,7 +211,7 @@ impl Module for PolyMidiIn {
 mod tests {
     use super::*;
     use patches_core::{AudioEnvironment, CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
-    use patches_core::test_support::{assert_within, ModuleHarness};
+    use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, send_midi};
 
     fn make_kbd(poly_voices: usize) -> ModuleHarness {
         ModuleHarness::build_with_env::<PolyMidiIn>(
@@ -227,18 +220,6 @@ mod tests {
         )
     }
 
-    fn note_on(note: u8, vel: u8) -> MidiEvent { MidiEvent { bytes: [0x90, note, vel] } }
-    fn note_off(note: u8) -> MidiEvent { MidiEvent { bytes: [0x80, note, 0] } }
-
-    /// Write MIDI events to the GLOBAL_MIDI backplane slot.
-    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
-        let mut frame = [0.0f32; 16];
-        MidiFrame::set_event_count(&mut frame, events.len());
-        for (i, &event) in events.iter().enumerate() {
-            MidiFrame::write_event(&mut frame, i, event);
-        }
-        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
-    }
 
     #[test]
     fn note_on_sets_v_oct_gate_trigger_for_voice_zero() {

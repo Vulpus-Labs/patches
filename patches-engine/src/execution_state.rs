@@ -219,12 +219,6 @@ impl ReadyState {
 
 }
 
-// ── Legacy alias ─────────────────────────────────────────────────────────────
-
-/// Legacy alias — kept temporarily to ease migration.
-/// Equivalent to [`ReadyState`].
-pub type ExecutionState = ReadyState;
-
 #[cfg(test)]
 mod tests {
     use std::any::Any;

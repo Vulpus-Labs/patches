@@ -367,7 +367,7 @@ mod tests {
 
     use super::*;
     use crate::builder::ExecutionPlan;
-    use crate::execution_state::ExecutionState;
+    use crate::execution_state::ReadyState;
     use crate::pool::ModulePool;
 
     fn p(name: &'static str) -> PortRef {
@@ -476,7 +476,7 @@ mod tests {
 
         let graph = counter_graph();
         let mut plan_a = planner.build(&graph, &registry, &env).unwrap();
-        let mut stale = ExecutionState::new_stale(pool);
+        let mut stale = ReadyState::new_stale(pool);
         adopt_plan(&mut plan_a, &mut stale);
 
         let mut buffer_pool = make_buffer_pool(256);
@@ -519,7 +519,7 @@ mod tests {
 
         let graph = counter_graph();
         let mut plan = planner.build(&graph, &registry, &env).unwrap();
-        let mut stale = ExecutionState::new_stale(pool);
+        let mut stale = ReadyState::new_stale(pool);
         adopt_plan(&mut plan, &mut stale);
 
         let mut buffer_pool = make_buffer_pool(256);

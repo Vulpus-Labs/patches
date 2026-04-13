@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiFrame, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, PolyInput, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
+    ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -23,8 +23,8 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 pub struct MidiCc {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    /// Fixed input pointing at the GLOBAL_MIDI backplane slot.
-    midi_in: PolyInput,
+    /// Debounced MIDI input from the GLOBAL_MIDI backplane slot.
+    midi_in: MidiInput,
     cc_number: u8,
     value: f32,
     out: MonoOutput,
@@ -45,11 +45,7 @@ impl Module for MidiCc {
         Self {
             instance_id,
             descriptor,
-            midi_in: PolyInput {
-                cable_idx: GLOBAL_MIDI,
-                scale: 1.0,
-                connected: true,
-            },
+            midi_in: MidiInput::backplane(GLOBAL_MIDI),
             cc_number: 1,
             value: -1.0,
             out: MonoOutput::default(),
@@ -75,11 +71,8 @@ impl Module for MidiCc {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Read MIDI events from the GLOBAL_MIDI backplane slot.
-        let frame = pool.read_poly(&self.midi_in);
-        let event_count = MidiFrame::event_count(&frame);
-        for i in 0..event_count {
-            let event = MidiFrame::read_event(&frame, i);
+        let events = self.midi_in.read(pool);
+        for event in events.iter() {
             let status = event.bytes[0] & 0xF0;
             if status == 0xB0 && event.bytes[1] == self.cc_number {
                 self.value = event.bytes[2] as f32 / 127.0 * 2.0 - 1.0;
@@ -97,21 +90,8 @@ impl Module for MidiCc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
-    use patches_core::test_support::{assert_within, ModuleHarness, params};
-
-    fn cc(number: u8, value: u8) -> MidiEvent {
-        MidiEvent { bytes: [0xB0, number, value] }
-    }
-
-    fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
-        let mut frame = [0.0f32; 16];
-        MidiFrame::set_event_count(&mut frame, events.len());
-        for (i, &event) in events.iter().enumerate() {
-            MidiFrame::write_event(&mut frame, i, event);
-        }
-        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
-    }
+    use patches_core::MidiEvent;
+    use patches_core::test_support::{assert_within, cc, ModuleHarness, params, send_midi};
 
     #[test]
     fn default_cc_is_1() {

@@ -194,6 +194,11 @@ impl Default for PolyInput {
 }
 
 impl PolyInput {
+    /// Create a `PolyInput` connected to a backplane slot (e.g. `GLOBAL_MIDI`).
+    pub fn backplane(cable_idx: usize) -> Self {
+        Self { cable_idx, scale: 1.0, connected: true }
+    }
+
     /// Extract the `PolyInput` at position `idx` from a port slice.
     ///
     /// # Panics

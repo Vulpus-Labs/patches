@@ -12,6 +12,22 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "patches.showPatchGraph",
+        "title": "Patches: Show Patch Graph",
+        "category": "Patches"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "patches.showPatchGraph",
+          "when": "resourceExtname == .patches",
+          "group": "navigation"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "patches",

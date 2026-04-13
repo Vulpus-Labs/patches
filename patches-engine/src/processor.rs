@@ -15,6 +15,7 @@ use patches_core::{
     BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TransportFrame,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
+    MAX_STASH,
 };
 
 use crate::builder::ExecutionPlan;
@@ -56,7 +57,7 @@ pub struct PatchProcessor {
     midi_poly: [f32; 16],
     /// Pre-allocated overflow buffer for MIDI events that exceed `MidiFrame::MAX_EVENTS`
     /// per sample. Deferred events are written to the next sample's frame.
-    midi_overflow: [MidiEvent; MidiFrame::MAX_EVENTS],
+    midi_overflow: [MidiEvent; MAX_STASH],
     /// Number of valid events in `midi_overflow`.
     midi_overflow_count: usize,
     global_drift_walk: BoundedRandomWalk,
@@ -103,7 +104,7 @@ impl PatchProcessor {
             sample_count: 0,
             transport_poly: [0.0; 16],
             midi_poly: [0.0; 16],
-            midi_overflow: [MidiEvent { bytes: [0; 3] }; MidiFrame::MAX_EVENTS],
+            midi_overflow: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
             midi_overflow_count: 0,
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
@@ -231,19 +232,20 @@ impl PatchProcessor {
     /// sample.
     #[inline]
     pub fn write_midi(&mut self, events: &[MidiEvent]) {
-        // Start from current count (may include overflow from previous sample).
-        let mut count = MidiFrame::event_count(&self.midi_poly);
+        // Start from current packed count (may include overflow from previous sample).
+        let mut packed = MidiFrame::packed_count(&self.midi_poly);
         for &event in events {
-            if count < MidiFrame::MAX_EVENTS {
-                MidiFrame::write_event(&mut self.midi_poly, count, event);
-                count += 1;
-            } else if self.midi_overflow_count < MidiFrame::MAX_EVENTS {
+            if packed < MidiFrame::MAX_EVENTS {
+                MidiFrame::write_event(&mut self.midi_poly, packed, event);
+                packed += 1;
+            } else if self.midi_overflow_count < MAX_STASH {
                 self.midi_overflow[self.midi_overflow_count] = event;
                 self.midi_overflow_count += 1;
             }
-            // Events beyond overflow capacity are dropped (extremely rare).
+            // Events beyond overflow capacity are silently dropped.
         }
-        MidiFrame::set_event_count(&mut self.midi_poly, count);
+        // Total count includes events packed in this frame + overflow pending.
+        MidiFrame::set_event_count(&mut self.midi_poly, packed + self.midi_overflow_count);
     }
 
     /// Writes `GLOBAL_TRANSPORT` and `GLOBAL_DRIFT` to the backplane, runs all
@@ -266,11 +268,17 @@ impl PatchProcessor {
         MidiFrame::clear(&mut self.midi_poly);
         // Drain overflow from previous sample into the fresh frame.
         let overflow_n = self.midi_overflow_count;
-        for i in 0..overflow_n {
+        let drain = overflow_n.min(MidiFrame::MAX_EVENTS);
+        for i in 0..drain {
             MidiFrame::write_event(&mut self.midi_poly, i, self.midi_overflow[i]);
         }
-        MidiFrame::set_event_count(&mut self.midi_poly, overflow_n);
-        self.midi_overflow_count = 0;
+        // Shift remaining overflow to front.
+        if drain < overflow_n {
+            self.midi_overflow.copy_within(drain..overflow_n, 0);
+        }
+        self.midi_overflow_count = overflow_n - drain;
+        // Total count = events packed in this frame + events still in overflow.
+        MidiFrame::set_event_count(&mut self.midi_poly, drain + self.midi_overflow_count);
 
         {
             let mut cable_pool = CablePool::new(&mut self.buffer_pool, wi);
@@ -300,7 +308,7 @@ impl PatchProcessor {
         window_size: u64,
     ) {
         if let Some(eq) = queue {
-            let mut batch = [MidiEvent { bytes: [0; 3] }; 16];
+            let mut batch = [MidiEvent { bytes: [0; 3] }; MAX_STASH];
             let mut count = 0;
             for (_offset, event) in eq.drain_window(sample_counter, window_size) {
                 if count < batch.len() {

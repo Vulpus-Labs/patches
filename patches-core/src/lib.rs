@@ -20,6 +20,7 @@ pub mod cables;
 pub mod frames;
 pub mod graphs;
 pub mod midi;
+pub mod midi_io;
 pub mod modules;
 pub mod tracker;
 pub mod random_walk;
@@ -36,6 +37,7 @@ pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerIn
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, NodeId};
 pub use midi::MidiEvent;
+pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
 pub use tracker::Step as TrackerStep;
 pub use modules::{validate_parameters, Module, PeriodicUpdate, PortConnectivity};

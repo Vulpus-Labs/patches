@@ -180,7 +180,7 @@ fn build_patch(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Patch {
 
     let body = named_children_of_kind(node, "statement")
         .into_iter()
-        .filter_map(|s| build_statement(s, source, diags))
+        .flat_map(|s| build_statements(s, source, diags))
         .collect();
 
     Patch {
@@ -191,7 +191,7 @@ fn build_patch(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Patch {
 
 // ─── Statement ──────────────────────────────────────────────────────────────
 
-fn build_statement(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Option<Statement> {
+fn build_statements(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Vec<Statement> {
     walk_errors(node, diags);
 
     let mut cursor = node.walk();
@@ -200,12 +200,15 @@ fn build_statement(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Opt
             continue;
         }
         match child.kind() {
-            "module_decl" => return Some(Statement::Module(build_module_decl(child, source, diags))),
-            "connection" => return Some(Statement::Connection(Box::new(build_connection(child, source, diags)))),
+            "module_decl" => return vec![Statement::Module(build_module_decl(child, source, diags))],
+            "connection" => return build_connections(child, source, diags)
+                .into_iter()
+                .map(|c| Statement::Connection(Box::new(c)))
+                .collect(),
             _ => {}
         }
     }
-    None
+    vec![]
 }
 
 // ─── Module declaration ─────────────────────────────────────────────────────
@@ -594,21 +597,29 @@ fn parse_float_unit(s: &str, diags: &mut Vec<Diagnostic>, span: Span) -> f64 {
 
 // ─── Connections ────────────────────────────────────────────────────────────
 
-fn build_connection(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Connection {
+fn build_connections(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Vec<Connection> {
     walk_errors(node, diags);
 
     let port_refs = named_children_of_kind(node, "port_ref");
     let lhs = port_refs.first().map(|n| build_port_ref(*n, source, diags));
-    let rhs = port_refs.get(1).map(|n| build_port_ref(*n, source, diags));
     let arrow = first_named_child_of_kind(node, "arrow")
         .map(|n| build_arrow(n, source, diags));
+    let span = span_of(node);
 
-    Connection {
-        lhs,
-        arrow,
-        rhs,
-        span: span_of(node),
+    let rhs_refs = port_refs.get(1..).unwrap_or(&[]);
+    if rhs_refs.is_empty() {
+        // Incomplete parse — emit a single connection with no RHS
+        return vec![Connection { lhs, arrow, rhs: None, span }];
     }
+
+    rhs_refs.iter().map(|n| {
+        Connection {
+            lhs: lhs.clone(),
+            arrow: arrow.clone(),
+            rhs: Some(build_port_ref(*n, source, diags)),
+            span,
+        }
+    }).collect()
 }
 
 fn build_port_ref(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> PortRef {
@@ -744,7 +755,7 @@ fn build_template(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Temp
 
     let body = named_children_of_kind(node, "statement")
         .into_iter()
-        .filter_map(|s| build_statement(s, source, diags))
+        .flat_map(|s| build_statements(s, source, diags))
         .collect();
 
     Template {

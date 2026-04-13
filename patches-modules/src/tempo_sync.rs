@@ -125,10 +125,9 @@ mod tests {
     use patches_core::parameter_map::ParameterValue;
 
     fn make_tempo_sync(subdivision: &'static str) -> ModuleHarness {
-        let mut h = ModuleHarness::build::<TempoSync>(&[
+        ModuleHarness::build::<TempoSync>(&[
             ("subdivision", ParameterValue::Enum(subdivision)),
-        ]);
-        h
+        ])
     }
 
     #[test]

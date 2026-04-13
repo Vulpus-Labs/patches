@@ -3,7 +3,6 @@
 //! Creates a vizia window embedded in the host's parent window via
 //! baseview. Includes a scrollable, zoomable patch graph view.
 
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +10,11 @@ use vizia::prelude::*;
 use vizia::vg;
 use vizia::ParentWindow;
 
-use crate::gui::{GuiState, PatchSnapshot, SnapshotNode};
+use patches_dsl::FlatPatch;
+use patches_layout::{layout_graph, GraphLayout, LayoutConfig};
+use patches_svg::flat_to_layout_input;
+
+use crate::gui::GuiState;
 
 // ── Host pointer wrapper ───────────────────────────────────────────
 
@@ -77,149 +80,15 @@ impl Model for PluginUiData {
 struct UiSignals {
     path: Signal<String>,
     status: Signal<String>,
-    snapshot: Signal<Option<PatchSnapshot>>,
+    flat: Signal<Option<FlatPatch>>,
 }
 
 // Safety: Signal<T> is just an ID + PhantomData — no thread-local state.
 unsafe impl Send for UiSignals {}
 unsafe impl Sync for UiSignals {}
 
-// ── Graph layout ───────────────────────────────────────────────────
-
-/// Layout constants for the graph view.
-const NODE_WIDTH: f64 = 160.0;
-const NODE_HEADER_HEIGHT: f64 = 24.0;
-const PORT_ROW_HEIGHT: f64 = 18.0;
-const NODE_PADDING: f64 = 4.0;
-const VERTEX_SPACING: f64 = 30.0;
-const GRAPH_MARGIN: f64 = 20.0;
-
-/// Compute node height based on connected port count.
-fn node_height(node: &SnapshotNode) -> f64 {
-    let port_rows = node.inputs.len().max(node.outputs.len());
-    NODE_HEADER_HEIGHT + NODE_PADDING * 2.0 + port_rows as f64 * PORT_ROW_HEIGHT
-}
-
-/// Computed position of a node in the graph layout.
-#[derive(Clone)]
-struct NodeLayout {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    node: SnapshotNode,
-}
-
-impl NodeLayout {
-    fn port_y(&self, port_name: &str, is_input: bool) -> f32 {
-        let ports = if is_input {
-            &self.node.inputs
-        } else {
-            &self.node.outputs
-        };
-        let idx = ports.iter().position(|p| p == port_name).unwrap_or(0);
-        self.y
-            + NODE_HEADER_HEIGHT as f32
-            + NODE_PADDING as f32
-            + idx as f32 * PORT_ROW_HEIGHT as f32
-            + PORT_ROW_HEIGHT as f32 / 2.0
-    }
-
-    fn input_x(&self) -> f32 {
-        self.x
-    }
-
-    fn output_x(&self) -> f32 {
-        self.x + self.width
-    }
-}
-
-/// Result of laying out the graph.
-struct GraphLayout {
-    nodes: Vec<NodeLayout>,
-}
-
-/// Lay out nodes using the Sugiyama algorithm via `rust-sugiyama`,
-/// transposed so signal flows left-to-right.
-fn layout_graph(snapshot: &PatchSnapshot) -> GraphLayout {
-    if snapshot.nodes.is_empty() {
-        return GraphLayout { nodes: vec![] };
-    }
-
-    let id_to_idx: HashMap<&str, u32> = snapshot
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.id.as_str(), i as u32))
-        .collect();
-
-    // Sugiyama lays out top-to-bottom. We want left-to-right, so feed
-    // (height, width) and transpose the output coordinates.
-    let vertices: Vec<(u32, (f64, f64))> = snapshot
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(i, node)| (i as u32, (node_height(node), NODE_WIDTH)))
-        .collect();
-
-    let mut edges: Vec<(u32, u32)> = snapshot
-        .edges
-        .iter()
-        .filter_map(|e| {
-            let from = *id_to_idx.get(e.from_node.as_str())?;
-            let to = *id_to_idx.get(e.to_node.as_str())?;
-            Some((from, to))
-        })
-        .collect();
-    edges.sort();
-    edges.dedup();
-
-    let config = rust_sugiyama::configure::Config {
-        vertex_spacing: VERTEX_SPACING,
-        ..Default::default()
-    };
-
-    let components =
-        rust_sugiyama::from_vertices_and_edges(&vertices, &edges, &config);
-
-    let mut layouts = Vec::with_capacity(snapshot.nodes.len());
-    let mut max_x: f32 = 0.0;
-    let mut max_y: f32 = 0.0;
-    let mut y_offset: f32 = 0.0;
-
-    for (component, _w, _h) in &components {
-        let mut comp_max_y: f32 = 0.0;
-        for &(idx, (sx, sy)) in component {
-            let i = idx;
-            let node = &snapshot.nodes[i];
-            let h = node_height(node) as f32;
-            // Transpose: Sugiyama x → our y, Sugiyama y → our x.
-            let x = GRAPH_MARGIN as f32 + sy as f32;
-            let y = GRAPH_MARGIN as f32 + y_offset + sx as f32;
-            layouts.push(NodeLayout {
-                x,
-                y,
-                width: NODE_WIDTH as f32,
-                height: h,
-                node: node.clone(),
-            });
-            let right = x + NODE_WIDTH as f32;
-            let bottom = y + h;
-            if right > max_x {
-                max_x = right;
-            }
-            if bottom > comp_max_y {
-                comp_max_y = bottom;
-            }
-        }
-        if comp_max_y > max_y {
-            max_y = comp_max_y;
-        }
-        y_offset = comp_max_y + VERTEX_SPACING as f32 - GRAPH_MARGIN as f32;
-    }
-
-    GraphLayout { nodes: layouts }
-}
+// Layout input construction lives in `patches-svg` so the renderer and
+// the clap GUI share exactly one mapping from FlatPatch → LayoutNode.
 
 // ── Zoom ───────────────────────────────────────────────────────────
 
@@ -233,18 +102,18 @@ const ZOOM_STEP: f32 = 0.25;
 ///
 /// Reads its zoom level from a shared `Signal<f32>` set by toolbar buttons.
 struct PatchGraphView {
-    snapshot_signal: Signal<Option<PatchSnapshot>>,
+    flat_signal: Signal<Option<FlatPatch>>,
     zoom_signal: Signal<f32>,
 }
 
 impl PatchGraphView {
     fn new(
         cx: &mut Context,
-        snapshot_signal: Signal<Option<PatchSnapshot>>,
+        flat_signal: Signal<Option<FlatPatch>>,
         zoom_signal: Signal<f32>,
     ) -> Handle<'_, Self> {
         Self {
-            snapshot_signal,
+            flat_signal,
             zoom_signal,
         }
         .build(cx, |_| {})
@@ -255,22 +124,17 @@ impl View for PatchGraphView {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         cx.draw_background(canvas);
 
-        let snapshot_opt: Option<PatchSnapshot> = self.snapshot_signal.get();
-        let snapshot = match snapshot_opt {
-            Some(ref s) if !s.nodes.is_empty() => s,
+        let flat_opt: Option<FlatPatch> = self.flat_signal.get();
+        let flat = match flat_opt {
+            Some(ref f) if !f.modules.is_empty() => f.clone(),
             _ => return,
         };
 
         let zoom = self.zoom_signal.get();
         let bounds = cx.bounds();
-        let gl = layout_graph(snapshot);
-
-        let layout_map: HashMap<&str, usize> = gl
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(i, l)| (l.node.id.as_str(), i))
-            .collect();
+        let config = LayoutConfig::default();
+        let (layout_nodes, layout_edges) = flat_to_layout_input(&flat, &config);
+        let gl: GraphLayout = layout_graph(&layout_nodes, &layout_edges, &config);
 
         // Clip + zoom.
         canvas.save();
@@ -346,38 +210,29 @@ impl View for PatchGraphView {
 
         // ── Draw edges ─────────────────────────────────────────────
 
-        for edge in &snapshot.edges {
-            let from_idx = match layout_map.get(edge.from_node.as_str()) {
-                Some(&i) => i,
-                None => continue,
-            };
-            let to_idx = match layout_map.get(edge.to_node.as_str()) {
-                Some(&i) => i,
-                None => continue,
-            };
-            let from_layout = &gl.nodes[from_idx];
-            let to_layout = &gl.nodes[to_idx];
-
-            let x0 = from_layout.output_x();
-            let y0 = from_layout.port_y(&edge.from_port, false);
-            let x1 = to_layout.input_x();
-            let y1 = to_layout.port_y(&edge.to_port, true);
-
+        for edge in &gl.edges {
             let mut pb = vg::PathBuilder::new();
-            pb.move_to((x0, y0));
-            let dx = (x1 - x0).abs() * 0.4;
-            pb.cubic_to((x0 + dx, y0), (x1 - dx, y1), (x1, y1));
+            pb.move_to((edge.x0, edge.y0));
+            pb.cubic_to(
+                (edge.c1x, edge.c1y),
+                (edge.c2x, edge.c2y),
+                (edge.x1, edge.y1),
+            );
             let path = pb.detach();
             canvas.draw_path(&path, &edge_paint);
         }
 
         // ── Draw nodes ─────────────────────────────────────────────
 
-        for layout in &gl.nodes {
-            let nx = layout.x;
-            let ny = layout.y;
-            let nw = layout.width;
-            let nh = layout.height;
+        let header_h = config.node_header_height;
+        let padding = config.node_padding;
+        let row_h = config.port_row_height;
+
+        for node in &gl.nodes {
+            let nx = node.x;
+            let ny = node.y;
+            let nw = node.width;
+            let nh = node.height;
 
             let body_rect = vg::Rect::from_xywh(nx, ny, nw, nh);
             let rrect = vg::RRect::new_rect_xy(body_rect, 4.0, 4.0);
@@ -385,30 +240,23 @@ impl View for PatchGraphView {
             canvas.draw_rrect(rrect, &node_border_paint);
 
             // Header.
-            let header_rect =
-                vg::Rect::from_xywh(nx, ny, nw, NODE_HEADER_HEIGHT as f32);
+            let header_rect = vg::Rect::from_xywh(nx, ny, nw, header_h);
             canvas.save();
             canvas.clip_rrect(rrect, None, Some(true));
             canvas.draw_rect(header_rect, &header_bg_paint);
             canvas.restore();
 
-            let label =
-                format!("{} : {}", layout.node.id, layout.node.module_name);
-            let text_y = ny + NODE_HEADER_HEIGHT as f32 * 0.7;
+            let text_y = ny + header_h * 0.7;
             canvas.draw_str(
-                &label,
+                &node.label,
                 (nx + 8.0, text_y),
                 &header_font,
                 &header_text_paint,
             );
 
             // Input ports (left side).
-            for (i, port) in layout.node.inputs.iter().enumerate() {
-                let py = ny
-                    + NODE_HEADER_HEIGHT as f32
-                    + NODE_PADDING as f32
-                    + i as f32 * PORT_ROW_HEIGHT as f32
-                    + PORT_ROW_HEIGHT as f32 / 2.0;
+            for (i, port) in node.input_ports.iter().enumerate() {
+                let py = ny + header_h + padding + i as f32 * row_h + row_h / 2.0;
                 canvas.draw_circle((nx + 6.0, py), 3.0, &input_dot_paint);
                 canvas.draw_str(
                     port.as_str(),
@@ -419,19 +267,14 @@ impl View for PatchGraphView {
             }
 
             // Output ports (right side).
-            for (i, port) in layout.node.outputs.iter().enumerate() {
-                let py = ny
-                    + NODE_HEADER_HEIGHT as f32
-                    + NODE_PADDING as f32
-                    + i as f32 * PORT_ROW_HEIGHT as f32
-                    + PORT_ROW_HEIGHT as f32 / 2.0;
+            for (i, port) in node.output_ports.iter().enumerate() {
+                let py = ny + header_h + padding + i as f32 * row_h + row_h / 2.0;
                 canvas.draw_circle(
                     (nx + nw - 6.0, py),
                     3.0,
                     &output_dot_paint,
                 );
-                let (text_width, _) =
-                    port_font.measure_str(port.as_str(), None);
+                let (text_width, _) = port_font.measure_str(port.as_str(), None);
                 let text_x = nx + nw - 13.0 - text_width;
                 canvas.draw_str(
                     port.as_str(),
@@ -510,7 +353,7 @@ pub(crate) unsafe fn create_gui(
         return None;
     }
 
-    let (initial_path, initial_status, initial_snapshot) = {
+    let (initial_path, initial_status, initial_flat) = {
         let gui = gui_state.lock().unwrap_or_else(|e| e.into_inner());
         let path = gui
             .file_path
@@ -522,8 +365,8 @@ pub(crate) unsafe fn create_gui(
         } else {
             gui.status.clone()
         };
-        let snapshot = gui.patch_snapshot.clone();
-        (path, status, snapshot)
+        let flat = gui.flat_patch.clone();
+        (path, status, flat)
     };
 
     let signals: Arc<Mutex<Option<UiSignals>>> = Arc::new(Mutex::new(None));
@@ -535,14 +378,14 @@ pub(crate) unsafe fn create_gui(
     let window_handle = Application::new(move |cx| {
         let path_sig = Signal::new(initial_path.clone());
         let status_sig = Signal::new(initial_status.clone());
-        let snapshot_sig = Signal::new(initial_snapshot.clone());
+        let flat_sig = Signal::new(initial_flat.clone());
         let zoom_sig = Signal::new(1.0f32);
 
         *signals_app.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(UiSignals {
                 path: path_sig,
                 status: status_sig,
-                snapshot: snapshot_sig,
+                flat: flat_sig,
             });
 
         PluginUiData {
@@ -591,10 +434,10 @@ pub(crate) unsafe fn create_gui(
             Label::new(cx, status_sig).width(Stretch(1.0));
 
             // Scrollable patch graph view.
-            let snap = snapshot_sig;
+            let flat = flat_sig;
             let zs = zoom_sig;
             ScrollView::new(cx, move |cx| {
-                PatchGraphView::new(cx, snap, zs)
+                PatchGraphView::new(cx, flat, zs)
                     .width(Pixels(2000.0))
                     .height(Pixels(1500.0))
                     .background_color(Color::rgb(30, 32, 38));
@@ -623,11 +466,11 @@ pub(crate) unsafe fn create_gui(
         } else {
             gui.status.clone()
         };
-        let new_snapshot = gui.patch_snapshot.clone();
+        let new_flat = gui.flat_patch.clone();
         drop(gui);
         sigs.path.set(new_path);
         sigs.status.set(new_status);
-        sigs.snapshot.set(new_snapshot);
+        sigs.flat.set(new_flat);
     })
     .open_parented(&ParentWindow(parent));
 

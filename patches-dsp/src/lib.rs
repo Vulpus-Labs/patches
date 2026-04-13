@@ -61,8 +61,17 @@ pub use atomic_f32::AtomicF32;
 mod bitcrusher;
 pub use bitcrusher::BitcrusherKernel;
 
+mod dc_blocker;
+pub use dc_blocker::DcBlocker;
+
+mod limiter_core;
+pub use limiter_core::LimiterCore;
+
 mod envelope_follower;
 pub use envelope_follower::EnvelopeFollower;
+
+pub mod time_utils;
+pub use time_utils::{ms_to_samples, compute_time_coeff};
 
 pub mod drum;
 pub use drum::{DecayEnvelope, PitchSweep, MetallicTone, BurstGenerator, saturate};

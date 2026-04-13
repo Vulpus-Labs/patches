@@ -57,9 +57,9 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 /// prepare time to select its clock source — host transport if hosted,
 /// internal BPM otherwise. `free` forces the internal clock regardless;
 /// `host` forces host transport regardless. In host mode the sequencer
-/// reads the `GLOBAL_TRANSPORT` backplane slot directly; `bpm` and
-/// `autostart` are ignored. When the host stops, playback freezes rather
-/// than resetting.
+/// reads the `GLOBAL_TRANSPORT` backplane slot directly; `bpm`,
+/// `autostart`, and `swing` are ignored. When the host stops, playback
+/// freezes rather than resetting.
 pub struct MasterSequencer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -338,7 +338,7 @@ impl Module for MasterSequencer {
         }
         if let Some(ParameterValue::Bool(v)) = params.get_scalar("autostart") {
             self.autostart = *v;
-            if self.autostart {
+            if self.autostart && !self.use_host_transport {
                 self.state = TransportState::Playing;
                 self.reset_position();
             }

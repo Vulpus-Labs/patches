@@ -5,10 +5,12 @@
 //! feature logic.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use patches_modules::default_registry;
 use patches_core::Registry;
+use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -120,7 +122,8 @@ impl PatchesLanguageServer {
     }
 
     /// Resolve include directives for a document, loading included files into
-    /// the document map. Returns diagnostics for missing/unreadable files.
+    /// the document map. Returns diagnostics for missing/unreadable files,
+    /// including nested diagnostics from transitive includes.
     fn resolve_includes(
         &self,
         parent_uri: &Url,
@@ -176,8 +179,13 @@ impl PatchesLanguageServer {
             };
             let (file, _syntax_diags) = ast_builder::build_ast(&tree, &source);
 
-            // Recursively resolve includes in the included file.
-            let _nested_diags = self.resolve_includes(&inc_uri, &file.includes);
+            // Recursively resolve includes in the included file. Surface nested
+            // diagnostics on the parent's include directive so the user can trace
+            // the include chain.
+            let nested_diags = self.resolve_includes(&inc_uri, &file.includes);
+            for (_nested_span, msg) in nested_diags {
+                diags.push((inc.span, format!("in file included from \"{}\": {msg}", inc.path)));
+            }
 
             let model = analysis::analyse(&file, &self.registry);
             let line_index = lsp_util::build_line_index(&source);
@@ -198,13 +206,38 @@ impl PatchesLanguageServer {
             }
         }
 
-        // Clean up stale include-loaded documents that are no longer referenced
-        // by this parent's include directives.
+        // Clean up stale include-loaded documents. Walk the transitive closure:
+        // compute the live set of all URIs reachable from this parent's includes,
+        // then remove anything in include_loaded that is not in the live set.
         {
+            let docs = self.documents.lock().expect("lock documents");
+            let mut live = new_include_uris.clone();
+            // Expand transitively: for each live include, add its own includes.
+            let mut frontier: Vec<Url> = live.iter().cloned().collect();
+            while let Some(uri) = frontier.pop() {
+                if let Some(doc) = docs.get(&uri) {
+                    let (file, _) = ast_builder::build_ast(&doc.tree, &doc.source);
+                    if let Ok(doc_path) = uri.to_file_path() {
+                        let doc_dir = doc_path.parent().unwrap_or(std::path::Path::new("."));
+                        for child_inc in &file.includes {
+                            let child_resolved = doc_dir.join(&child_inc.path);
+                            if let Ok(canonical) = child_resolved.canonicalize() {
+                                if let Ok(child_uri) = Url::from_file_path(&canonical) {
+                                    if live.insert(child_uri.clone()) {
+                                        frontier.push(child_uri);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            drop(docs);
+
             let mut inc_set = self.include_loaded.lock().expect("lock include_loaded");
             let stale: Vec<Url> = inc_set
                 .iter()
-                .filter(|u| !new_include_uris.contains(*u))
+                .filter(|u| !live.contains(*u))
                 .cloned()
                 .collect();
             let mut docs = self.documents.lock().expect("lock documents");
@@ -384,6 +417,104 @@ impl LanguageServer for PatchesLanguageServer {
     }
 }
 
+// ─── Custom request: patches/renderSvg ─────────────────────────────────────
+
+/// Params for `patches/renderSvg`.
+#[derive(Debug, Deserialize)]
+pub struct RenderSvgParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+}
+
+/// Result of `patches/renderSvg`.
+#[derive(Debug, Serialize)]
+pub struct RenderSvgResult {
+    pub svg: String,
+    pub diagnostics: Vec<RenderSvgDiagnostic>,
+}
+
+/// Structured diagnostic surfaced alongside a (possibly partial) SVG.
+#[derive(Debug, Serialize)]
+pub struct RenderSvgDiagnostic {
+    pub message: String,
+}
+
+impl PatchesLanguageServer {
+    /// Handle `patches/renderSvg`. Reads the master document (and any
+    /// includes) from the in-memory document map first, falling back to
+    /// disk for files the editor has not opened.
+    pub async fn render_svg(&self, params: RenderSvgParams) -> Result<RenderSvgResult> {
+        let uri = params.text_document.uri;
+        let master_path = uri
+            .to_file_path()
+            .map_err(|_| tower_lsp::jsonrpc::Error::invalid_params("uri is not a file path"))?;
+
+        // Snapshot the in-memory sources under lock.
+        let sources: HashMap<PathBuf, String> = {
+            let docs = self.documents.lock().expect("lock documents");
+            docs.iter()
+                .filter_map(|(u, d)| u.to_file_path().ok().map(|p| (p, d.source.clone())))
+                .collect()
+        };
+
+        Ok(render_svg_pipeline(&master_path, &sources))
+    }
+}
+
+/// Pure pipeline: master path + in-memory sources → SVG + diagnostics.
+/// Extracted for testability.
+fn render_svg_pipeline(
+    master_path: &Path,
+    sources: &HashMap<PathBuf, String>,
+) -> RenderSvgResult {
+    let read_file = |p: &Path| -> std::io::Result<String> {
+        if let Some(src) = sources.get(p) {
+            return Ok(src.clone());
+        }
+        if let Ok(canon) = p.canonicalize() {
+            if let Some(src) = sources.get(&canon) {
+                return Ok(src.clone());
+            }
+        }
+        std::fs::read_to_string(p)
+    };
+
+    let load_result = match patches_dsl::load_with(master_path, read_file) {
+        Ok(r) => r,
+        Err(e) => {
+            return RenderSvgResult {
+                svg: empty_svg(),
+                diagnostics: vec![RenderSvgDiagnostic {
+                    message: e.to_string(),
+                }],
+            };
+        }
+    };
+
+    let expanded = match patches_dsl::expand(&load_result.file) {
+        Ok(r) => r,
+        Err(e) => {
+            return RenderSvgResult {
+                svg: empty_svg(),
+                diagnostics: vec![RenderSvgDiagnostic {
+                    message: e.to_string(),
+                }],
+            };
+        }
+    };
+
+    let svg = patches_svg::render_svg(&expanded.patch, &patches_svg::SvgOptions::default());
+    RenderSvgResult {
+        svg,
+        diagnostics: vec![],
+    }
+}
+
+fn empty_svg() -> String {
+    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" width="1" height="1"/>"#
+        .to_string()
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -416,6 +547,47 @@ mod tests {
         let line_index = lsp_util::build_line_index(source);
         let lsp_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
         assert!(lsp_diags.iter().any(|d| d.message.contains("unknown module type")));
+    }
+
+    #[test]
+    fn render_svg_pipeline_returns_svg_for_valid_patch() {
+        let tmp = std::env::temp_dir().join(format!(
+            "patches_lsp_render_{}.patches",
+            std::process::id()
+        ));
+        std::fs::write(
+            &tmp,
+            "patch { module osc : Osc\nmodule vca : Vca\nosc.out -> vca.in }\n",
+        )
+        .unwrap();
+        let mut sources = HashMap::new();
+        sources.insert(
+            tmp.clone(),
+            std::fs::read_to_string(&tmp).unwrap(),
+        );
+        let result = render_svg_pipeline(&tmp, &sources);
+        assert!(
+            result.svg.starts_with("<svg"),
+            "unexpected svg prefix: {}",
+            &result.svg[..result.svg.len().min(80)]
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn render_svg_pipeline_returns_diagnostic_on_parse_error() {
+        let tmp = std::env::temp_dir().join(format!(
+            "patches_lsp_render_bad_{}.patches",
+            std::process::id()
+        ));
+        std::fs::write(&tmp, "patch { module osc : }").unwrap();
+        let mut sources = HashMap::new();
+        sources.insert(tmp.clone(), std::fs::read_to_string(&tmp).unwrap());
+        let result = render_svg_pipeline(&tmp, &sources);
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.svg.starts_with("<svg"), "should emit placeholder svg");
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

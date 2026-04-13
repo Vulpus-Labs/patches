@@ -13,7 +13,7 @@ pub mod planner;
 pub mod pool;
 
 pub use builder::{build_patch, BuildError, ExecutionPlan, ModuleSlot, PatchBuilder};
-pub use execution_state::{ExecutionState, ReadyState, StaleState};
+pub use execution_state::{ReadyState, StaleState};
 pub use patches_core::{BufferAllocState, ModuleAllocState, NodeState, PlannerState};
 pub use engine::{CleanupAction, DeviceConfig, DeviceInfo, EngineError, SoundEngine, enumerate_devices};
 pub use midi::{new_event_queue, AudioClock, ClockAnchor, EventQueueConsumer, EventQueueProducer, EventScheduler, MidiConnector, MidiError, MidiEvent};

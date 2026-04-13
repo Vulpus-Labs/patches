@@ -41,7 +41,7 @@ use patches_engine::builder::ExecutionPlan;
 use patches_engine::{CleanupAction, PatchProcessor, Planner};
 
 use crate::extensions;
-use crate::gui::{GuiState, PatchSnapshot};
+use crate::gui::GuiState;
 
 /// The runtime state of a single plugin instance.
 ///
@@ -100,6 +100,7 @@ impl PatchesClapPlugin {
         let env = self.env.as_ref().ok_or("not activated")?;
         let file = self.load_or_parse()?;
         let result = patches_dsl::expand(&file).map_err(|e| e.to_string())?;
+        let flat_patch = result.patch.clone();
         let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
             &self.registry,
@@ -113,11 +114,10 @@ impl PatchesClapPlugin {
             .planner
             .build_with_tracker_data(&graph, &self.registry, env, tracker_data)
             .map_err(|e| e.to_string())?;
-        // Snapshot the graph for the GUI before storing it.
-        let snapshot = PatchSnapshot::from_graph(&graph);
+        // Stash the FlatPatch so the GUI can render the graph.
         {
             let mut gui = self.gui_state.lock().unwrap_or_else(|e| e.into_inner());
-            gui.patch_snapshot = Some(snapshot);
+            gui.flat_patch = Some(flat_patch);
         }
         self.graph = Some(graph);
         if let Some(tx) = &mut self.plan_tx {
@@ -129,12 +129,24 @@ impl PatchesClapPlugin {
     /// Load the master file using the include loader (resolving includes) when
     /// a file path is available on disk, or fall back to parsing `dsl_source`
     /// directly (e.g. state restored without original files).
+    ///
+    /// The master file is read from `self.dsl_source` (already loaded by the
+    /// caller) to avoid a redundant disk read and TOCTOU inconsistency.
     fn load_or_parse(&self) -> Result<patches_dsl::File, String> {
         let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
         if let Some(path) = file_path {
             if path.exists() {
+                let master_source = self.dsl_source.clone();
+                let master_canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
                 let load_result = patches_dsl::load_with(&path, |p| {
-                    std::fs::read_to_string(p)
+                    // For the master file, return the already-read source;
+                    // for included files, read from disk.
+                    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+                    if canonical == master_canonical {
+                        Ok(master_source.clone())
+                    } else {
+                        std::fs::read_to_string(p)
+                    }
                 })
                 .map_err(|e| e.to_string())?;
                 return Ok(load_result.file);
@@ -241,14 +253,14 @@ unsafe extern "C" fn plugin_activate(
     _max_frames_count: u32,
 ) -> bool {
     dlog!("activate: sr={sample_rate}");
-    let p = plugin_mut(plugin);
 
     // If already active (e.g. sample-rate change), deactivate first.
-    if p.processor.is_some() {
+    // Check into a bool before calling deactivate so we don't hold
+    // two &mut references simultaneously.
+    let already_active = plugin_mut(plugin).processor.is_some();
+    if already_active {
         dlog!("activate: already active, deactivating first");
         plugin_deactivate(plugin);
-        let p = plugin_mut(plugin);
-        let _ = p; // reborrow after deactivate
     }
     let p = plugin_mut(plugin);
 

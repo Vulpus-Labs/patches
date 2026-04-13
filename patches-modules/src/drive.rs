@@ -28,14 +28,12 @@
 /// | `tone`  | float | 0.0--1.0                     | `0.5`      | Post-distortion lowpass             |
 /// | `bias`  | float | -1.0--1.0                    | `0.0`      | DC offset before shaper (asymmetry) |
 /// | `mix`   | float | 0.0--1.0                     | `1.0`      | Dry/wet blend                       |
-use std::f32::consts::TAU;
-
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_dsp::{fast_tanh, fast_sine, ToneFilter};
+use patches_dsp::{fast_tanh, fast_sine, BitcrusherKernel, DcBlocker, ToneFilter};
 
 // ─── Distortion mode ─────────────────────────────────────────────────────────
 
@@ -56,42 +54,6 @@ fn parse_mode(s: &str) -> DriveMode {
     }
 }
 
-// ─── DC blocker ──────────────────────────────────────────────────────────────
-
-/// One-pole highpass at ~5 Hz for DC removal.
-#[derive(Clone)]
-struct DcBlocker {
-    x_prev: f32,
-    y_prev: f32,
-    r: f32,
-}
-
-impl DcBlocker {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            x_prev: 0.0,
-            y_prev: 0.0,
-            r: 1.0 - TAU * 5.0 / sample_rate,
-        }
-    }
-
-    #[inline]
-    fn process(&mut self, x: f32) -> f32 {
-        let y = x - self.x_prev + self.r * self.y_prev;
-        self.x_prev = x;
-        self.y_prev = y;
-        y
-    }
-}
-
-// ─── Quantise helper for crush mode ──────────────────────────────────────────
-
-#[inline]
-fn quantize(x: f32, bits: f32) -> f32 {
-    let levels = (2.0_f32).powf(bits);
-    (x * levels).round() / levels
-}
-
 // ─── Module ──────────────────────────────────────────────────────────────────
 
 pub struct Drive {
@@ -99,11 +61,13 @@ pub struct Drive {
     descriptor: ModuleDescriptor,
     mode: DriveMode,
     drive: f32,
+    effective_drive: f32,
     bias: f32,
     mix: f32,
     dc_pre: DcBlocker,
     dc_post: DcBlocker,
     tone: ToneFilter,
+    crush_kernel: BitcrusherKernel,
     in_audio: MonoInput,
     in_drive_cv: MonoInput,
     out_audio: MonoOutput,
@@ -126,16 +90,20 @@ impl Module for Drive {
         let mut tone = ToneFilter::new();
         tone.prepare(env.sample_rate);
         tone.set_tone(0.5);
+        let mut crush_kernel = BitcrusherKernel::new();
+        crush_kernel.set_depth(6.0);
         Self {
             instance_id,
             descriptor,
             mode: DriveMode::Saturate,
             drive: 1.0,
+            effective_drive: 1.0,
             bias: 0.0,
             mix: 1.0,
             dc_pre: DcBlocker::new(env.sample_rate),
             dc_post: DcBlocker::new(env.sample_rate),
             tone,
+            crush_kernel,
             in_audio: MonoInput::default(),
             in_drive_cv: MonoInput::default(),
             out_audio: MonoOutput::default(),
@@ -148,9 +116,10 @@ impl Module for Drive {
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("drive") {
             self.drive = v.clamp(0.1, 50.0);
+            self.effective_drive = self.drive;
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("tone") {
-            self.tone.set_tone(*v);
+            self.tone.set_tone(v.clamp(0.0, 1.0));
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("bias") {
             self.bias = v.clamp(-1.0, 1.0);
@@ -175,15 +144,16 @@ impl Module for Drive {
         // Pre-drive DC block
         let x = self.dc_pre.process(dry);
 
-        // Bias + drive
-        let driven = (x + self.bias) * self.drive;
+        // Bias + drive (effective_drive includes CV modulation)
+        let drive = self.effective_drive;
+        let driven = (x + self.bias) * drive;
 
         // Waveshaper
         let shaped = match self.mode {
             DriveMode::Saturate => {
                 let raw = fast_tanh(driven);
                 // Gain compensation: normalise so peak stays ~1.0 across drive levels
-                let comp = fast_tanh(self.drive);
+                let comp = fast_tanh(drive);
                 if comp > 0.001 { raw / comp } else { raw }
             }
             DriveMode::Fold => {
@@ -195,7 +165,7 @@ impl Module for Drive {
                 driven.clamp(-1.0, 1.0)
             }
             DriveMode::Crush => {
-                fast_tanh(quantize(driven, 6.0))
+                fast_tanh(self.crush_kernel.quantize(driven))
             }
         };
 
@@ -219,18 +189,14 @@ impl Module for Drive {
 
 impl PeriodicUpdate for Drive {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
-        if !self.in_drive_cv.is_connected() {
-            return;
-        }
-        let cv = pool.read_mono(&self.in_drive_cv);
-        if cv != 0.0 {
-            // CV adds to drive multiplicatively: drive * 2^cv
-            // +1V doubles the drive, -1V halves it
-            let _ = cv; // CV modulation of drive is applied directly in process
-            // For now we use additive: effective_drive = drive + cv * 10.0
-            // This is intentionally left simple; the base drive parameter
-            // is the primary control.
-        }
+        let cv = if self.in_drive_cv.is_connected() {
+            pool.read_mono(&self.in_drive_cv)
+        } else {
+            0.0
+        };
+        // Additive CV: effective_drive = drive + cv * 10.0, clamped to valid range.
+        // At cv=1.0 the drive increases by 10; at cv=-0.1 it decreases by 1.
+        self.effective_drive = (self.drive + cv * 10.0).clamp(0.1, 50.0);
     }
 }
 
@@ -308,6 +274,72 @@ mod tests {
             let out = h.read_mono("out");
             assert!(out.abs() <= 1.1, "fold output should be bounded, got {out} at sample {i}");
         }
+    }
+
+    #[test]
+    fn drive_cv_modulates_output() {
+        let mut h = ModuleHarness::build::<Drive>(
+            params!["mode" => "saturate", "drive" => 1.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+        );
+        // Warm up DC blocker (ensure periodic_update fires by ticking many cycles)
+        for _ in 0..4410 {
+            h.set_mono("in", 0.0);
+            h.tick();
+        }
+        // Baseline: no CV — tick a full periodic update cycle
+        for _ in 0..32 {
+            h.set_mono("in", 0.3);
+            h.tick();
+        }
+        let baseline = h.read_mono("out");
+
+        // Apply positive CV to increase drive, tick a full cycle so periodic_update fires
+        for _ in 0..32 {
+            h.set_mono("in", 0.3);
+            h.set_mono("drive_cv", 1.0);
+            h.tick();
+        }
+        let boosted = h.read_mono("out");
+
+        // Higher drive should produce a different (more saturated) output
+        assert!(
+            (boosted - baseline).abs() > 0.01,
+            "drive_cv should alter output: baseline={baseline}, boosted={boosted}"
+        );
+    }
+
+    #[test]
+    fn drive_cv_reverts_to_base_on_zero() {
+        let mut h = ModuleHarness::build::<Drive>(
+            params!["mode" => "clip", "drive" => 5.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+        );
+        // Warm up
+        for _ in 0..4410 {
+            h.set_mono("in", 0.0);
+            h.tick();
+        }
+
+        // Apply CV for a full cycle
+        for _ in 0..32 {
+            h.set_mono("drive_cv", 1.0);
+            h.set_mono("in", 0.3);
+            h.tick();
+        }
+        let with_cv = h.read_mono("out");
+
+        // Remove CV and tick a full cycle
+        for _ in 0..32 {
+            h.set_mono("drive_cv", 0.0);
+            h.set_mono("in", 0.3);
+            h.tick();
+        }
+        let without_cv = h.read_mono("out");
+
+        // Output should change when CV is removed
+        assert!(
+            (with_cv - without_cv).abs() > 0.001,
+            "output should differ after CV removed: with={with_cv}, without={without_cv}"
+        );
     }
 
     #[test]

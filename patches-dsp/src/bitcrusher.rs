@@ -79,8 +79,11 @@ impl BitcrusherKernel {
         self.phase = 1.0; // ensures next tick captures immediately
     }
 
+    /// Quantise a sample to the configured bit depth.
+    ///
+    /// Returns `x` unchanged when depth >= 24 (levels = `f32::MAX`).
     #[inline]
-    fn quantize(&self, x: f32) -> f32 {
+    pub fn quantize(&self, x: f32) -> f32 {
         if self.levels >= f32::MAX {
             return x;
         }
@@ -154,6 +157,24 @@ mod tests {
         k.reset();
         assert_eq!(0.0, k.held);
         assert_eq!(1.0, k.phase);
+    }
+
+    #[test]
+    fn low_depth_quantisation_stays_finite() {
+        let mut k = BitcrusherKernel::new();
+        k.set_rate(1.0, SR);
+        // Sweep depth from 1.0 to 32.0 in fine increments
+        for d in 0..320 {
+            let depth = 1.0 + d as f32 * 0.1;
+            k.set_depth(depth);
+            for &input in &[-1.0, -0.5, 0.0, 0.001, 0.5, 1.0, f32::MIN_POSITIVE] {
+                let out = k.tick(input);
+                assert!(
+                    out.is_finite(),
+                    "non-finite output at depth={depth}, input={input}: {out}"
+                );
+            }
+        }
     }
 
     #[test]

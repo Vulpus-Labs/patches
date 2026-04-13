@@ -128,14 +128,10 @@ impl PeriodicUpdate for Bitcrusher {
             0.0
         };
 
-        if rate_cv != 0.0 {
-            let effective_rate = (self.rate + rate_cv).clamp(0.0, 1.0);
-            self.kernel.set_rate(effective_rate, self.sample_rate);
-        }
-        if depth_cv != 0.0 {
-            let effective_depth = (self.depth + depth_cv * 31.0).clamp(1.0, 32.0);
-            self.kernel.set_depth(effective_depth);
-        }
+        let effective_rate = (self.rate + rate_cv).clamp(0.0, 1.0);
+        self.kernel.set_rate(effective_rate, self.sample_rate);
+        let effective_depth = (self.depth + depth_cv * 31.0).clamp(1.0, 32.0);
+        self.kernel.set_depth(effective_depth);
     }
 }
 
@@ -174,5 +170,29 @@ mod tests {
         h.set_mono("in", 0.42);
         h.tick();
         assert_nearly!(0.42, h.read_mono("out"));
+    }
+
+    #[test]
+    fn cv_reverts_to_base_on_zero() {
+        let mut h = ModuleHarness::build::<Bitcrusher>(
+            params!["rate" => 1.0_f32, "depth" => 32.0_f32, "dry_wet" => 1.0_f32],
+        );
+        // Apply rate CV to reduce rate significantly
+        for _ in 0..32 {
+            h.set_mono("in", 0.5);
+            h.set_mono("rate_cv", -0.5);
+            h.tick();
+        }
+        // Remove CV — should revert to base rate (1.0 = full rate, pass-through)
+        for _ in 0..32 {
+            h.set_mono("in", 0.5);
+            h.set_mono("rate_cv", 0.0);
+            h.tick();
+        }
+        // At full rate + full depth, output should equal input
+        h.set_mono("in", 0.5);
+        h.set_mono("rate_cv", 0.0);
+        h.tick();
+        assert_nearly!(0.5, h.read_mono("out"));
     }
 }

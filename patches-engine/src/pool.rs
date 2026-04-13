@@ -42,7 +42,7 @@ impl ModulePool {
             m.as_periodic().map(|p| {
                 // SAFETY: Module instances are heap-allocated owned values with 'static
                 // lifetime.  We erase the borrow-checker lifetime (tied to `&mut self`)
-                // because the raw pointer is managed by ExecutionState under its own
+                // because the raw pointer is managed by ReadyState under its own
                 // rebuild-before-tick safety invariant.
                 let p_lt: *mut (dyn PeriodicUpdate + '_) = p;
                 unsafe { std::mem::transmute::<*mut (dyn PeriodicUpdate + '_), *mut dyn PeriodicUpdate>(p_lt) }
