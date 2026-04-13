@@ -263,13 +263,11 @@ fn build_tracker_data(
         song_name_to_index.insert(song_def.name.name.clone(), song_idx);
     }
 
-    let song_bank = SongBank {
-        songs: song_list,
-        name_to_index: song_name_to_index,
-    };
+    let song_bank = SongBank { songs: song_list };
 
     // Validate: MasterSequencer song references and channel matching.
-    validate_sequencer_songs(graph, &song_bank, flat)?;
+    // `song_name_to_index` is consumed here — names never enter `TrackerData`.
+    validate_sequencer_songs(graph, &song_bank, &song_name_to_index, flat)?;
 
     Ok(Some(TrackerData {
         patterns: PatternBank { patterns },
@@ -295,6 +293,7 @@ fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
 fn validate_sequencer_songs(
     _graph: &ModuleGraph,
     song_bank: &SongBank,
+    song_name_to_index: &HashMap<String, usize>,
     flat: &FlatPatch,
 ) -> Result<(), InterpretError> {
     for flat_module in &flat.modules {
@@ -313,7 +312,7 @@ fn validate_sequencer_songs(
             }
         });
         if let Some(song_name) = song_name {
-            let Some(&song_idx) = song_bank.name_to_index.get(song_name) else {
+            let Some(&song_idx) = song_name_to_index.get(song_name) else {
                 return Err(InterpretError {
                     span: flat_module.span,
                     message: format!(
@@ -1014,8 +1013,9 @@ mod tests {
         }];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();
-        let song_idx = td.songs.name_to_index["my_song"];
-        let song = &td.songs.songs[song_idx];
+        // Names no longer travel with `TrackerData`. Alphabetical ordering
+        // at bank-build time means "my_song" (the only song) is at index 0.
+        let song = &td.songs.songs[0];
         assert_eq!(song.channels, 1);
         assert_eq!(song.order.len(), 3);
         assert_eq!(song.order[0][0], Some(0)); // pat_a = index 0

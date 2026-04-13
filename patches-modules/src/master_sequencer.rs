@@ -631,7 +631,6 @@ mod tests {
     use patches_core::{
         PatternBank, SongBank, Song, Pattern, TrackerStep,
     };
-    use std::collections::HashMap;
 
     const SR: f32 = 44100.0;
     const ENV: AudioEnvironment = AudioEnvironment {
@@ -767,7 +766,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern.clone(), pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("loop_song".to_string(), 0)]),
             },
         });
 
@@ -815,7 +813,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("finite_song".to_string(), 0)]),
             },
         });
 
@@ -930,7 +927,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -993,7 +989,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1065,7 +1060,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![make_pattern(), make_pattern(), make_pattern(), make_pattern()] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1131,7 +1125,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1196,7 +1189,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1261,7 +1253,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1320,7 +1311,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![pattern] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);
@@ -1379,7 +1369,6 @@ mod tests {
             patterns: PatternBank { patterns: vec![make_pattern(), make_pattern(), make_pattern(), make_pattern()] },
             songs: SongBank {
                 songs: vec![song],
-                name_to_index: HashMap::from([("test".to_string(), 0)]),
             },
         });
         h.as_tracker_data_receiver().unwrap().receive_tracker_data(data);

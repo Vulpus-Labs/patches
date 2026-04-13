@@ -65,9 +65,12 @@ impl MidiFrame {
     /// Read a MIDI event at the given index (0–4).
     ///
     /// # Panics
-    /// Panics if `index >= MAX_EVENTS`.
+    /// Debug builds panic if `index >= MAX_EVENTS`. Release builds rely on
+    /// the caller to bound-check (`index` is internal to the backplane;
+    /// misuse is a bug, not a runtime condition). Audio-thread callers must
+    /// ensure the bound holds before calling.
     pub fn read_event(frame: &[f32; 16], index: usize) -> MidiEvent {
-        assert!(index < Self::MAX_EVENTS, "MIDI event index {index} out of range (max {})", Self::MAX_EVENTS);
+        debug_assert!(index < Self::MAX_EVENTS, "MIDI event index {index} out of range (max {})", Self::MAX_EVENTS);
         let base = 1 + index * 3;
         MidiEvent {
             bytes: [
@@ -81,9 +84,10 @@ impl MidiFrame {
     /// Write a MIDI event at the given index (0–4).
     ///
     /// # Panics
-    /// Panics if `index >= MAX_EVENTS`.
+    /// Debug builds panic if `index >= MAX_EVENTS`. Release builds rely on
+    /// the caller to bound-check.
     pub fn write_event(frame: &mut [f32; 16], index: usize, event: MidiEvent) {
-        assert!(index < Self::MAX_EVENTS, "MIDI event index {index} out of range (max {})", Self::MAX_EVENTS);
+        debug_assert!(index < Self::MAX_EVENTS, "MIDI event index {index} out of range (max {})", Self::MAX_EVENTS);
         let base = 1 + index * 3;
         frame[base] = event.bytes[0] as f32;
         frame[base + 1] = event.bytes[1] as f32;

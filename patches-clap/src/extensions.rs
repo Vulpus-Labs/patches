@@ -133,7 +133,7 @@ unsafe extern "C" fn state_save(
     let p = plugin::plugin_ref_pub(plugin);
 
     let path_bytes = {
-        let gui = p.gui_state.lock().unwrap_or_else(|e| e.into_inner());
+        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
         gui.file_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
@@ -175,7 +175,7 @@ unsafe extern "C" fn state_load(
     };
 
     {
-        let mut gui = p.gui_state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
         if path_str.is_empty() {
             gui.file_path = None;
         } else {

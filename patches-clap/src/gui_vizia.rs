@@ -57,7 +57,7 @@ impl Model for PluginUiData {
             PluginUiEvent::Browse => {
                 {
                     let mut gui =
-                        self.gui_state.lock().unwrap_or_else(|e| e.into_inner());
+                        self.gui_state.lock().expect("gui_state mutex poisoned");
                     gui.browse_requested = true;
                 }
                 self.host.request_callback();
@@ -65,7 +65,7 @@ impl Model for PluginUiData {
             PluginUiEvent::Reload => {
                 {
                     let mut gui =
-                        self.gui_state.lock().unwrap_or_else(|e| e.into_inner());
+                        self.gui_state.lock().expect("gui_state mutex poisoned");
                     gui.reload_requested = true;
                 }
                 self.host.request_callback();
@@ -354,7 +354,7 @@ pub(crate) unsafe fn create_gui(
     }
 
     let (initial_path, initial_status, initial_flat) = {
-        let gui = gui_state.lock().unwrap_or_else(|e| e.into_inner());
+        let gui = gui_state.lock().expect("gui_state mutex poisoned");
         let path = gui
             .file_path
             .as_ref()
@@ -381,7 +381,7 @@ pub(crate) unsafe fn create_gui(
         let flat_sig = Signal::new(initial_flat.clone());
         let zoom_sig = Signal::new(1.0f32);
 
-        *signals_app.lock().unwrap_or_else(|e| e.into_inner()) =
+        *signals_app.lock().expect("gui_state mutex poisoned") =
             Some(UiSignals {
                 path: path_sig,
                 status: status_sig,
@@ -452,10 +452,10 @@ pub(crate) unsafe fn create_gui(
     .user_scale_factor(scale)
     .on_idle(move |_cx| {
         let sigs_guard =
-            signals_idle.lock().unwrap_or_else(|e| e.into_inner());
+            signals_idle.lock().expect("gui_state mutex poisoned");
         let Some(ref sigs) = *sigs_guard else { return };
         let gui =
-            gui_state_idle.lock().unwrap_or_else(|e| e.into_inner());
+            gui_state_idle.lock().expect("gui_state mutex poisoned");
         let new_path = gui
             .file_path
             .as_ref()

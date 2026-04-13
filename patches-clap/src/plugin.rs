@@ -40,6 +40,7 @@ use patches_core::{
 use patches_engine::builder::ExecutionPlan;
 use patches_engine::{CleanupAction, PatchProcessor, Planner};
 
+use crate::error::CompileError;
 use crate::extensions;
 use crate::gui::GuiState;
 
@@ -96,27 +97,25 @@ impl PatchesClapPlugin {
     ///
     /// Called from `activate` (if source non-empty), `state_load`, and
     /// `on_main_thread`.
-    pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), String> {
-        let env = self.env.as_ref().ok_or("not activated")?;
+    pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
+        let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
         let file = self.load_or_parse()?;
-        let result = patches_dsl::expand(&file).map_err(|e| e.to_string())?;
+        let result = patches_dsl::expand(&file)?;
         let flat_patch = result.patch.clone();
         let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
             &self.registry,
             env,
             self.base_dir.as_deref(),
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         let graph = build_result.graph;
         let tracker_data = build_result.tracker_data;
         let plan = self
             .planner
-            .build_with_tracker_data(&graph, &self.registry, env, tracker_data)
-            .map_err(|e| e.to_string())?;
+            .build_with_tracker_data(&graph, &self.registry, env, tracker_data)?;
         // Stash the FlatPatch so the GUI can render the graph.
         {
-            let mut gui = self.gui_state.lock().unwrap_or_else(|e| e.into_inner());
+            let mut gui = self.gui_state.lock().expect("gui_state mutex poisoned");
             gui.flat_patch = Some(flat_patch);
         }
         self.graph = Some(graph);
@@ -132,7 +131,7 @@ impl PatchesClapPlugin {
     ///
     /// The master file is read from `self.dsl_source` (already loaded by the
     /// caller) to avoid a redundant disk read and TOCTOU inconsistency.
-    fn load_or_parse(&self) -> Result<patches_dsl::File, String> {
+    fn load_or_parse(&self) -> Result<patches_dsl::File, CompileError> {
         let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
         if let Some(path) = file_path {
             if path.exists() {
@@ -147,13 +146,12 @@ impl PatchesClapPlugin {
                     } else {
                         std::fs::read_to_string(p)
                     }
-                })
-                .map_err(|e| e.to_string())?;
+                })?;
                 return Ok(load_result.file);
             }
         }
         // Fallback: parse the in-memory source (no include resolution).
-        patches_dsl::parse(&self.dsl_source).map_err(|e| e.to_string())
+        Ok(patches_dsl::parse(&self.dsl_source)?)
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.
@@ -351,9 +349,11 @@ unsafe extern "C" fn plugin_reset(_plugin: *const clap_plugin) {
 }
 
 /// Logged once so we know process was reached without flooding the log.
-static PROCESS_LOGGED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-/// Count process calls to log diagnostics after a few buffers.
+/// `OnceLock` makes the "first call" semantics explicit.
+static PROCESS_LOGGED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+/// Count process calls to log diagnostics after a few buffers. `Relaxed`
+/// ordering is sufficient — this is a diagnostic counter with no
+/// happens-before dependency on other state.
 static PROCESS_COUNT: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 
@@ -361,7 +361,7 @@ unsafe extern "C" fn plugin_process(
     plugin: *const clap_plugin,
     process: *const clap_process,
 ) -> clap_process_status {
-    if !PROCESS_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+    if PROCESS_LOGGED.set(()).is_ok() {
         dlog!("process: first call");
     }
     if process.is_null() {
@@ -593,13 +593,13 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
 
 /// Read from GuiState under the lock.
 fn lock_gui<T>(state: &Mutex<GuiState>, f: impl FnOnce(&GuiState) -> T) -> T {
-    let gui = state.lock().unwrap_or_else(|e| e.into_inner());
+    let gui = state.lock().expect("gui_state mutex poisoned");
     f(&gui)
 }
 
 /// Mutate GuiState under the lock.
 fn lock_gui_mut(state: &Mutex<GuiState>, f: impl FnOnce(&mut GuiState)) {
-    let mut gui = state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut gui = state.lock().expect("gui_state mutex poisoned");
     f(&mut gui);
 }
 

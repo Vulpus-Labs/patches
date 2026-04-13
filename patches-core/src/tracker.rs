@@ -6,7 +6,6 @@
 //!
 //! See ADR 0029 for the full design.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// A single step in a pattern channel.
@@ -64,14 +63,14 @@ pub struct Song {
     pub loop_point: usize,
 }
 
-/// A collection of songs, indexed by position with a name-to-index lookup.
+/// A collection of songs, indexed by position.
 ///
 /// Songs are stored in a flat `Vec` for O(1) access by index on the audio
-/// thread. The `name_to_index` map is used at interpret/validation time only.
+/// thread. Name-to-index resolution is the interpreter's concern and does
+/// **not** live inside `TrackerData`: no strings cross into the audio thread.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SongBank {
     pub songs: Vec<Song>,
-    pub name_to_index: HashMap<String, usize>,
 }
 
 /// All pattern and song data for a patch, shared via `Arc`.
@@ -116,7 +115,7 @@ mod tests {
     fn empty_tracker_data() {
         let data = TrackerData {
             patterns: PatternBank { patterns: vec![] },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         };
         assert_eq!(data.patterns.patterns.len(), 0);
         assert_eq!(data.songs.songs.len(), 0);

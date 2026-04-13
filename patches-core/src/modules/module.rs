@@ -328,6 +328,19 @@ pub trait Module: Send {
     /// The execution plan uses this during plan activation to build `periodic_indices`.
     ///
     /// The default implementation returns `None`.
+    ///
+    /// # Safety contract
+    ///
+    /// The returned reference must point to data *owned by the module itself*
+    /// — typically `Some(self)`, or `Some(&mut self.some_field)` where
+    /// `some_field` lives inside the module. It must **never** reference a
+    /// local temporary or borrowed data.
+    ///
+    /// `ModulePool::as_periodic_ptr` erases the borrow-checker lifetime on
+    /// this pointer so that `ReadyState` can store it across ticks. The
+    /// pointer's validity therefore piggy-backs on the module's own
+    /// lifetime in the pool — a returned reference to a temporary would be
+    /// dangling as soon as this method returns.
     fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
         None
     }

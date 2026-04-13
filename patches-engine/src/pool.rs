@@ -40,10 +40,20 @@ impl ModulePool {
     pub fn as_periodic_ptr(&mut self, idx: usize) -> Option<*mut dyn PeriodicUpdate> {
         self.modules[idx].as_mut().and_then(|m| {
             m.as_periodic().map(|p| {
-                // SAFETY: Module instances are heap-allocated owned values with 'static
-                // lifetime.  We erase the borrow-checker lifetime (tied to `&mut self`)
-                // because the raw pointer is managed by ReadyState under its own
-                // rebuild-before-tick safety invariant.
+                // SAFETY:
+                // 1. `Module` implementations are heap-allocated `Box<dyn Module>` with
+                //    `'static` data. The module itself lives as long as the slot is
+                //    occupied, and `ModulePool` is neither moved nor dropped while
+                //    `ReadyState` holds raw pointers into it.
+                // 2. `Module::as_periodic` is required by contract to return a
+                //    reference to a field *owned by the module* (e.g. `Some(self)` or
+                //    `Some(&mut self.inner_field)`), never a reference to a local
+                //    temporary. This guarantees the pointer remains valid for the
+                //    module's lifetime, so erasing the borrow-checker lifetime
+                //    (which is only tied to `&mut self` on this method) is sound.
+                // 3. `ReadyState` upholds a rebuild-before-tick invariant: any stored
+                //    `*mut dyn PeriodicUpdate` is invalidated and re-derived whenever
+                //    the owning module could have moved or been dropped.
                 let p_lt: *mut (dyn PeriodicUpdate + '_) = p;
                 unsafe { std::mem::transmute::<*mut (dyn PeriodicUpdate + '_), *mut dyn PeriodicUpdate>(p_lt) }
             })

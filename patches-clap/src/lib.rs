@@ -11,6 +11,7 @@
 
 pub mod descriptor;
 pub mod entry;
+pub mod error;
 pub mod extensions;
 pub mod factory;
 pub mod gui;

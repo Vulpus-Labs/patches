@@ -51,10 +51,11 @@ impl<T: ?Sized> PtrArray<T> {
     {
         self.ptrs.clear();
         for &idx in indices {
-            let ptr = resolve(idx).expect("PtrArray::rebuild: slot is empty or wrong type");
-            self.ptrs.push(
-                NonNull::new(ptr).expect("PtrArray::rebuild: resolve returned null pointer"),
-            );
+            let ptr = resolve(idx)
+                .expect("PtrArray::rebuild: slot is empty or wrong type");
+            let non_null = NonNull::new(ptr)
+                .expect("PtrArray::rebuild: resolve returned null pointer");
+            self.ptrs.push(non_null);
         }
     }
 

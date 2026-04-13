@@ -15,6 +15,12 @@ use std::sync::Arc;
 use crate::pool::ModulePool;
 
 /// Errors that can occur when building an [`ExecutionPlan`].
+///
+/// Constructed on the **planner thread** (non-real-time). `InternalError` and
+/// `ModuleCreationError` carry owned `String` messages built with `format!`
+/// at call sites; that heap allocation is fine here because the planner runs
+/// off the audio thread. Do not propagate `BuildError` construction — or any
+/// of its `format!` call sites — onto the audio thread.
 #[derive(Debug)]
 pub enum BuildError {
     /// An internal consistency invariant was violated (indicates a bug in the builder).
@@ -348,7 +354,11 @@ impl PatchBuilder {
                 })
                 .collect();
 
-            let is_periodic = match &decision {
+            // Consume `decision` so `ParameterMap` / port vectors inside
+            // `Update` move directly into the corresponding diff collections
+            // — matches the destructive-read convention used downstream by
+            // `Module::update_validated_parameters(&mut ParameterMap)`.
+            let is_periodic = match decision {
                 NodeDecision::Install { .. } => {
                     let mut fresh = fresh_modules.remove(&id).ok_or_else(|| {
                         BuildError::InternalError(format!(
@@ -362,15 +372,18 @@ impl PatchBuilder {
                     periodic
                 }
                 NodeDecision::Update { param_diff, .. } => {
-                    if !param_diff.is_empty() {
-                        parameter_updates.push((pool_index, param_diff.clone()));
-                    }
                     let prev_ns = &prev_state.nodes[&id];
-                    if prev_ns.input_ports != input_ports || prev_ns.output_ports != output_ports {
+                    let ports_changed = prev_ns.input_ports != input_ports
+                        || prev_ns.output_ports != output_ports;
+                    let is_periodic = prev_ns.is_periodic;
+                    if !param_diff.is_empty() {
+                        parameter_updates.push((pool_index, param_diff));
+                    }
+                    if ports_changed {
                         port_updates.push((pool_index, input_ports.clone(), output_ports.clone()));
                     }
-                    if prev_ns.is_periodic { periodic_indices.push(pool_index); }
-                    prev_ns.is_periodic
+                    if is_periodic { periodic_indices.push(pool_index); }
+                    is_periodic
                 }
             };
 

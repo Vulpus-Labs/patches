@@ -392,7 +392,6 @@ mod tests {
     use patches_core::{
         PatternBank, SongBank, Pattern, TrackerStep,
     };
-    use std::collections::HashMap;
 
     const SR: f32 = 44100.0;
     const ENV: AudioEnvironment = AudioEnvironment {
@@ -480,7 +479,7 @@ mod tests {
                     ]],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1);
@@ -528,7 +527,7 @@ mod tests {
                     ]],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1);
@@ -565,7 +564,7 @@ mod tests {
                     ]],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1);
@@ -605,7 +604,7 @@ mod tests {
                     ]],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1);
@@ -661,7 +660,7 @@ mod tests {
                     ],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1); // only 1 channel
@@ -689,7 +688,7 @@ mod tests {
                     ],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(2);
@@ -724,7 +723,7 @@ mod tests {
                     data: vec![vec![repeat_step(1.0, 3)]],
                 }],
             },
-            songs: SongBank { songs: vec![], name_to_index: HashMap::new() },
+            songs: SongBank { songs: vec![] },
         });
 
         let s = shape(1);

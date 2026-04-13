@@ -10,6 +10,7 @@
 //! - Plugin hosts (VST/AU/CLAP) — future callers that supply their own I/O.
 
 use std::mem;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
     BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TransportFrame,
@@ -62,6 +63,11 @@ pub struct PatchProcessor {
     midi_overflow_count: usize,
     global_drift_walk: BoundedRandomWalk,
     periodic_update_interval: u32,
+    /// Count of `CleanupAction`s dropped inline because the cleanup ring was
+    /// full at plan-adoption time. Non-RT code may poll this to detect
+    /// cleanup-thread starvation. Bumped with `Relaxed` ordering on the
+    /// audio thread.
+    cleanup_overflow_count: AtomicU32,
 }
 
 impl PatchProcessor {
@@ -108,7 +114,14 @@ impl PatchProcessor {
             midi_overflow_count: 0,
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
+            cleanup_overflow_count: AtomicU32::new(0),
         }
+    }
+
+    /// Number of `CleanupAction`s dropped inline because the cleanup ring
+    /// was full. Safe to call from any thread.
+    pub fn cleanup_overflow_count(&self) -> u32 {
+        self.cleanup_overflow_count.load(Ordering::Relaxed)
     }
 
     /// Apply a new [`ExecutionPlan`].
@@ -127,9 +140,7 @@ impl PatchProcessor {
                 if let Err(rtrb::PushError::Full(action)) =
                     self.cleanup_tx.push(CleanupAction::DropModule(module))
                 {
-                    eprintln!(
-                        "patches: cleanup ring buffer full — dropping module inline (slot {idx})"
-                    );
+                    self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
                     drop(action);
                 }
             }
@@ -163,7 +174,7 @@ impl PatchProcessor {
             if let Err(rtrb::PushError::Full(action)) =
                 self.cleanup_tx.push(CleanupAction::DropPlan(Box::new(old)))
             {
-                eprintln!("patches: cleanup ring buffer full — dropping old plan inline");
+                self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
                 drop(action);
             }
         }
