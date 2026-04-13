@@ -132,10 +132,22 @@ pub struct RenderSvgResult {
     pub diagnostics: Vec<RenderSvgDiagnostic>,
 }
 
+/// Severity of a `patches/renderSvg` diagnostic.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RenderSvgSeverity {
+    Error,
+    #[allow(dead_code)]
+    Warning,
+}
+
 /// Structured diagnostic surfaced alongside a (possibly partial) SVG.
 #[derive(Debug, Serialize)]
 pub struct RenderSvgDiagnostic {
     pub message: String,
+    pub severity: RenderSvgSeverity,
+    /// Byte-range in the master document, if known.
+    pub span: Option<(u32, u32)>,
 }
 
 impl PatchesLanguageServer {
@@ -177,6 +189,8 @@ pub(crate) fn render_svg_pipeline(
                 svg: empty_svg(),
                 diagnostics: vec![RenderSvgDiagnostic {
                     message: e.to_string(),
+                    severity: RenderSvgSeverity::Error,
+                    span: None,
                 }],
             };
         }
@@ -189,6 +203,8 @@ pub(crate) fn render_svg_pipeline(
                 svg: empty_svg(),
                 diagnostics: vec![RenderSvgDiagnostic {
                     message: e.to_string(),
+                    severity: RenderSvgSeverity::Error,
+                    span: None,
                 }],
             };
         }

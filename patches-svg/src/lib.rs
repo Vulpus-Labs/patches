@@ -35,6 +35,8 @@ pub struct SvgOptions {
     /// If true, emit a `<style>` block with CSS classes; else inline
     /// `style="..."` on each element.
     pub embed_css: bool,
+    /// Override the default node width. `None` uses [`DEFAULT_NODE_WIDTH`].
+    pub node_width: Option<f32>,
 }
 
 impl Default for SvgOptions {
@@ -43,20 +45,25 @@ impl Default for SvgOptions {
             theme: Theme::Dark,
             include_port_labels: true,
             embed_css: true,
+            node_width: None,
         }
     }
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-/// Fixed node width; matches the value used by the clap GUI so outputs
-/// are visually consistent.
+/// Default node width; matches the value used by the clap GUI so outputs
+/// are visually consistent. Override via [`SvgOptions::node_width`].
 pub const NODE_WIDTH: f32 = 160.0;
 
 /// Render `patch` as a standalone SVG document.
 pub fn render_svg(patch: &FlatPatch, opts: &SvgOptions) -> String {
     let config = LayoutConfig::default();
-    let (nodes, edges) = flat_to_layout_input(patch, &config);
+    let width = opts.node_width.unwrap_or(NODE_WIDTH);
+    let (mut nodes, edges) = flat_to_layout_input(patch, &config);
+    for n in &mut nodes {
+        n.width = width;
+    }
     let layout = layout_graph(&nodes, &edges, &config);
     emit_svg(&layout, &config, opts)
 }

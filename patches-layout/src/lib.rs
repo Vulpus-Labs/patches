@@ -44,6 +44,9 @@ pub struct LayoutConfig {
     pub node_padding: f32,
     pub vertex_spacing: f32,
     pub graph_margin: f32,
+    /// Fraction of horizontal edge span used as the Bézier control-point offset.
+    /// Higher values produce softer S-curves; lower values approach straight lines.
+    pub edge_curve_factor: f32,
 }
 
 impl Default for LayoutConfig {
@@ -54,6 +57,7 @@ impl Default for LayoutConfig {
             node_padding: 4.0,
             vertex_spacing: 30.0,
             graph_margin: 20.0,
+            edge_curve_factor: 0.4,
         }
     }
 }
@@ -76,16 +80,13 @@ pub struct PositionedNode {
     pub label: String,
     pub input_ports: Vec<String>,
     pub output_ports: Vec<String>,
-    header_height: f32,
-    port_row_height: f32,
-    node_padding: f32,
 }
 
 impl PositionedNode {
     /// Y coordinate of the centre of the named port row.
     ///
     /// Returns `None` if the port is not present on the given side.
-    pub fn port_y(&self, port_name: &str, is_input: bool) -> Option<f32> {
+    pub fn port_y(&self, port_name: &str, is_input: bool, config: &LayoutConfig) -> Option<f32> {
         let ports = if is_input {
             &self.input_ports
         } else {
@@ -94,10 +95,10 @@ impl PositionedNode {
         let idx = ports.iter().position(|p| p == port_name)?;
         Some(
             self.y
-                + self.header_height
-                + self.node_padding
-                + idx as f32 * self.port_row_height
-                + self.port_row_height / 2.0,
+                + config.node_header_height
+                + config.node_padding
+                + idx as f32 * config.port_row_height
+                + config.port_row_height / 2.0,
         )
     }
 
@@ -220,9 +221,6 @@ pub fn layout_graph(
                 label: src.label.clone(),
                 input_ports: src.input_ports.clone(),
                 output_ports: src.output_ports.clone(),
-                header_height: config.node_header_height,
-                port_row_height: config.port_row_height,
-                node_padding: config.node_padding,
             });
         }
         if comp_max_y > max_y {
@@ -245,17 +243,17 @@ pub fn layout_graph(
             Some(n) => *n,
             None => continue,
         };
-        let y0 = match from.port_y(&e.from_port, false) {
+        let y0 = match from.port_y(&e.from_port, false, config) {
             Some(v) => v,
             None => continue,
         };
-        let y1 = match to.port_y(&e.to_port, true) {
+        let y1 = match to.port_y(&e.to_port, true, config) {
             Some(v) => v,
             None => continue,
         };
         let x0 = from.output_x();
         let x1 = to.input_x();
-        let dx = (x1 - x0).abs() * 0.4;
+        let dx = (x1 - x0).abs() * config.edge_curve_factor;
         routed.push(RoutedEdge {
             x0,
             y0,

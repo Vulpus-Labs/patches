@@ -83,6 +83,12 @@ fn parse_args() -> Result<Args, String> {
 
 /// Read an included file from disk, searching the master file's parent
 /// directory and any `--include-path` entries, in order.
+///
+/// Note: `--include-path` is CLI-only sugar. The DSL itself resolves
+/// includes relative to the directive's source file; this loader adds
+/// extra search directories as a convenience for renders kicked off
+/// outside a project tree. Do not treat `--include-path` as equivalent
+/// to module-search behaviour in other tools.
 fn make_loader(
     master_dir: PathBuf,
     extra: Vec<PathBuf>,
