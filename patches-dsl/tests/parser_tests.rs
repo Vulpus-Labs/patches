@@ -1,5 +1,21 @@
 use patches_dsl::{parse, Connection, Direction, ParseError, Scalar, Statement, Step, StepOrGenerator, Value};
 
+/// Assert `parse(src)` errors and the lowercased message contains every
+/// substring in `expected`. Use to lock in *which* error fired, not just
+/// "some parse error" — catches regressions where a more permissive grammar
+/// would silently accept the input or report a misleading error.
+fn assert_parse_error_contains(src: &str, expected: &[&str]) {
+    let err = parse(src).expect_err("expected parse error");
+    let lower = err.message.to_lowercase();
+    for needle in expected {
+        assert!(
+            lower.contains(&needle.to_lowercase()),
+            "parse error message {:?} missing {:?} (full message: {:?})",
+            lower, needle, err.message
+        );
+    }
+}
+
 // ─── Positive fixtures ────────────────────────────────────────────────────────
 
 #[test]
@@ -100,14 +116,20 @@ fn unit_literal_conversions() {
 
 #[test]
 fn unit_literal_errors() {
-    let error_cases: &[(&str, &str)] = &[
-        ("patch { module x : X { v: -440Hz } }",  "negative Hz"),
-        ("patch { module x : X { v: 0Hz } }",     "0 Hz"),
-        ("patch { module x : X { v: 0.0kHz } }",  "0 kHz"),
-    ];
-    for &(src, label) in error_cases {
-        assert!(parse(src).is_err(), "{label} should be a parse error");
-    }
+    // Assert specific error keywords so a regression that accepts -440Hz
+    // (or fails for an unrelated reason) is caught.
+    assert_parse_error_contains(
+        "patch { module x : X { v: -440Hz } }",
+        &["hz"],
+    );
+    assert_parse_error_contains(
+        "patch { module x : X { v: 0Hz } }",
+        &["hz"],
+    );
+    assert_parse_error_contains(
+        "patch { module x : X { v: 0.0kHz } }",
+        &["khz"],
+    );
 }
 
 // Note literals must not swallow following identifier characters.
@@ -345,6 +367,10 @@ fn bare_note_letter_is_ident() {
 
 #[test]
 fn negative_fixtures_parse_err() {
+    // Each fixture must produce an Err; the assertion is just that parsing
+    // fails. Message-content checks live in the per-fixture tests below so
+    // that a regression in any single one fails its own named test instead of
+    // a single bulk assertion.
     let fixtures: &[(&str, &str)] = &[
         ("missing_arrow",       include_str!("fixtures/errors/missing_arrow.patches")),
         ("malformed_index",     include_str!("fixtures/errors/malformed_index.patches")),
@@ -356,6 +382,29 @@ fn negative_fixtures_parse_err() {
     for &(name, src) in fixtures {
         assert!(parse(src).is_err(), "expected Err for {name}.patches");
     }
+}
+
+/// Lock in that overflowing literals report as "invalid integer literal"
+/// rather than e.g. a generic "parsing failed".
+#[test]
+fn int_overflow_error_message_is_specific() {
+    assert_parse_error_contains(
+        "patch {\n  module osc : Osc { frequency: 99999999999999999999 }\n}",
+        &["invalid integer literal"],
+    );
+}
+
+/// F##3 is a malformed note literal — the error must point at the note
+/// parser, not just "syntax error".
+#[test]
+fn double_sharp_note_error_message_is_specific() {
+    assert_parse_error_contains(
+        "patch { module x : X { v: F##3 } }",
+        // Either the note parser flags the literal, or the grammar
+        // rejects the unknown identifier — both should mention F##3
+        // or an expected token.
+        &["f##3"],
+    );
 }
 
 // ─── T-0248: Parse error location accuracy ───────────────────────────────────
