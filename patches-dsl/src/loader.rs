@@ -5,10 +5,11 @@
 //! expander. It accepts a file-reading closure so it can be tested with
 //! in-memory file maps.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{File, Span};
+use crate::include_frontier::{normalize_path, EnterResult, IncludeFrontier};
 use crate::parser::{parse, parse_include_file, ParseError};
 
 /// The result of a successful load: a merged [`File`] and the full set of
@@ -89,12 +90,10 @@ where
     let mut master = parse(&src).map_err(|e| LoadError::from_parse_error(e, &master_path))?;
 
     let mut ctx = ResolveContext {
-        visited: HashSet::new(),
-        stack: vec![master_path.clone()],
+        frontier: IncludeFrontier::with_root(master_path.clone()),
         all_paths: vec![master_path.clone()],
         defined_names: HashMap::new(),
     };
-    ctx.visited.insert(master_path.clone());
 
     // Collect names defined in the master file for collision detection.
     register_names(&master_path, &master.templates, &master.patterns, &master.songs, &mut ctx.defined_names)?;
@@ -121,8 +120,7 @@ where
 
 /// Mutable state threaded through the recursive include resolution.
 struct ResolveContext {
-    visited: HashSet<PathBuf>,
-    stack: Vec<PathBuf>,
+    frontier: IncludeFrontier<PathBuf>,
     all_paths: Vec<PathBuf>,
     defined_names: HashMap<String, PathBuf>,
 }
@@ -145,25 +143,20 @@ where
     for inc in includes {
         let resolved = normalize_path(&parent_dir.join(&inc.path));
 
-        // Cycle detection: check if path is on the current stack.
-        if ctx.stack.contains(&resolved) {
-            let chain: Vec<(PathBuf, Span)> = vec![(parent_path.to_path_buf(), inc.span)];
-            return Err(LoadError {
-                message: format!(
-                    "include cycle detected: {} includes {}",
-                    parent_path.display(),
-                    resolved.display()
-                ),
-                include_chain: chain,
-            });
+        match ctx.frontier.enter(resolved.clone()) {
+            EnterResult::Cycle => {
+                return Err(LoadError {
+                    message: format!(
+                        "include cycle detected: {} includes {}",
+                        parent_path.display(),
+                        resolved.display()
+                    ),
+                    include_chain: vec![(parent_path.to_path_buf(), inc.span)],
+                });
+            }
+            EnterResult::AlreadyVisited => continue,
+            EnterResult::Fresh => {}
         }
-
-        // Diamond deduplication: skip already-visited files.
-        if ctx.visited.contains(&resolved) {
-            continue;
-        }
-
-        ctx.visited.insert(resolved.clone());
 
         let src = read_file(&resolved).map_err(|e| {
             let mut err = LoadError::from_io_error(e, &resolved);
@@ -187,7 +180,6 @@ where
             })?;
 
         // Recurse into this file's includes before adding its definitions (depth-first).
-        ctx.stack.push(resolved.clone());
         resolve_includes(
             &resolved,
             &inc_file.includes,
@@ -200,7 +192,7 @@ where
             e.include_chain.push((parent_path.to_path_buf(), inc.span));
             e
         })?;
-        ctx.stack.pop();
+        ctx.frontier.leave(&resolved);
 
         // Merge definitions (dependencies before dependents due to depth-first).
         templates.extend(inc_file.templates);
@@ -250,33 +242,6 @@ fn check_collision(
     }
     defined.insert(key, path.to_path_buf());
     Ok(())
-}
-
-/// Normalize a path by resolving `.` and `..` components without touching the
-/// filesystem (no `canonicalize`). This ensures consistent path comparison in
-/// tests that use in-memory file maps.
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if let Some(std::path::Component::Normal(_)) =
-                    components.last().copied()
-                {
-                    components.pop();
-                } else {
-                    components.push(component);
-                }
-            }
-            _ => components.push(component),
-        }
-    }
-    if components.is_empty() {
-        PathBuf::from(".")
-    } else {
-        components.iter().collect()
-    }
 }
 
 #[cfg(test)]

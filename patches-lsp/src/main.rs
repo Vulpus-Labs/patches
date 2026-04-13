@@ -7,6 +7,7 @@ mod lsp_util;
 mod navigation;
 mod parser;
 mod server;
+mod workspace;
 
 use server::PatchesLanguageServer;
 use tower_lsp::{LspService, Server};

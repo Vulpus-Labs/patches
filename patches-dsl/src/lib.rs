@@ -23,6 +23,7 @@ mod expand;
 pub mod flat;
 mod parser;
 
+pub mod include_frontier;
 pub mod loader;
 
 pub use ast::{
@@ -33,5 +34,6 @@ pub use ast::{
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
+pub use include_frontier::{normalize_path, EnterResult, IncludeFrontier};
 pub use loader::{load_with, LoadError, LoadResult};
 pub use parser::{parse, parse_include_file, ParseError};
