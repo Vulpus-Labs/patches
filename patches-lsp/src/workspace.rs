@@ -37,16 +37,26 @@ pub(crate) struct DocumentState {
     pub line_index: Vec<usize>,
 }
 
+/// Mutable state unified behind a single lock.
+///
+/// Holding `documents`, `nav_index`, and `include_loaded` under one mutex
+/// removes the hand-rolled drop-ordering the previous four-mutex layout
+/// needed to avoid deadlocks. The tree-sitter `Parser` stays separate
+/// because it is only used during the lock-free parse step.
+pub(crate) struct WorkspaceState {
+    documents: HashMap<Url, DocumentState>,
+    nav_index: NavigationIndex,
+    /// URIs of documents loaded as includes (not opened by the editor).
+    /// Managed automatically and removed when no longer referenced.
+    include_loaded: HashSet<Url>,
+}
+
 /// Per-workspace analysis state. Holds every piece of mutable state the LSP
 /// needs except the `Client`.
 pub struct DocumentWorkspace {
     registry: Registry,
-    documents: Mutex<HashMap<Url, DocumentState>>,
     parser: Mutex<Parser>,
-    nav_index: Mutex<NavigationIndex>,
-    /// URIs of documents loaded as includes (not opened by the editor).
-    /// Managed automatically and removed when no longer referenced.
-    include_loaded: Mutex<HashSet<Url>>,
+    state: Mutex<WorkspaceState>,
 }
 
 impl DocumentWorkspace {
@@ -57,20 +67,19 @@ impl DocumentWorkspace {
             .expect("loading patches grammar");
         Self {
             registry: default_registry(),
-            documents: Mutex::new(HashMap::new()),
             parser: Mutex::new(parser),
-            nav_index: Mutex::new(NavigationIndex::default()),
-            include_loaded: Mutex::new(HashSet::new()),
+            state: Mutex::new(WorkspaceState {
+                documents: HashMap::new(),
+                nav_index: NavigationIndex::default(),
+                include_loaded: HashSet::new(),
+            }),
         }
     }
 
     /// Parse, analyse, and store a document. Returns the diagnostics the
     /// caller should publish for `uri`.
     pub fn analyse(&self, uri: &Url, source: String) -> Vec<Diagnostic> {
-        let tree = {
-            let mut parser = self.parser.lock().expect("lock parser");
-            parser.parse(&source, None).expect("tree-sitter parse")
-        };
+        let tree = self.parse(&source);
         let (file, syntax_diags) = ast_builder::build_ast(&tree, &source);
         let model = analysis::analyse(&file, &self.registry);
         let line_index = lsp_util::build_line_index(&source);
@@ -79,7 +88,8 @@ impl DocumentWorkspace {
             lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
 
         let mut frontier = IncludeFrontier::with_root(uri.clone());
-        let include_diags = self.resolve_includes(uri, &file.includes, &mut frontier);
+        let mut state = self.state.lock().expect("lock workspace state");
+        let include_diags = self.resolve_includes(&mut state, uri, &file.includes, &mut frontier);
 
         let mut all_diags = lsp_diags;
         all_diags.extend(include_diags.into_iter().map(|(span, msg)| {
@@ -93,8 +103,7 @@ impl DocumentWorkspace {
             }
         }));
 
-        let mut docs = self.documents.lock().expect("lock documents");
-        docs.insert(
+        state.documents.insert(
             uri.clone(),
             DocumentState {
                 source,
@@ -103,13 +112,8 @@ impl DocumentWorkspace {
                 line_index,
             },
         );
-
-        let mut nav = self.nav_index.lock().expect("lock nav_index");
-        nav.rebuild(docs.iter().map(|(u, d)| (u, &d.model.navigation)));
-        drop(nav);
-        drop(docs);
-
-        self.purge_stale_includes();
+        rebuild_nav(&mut state);
+        self.purge_stale_includes(&mut state);
 
         all_diags
     }
@@ -118,26 +122,19 @@ impl DocumentWorkspace {
     /// referenced; editor-opened files are removed and the nav index
     /// rebuilt.
     pub fn close(&self, uri: &Url) {
-        let is_include = {
-            let inc_set = self.include_loaded.lock().expect("lock include_loaded");
-            inc_set.contains(uri)
-        };
-        let mut docs = self.documents.lock().expect("lock documents");
-        if !is_include {
-            docs.remove(uri);
+        let mut state = self.state.lock().expect("lock workspace state");
+        if !state.include_loaded.contains(uri) {
+            state.documents.remove(uri);
         }
-        let mut nav = self.nav_index.lock().expect("lock nav_index");
-        nav.rebuild(docs.iter().map(|(u, d)| (u, &d.model.navigation)));
-        drop(nav);
-        drop(docs);
-        self.purge_stale_includes();
+        rebuild_nav(&mut state);
+        self.purge_stale_includes(&mut state);
     }
 
     /// Compute completion items at `position` in `uri`, or an empty vector
     /// if the document is unknown.
     pub fn completions(&self, uri: &Url, position: Position) -> Vec<CompletionItem> {
-        let docs = self.documents.lock().expect("lock documents");
-        let Some(doc) = docs.get(uri) else {
+        let state = self.state.lock().expect("lock workspace state");
+        let Some(doc) = state.documents.get(uri) else {
             return Vec::new();
         };
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
@@ -152,8 +149,8 @@ impl DocumentWorkspace {
 
     /// Compute hover for `position` in `uri`.
     pub fn hover(&self, uri: &Url, position: Position) -> Option<Hover> {
-        let docs = self.documents.lock().expect("lock documents");
-        let doc = docs.get(uri)?;
+        let state = self.state.lock().expect("lock workspace state");
+        let doc = state.documents.get(uri)?;
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
         hover::compute_hover(
             &doc.tree,
@@ -168,16 +165,15 @@ impl DocumentWorkspace {
     /// Resolve goto-definition at `position` in `uri` to an LSP
     /// [`Location`].
     pub fn goto_definition(&self, uri: &Url, position: Position) -> Option<Location> {
-        let docs = self.documents.lock().expect("lock documents");
-        let doc = docs.get(uri)?;
+        let state = self.state.lock().expect("lock workspace state");
+        let doc = state.documents.get(uri)?;
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
-        let nav = self.nav_index.lock().expect("lock nav_index");
         let (target_uri, target_span) =
-            navigation::goto_definition(&doc.model.navigation, &nav, byte_offset)?;
+            navigation::goto_definition(&doc.model.navigation, &state.nav_index, byte_offset)?;
         let target_line_index = if &target_uri == uri {
             &doc.line_index
         } else {
-            &docs.get(&target_uri)?.line_index
+            &state.documents.get(&target_uri)?.line_index
         };
         let start = lsp_util::byte_offset_to_position(target_line_index, target_span.start);
         let end = lsp_util::byte_offset_to_position(target_line_index, target_span.end);
@@ -190,17 +186,26 @@ impl DocumentWorkspace {
     /// Snapshot of file-path-keyed sources for out-of-band consumers
     /// (e.g. the SVG renderer).
     pub fn sources_snapshot(&self) -> HashMap<PathBuf, String> {
-        let docs = self.documents.lock().expect("lock documents");
-        docs.iter()
+        let state = self.state.lock().expect("lock workspace state");
+        state
+            .documents
+            .iter()
             .filter_map(|(u, d)| u.to_file_path().ok().map(|p| (p, d.source.clone())))
             .collect()
     }
 
+    fn parse(&self, source: &str) -> Tree {
+        let mut parser = self.parser.lock().expect("lock parser");
+        parser.parse(source, None).expect("tree-sitter parse")
+    }
+
     /// Resolve include directives for `parent_uri`, loading referenced files
     /// into the document map. Returns diagnostics keyed by the parent
-    /// directive's span.
+    /// directive's span. Operates on a caller-held state guard so nested
+    /// calls don't re-lock.
     fn resolve_includes(
         &self,
+        state: &mut WorkspaceState,
         parent_uri: &Url,
         includes: &[crate::ast::IncludeDirective],
         frontier: &mut IncludeFrontier<Url>,
@@ -239,15 +244,14 @@ impl DocumentWorkspace {
 
             // Recurse via the cached tree if already analysed; otherwise
             // read, parse, analyse, and store.
-            let cached = {
-                let docs = self.documents.lock().expect("lock documents");
-                docs.get(&inc_uri)
-                    .map(|d| (d.source.clone(), d.tree.clone()))
-            };
+            let cached = state
+                .documents
+                .get(&inc_uri)
+                .map(|d| (d.source.clone(), d.tree.clone()));
 
             if let Some((source, tree)) = cached {
                 let (file, _) = ast_builder::build_ast(&tree, &source);
-                let nested = self.resolve_includes(&inc_uri, &file.includes, frontier);
+                let nested = self.resolve_includes(state, &inc_uri, &file.includes, frontier);
                 for (_nested_span, msg) in nested {
                     diags.push((inc.span, format!("in file included from \"{}\": {msg}", inc.path)));
                 }
@@ -264,13 +268,10 @@ impl DocumentWorkspace {
                 }
             };
 
-            let tree = {
-                let mut parser = self.parser.lock().expect("lock parser");
-                parser.parse(&source, None).expect("tree-sitter parse")
-            };
+            let tree = self.parse(&source);
             let (file, _syntax_diags) = ast_builder::build_ast(&tree, &source);
 
-            let nested = self.resolve_includes(&inc_uri, &file.includes, frontier);
+            let nested = self.resolve_includes(state, &inc_uri, &file.includes, frontier);
             for (_nested_span, msg) in nested {
                 diags.push((inc.span, format!("in file included from \"{}\": {msg}", inc.path)));
             }
@@ -278,18 +279,11 @@ impl DocumentWorkspace {
             let model = analysis::analyse(&file, &self.registry);
             let line_index = lsp_util::build_line_index(&source);
 
-            {
-                let mut docs = self.documents.lock().expect("lock documents");
-                docs.insert(
-                    inc_uri.clone(),
-                    DocumentState { source, tree, model, line_index },
-                );
-            }
-
-            {
-                let mut inc_set = self.include_loaded.lock().expect("lock include_loaded");
-                inc_set.insert(inc_uri.clone());
-            }
+            state.documents.insert(
+                inc_uri.clone(),
+                DocumentState { source, tree, model, line_index },
+            );
+            state.include_loaded.insert(inc_uri.clone());
 
             frontier.leave(&inc_uri);
         }
@@ -300,27 +294,19 @@ impl DocumentWorkspace {
     /// Drop include-loaded documents no longer reachable from any
     /// editor-opened document. Call after a top-level analyse pass
     /// completes; running this mid-walk would prune still-live siblings.
-    fn purge_stale_includes(&self) {
-        let docs = self.documents.lock().expect("lock documents");
-        let inc_set_snapshot: HashSet<Url> = self
-            .include_loaded
-            .lock()
-            .expect("lock include_loaded")
-            .iter()
-            .cloned()
-            .collect();
-
-        // Seed live set from editor-opened documents (anything in docs that
-        // is not in include_loaded).
-        let mut live: HashSet<Url> = docs
+    fn purge_stale_includes(&self, state: &mut WorkspaceState) {
+        // Seed live set from editor-opened documents (anything in documents
+        // that is not in include_loaded).
+        let mut live: HashSet<Url> = state
+            .documents
             .keys()
-            .filter(|u| !inc_set_snapshot.contains(*u))
+            .filter(|u| !state.include_loaded.contains(*u))
             .cloned()
             .collect();
         let mut queue: Vec<Url> = live.iter().cloned().collect();
 
         while let Some(uri) = queue.pop() {
-            if let Some(doc) = docs.get(&uri) {
+            if let Some(doc) = state.documents.get(&uri) {
                 let (file, _) = ast_builder::build_ast(&doc.tree, &doc.source);
                 if let Ok(doc_path) = uri.to_file_path() {
                     let doc_dir = doc_path.parent().unwrap_or(std::path::Path::new("."));
@@ -337,21 +323,25 @@ impl DocumentWorkspace {
                 }
             }
         }
-        drop(docs);
 
-        let mut inc_set = self.include_loaded.lock().expect("lock include_loaded");
-        let stale: Vec<Url> = inc_set
+        let stale: Vec<Url> = state
+            .include_loaded
             .iter()
             .filter(|u| !live.contains(*u))
             .cloned()
             .collect();
-        let mut docs = self.documents.lock().expect("lock documents");
         for uri in stale {
-            if inc_set.remove(&uri) {
-                docs.remove(&uri);
+            if state.include_loaded.remove(&uri) {
+                state.documents.remove(&uri);
             }
         }
     }
+}
+
+fn rebuild_nav(state: &mut WorkspaceState) {
+    state
+        .nav_index
+        .rebuild(state.documents.iter().map(|(u, d)| (u, &d.model.navigation)));
 }
 
 impl Default for DocumentWorkspace {
@@ -487,10 +477,10 @@ mod tests {
         let source_a = std::fs::read_to_string(uri_a.to_file_path().unwrap()).unwrap();
         let _ = ws.analyse(&uri_a, source_a);
 
-        let docs = ws.documents.lock().unwrap();
+        let state = ws.state.lock().unwrap();
         let d_uri = tmp.uri("d.patches");
-        assert!(docs.contains_key(&d_uri), "d.patches should be loaded");
-        assert_eq!(docs.len(), 4, "a + b + c + d");
+        assert!(state.documents.contains_key(&d_uri), "d.patches should be loaded");
+        assert_eq!(state.documents.len(), 4, "a + b + c + d");
     }
 
     #[test]
