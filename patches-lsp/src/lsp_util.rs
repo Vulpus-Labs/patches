@@ -67,7 +67,10 @@ pub(crate) fn to_lsp_diagnostics(
     for diag in semantic_diags {
         let start = byte_offset_to_position(line_index, diag.span.start);
         let end = byte_offset_to_position(line_index, diag.span.end);
-        let severity = diag.kind.severity();
+        let severity = match diag.kind.severity() {
+            crate::ast_builder::Severity::Error => DiagnosticSeverity::ERROR,
+            crate::ast_builder::Severity::Warning => DiagnosticSeverity::WARNING,
+        };
         out.push(tower_lsp::lsp_types::Diagnostic {
             range: Range::new(start, end),
             severity: Some(severity),

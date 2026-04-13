@@ -716,16 +716,8 @@ fn analyse_tracker(decl_map: &DeclarationMap) -> Vec<Diagnostic> {
         }
     }
 
-    // Check MasterSequencer song references
-    for module in &decl_map.modules {
-        if module.type_name != "MasterSequencer" {
-            continue;
-        }
-        // Find song parameter value — we need to check the AST for this.
-        // Since we only have the module info (not the full AST), we check
-        // song channel vs module channel alignment via shape args.
-        // The song parameter check is done below in analyse_tracker_modules.
-    }
+    // MasterSequencer song parameter references are checked in
+    // analyse_tracker_modules, which has access to the full AST.
 
     diagnostics
 }

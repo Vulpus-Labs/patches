@@ -11,6 +11,7 @@ use crate::ast::{
     PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongBlock, SongCellRef, SongRow, Span,
     Statement, Template, Value,
 };
+use crate::lsp_util::first_named_child_of_kind;
 
 /// Classification of a diagnostic for severity mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,21 +28,26 @@ pub(crate) enum DiagnosticKind {
     ChannelCountMismatch,
 }
 
+/// Severity of a diagnostic, independent of any particular protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Severity {
+    Error,
+    Warning,
+}
+
 impl DiagnosticKind {
-    /// Map diagnostic kind to LSP severity.
-    pub fn severity(self) -> tower_lsp::lsp_types::DiagnosticSeverity {
-        use tower_lsp::lsp_types::DiagnosticSeverity;
+    pub fn severity(self) -> Severity {
         match self {
             DiagnosticKind::SyntaxError
             | DiagnosticKind::MissingToken
             | DiagnosticKind::UnknownModuleType
             | DiagnosticKind::DependencyCycle
             | DiagnosticKind::UndefinedPattern
-            | DiagnosticKind::UndefinedSong => DiagnosticSeverity::ERROR,
+            | DiagnosticKind::UndefinedSong => Severity::Error,
             DiagnosticKind::UnknownPort
             | DiagnosticKind::UnknownParameter
             | DiagnosticKind::InvalidValue
-            | DiagnosticKind::ChannelCountMismatch => DiagnosticSeverity::WARNING,
+            | DiagnosticKind::ChannelCountMismatch => Severity::Warning,
         }
     }
 }
@@ -109,13 +115,6 @@ fn named_children_of_kind<'a>(
     node.children(&mut cursor)
         .filter(|c| c.is_named() && c.kind() == kind)
         .collect()
-}
-
-fn first_named_child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    let result = node.children(&mut cursor)
-        .find(|c| c.is_named() && c.kind() == kind);
-    result
 }
 
 fn build_ident(node: Node, source: &str) -> Ident {
