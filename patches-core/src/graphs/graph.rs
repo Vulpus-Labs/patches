@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::cables::CableKind;
+use crate::cables::{CableKind, PolyLayout};
 use crate::modules::{ModuleDescriptor, ParameterMap, PortRef};
 
 /// Stable identifier for a module node in the graph.
@@ -56,6 +56,16 @@ pub enum GraphError {
     /// The source output port and the destination input port have different
     /// `CableKind`s (e.g. mono output wired to poly input).
     CableKindMismatch { from_port: String, to_port: String },
+    /// Both ports are poly but carry incompatible structured frame layouts
+    /// (e.g. a Midi output wired to a Transport input). See ADR 0033.
+    PolyLayoutMismatch {
+        from_node: NodeId,
+        from_port: String,
+        from_layout: PolyLayout,
+        to_node: NodeId,
+        to_port: String,
+        to_layout: PolyLayout,
+    },
 }
 
 impl fmt::Display for GraphError {
@@ -83,6 +93,16 @@ impl fmt::Display for GraphError {
                 write!(
                     f,
                     "cable kind mismatch: output port {from_port:?} and input port {to_port:?} have different arities"
+                )
+            }
+            GraphError::PolyLayoutMismatch {
+                from_node, from_port, from_layout,
+                to_node, to_port, to_layout,
+            } => {
+                write!(
+                    f,
+                    "cannot connect {from_layout:?} output {from_port:?} on {:?} to {to_layout:?} input {to_port:?} on {:?}",
+                    from_node, to_node,
                 )
             }
         }
@@ -182,8 +202,8 @@ impl ModuleGraph {
             return Err(GraphError::ScaleOutOfRange(scale));
         }
 
-        // Validate source node and output port; capture its CableKind.
-        let output_kind = {
+        // Validate source node and output port; capture its CableKind and PolyLayout.
+        let (output_kind, output_layout) = {
             let from_node = self
                 .nodes
                 .get(from)
@@ -193,7 +213,7 @@ impl ModuleGraph {
                 .outputs
                 .iter()
                 .find(|p| p.name == output.name && p.index == output.index)
-                .map(|p| p.kind.clone())
+                .map(|p| (p.kind.clone(), p.poly_layout))
                 .ok_or_else(|| GraphError::OutputPortNotFound {
                     node: from.clone(),
                     port: format!("{}/{}", output.name, output.index),
@@ -203,8 +223,8 @@ impl ModuleGraph {
                 })?
         };
 
-        // Validate destination node and input port; capture its CableKind.
-        let input_kind = {
+        // Validate destination node and input port; capture its CableKind and PolyLayout.
+        let (input_kind, input_layout) = {
             let to_node = self
                 .nodes
                 .get(to)
@@ -214,7 +234,7 @@ impl ModuleGraph {
                 .inputs
                 .iter()
                 .find(|p| p.name == input.name && p.index == input.index)
-                .map(|p| p.kind.clone())
+                .map(|p| (p.kind.clone(), p.poly_layout))
                 .ok_or_else(|| GraphError::InputPortNotFound {
                     node: to.clone(),
                     port: format!("{}/{}", input.name, input.index),
@@ -233,6 +253,18 @@ impl ModuleGraph {
             return Err(GraphError::CableKindMismatch {
                 from_port: format!("{}/{}", output.name, output.index),
                 to_port: format!("{}/{}", input.name, input.index),
+            });
+        }
+
+        // Reject poly connections with incompatible structured layouts (ADR 0033).
+        if output_kind == CableKind::Poly && !output_layout.compatible_with(input_layout) {
+            return Err(GraphError::PolyLayoutMismatch {
+                from_node: from.clone(),
+                from_port: format!("{}/{}", output.name, output.index),
+                from_layout: output_layout,
+                to_node: to.clone(),
+                to_port: format!("{}/{}", input.name, input.index),
+                to_layout: input_layout,
             });
         }
 
@@ -337,11 +369,11 @@ mod tests {
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: inputs
                 .iter()
-                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono })
+                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio })
                 .collect(),
             outputs: outputs
                 .iter()
-                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono })
+                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio })
                 .collect(),
             parameters: vec![],
         }
@@ -353,11 +385,11 @@ mod tests {
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: inputs
                 .iter()
-                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly })
+                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio })
                 .collect(),
             outputs: outputs
                 .iter()
-                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly })
+                .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio })
                 .collect(),
             parameters: vec![],
         }
@@ -577,8 +609,8 @@ mod tests {
             module_name: "stub",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![
-                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono },
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![],
             parameters: vec![],
@@ -645,5 +677,78 @@ mod tests {
             g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
             Err(GraphError::CableKindMismatch { .. })
         ));
+    }
+
+    // ── Poly layout validation (ADR 0033, ticket 0368) ──────────────────
+
+    fn poly_desc_layout(
+        inputs: &[(&'static str, PolyLayout)],
+        outputs: &[(&'static str, PolyLayout)],
+    ) -> ModuleDescriptor {
+        ModuleDescriptor {
+            module_name: "stub_layout",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: inputs
+                .iter()
+                .map(|&(n, layout)| PortDescriptor {
+                    name: n, index: 0, kind: CableKind::Poly, poly_layout: layout,
+                })
+                .collect(),
+            outputs: outputs
+                .iter()
+                .map(|&(n, layout)| PortDescriptor {
+                    name: n, index: 0, kind: CableKind::Poly, poly_layout: layout,
+                })
+                .collect(),
+            parameters: vec![],
+        }
+    }
+
+    #[test]
+    fn poly_layout_midi_to_midi_succeeds() {
+        let mut g = ModuleGraph::new();
+        let src = NodeId::from("src");
+        let dst = NodeId::from("dst");
+        g.add_module(src.clone(), poly_desc_layout(&[], &[("out", PolyLayout::Midi)]), &no_params()).unwrap();
+        g.add_module(dst.clone(), poly_desc_layout(&[("in", PolyLayout::Midi)], &[]), &no_params()).unwrap();
+        assert!(g.connect(&src, pref("out"), &dst, pref("in"), 1.0).is_ok());
+    }
+
+    #[test]
+    fn poly_layout_audio_to_midi_rejected() {
+        let mut g = ModuleGraph::new();
+        let src = NodeId::from("src");
+        let dst = NodeId::from("dst");
+        g.add_module(src.clone(), poly_desc_layout(&[], &[("out", PolyLayout::Audio)]), &no_params()).unwrap();
+        g.add_module(dst.clone(), poly_desc_layout(&[("in", PolyLayout::Midi)], &[]), &no_params()).unwrap();
+        assert!(matches!(
+            g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
+            Err(GraphError::PolyLayoutMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn poly_layout_midi_to_transport_rejected() {
+        let mut g = ModuleGraph::new();
+        let src = NodeId::from("src");
+        let dst = NodeId::from("dst");
+        g.add_module(src.clone(), poly_desc_layout(&[], &[("out", PolyLayout::Midi)]), &no_params()).unwrap();
+        g.add_module(dst.clone(), poly_desc_layout(&[("in", PolyLayout::Transport)], &[]), &no_params()).unwrap();
+        let err = g.connect(&src, pref("out"), &dst, pref("in"), 1.0).unwrap_err();
+        assert!(matches!(err, GraphError::PolyLayoutMismatch { .. }));
+        // Verify the error message is informative.
+        let msg = err.to_string();
+        assert!(msg.contains("Midi"), "error should mention Midi layout: {msg}");
+        assert!(msg.contains("Transport"), "error should mention Transport layout: {msg}");
+    }
+
+    #[test]
+    fn poly_layout_audio_to_audio_succeeds() {
+        let mut g = ModuleGraph::new();
+        let src = NodeId::from("src");
+        let dst = NodeId::from("dst");
+        g.add_module(src.clone(), poly_desc_layout(&[], &[("out", PolyLayout::Audio)]), &no_params()).unwrap();
+        g.add_module(dst.clone(), poly_desc_layout(&[("in", PolyLayout::Audio)], &[]), &no_params()).unwrap();
+        assert!(g.connect(&src, pref("out"), &dst, pref("in"), 1.0).is_ok());
     }
 }

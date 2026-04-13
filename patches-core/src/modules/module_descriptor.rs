@@ -1,4 +1,5 @@
 use super::parameter_map::ParameterValue;
+use crate::cables::PolyLayout;
 
 /// Describes a single port on a module by name and index.
 ///
@@ -11,11 +12,16 @@ use super::parameter_map::ParameterValue;
 /// `kind` declares whether the port carries a mono or poly signal. Port arity
 /// is fixed at module-definition time and used by [`ModuleGraph::connect`] to
 /// reject kind-mismatched connections at graph-construction time.
+///
+/// `poly_layout` declares the structured frame format for poly ports (ADR 0033).
+/// Mono ports always have `PolyLayout::Audio` (ignored by validation). Poly
+/// ports default to `Audio` (untyped) unless explicitly tagged.
 #[derive(Debug, Clone)]
 pub struct PortDescriptor {
     pub name: &'static str,
     pub index: usize,
     pub kind: crate::cables::CableKind,
+    pub poly_layout: PolyLayout,
 }
 
 /// A reference to a named, indexed port used in `ModuleGraph::connect()`.
@@ -173,13 +179,13 @@ pub struct ModuleDescriptor {
 macro_rules! port_builder {
     ($single:ident, $multi:ident, $vec:ident, $kind:expr) => {
         pub fn $single(mut self, name: &'static str) -> Self {
-            self.$vec.push(PortDescriptor { name, index: 0, kind: $kind });
+            self.$vec.push(PortDescriptor { name, index: 0, kind: $kind, poly_layout: PolyLayout::Audio });
             self
         }
 
         pub fn $multi(mut self, name: &'static str, count: usize) -> Self {
             for i in 0..count {
-                self.$vec.push(PortDescriptor { name, index: i, kind: $kind });
+                self.$vec.push(PortDescriptor { name, index: i, kind: $kind, poly_layout: PolyLayout::Audio });
             }
             self
         }
@@ -231,6 +237,22 @@ impl ModuleDescriptor {
     port_builder!(poly_in,  poly_in_multi,  inputs,  crate::cables::CableKind::Poly);
     port_builder!(mono_out, mono_out_multi, outputs, crate::cables::CableKind::Mono);
     port_builder!(poly_out, poly_out_multi, outputs, crate::cables::CableKind::Poly);
+
+    /// Declare a poly input port with a specific [`PolyLayout`].
+    pub fn poly_in_layout(mut self, name: &'static str, layout: PolyLayout) -> Self {
+        self.inputs.push(PortDescriptor {
+            name, index: 0, kind: crate::cables::CableKind::Poly, poly_layout: layout,
+        });
+        self
+    }
+
+    /// Declare a poly output port with a specific [`PolyLayout`].
+    pub fn poly_out_layout(mut self, name: &'static str, layout: PolyLayout) -> Self {
+        self.outputs.push(PortDescriptor {
+            name, index: 0, kind: crate::cables::CableKind::Poly, poly_layout: layout,
+        });
+        self
+    }
 
     // ── Parameter builder methods (generated) ───────────────────────────────
 
@@ -301,16 +323,16 @@ mod tests {
             module_name: "Mixer",
             shape: ModuleShape { channels: 2, length: 0, ..Default::default() },
             inputs: vec![
-                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono },
-                PortDescriptor { name: "gain_mod", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "gain_mod", index: 1, kind: CableKind::Mono },
-                PortDescriptor { name: "pan_mod", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "pan_mod", index: 1, kind: CableKind::Mono },
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "gain_mod", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "gain_mod", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "pan_mod", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "pan_mod", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![
-                PortDescriptor { name: "out_l", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "out_r", index: 0, kind: CableKind::Mono },
+                PortDescriptor { name: "out_l", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "out_r", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![
                 ParameterDescriptor { name: "gain", index: 0, parameter_type: gain_amount.clone() },

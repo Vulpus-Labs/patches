@@ -506,7 +506,12 @@ fn deserialize_port_descriptor(val: &JsonValue) -> Result<PortDescriptor, String
         Some("poly") => CableKind::Poly,
         _ => CableKind::Mono,
     };
-    Ok(PortDescriptor { name, index, kind })
+    let poly_layout = match val.get("poly_layout").and_then(|v| v.as_str()) {
+        Some("transport") => patches_core::cables::PolyLayout::Transport,
+        Some("midi") => patches_core::cables::PolyLayout::Midi,
+        _ => patches_core::cables::PolyLayout::Audio,
+    };
+    Ok(PortDescriptor { name, index, kind, poly_layout })
 }
 
 fn deserialize_parameter_descriptor(val: &JsonValue) -> Result<ParameterDescriptor, String> {
@@ -657,7 +662,7 @@ pub fn deserialize_error(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterMap, ParameterValue, PortDescriptor};
+    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterMap, ParameterValue, PolyLayout, PortDescriptor};
 
     #[test]
     fn module_descriptor_round_trip() {
@@ -665,11 +670,11 @@ mod tests {
             module_name: "TestGain",
             shape: ModuleShape { channels: 2, length: 8, high_quality: true },
             inputs: vec![
-                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "sidechain", index: 0, kind: CableKind::Poly },
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "sidechain", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![
-                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono },
+                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![
                 ParameterDescriptor { name: "gain", index: 0, parameter_type: ParameterKind::Float { min: 0.0, max: 2.0, default: 1.0 } },

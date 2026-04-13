@@ -3,7 +3,7 @@ use patches_core::{
     ModuleShape, MidiFrame, MonoOutput, OutputPort, PolyInput, PolyOutput, PortDescriptor,
     GLOBAL_MIDI,
 };
-use patches_core::CableKind;
+use patches_core::{CableKind, PolyLayout};
 use patches_core::parameter_map::ParameterMap;
 
 const VOCT_SCALING: f32 = 1.0 / 12.0;
@@ -123,12 +123,12 @@ impl Module for PolyMidiIn {
             shape: shape.clone(),
             inputs: vec![],
             outputs: vec![
-                PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly },
-                PortDescriptor { name: "trigger", index: 0, kind: CableKind::Poly },
-                PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly },
-                PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly },
-                PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono },
+                PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "trigger", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![],
         }

@@ -2,7 +2,7 @@ use std::any::Any;
 
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, PortDescriptor, PortRef, Registry,
+    ModuleShape, NodeId, PolyLayout, PortDescriptor, PortRef, Registry,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
@@ -28,8 +28,8 @@ impl Module for Probe {
         ModuleDescriptor {
             module_name: "Probe",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono }],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }

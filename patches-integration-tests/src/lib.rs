@@ -3,7 +3,7 @@ use patches_core::{
     BASE_PERIODIC_UPDATE_INTERVAL,
     AudioEnvironment, CableKind, CablePool, CableValue, InstanceId, MidiEvent,
     Module, ModuleDescriptor, ModuleGraph, ModuleShape, MonoOutput,
-    PortDescriptor, PortRef, Registry,
+    PolyLayout, PortDescriptor, PortRef, Registry,
 };
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
@@ -99,7 +99,7 @@ impl Module for ImpulseSource {
             module_name: "ImpulseSource",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }

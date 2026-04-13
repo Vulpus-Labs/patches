@@ -87,6 +87,34 @@ pub enum CableKind {
     Poly,
 }
 
+/// The structured layout of a poly cable's 16 lanes (ADR 0033, Phase 2).
+///
+/// Poly ports default to `Audio` (untyped 16-channel audio/CV). Ports that
+/// carry a structured frame format declare a specific layout so the
+/// interpreter can reject mismatched connections at patch load time.
+///
+/// Layouts must match exactly: an `Audio` output cannot connect to a `Midi`
+/// input or vice versa. There are no existing cross-layout connections to
+/// preserve, so strict matching is safe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolyLayout {
+    /// Untyped 16-channel audio/CV (default).
+    Audio,
+    /// Host transport frame (lane layout defined by [`TransportFrame`](crate::TransportFrame)).
+    Transport,
+    /// Packed MIDI events (lane layout defined by [`MidiFrame`](crate::MidiFrame)).
+    Midi,
+}
+
+impl PolyLayout {
+    /// Returns `true` if `self` and `other` are compatible for connection.
+    ///
+    /// Layouts must match exactly.
+    pub fn compatible_with(self, other: PolyLayout) -> bool {
+        self == other
+    }
+}
+
 /// A value carried by a cable. `Poly` holds exactly 16 channels; no heap
 /// allocation is required.
 #[derive(Clone, Copy, Debug)]

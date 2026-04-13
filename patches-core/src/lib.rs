@@ -31,7 +31,7 @@ pub mod registries;
 // ── Public API ────────────────────────────────────────────────────────────────
 pub use audio_environment::AudioEnvironment;
 pub use cable_pool::CablePool;
-pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput};
+pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, NodeId};

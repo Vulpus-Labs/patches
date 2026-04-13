@@ -256,7 +256,7 @@ fn compute_order(node_ids: &[NodeId]) -> Vec<NodeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cables::CableKind;
+    use crate::cables::{CableKind, PolyLayout};
     use crate::modules::{InstanceId, ModuleDescriptor, ParameterDescriptor, ParameterKind, ParameterValue, PortDescriptor, PortRef};
     use crate::ModuleGraph;
 
@@ -269,7 +269,7 @@ mod tests {
             module_name: "Oscillator",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "sine", index: 0, kind: CableKind::Mono }],
+            outputs: vec![PortDescriptor { name: "sine", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }
@@ -279,8 +279,8 @@ mod tests {
             module_name: "AudioOut",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![
-                PortDescriptor { name: "left", index: 0, kind: CableKind::Mono },
-                PortDescriptor { name: "right", index: 0, kind: CableKind::Mono },
+                PortDescriptor { name: "left", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "right", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![],
             parameters: vec![],
@@ -291,8 +291,8 @@ mod tests {
         ModuleDescriptor {
             module_name,
             shape,
-            inputs: (0..in_count).map(|i| PortDescriptor { name: "in", index: i, kind: CableKind::Mono }).collect(),
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+            inputs: (0..in_count).map(|i| PortDescriptor { name: "in", index: i, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }).collect(),
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }
@@ -552,8 +552,8 @@ mod tests {
         ModuleDescriptor {
             module_name: "Gain",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono }],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![ParameterDescriptor {
                 name: "gain",
                 index: 0,

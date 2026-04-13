@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, GraphError, InstanceId, Module, ModuleDescriptor,
-    ModuleGraph, ModuleShape, NodeId, PortDescriptor, PolyInput, PolyOutput, Registry,
+    ModuleGraph, ModuleShape, NodeId, PolyLayout, PortDescriptor, PolyInput, PolyOutput, Registry,
 };
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::ParameterMap;
@@ -39,8 +39,8 @@ impl Module for PolyProbe {
         ModuleDescriptor {
             module_name: "PolyProbe",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-            inputs: vec![PortDescriptor { name: "poly_in", index: 0, kind: CableKind::Poly }],
-            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly }],
+            inputs: vec![PortDescriptor { name: "poly_in", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }
@@ -119,7 +119,7 @@ impl Module for PolySource {
             module_name: "PolySource",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly }],
+            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }

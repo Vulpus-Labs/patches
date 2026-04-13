@@ -233,7 +233,7 @@ mod tests {
 
     use patches_core::{
         AudioEnvironment, CableKind, CablePool, CableValue, InstanceId, Module,
-        ModuleDescriptor, ModuleShape, MonoOutput, PortDescriptor,
+        ModuleDescriptor, ModuleShape, MonoOutput, PolyLayout, PortDescriptor,
         RESERVED_SLOTS,
     };
     use patches_core::parameter_map::ParameterMap;
@@ -346,7 +346,7 @@ mod tests {
                     module_name: "WriterModule",
                     shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
                     inputs: vec![],
-                    outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+                    outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
                     parameters: vec![],
                 },
                 out: MonoOutput { cable_idx, connected: true },
@@ -361,7 +361,7 @@ mod tests {
                 module_name: "WriterModule",
                 shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
                 inputs: vec![],
-                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
                 parameters: vec![],
             }
         }

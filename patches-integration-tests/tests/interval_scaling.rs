@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
     AudioEnvironment, BASE_PERIODIC_UPDATE_INTERVAL, CableKind, CablePool, InstanceId, Module,
-    ModuleDescriptor, ModuleGraph, ModuleShape, PeriodicUpdate, PortDescriptor, Registry,
+    ModuleDescriptor, ModuleGraph, ModuleShape, PeriodicUpdate, PolyLayout, PortDescriptor,
+    Registry,
 };
 use patches_core::parameter_map::ParameterMap;
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
@@ -38,7 +39,7 @@ impl Module for PeriodicCounter {
             module_name: "PeriodicCounter",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }

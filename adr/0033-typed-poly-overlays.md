@@ -111,16 +111,18 @@ Module descriptors gain an optional `poly_layout` tag on poly ports:
 ```
 
 The interpreter validates that connected poly ports share the same
-layout (or one side is untyped). This catches mismatched wiring at
-patch load time rather than at runtime. The LSP can surface layout
-mismatches as diagnostics.
+layout. Layouts must match exactly — there is no wildcard. Since no
+existing modules have declared typed-poly ports (they all use
+hardcoded backplane slots), strict matching is safe and prevents
+silent corruption from untyped connections to structured inputs.
+The LSP can surface layout mismatches as diagnostics.
 
 `PolyLayout` is a simple enum:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolyLayout {
-    /// Untyped 16-channel audio/CV (default, compatible with anything).
+    /// Untyped 16-channel audio/CV (default).
     Audio,
     /// Host transport frame (ADR 0031 lane layout).
     Transport,
@@ -129,9 +131,10 @@ pub enum PolyLayout {
 }
 ```
 
-Untyped (`Audio`) ports remain compatible with any other layout to
-preserve backward compatibility — existing patches with poly
-connections continue to work unchanged.
+Layouts must match exactly. `Audio` connects only to `Audio`,
+`Midi` only to `Midi`, etc. No existing modules declare typed-poly
+ports (they use backplane slots), so strict matching introduces no
+backward-compatibility risk.
 
 ### 3. Adoption strategy
 

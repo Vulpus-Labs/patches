@@ -360,7 +360,7 @@ impl PatchEngine {
 mod tests {
     use patches_core::{
         AudioEnvironment, CableKind, CableValue, InstanceId, Module, ModuleDescriptor,
-        ModuleGraph, ModuleShape, NodeId, PortDescriptor, PortRef,
+        ModuleGraph, ModuleShape, NodeId, PolyLayout, PortDescriptor, PortRef,
     };
     use patches_core::parameter_map::{ParameterMap, ParameterValue};
     use patches_modules::{AudioOut, Oscillator};
@@ -405,7 +405,7 @@ mod tests {
                 module_name: "Counter",
                 shape: shape.clone(),
                 inputs: vec![],
-                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono }],
+                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
                 parameters: vec![],
             }
         }
