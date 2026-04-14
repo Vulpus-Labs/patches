@@ -53,6 +53,13 @@ impl LanguageServer for PatchesLanguageServer {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                        work_done_progress_options: Default::default(),
+                        resolve_provider: None,
+                    },
+                )),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -62,21 +69,67 @@ impl LanguageServer for PatchesLanguageServer {
         })
     }
 
+    async fn initialized(&self, _: InitializedParams) {
+        // Dynamically register a file watcher for `.patches` files so the
+        // client forwards disk-level changes for files the editor hasn't
+        // opened — needed to keep include-loaded docs in sync with disk.
+        let registration = Registration {
+            id: "patches-watch".to_string(),
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            register_options: Some(
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                    watchers: vec![FileSystemWatcher {
+                        glob_pattern: GlobPattern::String("**/*.patches".to_string()),
+                        kind: None,
+                    }],
+                })
+                .expect("serialize watch registration"),
+            ),
+        };
+        if let Err(err) = self
+            .client
+            .register_capability(vec![registration])
+            .await
+        {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!("failed to register file watcher: {err}"),
+                )
+                .await;
+        }
+    }
+
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        for event in params.changes {
+            let affected = self.workspace.refresh_from_disk(&event.uri);
+            for (uri, diags) in affected {
+                self.client.publish_diagnostics(uri, diags, None).await;
+            }
+        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let diags = self.workspace.analyse(&uri, params.text_document.text);
-        self.client.publish_diagnostics(uri, diags, None).await;
+        self.client.publish_diagnostics(uri.clone(), diags, None).await;
+        for (anc_uri, anc_diags) in self.workspace.reanalyse_ancestors(&uri) {
+            self.client.publish_diagnostics(anc_uri, anc_diags, None).await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.into_iter().last() {
             let diags = self.workspace.analyse(&uri, change.text);
-            self.client.publish_diagnostics(uri, diags, None).await;
+            self.client.publish_diagnostics(uri.clone(), diags, None).await;
+            for (anc_uri, anc_diags) in self.workspace.reanalyse_ancestors(&uri) {
+                self.client.publish_diagnostics(anc_uri, anc_diags, None).await;
+            }
         }
     }
 
@@ -101,6 +154,48 @@ impl LanguageServer for PatchesLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         Ok(self.workspace.hover(uri, position))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+        for diag in &params.context.diagnostics {
+            let Some(data) = &diag.data else { continue };
+            let Some(replacements) = data.get("replacements").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for r in replacements {
+                let Some(text) = r.as_str() else { continue };
+                let edit = TextEdit {
+                    range: diag.range,
+                    new_text: text.to_string(),
+                };
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), vec![edit]);
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: format!("Replace with '{}'", text),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![diag.clone()]),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        document_changes: None,
+                        change_annotations: None,
+                    }),
+                    command: None,
+                    is_preferred: Some(true),
+                    disabled: None,
+                    data: None,
+                }));
+            }
+        }
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
+        }
     }
 
     async fn goto_definition(
@@ -260,6 +355,70 @@ mod tests {
         let line_index = lsp_util::build_line_index(source);
         let lsp_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
         assert!(lsp_diags.iter().any(|d| d.message.contains("unknown module type")));
+    }
+
+    fn analyse_for_test(source: &str) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+        let mut parser = Parser::new();
+        parser.set_language(&language()).unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let (file, syntax_diags) = ast_builder::build_ast(&tree, source);
+        let registry = default_registry();
+        let model = analysis::analyse(&file, &registry);
+        let line_index = lsp_util::build_line_index(source);
+        lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics)
+    }
+
+    #[test]
+    fn unknown_module_diagnostic_suggests_similar_type() {
+        // "Os" is a near-typo of "Osc"
+        let diags = analyse_for_test("patch { module foo : Os }");
+        let diag = diags
+            .iter()
+            .find(|d| d.message.contains("unknown module type"))
+            .expect("expected unknown module type diagnostic");
+        let data = diag.data.as_ref().expect("data should carry suggestions");
+        let replacements = data.get("replacements").and_then(|v| v.as_array()).unwrap();
+        let strs: Vec<&str> = replacements.iter().filter_map(|v| v.as_str()).collect();
+        assert!(strs.contains(&"Osc"), "expected Osc in suggestions: {strs:?}");
+        assert!(diag.message.contains("Did you mean"));
+    }
+
+    #[test]
+    fn unknown_port_diagnostic_suggests_similar_port() {
+        let source = "patch { module osc : Osc\nmodule vca : Vca\nosc.sinee -> vca.in }\n";
+        let diags = analyse_for_test(source);
+        let diag = diags
+            .iter()
+            .find(|d| d.message.contains("unknown output port"))
+            .expect("expected unknown output port diagnostic");
+        let data = diag.data.as_ref().expect("expected data with suggestions");
+        let replacements = data.get("replacements").and_then(|v| v.as_array()).unwrap();
+        let strs: Vec<&str> = replacements.iter().filter_map(|v| v.as_str()).collect();
+        assert!(strs.contains(&"sine"), "expected 'sine' in suggestions: {strs:?}");
+        assert!(diag.message.contains("Known outputs:"));
+    }
+
+    #[test]
+    fn unknown_parameter_diagnostic_lists_known_parameters() {
+        // Osc has frequency/detune/etc. — pass an obviously wrong one.
+        let source = "patch { module osc : Osc { xyzzy: 1.0 } }";
+        let diags = analyse_for_test(source);
+        let diag = diags
+            .iter()
+            .find(|d| d.message.contains("unknown parameter"))
+            .expect("expected unknown parameter diagnostic");
+        assert!(diag.message.contains("Known parameters:"));
+    }
+
+    #[test]
+    fn unknown_module_diagnostic_has_no_suggestion_for_nonsense() {
+        // "Zzzzzzzzzzz" should be too far from any known type
+        let diags = analyse_for_test("patch { module foo : Zzzzzzzzzzz }");
+        let diag = diags
+            .iter()
+            .find(|d| d.message.contains("unknown module type"))
+            .unwrap();
+        assert!(!diag.message.contains("Did you mean"));
     }
 
     #[test]

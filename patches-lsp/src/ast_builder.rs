@@ -58,6 +58,10 @@ pub(crate) struct Diagnostic {
     pub span: Span,
     pub message: String,
     pub kind: DiagnosticKind,
+    /// Suggested replacements that can fix this diagnostic. Each string is a
+    /// candidate replacement for the text spanned by `span`. Consumed by the
+    /// code-action handler to produce quick-fix edits.
+    pub replacements: Vec<String>,
 }
 
 /// Frequency of C0 in Hz (A4 = 440 Hz; C0 is 57 semitones below A4).
@@ -85,12 +89,14 @@ fn collect_errors(node: Node, diags: &mut Vec<Diagnostic>) {
             span: span_of(node),
             message: "syntax error".to_string(),
             kind: DiagnosticKind::SyntaxError,
+            replacements: Vec::new(),
         });
     } else if node.is_missing() {
         diags.push(Diagnostic {
             span: span_of(node),
             message: format!("missing {}", node.kind()),
             kind: DiagnosticKind::MissingToken,
+            replacements: Vec::new(),
         });
     }
 }
@@ -571,6 +577,7 @@ fn parse_float_unit(s: &str, diags: &mut Vec<Diagnostic>, span: Span) -> f64 {
                     span,
                     message: format!("Hz value must be positive, got {num}"),
                     kind: DiagnosticKind::InvalidValue,
+                    replacements: Vec::new(),
                 });
                 0.0
             } else {
@@ -584,6 +591,7 @@ fn parse_float_unit(s: &str, diags: &mut Vec<Diagnostic>, span: Span) -> f64 {
                     span,
                     message: format!("kHz value must be positive, got {num}"),
                     kind: DiagnosticKind::InvalidValue,
+                    replacements: Vec::new(),
                 });
                 0.0
             } else {
@@ -888,26 +896,31 @@ fn build_song_block(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> So
 
     let name = node.child_by_field_name("name").map(|n| build_ident(n, source));
 
-    let all_rows = named_children_of_kind(node, "song_row");
-
-    // First row is the header (channel names), rest are data rows
+    // Lanes live in a `song_lanes` child: "(" ident ("," ident)* ")"
     let mut channel_names = Vec::new();
-    let mut rows = Vec::new();
-
-    for (i, row_node) in all_rows.into_iter().enumerate() {
-        if i == 0 {
-            // Header row — extract channel names
-            let cells = named_children_of_kind(row_node, "song_cell");
-            for cell in cells {
-                if let Some(id) = first_named_child_of_kind(cell, "ident") {
-                    channel_names.push(build_ident(id, source));
-                }
-            }
-        } else {
-            // Data row
-            rows.push(build_song_row(row_node, source, diags));
+    if let Some(lanes_node) = first_named_child_of_kind(node, "song_lanes") {
+        for id in named_children_of_kind(lanes_node, "ident") {
+            channel_names.push(build_ident(id, source));
         }
     }
+
+    // Walk song items; flatten all song_cells found inside (sections and
+    // play bodies) into a single row of cells — the LSP uses this for
+    // navigation only, so we don't reconstruct row boundaries here.
+    let mut cells: Vec<SongCellRef> = Vec::new();
+    let mut is_loop_point = false;
+    for item in named_children_of_kind(node, "song_item") {
+        collect_song_item_cells(item, source, &mut cells, &mut is_loop_point);
+    }
+    let rows = if cells.is_empty() {
+        Vec::new()
+    } else {
+        vec![SongRow {
+            cells,
+            is_loop_point,
+            span: span_of(node),
+        }]
+    };
 
     SongBlock {
         name,
@@ -917,41 +930,58 @@ fn build_song_block(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> So
     }
 }
 
-fn build_song_row(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> SongRow {
-    walk_errors(node, diags);
+fn collect_song_cell(cell_node: Node, source: &str, out: &mut Vec<SongCellRef>) {
+    let text = node_text(cell_node, source);
+    if text == "_" {
+        out.push(SongCellRef {
+            name: None,
+            is_silence: true,
+            span: span_of(cell_node),
+        });
+    } else if let Some(id) = first_named_child_of_kind(cell_node, "ident") {
+        out.push(SongCellRef {
+            name: Some(build_ident(id, source)),
+            is_silence: false,
+            span: span_of(cell_node),
+        });
+    }
+}
 
-    let cells = named_children_of_kind(node, "song_cell")
-        .into_iter()
-        .map(|cell| {
-            let text = node_text(cell, source);
-            if text == "_" {
-                SongCellRef {
-                    name: None,
-                    is_silence: true,
-                    span: span_of(cell),
-                }
-            } else if let Some(id) = first_named_child_of_kind(cell, "ident") {
-                SongCellRef {
-                    name: Some(build_ident(id, source)),
+fn collect_song_item_cells(
+    item: Node,
+    source: &str,
+    cells: &mut Vec<SongCellRef>,
+    is_loop_point: &mut bool,
+) {
+    // A song_item wraps exactly one child: section_def, pattern_block,
+    // play_stmt, or loop_marker. Walk into each kind and accumulate cells.
+    let mut cursor = item.walk();
+    for child in item.named_children(&mut cursor) {
+        match child.kind() {
+            "loop_marker" => *is_loop_point = true,
+            "section_def" | "play_stmt" => collect_cells_recursive(child, source, cells),
+            "pattern_block" => {} // inline pattern — skipped here
+            _ => {}
+        }
+    }
+}
+
+fn collect_cells_recursive(node: Node, source: &str, cells: &mut Vec<SongCellRef>) {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "song_cell" => collect_song_cell(child, source, cells),
+            "ident" if matches!(node.kind(), "play_atom") => {
+                // Section ref inside a play expression: record as a cell so
+                // the reference is visible to go-to-definition.
+                cells.push(SongCellRef {
+                    name: Some(build_ident(child, source)),
                     is_silence: false,
-                    span: span_of(cell),
-                }
-            } else {
-                SongCellRef {
-                    name: None,
-                    is_silence: false,
-                    span: span_of(cell),
-                }
+                    span: span_of(child),
+                });
             }
-        })
-        .collect();
-
-    let is_loop_point = first_named_child_of_kind(node, "loop_annotation").is_some();
-
-    SongRow {
-        cells,
-        is_loop_point,
-        span: span_of(node),
+            _ => collect_cells_recursive(child, source, cells),
+        }
     }
 }
 
@@ -1327,11 +1357,13 @@ patch {}
     #[test]
     fn song_block_basic() {
         let source = r#"
-song my_song {
-    | drums   | bass  |
-    | pat_a   | pat_b |
-    | pat_a   | pat_b |  @loop
-    | pat_c   | pat_d |
+song my_song(drums, bass) {
+    play {
+        pat_a, pat_b
+        pat_a, pat_b
+        pat_c, pat_d
+    }
+    @loop
 }
 
 patch {}
@@ -1344,23 +1376,25 @@ patch {}
         assert_eq!(song.channel_names.len(), 2);
         assert_eq!(song.channel_names[0].name, "drums");
         assert_eq!(song.channel_names[1].name, "bass");
-        assert_eq!(song.rows.len(), 3);
-        // Row 0 (first data row)
-        assert_eq!(song.rows[0].cells.len(), 2);
-        assert_eq!(song.rows[0].cells[0].name.as_ref().unwrap().name, "pat_a");
-        assert!(!song.rows[0].is_loop_point);
-        // Row 1 has @loop
-        assert!(song.rows[1].is_loop_point);
-        // Row 2
-        assert!(!song.rows[2].is_loop_point);
+        // Flattened: all cell names should be present.
+        assert_eq!(song.rows.len(), 1);
+        let names: Vec<_> = song.rows[0]
+            .cells
+            .iter()
+            .filter_map(|c| c.name.as_ref().map(|n| n.name.as_str()))
+            .collect();
+        assert!(names.contains(&"pat_a"));
+        assert!(names.contains(&"pat_d"));
+        assert!(song.rows[0].is_loop_point);
     }
 
     #[test]
     fn song_block_with_silence() {
         let source = r#"
-song s {
-    | ch1 | ch2 |
-    | a   | _   |
+song s(ch1, ch2) {
+    play {
+        a, _
+    }
 }
 
 patch {}
@@ -1369,8 +1403,8 @@ patch {}
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
         let song = &file.songs[0];
         assert_eq!(song.rows.len(), 1);
-        assert!(!song.rows[0].cells[0].is_silence);
-        assert!(song.rows[0].cells[1].is_silence);
+        let has_silence = song.rows[0].cells.iter().any(|c| c.is_silence);
+        assert!(has_silence, "expected a silence cell");
     }
 
     #[test]
@@ -1386,9 +1420,11 @@ pattern drums {
     kick: x . x .
 }
 
-song arrangement {
-    | drums |
-    | drums |
+song arrangement(ch) {
+    play {
+        drums
+        drums
+    }
 }
 
 patch {

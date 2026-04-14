@@ -24,7 +24,10 @@ pub(crate) struct ModuleInfo {
     /// the same instance name in different scopes.
     pub scope: String,
     pub type_name: String,
+    /// Span of the type name identifier, for diagnostic replacement targets.
+    pub type_name_span: ast::Span,
     pub shape_args: Vec<(String, ShapeValue)>,
+    #[allow(dead_code)]
     pub span: ast::Span,
 }
 
@@ -223,8 +226,8 @@ fn extract_modules(body: &[ast::Statement], scope: &str, out: &mut Vec<ModuleInf
                 Some(id) => id.name.clone(),
                 None => continue,
             };
-            let type_name = match &m.type_name {
-                Some(id) => id.name.clone(),
+            let (type_name, type_name_span) = match &m.type_name {
+                Some(id) => (id.name.clone(), id.span),
                 None => continue,
             };
             let shape_args = m
@@ -247,6 +250,7 @@ fn extract_modules(body: &[ast::Statement], scope: &str, out: &mut Vec<ModuleInf
                 name,
                 scope: scope.to_string(),
                 type_name,
+                type_name_span,
                 shape_args,
                 span: m.span,
             });
@@ -351,6 +355,7 @@ pub(crate) fn resolve_dependencies(decl_map: &DeclarationMap) -> DependencyResul
                     span: info.span,
                     message: format!("template '{name}' is part of a dependency cycle"),
                     kind: crate::ast_builder::DiagnosticKind::DependencyCycle,
+                    replacements: Vec::new(),
                 });
             }
         }
@@ -393,6 +398,31 @@ impl ResolvedDescriptor {
             ResolvedDescriptor::Template { .. } => false,
         }
     }
+
+    pub fn input_names(&self) -> Vec<&str> {
+        match self {
+            ResolvedDescriptor::Module(desc) => desc.inputs.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Template { in_ports, .. } => {
+                in_ports.iter().map(|s| s.as_str()).collect()
+            }
+        }
+    }
+
+    pub fn output_names(&self) -> Vec<&str> {
+        match self {
+            ResolvedDescriptor::Module(desc) => desc.outputs.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Template { out_ports, .. } => {
+                out_ports.iter().map(|s| s.as_str()).collect()
+            }
+        }
+    }
+
+    pub fn parameter_names(&self) -> Vec<&str> {
+        match self {
+            ResolvedDescriptor::Module(desc) => desc.parameters.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Template { .. } => Vec::new(),
+        }
+    }
 }
 
 /// Phase 3: resolve module descriptors via the registry.
@@ -432,10 +462,26 @@ pub(crate) fn instantiate_descriptors(
                         continue;
                     }
                 }
+                let mut candidates: Vec<&str> = registry.module_names().collect();
+                candidates.extend(decl_map.templates.keys().map(|s| s.as_str()));
+                let replacements = crate::lsp_util::rank_suggestions(
+                    &module.type_name,
+                    candidates.iter().copied(),
+                    3,
+                );
+                let message = if let Some(first) = replacements.first() {
+                    format!(
+                        "unknown module type '{}'. Did you mean '{}'?",
+                        module.type_name, first
+                    )
+                } else {
+                    format!("unknown module type '{}'", module.type_name)
+                };
                 diagnostics.push(Diagnostic {
-                    span: module.span,
-                    message: format!("unknown module type '{}'", module.type_name),
+                    span: module.type_name_span,
+                    message,
                     kind: crate::ast_builder::DiagnosticKind::UnknownModuleType,
+                    replacements,
                 });
             }
         }
@@ -532,17 +578,34 @@ fn validate_module_params(
         match param {
             ast::ParamEntry::KeyValue {
                 name: Some(param_name),
-                span,
                 ..
             } => {
                 if !desc.has_parameter(&param_name.name) {
-                    diags.push(Diagnostic {
-                        kind: crate::ast_builder::DiagnosticKind::UnknownParameter,
-                        span: *span,
-                        message: format!(
+                    let replacements = crate::lsp_util::rank_suggestions(
+                        &param_name.name,
+                        desc.parameter_names(),
+                        3,
+                    );
+                    let known = desc.parameter_names().join(", ");
+                    let message = match replacements.first() {
+                        Some(first) => format!(
+                            "unknown parameter '{}' on module '{}'. Did you mean '{}'? Known parameters: {}",
+                            param_name.name, name, first, known
+                        ),
+                        None if !known.is_empty() => format!(
+                            "unknown parameter '{}' on module '{}'. Known parameters: {}",
+                            param_name.name, name, known
+                        ),
+                        None => format!(
                             "unknown parameter '{}' on module '{}'",
                             param_name.name, name
                         ),
+                    };
+                    diags.push(Diagnostic {
+                        kind: crate::ast_builder::DiagnosticKind::UnknownParameter,
+                        span: param_name.span,
+                        message,
+                        replacements,
                     });
                 }
             }
@@ -600,21 +663,32 @@ fn validate_port_ref_as_output(
         return;
     }
 
-    let port_name = match &port_ref.port {
-        Some(ast::PortLabel::Literal(id)) => &id.name,
+    let (port_name, port_span) = match &port_ref.port {
+        Some(ast::PortLabel::Literal(id)) => (&id.name, id.span),
         _ => return, // param refs can't be statically validated
     };
 
     let key = make_key(scope, module_name);
     if let Some(desc) = descriptors.get(&key) {
         if !desc.has_output(port_name) {
-            diags.push(Diagnostic {
-                span: port_ref.span,
-                message: format!(
-                    "unknown output port '{}' on module '{}'",
-                    port_name, module_name
+            let replacements =
+                crate::lsp_util::rank_suggestions(port_name, desc.output_names(), 3);
+            let known = desc.output_names().join(", ");
+            let message = match replacements.first() {
+                Some(first) => format!(
+                    "unknown output port '{}' on module '{}'. Did you mean '{}'? Known outputs: {}",
+                    port_name, module_name, first, known
                 ),
+                None => format!(
+                    "unknown output port '{}' on module '{}'. Known outputs: {}",
+                    port_name, module_name, known
+                ),
+            };
+            diags.push(Diagnostic {
+                span: port_span,
+                message,
                 kind: crate::ast_builder::DiagnosticKind::UnknownPort,
+                replacements,
             });
         }
     } else if !decl_map.templates.contains_key(module_name) {
@@ -639,21 +713,32 @@ fn validate_port_ref_as_input(
         return;
     }
 
-    let port_name = match &port_ref.port {
-        Some(ast::PortLabel::Literal(id)) => &id.name,
+    let (port_name, port_span) = match &port_ref.port {
+        Some(ast::PortLabel::Literal(id)) => (&id.name, id.span),
         _ => return,
     };
 
     let key = make_key(scope, module_name);
     if let Some(desc) = descriptors.get(&key) {
         if !desc.has_input(port_name) {
-            diags.push(Diagnostic {
-                span: port_ref.span,
-                message: format!(
-                    "unknown input port '{}' on module '{}'",
-                    port_name, module_name
+            let replacements =
+                crate::lsp_util::rank_suggestions(port_name, desc.input_names(), 3);
+            let known = desc.input_names().join(", ");
+            let message = match replacements.first() {
+                Some(first) => format!(
+                    "unknown input port '{}' on module '{}'. Did you mean '{}'? Known inputs: {}",
+                    port_name, module_name, first, known
                 ),
+                None => format!(
+                    "unknown input port '{}' on module '{}'. Known inputs: {}",
+                    port_name, module_name, known
+                ),
+            };
+            diags.push(Diagnostic {
+                span: port_span,
+                message,
                 kind: crate::ast_builder::DiagnosticKind::UnknownPort,
+                replacements,
             });
         }
     } else if !decl_map.templates.contains_key(module_name) {
@@ -681,6 +766,7 @@ fn analyse_tracker(decl_map: &DeclarationMap) -> Vec<Diagnostic> {
                             span: cell.span,
                             message: format!("undefined pattern '{pattern_name}'"),
                             kind: crate::ast_builder::DiagnosticKind::UndefinedPattern,
+                            replacements: Vec::new(),
                         });
                     }
                 }
@@ -712,6 +798,7 @@ fn analyse_tracker(decl_map: &DeclarationMap) -> Vec<Diagnostic> {
                                         pattern_name, pat_info.channel_count, expected
                                     ),
                                     kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                    replacements: Vec::new(),
                                 });
                             }
                             _ => {}
@@ -780,6 +867,7 @@ fn analyse_tracker_modules(
                                 span: *span,
                                 message: format!("undefined song '{song_name}'"),
                                 kind: crate::ast_builder::DiagnosticKind::UndefinedSong,
+                                replacements: Vec::new(),
                             });
                         } else {
                             // Check channel alignment: song channels vs module shape channels
@@ -801,6 +889,7 @@ fn analyse_tracker_modules(
                                                         aliases.len()
                                                     ),
                                                     kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                                    replacements: Vec::new(),
                                                 });
                                             } else if *aliases != song_info.channel_names {
                                                 diagnostics.push(Diagnostic {
@@ -812,6 +901,7 @@ fn analyse_tracker_modules(
                                                         aliases.join(", ")
                                                     ),
                                                     kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
+                                                    replacements: Vec::new(),
                                                 });
                                             }
                                         }
@@ -857,9 +947,42 @@ impl SemanticModel {
 }
 
 /// Run the full four-phase analysis pipeline.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn analyse(file: &ast::File, registry: &Registry) -> SemanticModel {
+    analyse_with_env(file, registry, &HashMap::new())
+}
+
+/// Run analysis with an environment of externally-defined templates
+/// (typically collected from the transitive closure of `include` directives).
+/// External templates appear to the current file as though they were declared
+/// locally, but they participate in neither cycle detection nor diagnostic
+/// emission — only their port signatures are used for descriptor resolution.
+pub(crate) fn analyse_with_env(
+    file: &ast::File,
+    registry: &Registry,
+    external_templates: &HashMap<String, TemplateInfo>,
+) -> SemanticModel {
     // Phase 1: shallow scan
-    let decl_map = shallow_scan(file);
+    let mut decl_map = shallow_scan(file);
+
+    // Merge external templates (from includes) into the local decl_map.
+    // Local templates win on name collision so local spans/diagnostics stay
+    // authoritative. External entries carry empty `body_type_refs` so they
+    // act as leaves in the dependency graph and never trigger cycle
+    // diagnostics from this file.
+    for (name, info) in external_templates {
+        decl_map
+            .templates
+            .entry(name.clone())
+            .or_insert_with(|| TemplateInfo {
+                name: info.name.clone(),
+                params: info.params.clone(),
+                in_ports: info.in_ports.clone(),
+                out_ports: info.out_ports.clone(),
+                body_type_refs: Vec::new(),
+                span: info.span,
+            });
+    }
 
     // Phase 2: dependency resolution
     let dep_result = resolve_dependencies(&decl_map);
@@ -1775,9 +1898,11 @@ pattern drums {
     snare: . x . x
 }
 
-song my_song {
-    | drums |
-    | drums |
+song my_song(drums) {
+    play {
+        drums
+        drums
+    }
 }
 
 patch {}
@@ -1801,9 +1926,10 @@ patch {}
     fn undefined_pattern_in_song() {
         let model = analyse_source(
             r#"
-song my_song {
-    | ch |
-    | nonexistent |
+song my_song(ch) {
+    play {
+        nonexistent
+    }
 }
 
 patch {}
@@ -1826,9 +1952,10 @@ pattern drums {
     kick: x . x .
 }
 
-song my_song {
-    | ch |
-    | drums |
+song my_song(ch) {
+    play {
+        drums
+    }
 }
 
 patch {}
@@ -1873,9 +2000,10 @@ pattern drums {
     kick: x . x .
 }
 
-song my_song {
-    | ch |
-    | drums |
+song my_song(ch) {
+    play {
+        drums
+    }
 }
 
 patch {}
@@ -1907,9 +2035,10 @@ pattern drums {
     kick: x . x .
 }
 
-song my_song {
-    | ch |
-    | drums |
+song my_song(ch) {
+    play {
+        drums
+    }
 }
 
 patch {}

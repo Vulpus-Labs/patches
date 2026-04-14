@@ -49,6 +49,13 @@ pub(crate) struct WorkspaceState {
     /// URIs of documents loaded as includes (not opened by the editor).
     /// Managed automatically and removed when no longer referenced.
     include_loaded: HashSet<Url>,
+    /// Reverse-dep graph: child URI -> set of parents that include it.
+    /// Used to cascade re-analysis on disk or editor changes to a child.
+    included_by: HashMap<Url, HashSet<Url>>,
+    /// Forward graph: parent URI -> direct children it includes. Kept in
+    /// sync with `included_by` so a parent's old edges can be removed when
+    /// its set of includes changes.
+    includes_of: HashMap<Url, HashSet<Url>>,
 }
 
 /// Per-workspace analysis state. Holds every piece of mutable state the LSP
@@ -72,6 +79,8 @@ impl DocumentWorkspace {
                 documents: HashMap::new(),
                 nav_index: NavigationIndex::default(),
                 include_loaded: HashSet::new(),
+                included_by: HashMap::new(),
+                includes_of: HashMap::new(),
             }),
         }
     }
@@ -81,15 +90,25 @@ impl DocumentWorkspace {
     pub fn analyse(&self, uri: &Url, source: String) -> Vec<Diagnostic> {
         let tree = self.parse(&source);
         let (file, syntax_diags) = ast_builder::build_ast(&tree, &source);
-        let model = analysis::analyse(&file, &self.registry);
         let line_index = lsp_util::build_line_index(&source);
-
-        let lsp_diags =
-            lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
 
         let mut frontier = IncludeFrontier::with_root(uri.clone());
         let mut state = self.state.lock().expect("lock workspace state");
+
+        // Resolve includes first so that any templates the parent references
+        // are already analysed and available via the template env below.
         let include_diags = self.resolve_includes(&mut state, uri, &file.includes, &mut frontier);
+
+        // Update forward/reverse include edges for this parent.
+        let direct_children = direct_include_uris(uri, &file.includes);
+        self.rewrite_include_edges(&mut state, uri, &direct_children);
+
+        // Gather template env from the transitive include closure.
+        let env = collect_external_templates(&state, uri);
+        let model = analysis::analyse_with_env(&file, &self.registry, &env);
+
+        let lsp_diags =
+            lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
 
         let mut all_diags = lsp_diags;
         all_diags.extend(include_diags.into_iter().map(|(span, msg)| {
@@ -116,6 +135,159 @@ impl DocumentWorkspace {
         self.purge_stale_includes(&mut state);
 
         all_diags
+    }
+
+    /// Re-analyse `uri` using its current cached source and refreshed
+    /// template env, returning publish-ready diagnostics. Does not re-read
+    /// from disk — callers that want disk-fresh content must update the
+    /// cached source first (see [`DocumentWorkspace::refresh_from_disk`]).
+    fn reanalyse_cached(&self, state: &mut WorkspaceState, uri: &Url) -> Option<Vec<Diagnostic>> {
+        let (source, tree) = {
+            let doc = state.documents.get(uri)?;
+            (doc.source.clone(), doc.tree.clone())
+        };
+        let (file, syntax_diags) = ast_builder::build_ast(&tree, &source);
+        let line_index = lsp_util::build_line_index(&source);
+
+        // Re-resolve includes so disk-fresh children are picked up and
+        // edges are up to date.
+        let mut frontier = IncludeFrontier::with_root(uri.clone());
+        let include_diags = self.resolve_includes(state, uri, &file.includes, &mut frontier);
+
+        let direct_children = direct_include_uris(uri, &file.includes);
+        self.rewrite_include_edges(state, uri, &direct_children);
+
+        let env = collect_external_templates(state, uri);
+        let model = analysis::analyse_with_env(&file, &self.registry, &env);
+
+        let mut all_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+        all_diags.extend(include_diags.into_iter().map(|(span, msg)| {
+            let start = lsp_util::byte_offset_to_position(&line_index, span.start);
+            let end = lsp_util::byte_offset_to_position(&line_index, span.end);
+            Diagnostic {
+                range: Range::new(start, end),
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: msg,
+                ..Default::default()
+            }
+        }));
+
+        state.documents.insert(
+            uri.clone(),
+            DocumentState { source, tree, model, line_index },
+        );
+
+        Some(all_diags)
+    }
+
+    /// Reload `uri` from disk (replacing any cached source), re-analyse it,
+    /// then cascade re-analysis to every ancestor that transitively includes
+    /// it. Returns `(uri, diagnostics)` pairs for the caller to publish.
+    ///
+    /// Intended for `workspace/didChangeWatchedFiles` events. URIs that are
+    /// open in the editor are skipped — the editor is authoritative.
+    pub fn refresh_from_disk(&self, uri: &Url) -> Vec<(Url, Vec<Diagnostic>)> {
+        let mut state = self.state.lock().expect("lock workspace state");
+
+        // Only refresh if this URI is not currently editor-open. Editor docs
+        // aren't tracked in `include_loaded`; a URI we've never heard of is
+        // also not something we should load speculatively.
+        if !state.include_loaded.contains(uri) {
+            return Vec::new();
+        }
+
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Vec::new(),
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(new_source) => {
+                let tree = self.parse(&new_source);
+                let line_index = lsp_util::build_line_index(&new_source);
+                // Placeholder model; reanalyse_cached below overwrites it.
+                let (file, _) = ast_builder::build_ast(&tree, &new_source);
+                let model = analysis::analyse_with_env(&file, &self.registry, &HashMap::new());
+                state.documents.insert(
+                    uri.clone(),
+                    DocumentState {
+                        source: new_source,
+                        tree,
+                        model,
+                        line_index,
+                    },
+                );
+            }
+            Err(_) => {
+                // File gone. Drop cached copy so parents surface "cannot
+                // read" diagnostics on their next analyse.
+                state.documents.remove(uri);
+                state.include_loaded.remove(uri);
+            }
+        }
+
+        let mut out = Vec::new();
+        if let Some(d) = self.reanalyse_cached(&mut state, uri) {
+            out.push((uri.clone(), d));
+        }
+
+        // Cascade to ancestors in BFS order.
+        let ancestors = collect_ancestors(&state, uri);
+        for ancestor in ancestors {
+            if let Some(d) = self.reanalyse_cached(&mut state, &ancestor) {
+                out.push((ancestor, d));
+            }
+        }
+
+        rebuild_nav(&mut state);
+        self.purge_stale_includes(&mut state);
+
+        out
+    }
+
+    /// Re-analyse every ancestor that transitively includes `uri`, using
+    /// each ancestor's cached source. Intended for cascading editor edits to
+    /// a child document whose parents are also open.
+    pub fn reanalyse_ancestors(&self, uri: &Url) -> Vec<(Url, Vec<Diagnostic>)> {
+        let mut state = self.state.lock().expect("lock workspace state");
+        let ancestors = collect_ancestors(&state, uri);
+        let mut out = Vec::new();
+        for ancestor in ancestors {
+            if let Some(d) = self.reanalyse_cached(&mut state, &ancestor) {
+                out.push((ancestor, d));
+            }
+        }
+        rebuild_nav(&mut state);
+        out
+    }
+
+    /// Replace `uri`'s stored include edges with `children`, maintaining
+    /// `included_by` in sync with `includes_of`.
+    fn rewrite_include_edges(
+        &self,
+        state: &mut WorkspaceState,
+        uri: &Url,
+        children: &HashSet<Url>,
+    ) {
+        if let Some(old_children) = state.includes_of.remove(uri) {
+            for c in old_children {
+                if let Some(parents) = state.included_by.get_mut(&c) {
+                    parents.remove(uri);
+                    if parents.is_empty() {
+                        state.included_by.remove(&c);
+                    }
+                }
+            }
+        }
+        if !children.is_empty() {
+            state.includes_of.insert(uri.clone(), children.clone());
+            for c in children {
+                state
+                    .included_by
+                    .entry(c.clone())
+                    .or_default()
+                    .insert(uri.clone());
+            }
+        }
     }
 
     /// Close a document. Include-loaded files stay resident until no longer
@@ -276,7 +448,11 @@ impl DocumentWorkspace {
                 diags.push((inc.span, format!("in file included from \"{}\": {msg}", inc.path)));
             }
 
-            let model = analysis::analyse(&file, &self.registry);
+            let child_children = direct_include_uris(&inc_uri, &file.includes);
+            self.rewrite_include_edges(state, &inc_uri, &child_children);
+
+            let child_env = collect_external_templates(state, &inc_uri);
+            let model = analysis::analyse_with_env(&file, &self.registry, &child_env);
             let line_index = lsp_util::build_line_index(&source);
 
             state.documents.insert(
@@ -333,6 +509,12 @@ impl DocumentWorkspace {
         for uri in stale {
             if state.include_loaded.remove(&uri) {
                 state.documents.remove(&uri);
+                // Remove any edges originating at or pointing to the purged
+                // URI. `rewrite_include_edges(uri, &empty)` clears this
+                // URI's outgoing edges; also drop any stale reverse entries.
+                let empty = HashSet::new();
+                self.rewrite_include_edges(state, &uri, &empty);
+                state.included_by.remove(&uri);
             }
         }
     }
@@ -342,6 +524,95 @@ fn rebuild_nav(state: &mut WorkspaceState) {
     state
         .nav_index
         .rebuild(state.documents.iter().map(|(u, d)| (u, &d.model.navigation)));
+}
+
+/// Resolve `includes` (relative paths in a parent file) to canonical URIs.
+/// Unresolvable entries are dropped silently — `resolve_includes` emits the
+/// user-facing diagnostic for them.
+fn direct_include_uris(
+    parent_uri: &Url,
+    includes: &[crate::ast::IncludeDirective],
+) -> HashSet<Url> {
+    let mut out = HashSet::new();
+    let parent_path = match parent_uri.to_file_path() {
+        Ok(p) => p,
+        Err(_) => return out,
+    };
+    let parent_dir = parent_path.parent().unwrap_or(std::path::Path::new("."));
+    for inc in includes {
+        let joined = parent_dir.join(&inc.path);
+        if let Ok(canon) = joined.canonicalize() {
+            if let Ok(u) = Url::from_file_path(&canon) {
+                out.insert(u);
+            }
+        }
+    }
+    out
+}
+
+/// BFS the transitive include closure of `uri` via the `includes_of` graph
+/// and union every child's local template declarations. Templates defined in
+/// `uri` itself are *not* included — the caller's own `shallow_scan` surfaces
+/// those.
+fn collect_external_templates(
+    state: &WorkspaceState,
+    uri: &Url,
+) -> HashMap<String, analysis::TemplateInfo> {
+    let mut out: HashMap<String, analysis::TemplateInfo> = HashMap::new();
+    let mut visited: HashSet<Url> = HashSet::new();
+    let mut queue: Vec<Url> = state
+        .includes_of
+        .get(uri)
+        .map(|s| s.iter().cloned().collect())
+        .unwrap_or_default();
+
+    while let Some(child) = queue.pop() {
+        if !visited.insert(child.clone()) {
+            continue;
+        }
+        if let Some(doc) = state.documents.get(&child) {
+            for (name, info) in &doc.model.declarations.templates {
+                out.entry(name.clone()).or_insert_with(|| info.clone());
+            }
+        }
+        if let Some(grand) = state.includes_of.get(&child) {
+            for g in grand {
+                if !visited.contains(g) {
+                    queue.push(g.clone());
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// BFS up `included_by` from `uri` to collect all transitively-including
+/// ancestors. Returned in BFS order (closest ancestors first).
+fn collect_ancestors(state: &WorkspaceState, uri: &Url) -> Vec<Url> {
+    let mut out = Vec::new();
+    let mut visited: HashSet<Url> = HashSet::new();
+    let mut queue: std::collections::VecDeque<Url> = state
+        .included_by
+        .get(uri)
+        .map(|s| s.iter().cloned().collect())
+        .unwrap_or_default();
+
+    while let Some(parent) = queue.pop_front() {
+        if !visited.insert(parent.clone()) {
+            continue;
+        }
+        out.push(parent.clone());
+        if let Some(grand) = state.included_by.get(&parent) {
+            for g in grand {
+                if !visited.contains(g) {
+                    queue.push_back(g.clone());
+                }
+            }
+        }
+    }
+
+    out
 }
 
 impl Default for DocumentWorkspace {
@@ -481,6 +752,75 @@ mod tests {
         let d_uri = tmp.uri("d.patches");
         assert!(state.documents.contains_key(&d_uri), "d.patches should be loaded");
         assert_eq!(state.documents.len(), 4, "a + b + c + d");
+    }
+
+    #[test]
+    fn template_from_include_is_visible_in_parent() {
+        // child.patches defines template `foo`; parent uses `module m : foo`.
+        // Without cross-file template merging this would raise "unknown
+        // module type 'foo'".
+        let tmp = TempDir::new("xfile_tmpl");
+        tmp.write(
+            "child.patches",
+            "template foo(x: float) { in: a out: b module m : Osc }\n",
+        );
+        tmp.write(
+            "parent.patches",
+            "include \"child.patches\"\npatch { module inst : foo }\n",
+        );
+
+        let ws = DocumentWorkspace::new();
+        let uri = tmp.uri("parent.patches");
+        let source = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
+        let diags = ws.analyse(&uri, source);
+
+        assert!(
+            !diags.iter().any(|d| d.message.contains("unknown module type")),
+            "unexpected unknown-module diag: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn disk_change_to_included_cascades_to_parent() {
+        // child defines `foo`; parent uses `module m : foo`. Remove the
+        // template from child on disk and fire refresh_from_disk — parent
+        // should now surface "unknown module type 'foo'".
+        let tmp = TempDir::new("cascade");
+        tmp.write(
+            "child.patches",
+            "template foo(x: float) { in: a out: b module m : Osc }\n",
+        );
+        tmp.write(
+            "parent.patches",
+            "include \"child.patches\"\npatch { module inst : foo }\n",
+        );
+
+        let ws = DocumentWorkspace::new();
+        let parent_uri = tmp.uri("parent.patches");
+        let child_uri = tmp.uri("child.patches");
+        let parent_src = std::fs::read_to_string(parent_uri.to_file_path().unwrap()).unwrap();
+        let initial = ws.analyse(&parent_uri, parent_src);
+        assert!(
+            !initial.iter().any(|d| d.message.contains("unknown module type")),
+            "{initial:?}"
+        );
+
+        // Rewrite child with no templates, then notify via refresh_from_disk.
+        tmp.write("child.patches", "# no templates\n");
+        let affected = ws.refresh_from_disk(&child_uri);
+
+        // Parent must appear in the affected set and now carry the diag.
+        let parent_diags = affected
+            .iter()
+            .find(|(u, _)| u == &parent_uri)
+            .map(|(_, d)| d.clone())
+            .expect("parent should be in cascade set");
+        assert!(
+            parent_diags
+                .iter()
+                .any(|d| d.message.contains("unknown module type")),
+            "expected cascade to surface unknown-module on parent: {parent_diags:?}"
+        );
     }
 
     #[test]

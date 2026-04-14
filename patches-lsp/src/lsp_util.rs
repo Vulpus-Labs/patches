@@ -71,16 +71,68 @@ pub(crate) fn to_lsp_diagnostics(
             crate::ast_builder::Severity::Error => DiagnosticSeverity::ERROR,
             crate::ast_builder::Severity::Warning => DiagnosticSeverity::WARNING,
         };
+        let data = if diag.replacements.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "replacements": diag.replacements }))
+        };
         out.push(tower_lsp::lsp_types::Diagnostic {
             range: Range::new(start, end),
             severity: Some(severity),
             source: Some("patches".to_string()),
             message: diag.message.clone(),
+            data,
             ..Default::default()
         });
     }
 
     out
+}
+
+// ─── Suggestion ranking ──────────────────────────────────────────────────
+
+/// Levenshtein distance between two ASCII-ish strings (byte-wise). Adequate
+/// for ranking identifier typos; we don't need Unicode correctness here.
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = if ca.eq_ignore_ascii_case(cb) { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+/// Rank candidates by edit distance to `needle`, returning up to `max`
+/// suggestions. Filters out candidates whose distance exceeds a threshold
+/// proportional to the needle length so we don't suggest garbage for typos
+/// that are off by too much.
+pub(crate) fn rank_suggestions<'a, I>(needle: &str, candidates: I, max: usize) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let threshold = (needle.len() / 2).max(2);
+    let mut scored: Vec<(usize, &'a str)> = candidates
+        .into_iter()
+        .filter(|c| !c.is_empty() && *c != needle)
+        .map(|c| (levenshtein(needle, c), c))
+        .filter(|(d, _)| *d <= threshold)
+        .collect();
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    scored.dedup_by(|a, b| a.1 == b.1);
+    scored.into_iter().take(max).map(|(_, s)| s.to_string()).collect()
 }
 
 // ─── Tree-sitter node helpers ────────────────────────────────────────────
