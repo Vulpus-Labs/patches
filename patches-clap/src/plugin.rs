@@ -609,15 +609,15 @@ fn set_status_from_load(
             p.base_dir = path.parent().map(|d| d.to_path_buf());
             match p.compile_and_push_plan() {
                 Ok(()) => lock_gui_mut(&p.gui_state, |g| {
-                    g.status = success_msg.into();
+                    g.push_status(success_msg);
                 }),
                 Err(e) => lock_gui_mut(&p.gui_state, |g| {
-                    g.status = format!("Error: {e}");
+                    g.push_status(format!("Error: {e}"));
                 }),
             }
         }
         Err(e) => lock_gui_mut(&p.gui_state, |g| {
-            g.status = format!("Read error: {e}");
+            g.push_status(format!("Read error: {e}"));
         }),
     }
 }

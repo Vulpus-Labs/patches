@@ -124,11 +124,7 @@ pub(crate) unsafe fn create_gui(
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| "No file loaded".into());
-        let status = if gui.status.is_empty() {
-            " ".to_owned()
-        } else {
-            gui.status.clone()
-        };
+        let status = gui.status_text();
         (path, status)
     };
 
@@ -172,8 +168,15 @@ pub(crate) unsafe fn create_gui(
             .horizontal_gap(Pixels(4.0))
             .height(Auto);
 
-            // Status label.
-            Label::new(cx, status_sig).width(Stretch(1.0));
+            // Scrollable status log.
+            ScrollView::new(cx, move |cx| {
+                Label::new(cx, status_sig)
+                    .width(Stretch(1.0))
+                    .text_wrap(true);
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0))
+            .background_color(Color::rgb(24, 26, 30));
         })
         .padding(Pixels(8.0))
         .vertical_gap(Pixels(4.0));
@@ -191,11 +194,7 @@ pub(crate) unsafe fn create_gui(
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| "No file loaded".into());
-        let new_status = if gui.status.is_empty() {
-            " ".to_owned()
-        } else {
-            gui.status.clone()
-        };
+        let new_status = gui.status_text();
         drop(gui);
         sigs.path.set(new_path);
         sigs.status.set(new_status);
