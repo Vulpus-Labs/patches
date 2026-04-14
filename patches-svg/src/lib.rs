@@ -497,6 +497,7 @@ mod tests {
             }],
             patterns: vec![],
             songs: vec![],
+            port_refs: vec![],
         }
     }
 
@@ -507,6 +508,7 @@ mod tests {
             connections: vec![],
             patterns: vec![],
             songs: vec![],
+            port_refs: vec![],
         };
         let svg = render_svg(&flat, &SvgOptions::default());
         assert!(svg.starts_with("<svg"));
@@ -565,6 +567,7 @@ mod tests {
             connections: vec![],
             patterns: vec![],
             songs: vec![],
+            port_refs: vec![],
         };
         let svg = render_svg(&patch, &SvgOptions::default());
         assert!(svg.contains("a&amp;b : &lt;Odd&gt;"));
