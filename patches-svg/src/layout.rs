@@ -5,9 +5,9 @@
 //! components are stacked vertically. Cable routing produces cubic Bézier
 //! control points; renderers draw them.
 //!
-//! This crate knows nothing about the DSL, modules, or any renderer. Callers
-//! build [`LayoutNode`] / [`LayoutEdge`] inputs from their own data and
-//! consume the [`GraphLayout`] result.
+//! This module knows nothing about the DSL, modules, or the SVG renderer.
+//! Callers build [`LayoutNode`] / [`LayoutEdge`] inputs from their own data
+//! and consume the [`GraphLayout`] result.
 
 use std::collections::HashMap;
 

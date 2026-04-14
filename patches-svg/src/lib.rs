@@ -71,7 +71,7 @@ pub fn render_svg(patch: &FlatPatch, opts: &SvgOptions) -> String {
     emit_svg(&layout, &config, opts)
 }
 
-/// Build `patches-layout` inputs from a `FlatPatch`.
+/// Build layout inputs from a `FlatPatch`.
 ///
 /// Only ports that appear in at least one connection are included. Port
 /// row order within a node follows first appearance across

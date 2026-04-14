@@ -3,7 +3,7 @@
 //! Creates a vizia window embedded in the host's parent window via
 //! baseview. Provides a minimal controls surface: file path label,
 //! Browse / Reload buttons, and a status line. Patch graph rendering
-//! lives in `patches-lsp` / `patches-svg-cli`, not in the plugin.
+//! lives in `patches-lsp` and the `patches-svg` CLI, not in the plugin.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};

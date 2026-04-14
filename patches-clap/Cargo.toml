@@ -10,7 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../patches-core" }
-patches-dsp = { path = "../patches-dsp" }
 patches-dsl = { path = "../patches-dsl" }
 patches-engine = { path = "../patches-engine" }
 patches-interpreter = { path = "../patches-interpreter" }
