@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 patches-dsl = { path = "../patches-dsl" }
-patches-layout = { path = "../patches-layout" }
+rust-sugiyama = "0.4"
 
 [dev-dependencies]
 quick-xml = "0.36"

@@ -5,14 +5,17 @@
 //! which is useful for live editing where the user's current source may
 //! not be a fully valid graph.
 //!
-//! The renderer delegates layout to [`patches_layout`] and emits a
-//! standalone SVG `String` with inline styling.
+//! Sugiyama layout lives in the [`layout`] submodule; rendering emits
+//! a standalone SVG `String` with inline styling.
+
+pub mod layout;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use patches_dsl::{FlatModule, FlatPatch};
-use patches_layout::{
+
+use crate::layout::{
     layout_graph, node_height, GraphLayout, LayoutConfig, LayoutEdge, LayoutNode,
 };
 
@@ -269,7 +272,7 @@ fn emit_style_block(s: &mut String, pal: &Palette) {
 
 fn emit_node(
     s: &mut String,
-    n: &patches_layout::PositionedNode,
+    n: &crate::layout::PositionedNode,
     config: &LayoutConfig,
     opts: &SvgOptions,
     pal: &Palette,

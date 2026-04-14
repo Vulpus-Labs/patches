@@ -11,7 +11,6 @@ members = [
     "patches-player",
     "patches-profiling",
     "patches-clap",
-    "patches-layout",
     "patches-lsp",
     "patches-svg",
     "patches-svg-cli",
