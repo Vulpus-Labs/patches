@@ -37,7 +37,7 @@ pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, Output
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, NodeId};
-pub use midi::MidiEvent;
+pub use midi::{MidiEvent, MidiMessage};
 pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::QName;
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};

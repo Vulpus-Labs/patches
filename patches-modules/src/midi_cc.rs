@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -73,9 +73,11 @@ impl Module for MidiCc {
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let events = self.midi_in.read(pool);
         for event in events.iter() {
-            let status = event.bytes[0] & 0xF0;
-            if status == 0xB0 && event.bytes[1] == self.cc_number {
-                self.value = event.bytes[2] as f32 / 127.0 * 2.0 - 1.0;
+            if let MidiMessage::ControlChange { controller, value, .. } = MidiMessage::parse(event)
+            {
+                if controller == self.cc_number {
+                    self.value = value as f32 / 127.0 * 2.0 - 1.0;
+                }
             }
         }
 

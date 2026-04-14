@@ -44,8 +44,8 @@
 /// |-----------|------|-------|---------|--------------------------------------------------------|
 /// | `channel` | int  | 0–16  | 0       | MIDI channel filter (1–16); 0 = respond to all channels |
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
@@ -152,11 +152,10 @@ impl Module for MidiDrumset {
         // Read MIDI events from the GLOBAL_MIDI backplane slot.
         let midi_events = self.midi_in.read(pool);
         for event in midi_events.iter() {
-            let status = event.bytes[0] & 0xF0;
-            let ch = (event.bytes[0] & 0x0F) + 1; // 1-based channel
-            let note = event.bytes[1];
-            let vel = event.bytes[2];
-
+            let MidiMessage::NoteOn { channel, note, velocity } = MidiMessage::parse(event) else {
+                continue;
+            };
+            let ch = channel + 1; // 1-based channel
             if self.channel != 0 && ch != self.channel {
                 continue;
             }
@@ -168,11 +167,8 @@ impl Module for MidiDrumset {
                 continue;
             }
             let slot = slot as usize;
-
-            if status == 0x90 && vel > 0 {
-                self.trigger_armed[slot] = true;
-                self.velocity[slot] = vel as f32 / 127.0;
-            }
+            self.trigger_armed[slot] = true;
+            self.velocity[slot] = velocity as f32 / 127.0;
         }
 
         for i in 0..NUM_DRUMS {

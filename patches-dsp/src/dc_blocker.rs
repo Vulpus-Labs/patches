@@ -32,11 +32,7 @@ impl DcBlocker {
     /// Process one sample, returning the DC-blocked output.
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
-        let mut y = x - self.x_prev + self.r * self.y_prev;
-        // Flush subnormals to zero to avoid denormal stalls on the audio thread.
-        if !y.is_normal() && y != 0.0 {
-            y = 0.0;
-        }
+        let y = crate::flush_denormal(x - self.x_prev + self.r * self.y_prev);
         self.x_prev = x;
         self.y_prev = y;
         y

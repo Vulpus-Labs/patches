@@ -15,27 +15,9 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::parameter_map::ParameterMap;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-/// Extract a float parameter at `(name, index)`, falling back to `default`.
-#[inline]
-fn get_float(params: &ParameterMap, name: &str, index: usize, default: f32) -> f32 {
-    match params.get(name, index) {
-        Some(ParameterValue::Float(v)) => *v,
-        _ => default,
-    }
-}
-
-/// Extract a bool parameter at `(name, index)`, falling back to `default`.
-#[inline]
-fn get_bool(params: &ParameterMap, name: &str, index: usize, default: bool) -> bool {
-    match params.get(name, index) {
-        Some(ParameterValue::Bool(v)) => *v,
-        _ => default,
-    }
-}
+use crate::common::param_access::{get_bool, get_float};
 
 // ── Mixer ─────────────────────────────────────────────────────────────────────
 

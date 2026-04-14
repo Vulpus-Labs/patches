@@ -47,24 +47,7 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use crate::common::delay_buffer::DelayBuffer;
 use crate::common::{TapFeedbackFilter, ToneFilter};
 use crate::common::approximate::fast_tanh;
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-#[inline]
-fn get_float(params: &ParameterMap, name: &str, index: usize, default: f32) -> f32 {
-    match params.get(name, index) {
-        Some(ParameterValue::Float(v)) => *v,
-        _ => default,
-    }
-}
-
-#[inline]
-fn get_int(params: &ParameterMap, name: &str, index: usize, default: i64) -> i64 {
-    match params.get(name, index) {
-        Some(ParameterValue::Int(v)) => *v,
-        _ => default,
-    }
-}
+use crate::common::param_access::{get_float, get_int};
 
 // ─── Delay ────────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
+    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
     GLOBAL_MIDI,
 };
 use patches_core::{CableKind, PolyLayout};
@@ -80,36 +80,31 @@ impl PolyMidiIn {
         steal_idx
     }
 
-    /// Process a single MIDI event through the voice allocator.
-    fn handle_midi_event(&mut self, status: u8, b1: u8, b2: u8) {
-        match status {
-            // Note On (velocity 0 treated as Note Off per MIDI spec)
-            0x90 if b2 > 0 => {
+    /// Process a single MIDI message through the voice allocator.
+    fn handle_midi_message(&mut self, msg: MidiMessage) {
+        match msg {
+            MidiMessage::NoteOn { note, velocity, .. } => {
                 let idx = self.find_or_steal_voice();
                 let v = &mut self.voices[idx];
-                v.note = b1;
-                v.velocity = b2 as f32 / 127.0;
+                v.note = note;
+                v.velocity = velocity as f32 / 127.0;
                 v.active = true;
                 v.allocation_tick = self.tick_count;
                 v.trigger_armed = true;
             }
-            // Note Off (or Note On velocity 0)
-            0x80 | 0x90 => {
+            MidiMessage::NoteOff { note, .. } => {
                 for i in 0..self.voice_count {
-                    if self.voices[i].active && self.voices[i].note == b1 {
+                    if self.voices[i].active && self.voices[i].note == note {
                         self.voices[i].active = false;
                         break;
                     }
                 }
             }
-            // Control Change — mod wheel (CC 1)
-            0xB0 if b1 == 1 => {
-                self.mod_value = b2 as f32 / 127.0;
+            MidiMessage::ControlChange { controller: 1, value, .. } => {
+                self.mod_value = value as f32 / 127.0;
             }
-            // Pitch Bend: 14-bit value, LSB in b1, MSB in b2; centre = 8192
-            0xE0 => {
-                let raw = ((b2 as u16) << 7) | (b1 as u16);
-                self.pitch_value = (raw as f32 - 8192.0) / 8192.0;
+            MidiMessage::PitchBend { value, .. } => {
+                self.pitch_value = value as f32 / 8192.0;
             }
             _ => {}
         }
@@ -171,8 +166,7 @@ impl Module for PolyMidiIn {
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let events = self.midi_in.read(pool);
         for event in events.iter() {
-            let status = event.bytes[0] & 0xF0;
-            self.handle_midi_event(status, event.bytes[1], event.bytes[2]);
+            self.handle_midi_message(MidiMessage::parse(event));
         }
 
         let mut v_oct    = [0.0f32; 16];

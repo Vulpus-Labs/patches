@@ -1,6 +1,7 @@
 pub mod approximate;
 pub mod delay_buffer;
 pub mod frequency;
+pub mod param_access;
 pub mod phase_accumulator;
 
 pub use delay_buffer::{DelayBuffer, PolyDelayBuffer, PolyThiranInterp, ThiranInterp};

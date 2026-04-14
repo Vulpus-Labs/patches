@@ -76,5 +76,20 @@ pub use time_utils::{ms_to_samples, compute_time_coeff};
 pub mod drum;
 pub use drum::{DecayEnvelope, PitchSweep, MetallicTone, BurstGenerator, saturate};
 
+/// Flush subnormal floats to zero.
+///
+/// Audio filters with a feedback path can settle into subnormal values after
+/// long stretches of silence; on x86 these trigger microcode traps that cost
+/// tens of cycles per operation. Flushing to zero avoids the stall with no
+/// audible effect.
+#[inline]
+pub fn flush_denormal(x: f32) -> f32 {
+    if !x.is_normal() && x != 0.0 {
+        0.0
+    } else {
+        x
+    }
+}
+
 #[cfg(test)]
 mod test_support;

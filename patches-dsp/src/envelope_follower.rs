@@ -50,11 +50,7 @@ impl EnvelopeFollower {
         } else {
             self.release_coeff
         };
-        self.envelope += coeff * (abs_input - self.envelope);
-        // Flush subnormals to zero to avoid denormal stalls on the audio thread.
-        if !self.envelope.is_normal() && self.envelope != 0.0 {
-            self.envelope = 0.0;
-        }
+        self.envelope = crate::flush_denormal(self.envelope + coeff * (abs_input - self.envelope));
         self.envelope
     }
 
