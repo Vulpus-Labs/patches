@@ -13,7 +13,6 @@ members = [
     "patches-clap",
     "patches-lsp",
     "patches-svg",
-    "patches-svg-cli",
     "patches-ffi",
     "patches-ffi-common",
     "test-plugins/gain",
