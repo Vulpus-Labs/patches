@@ -1,5 +1,6 @@
 src/**
-node_modules/**
 .vscode-test/**
 tsconfig.json
 package-lock.json
+node_modules/@types/**
+node_modules/typescript/**
