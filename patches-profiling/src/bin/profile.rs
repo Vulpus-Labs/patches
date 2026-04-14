@@ -42,14 +42,11 @@ fn main() {
     println!("patch:  {path}");
 
     let registry = patches_modules::default_registry();
-    let src = fs::read_to_string(&path).unwrap_or_else(|e| {
-        eprintln!("error reading {path}: {e}");
+    let load = patches_dsl::load_with(std::path::Path::new(&path), |p| fs::read_to_string(p)).unwrap_or_else(|e| {
+        eprintln!("load error: {e}");
         process::exit(1);
     });
-    let file = patches_dsl::parse(&src).unwrap_or_else(|e| {
-        eprintln!("parse error: {e}");
-        process::exit(1);
-    });
+    let file = load.file;
     let result = patches_dsl::expand(&file).unwrap_or_else(|e| {
         eprintln!("expand error: {e}");
         process::exit(1);
