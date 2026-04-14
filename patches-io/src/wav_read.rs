@@ -42,6 +42,17 @@ pub(crate) fn parse_wav(data: &[u8]) -> Result<AudioData, AudioIoError> {
         ]) as usize;
         let chunk_body = pos + 8;
 
+        // Guard against truncated chunks whose declared size exceeds the
+        // remaining bytes — otherwise indexing below panics on crafted files.
+        if chunk_body + chunk_size > data.len() {
+            return Err(AudioIoError::MalformedFile(format!(
+                "WAV chunk '{}' declares size {} but only {} bytes remain",
+                String::from_utf8_lossy(chunk_id),
+                chunk_size,
+                data.len().saturating_sub(chunk_body),
+            )));
+        }
+
         if chunk_id == b"fmt " && chunk_size >= 16 {
             format_tag = u16::from_le_bytes([data[chunk_body], data[chunk_body + 1]]);
             num_channels = u16::from_le_bytes([data[chunk_body + 2], data[chunk_body + 3]]);
@@ -266,6 +277,53 @@ mod tests {
         buf.extend_from_slice(&16u16.to_le_bytes()); // bits
 
         assert!(parse_wav(&buf).is_err());
+    }
+
+    #[test]
+    fn truncated_mid_fmt_chunk_rejected() {
+        // A RIFF/WAVE header with a fmt chunk whose declared size (16)
+        // exceeds the remaining bytes: declaring 16 but only writing 4.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&100u32.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes()); // declares 16 bytes
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM (2 of the 16)
+        buf.extend_from_slice(&1u16.to_le_bytes()); // mono (4 of the 16)
+        // Truncated here — parser must reject, not read past end.
+        assert!(parse_wav(&buf).is_err());
+    }
+
+    #[test]
+    fn non_pcm_format_code_rejected() {
+        // Format code 3 (IEEE float) in a file this parser only handles PCM.
+        // If the parser silently accepts this and misinterprets the bytes,
+        // we'd read garbage samples.
+        let mut samples = Vec::new();
+        samples.extend_from_slice(&0i16.to_le_bytes());
+        // Build a WAV with format = 99 (unsupported/invalid).
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        let total_size = 4 + (8 + 16) + (8 + samples.len());
+        buf.extend_from_slice(&(total_size as u32).to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes());
+        buf.extend_from_slice(&99u16.to_le_bytes()); // unsupported format code
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&44100u32.to_le_bytes());
+        buf.extend_from_slice(&88200u32.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes());
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&samples);
+
+        assert!(
+            parse_wav(&buf).is_err(),
+            "unsupported PCM format code 99 must be rejected, not silently accepted"
+        );
     }
 
     #[test]
