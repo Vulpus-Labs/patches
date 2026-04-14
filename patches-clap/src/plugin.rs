@@ -101,7 +101,6 @@ impl PatchesClapPlugin {
         let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
         let file = self.load_or_parse()?;
         let result = patches_dsl::expand(&file)?;
-        let flat_patch = result.patch.clone();
         let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
             &self.registry,
@@ -113,11 +112,6 @@ impl PatchesClapPlugin {
         let plan = self
             .planner
             .build_with_tracker_data(&graph, &self.registry, env, tracker_data)?;
-        // Stash the FlatPatch so the GUI can render the graph.
-        {
-            let mut gui = self.gui_state.lock().expect("gui_state mutex poisoned");
-            gui.flat_patch = Some(flat_patch);
-        }
         self.graph = Some(graph);
         if let Some(tx) = &mut self.plan_tx {
             let _ = tx.push(plan);

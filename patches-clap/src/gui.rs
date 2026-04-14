@@ -6,8 +6,6 @@
 
 use std::path::PathBuf;
 
-use patches_dsl::FlatPatch;
-
 /// Shared state between the plugin and the embedded GUI.
 #[derive(Default)]
 pub struct GuiState {
@@ -19,6 +17,4 @@ pub struct GuiState {
     pub reload_requested: bool,
     /// Status message shown in the UI (e.g. "Loaded", "Error: ...").
     pub status: String,
-    /// Latest successfully-expanded flat patch, used for graph rendering.
-    pub flat_patch: Option<FlatPatch>,
 }

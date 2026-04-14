@@ -1,18 +1,15 @@
 //! Cross-platform GUI implementation using vizia + baseview.
 //!
 //! Creates a vizia window embedded in the host's parent window via
-//! baseview. Includes a scrollable, zoomable patch graph view.
+//! baseview. Provides a minimal controls surface: file path label,
+//! Browse / Reload buttons, and a status line. Patch graph rendering
+//! lives in `patches-lsp` / `patches-svg-cli`, not in the plugin.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
 use vizia::prelude::*;
-use vizia::vg;
 use vizia::ParentWindow;
-
-use patches_dsl::FlatPatch;
-use patches_layout::{layout_graph, GraphLayout, LayoutConfig};
-use patches_svg::flat_to_layout_input;
 
 use crate::gui::GuiState;
 
@@ -80,244 +77,11 @@ impl Model for PluginUiData {
 struct UiSignals {
     path: Signal<String>,
     status: Signal<String>,
-    flat: Signal<Option<FlatPatch>>,
 }
 
 // Safety: Signal<T> is just an ID + PhantomData — no thread-local state.
 unsafe impl Send for UiSignals {}
 unsafe impl Sync for UiSignals {}
-
-// Layout input construction lives in `patches-svg` so the renderer and
-// the clap GUI share exactly one mapping from FlatPatch → LayoutNode.
-
-// ── Zoom ───────────────────────────────────────────────────────────
-
-const MIN_ZOOM: f32 = 0.25;
-const MAX_ZOOM: f32 = 4.0;
-const ZOOM_STEP: f32 = 0.25;
-
-// ── Patch graph view ───────────────────────────────────────────────
-
-/// A custom vizia view that draws the patch graph using the Canvas (Skia) API.
-///
-/// Reads its zoom level from a shared `Signal<f32>` set by toolbar buttons.
-struct PatchGraphView {
-    flat_signal: Signal<Option<FlatPatch>>,
-    zoom_signal: Signal<f32>,
-}
-
-impl PatchGraphView {
-    fn new(
-        cx: &mut Context,
-        flat_signal: Signal<Option<FlatPatch>>,
-        zoom_signal: Signal<f32>,
-    ) -> Handle<'_, Self> {
-        Self {
-            flat_signal,
-            zoom_signal,
-        }
-        .build(cx, |_| {})
-    }
-}
-
-impl View for PatchGraphView {
-    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        cx.draw_background(canvas);
-
-        let flat_opt: Option<FlatPatch> = self.flat_signal.get();
-        let flat = match flat_opt {
-            Some(ref f) if !f.modules.is_empty() => f.clone(),
-            _ => return,
-        };
-
-        let zoom = self.zoom_signal.get();
-        let bounds = cx.bounds();
-        let config = LayoutConfig::default();
-        let (layout_nodes, layout_edges) = flat_to_layout_input(&flat, &config);
-        let gl: GraphLayout = layout_graph(&layout_nodes, &layout_edges, &config);
-
-        // Clip + zoom.
-        canvas.save();
-        let clip_rect =
-            vg::Rect::from_xywh(bounds.x, bounds.y, bounds.w, bounds.h);
-        canvas.clip_rect(clip_rect, None, Some(true));
-        canvas.translate((bounds.x, bounds.y));
-        canvas.scale((zoom, zoom));
-
-        // ── Fonts (via system font manager) ────────────────────────
-
-        let font_mgr = vg::FontMgr::new();
-        let typeface =
-            font_mgr.legacy_make_typeface(None, vg::FontStyle::default());
-        let header_font = match typeface {
-            Some(ref tf) => vg::Font::new(tf.clone(), Some(12.0)),
-            None => {
-                let mut f = vg::Font::default();
-                f.set_size(12.0);
-                f
-            }
-        };
-        let port_font = match typeface {
-            Some(ref tf) => vg::Font::new(tf.clone(), Some(10.0)),
-            None => {
-                let mut f = vg::Font::default();
-                f.set_size(10.0);
-                f
-            }
-        };
-
-        // ── Paints ─────────────────────────────────────────────────
-
-        let mut edge_paint = vg::Paint::default();
-        edge_paint.set_color(vg::Color::from_argb(180, 120, 180, 255));
-        edge_paint.set_style(vg::PaintStyle::Stroke);
-        edge_paint.set_stroke_width(1.5);
-        edge_paint.set_anti_alias(true);
-
-        let mut node_bg_paint = vg::Paint::default();
-        node_bg_paint.set_color(vg::Color::from_argb(255, 40, 44, 52));
-        node_bg_paint.set_style(vg::PaintStyle::Fill);
-        node_bg_paint.set_anti_alias(true);
-
-        let mut node_border_paint = vg::Paint::default();
-        node_border_paint.set_color(vg::Color::from_argb(255, 80, 90, 110));
-        node_border_paint.set_style(vg::PaintStyle::Stroke);
-        node_border_paint.set_stroke_width(1.0);
-        node_border_paint.set_anti_alias(true);
-
-        let mut header_bg_paint = vg::Paint::default();
-        header_bg_paint.set_color(vg::Color::from_argb(255, 60, 70, 90));
-        header_bg_paint.set_style(vg::PaintStyle::Fill);
-        header_bg_paint.set_anti_alias(true);
-
-        let mut header_text_paint = vg::Paint::default();
-        header_text_paint.set_color(vg::Color::from_argb(255, 230, 230, 240));
-        header_text_paint.set_anti_alias(true);
-
-        let mut port_text_paint = vg::Paint::default();
-        port_text_paint.set_color(vg::Color::from_argb(220, 190, 190, 200));
-        port_text_paint.set_anti_alias(true);
-
-        let mut input_dot_paint = vg::Paint::default();
-        input_dot_paint.set_color(vg::Color::from_argb(255, 100, 200, 120));
-        input_dot_paint.set_style(vg::PaintStyle::Fill);
-        input_dot_paint.set_anti_alias(true);
-
-        let mut output_dot_paint = vg::Paint::default();
-        output_dot_paint.set_color(vg::Color::from_argb(255, 200, 140, 80));
-        output_dot_paint.set_style(vg::PaintStyle::Fill);
-        output_dot_paint.set_anti_alias(true);
-
-        // ── Draw edges ─────────────────────────────────────────────
-
-        for edge in &gl.edges {
-            let mut pb = vg::PathBuilder::new();
-            pb.move_to((edge.x0, edge.y0));
-            pb.cubic_to(
-                (edge.c1x, edge.c1y),
-                (edge.c2x, edge.c2y),
-                (edge.x1, edge.y1),
-            );
-            let path = pb.detach();
-            canvas.draw_path(&path, &edge_paint);
-        }
-
-        // ── Draw nodes ─────────────────────────────────────────────
-
-        let header_h = config.node_header_height;
-        let padding = config.node_padding;
-        let row_h = config.port_row_height;
-
-        for node in &gl.nodes {
-            let nx = node.x;
-            let ny = node.y;
-            let nw = node.width;
-            let nh = node.height;
-
-            let body_rect = vg::Rect::from_xywh(nx, ny, nw, nh);
-            let rrect = vg::RRect::new_rect_xy(body_rect, 4.0, 4.0);
-            canvas.draw_rrect(rrect, &node_bg_paint);
-            canvas.draw_rrect(rrect, &node_border_paint);
-
-            // Header.
-            let header_rect = vg::Rect::from_xywh(nx, ny, nw, header_h);
-            canvas.save();
-            canvas.clip_rrect(rrect, None, Some(true));
-            canvas.draw_rect(header_rect, &header_bg_paint);
-            canvas.restore();
-
-            let text_y = ny + header_h * 0.7;
-            canvas.draw_str(
-                &node.label,
-                (nx + 8.0, text_y),
-                &header_font,
-                &header_text_paint,
-            );
-
-            // Input ports (left side).
-            for (i, port) in node.input_ports.iter().enumerate() {
-                let py = ny + header_h + padding + i as f32 * row_h + row_h / 2.0;
-                canvas.draw_circle((nx + 6.0, py), 3.0, &input_dot_paint);
-                canvas.draw_str(
-                    port.as_str(),
-                    (nx + 13.0, py + 3.5),
-                    &port_font,
-                    &port_text_paint,
-                );
-            }
-
-            // Output ports (right side).
-            for (i, port) in node.output_ports.iter().enumerate() {
-                let py = ny + header_h + padding + i as f32 * row_h + row_h / 2.0;
-                canvas.draw_circle(
-                    (nx + nw - 6.0, py),
-                    3.0,
-                    &output_dot_paint,
-                );
-                let (text_width, _) = port_font.measure_str(port.as_str(), None);
-                let text_x = nx + nw - 13.0 - text_width;
-                canvas.draw_str(
-                    port.as_str(),
-                    (text_x, py + 3.5),
-                    &port_font,
-                    &port_text_paint,
-                );
-            }
-        }
-
-        canvas.restore();
-    }
-}
-
-// ── Zoom model ─────────────────────────────────────────────────────
-
-/// Events emitted by the zoom buttons.
-#[allow(clippy::enum_variant_names)]
-enum ZoomEvent {
-    In,
-    Out,
-}
-
-/// Model that owns the zoom signal and updates it on button presses.
-struct ZoomModel {
-    zoom: Signal<f32>,
-}
-
-impl Model for ZoomModel {
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
-        event.take(|e, _| {
-            let cur = self.zoom.get();
-            match e {
-                ZoomEvent::In => {
-                    self.zoom.set((cur + ZOOM_STEP).min(MAX_ZOOM));
-                }
-                ZoomEvent::Out => {
-                    self.zoom.set((cur - ZOOM_STEP).max(MIN_ZOOM));
-                }
-            }
-        });
-    }
-}
 
 // ── Public API ─────────────────────────────────────────────────────
 
@@ -353,7 +117,7 @@ pub(crate) unsafe fn create_gui(
         return None;
     }
 
-    let (initial_path, initial_status, initial_flat) = {
+    let (initial_path, initial_status) = {
         let gui = gui_state.lock().expect("gui_state mutex poisoned");
         let path = gui
             .file_path
@@ -365,8 +129,7 @@ pub(crate) unsafe fn create_gui(
         } else {
             gui.status.clone()
         };
-        let flat = gui.flat_patch.clone();
-        (path, status, flat)
+        (path, status)
     };
 
     let signals: Arc<Mutex<Option<UiSignals>>> = Arc::new(Mutex::new(None));
@@ -378,14 +141,11 @@ pub(crate) unsafe fn create_gui(
     let window_handle = Application::new(move |cx| {
         let path_sig = Signal::new(initial_path.clone());
         let status_sig = Signal::new(initial_status.clone());
-        let flat_sig = Signal::new(initial_flat.clone());
-        let zoom_sig = Signal::new(1.0f32);
 
         *signals_app.lock().expect("gui_state mutex poisoned") =
             Some(UiSignals {
                 path: path_sig,
                 status: status_sig,
-                flat: flat_sig,
             });
 
         PluginUiData {
@@ -393,8 +153,6 @@ pub(crate) unsafe fn create_gui(
             host: host_ptr,
         }
         .build(cx);
-
-        ZoomModel { zoom: zoom_sig }.build(cx);
 
         VStack::new(cx, |cx| {
             // Top toolbar.
@@ -410,40 +168,12 @@ pub(crate) unsafe fn create_gui(
                 Button::new(cx, |cx| Label::new(cx, "Reload"))
                     .on_press(|cx| cx.emit(PluginUiEvent::Reload))
                     .width(Pixels(90.0));
-
-                // Zoom controls.
-                Button::new(cx, |cx| Label::new(cx, "\u{2212}"))
-                    .on_press(|cx| cx.emit(ZoomEvent::Out))
-                    .width(Pixels(30.0));
-
-                Label::new(
-                    cx,
-                    zoom_sig.map(|z| format!("{}%", (*z * 100.0) as u32)),
-                )
-                .width(Pixels(45.0))
-                .text_align(TextAlign::Center);
-
-                Button::new(cx, |cx| Label::new(cx, "+"))
-                    .on_press(|cx| cx.emit(ZoomEvent::In))
-                    .width(Pixels(30.0));
             })
             .horizontal_gap(Pixels(4.0))
             .height(Auto);
 
             // Status label.
             Label::new(cx, status_sig).width(Stretch(1.0));
-
-            // Scrollable patch graph view.
-            let flat = flat_sig;
-            let zs = zoom_sig;
-            ScrollView::new(cx, move |cx| {
-                PatchGraphView::new(cx, flat, zs)
-                    .width(Pixels(2000.0))
-                    .height(Pixels(1500.0))
-                    .background_color(Color::rgb(30, 32, 38));
-            })
-            .width(Stretch(1.0))
-            .height(Stretch(1.0));
         })
         .padding(Pixels(8.0))
         .vertical_gap(Pixels(4.0));
@@ -466,11 +196,9 @@ pub(crate) unsafe fn create_gui(
         } else {
             gui.status.clone()
         };
-        let new_flat = gui.flat_patch.clone();
         drop(gui);
         sigs.path.set(new_path);
         sigs.status.set(new_status);
-        sigs.flat.set(new_flat);
     })
     .open_parented(&ParentWindow(parent));
 

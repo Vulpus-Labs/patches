@@ -14,9 +14,7 @@ patches-dsp = { path = "../patches-dsp" }
 patches-dsl = { path = "../patches-dsl" }
 patches-engine = { path = "../patches-engine" }
 patches-interpreter = { path = "../patches-interpreter" }
-patches-layout = { path = "../patches-layout" }
 patches-modules = { path = "../patches-modules" }
-patches-svg = { path = "../patches-svg" }
 clap-sys = "0.5"
 rfd = "0.17"
 rtrb = "0.3"
