@@ -58,7 +58,7 @@ fn poly_out(cable_idx: usize, connected: bool) -> OutputPort {
 }
 
 /// Run the module for `n` samples, alternating wi, and return elapsed time.
-fn time_process(module: &mut dyn Module, pool: &mut Vec<[CableValue; 2]>, n: u64) -> std::time::Duration {
+fn time_process(module: &mut dyn Module, pool: &mut [[CableValue; 2]], n: u64) -> std::time::Duration {
     let mut wi = 0usize;
     let t0 = Instant::now();
     for _ in 0..n {

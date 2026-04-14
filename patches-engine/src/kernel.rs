@@ -168,14 +168,16 @@ mod tests {
         stale.rebuild(&ExecutionPlan::empty(), 32)
     }
 
-    /// Allocate the standard test fixtures for `apply_plan` tests.
-    fn fixtures(buf_len: usize, pool_cap: usize) -> (
+    type Fixtures = (
         Box<[[CableValue; 2]]>,
         ReadyState,
         Option<ExecutionPlan>,
         rtrb::Producer<CleanupAction>,
         rtrb::Consumer<CleanupAction>,
-    ) {
+    );
+
+    /// Allocate the standard test fixtures for `apply_plan` tests.
+    fn fixtures(buf_len: usize, pool_cap: usize) -> Fixtures {
         let (tx, rx) = rtrb::RingBuffer::<CleanupAction>::new(pool_cap * 2 + 4);
         let pool = ModulePool::new(pool_cap);
         let ready = ready_from_pool(pool);
@@ -237,7 +239,7 @@ mod tests {
         let mut plan = ExecutionPlan::empty();
         plan.new_modules.push((2, Box::new(Stub::new())));
 
-        let ready = apply_plan(plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         // Verify by transitioning to stale and tombstoning
         let mut stale = ready.make_stale();
@@ -253,12 +255,12 @@ mod tests {
         // First install a module via a plan.
         let mut install_plan = ExecutionPlan::empty();
         install_plan.new_modules.push((1, Box::new(Stub::new())));
-        let state = apply_plan(install_plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let state = apply_plan(install_plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         let mut plan = ExecutionPlan::empty();
         plan.tombstones.push(1);
 
-        let ready = apply_plan(plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         let mut stale = ready.make_stale();
         assert!(stale.module_pool_mut().tombstone(1).is_none(), "slot 1 should be empty after tombstoning");
@@ -280,7 +282,7 @@ mod tests {
         let mut plan = ExecutionPlan::empty();
         plan.tombstones.push(0); // slot 0 was never installed
 
-        let _ready = apply_plan(plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let _ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         // The only action should be no DropModule (there may be a DropPlan from prev)
         while let Ok(action) = rx.pop() {
@@ -299,7 +301,7 @@ mod tests {
         let mut plan = ExecutionPlan::empty();
         plan.to_zero.push(slot);
 
-        let _ready = apply_plan(plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let _ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         for frame in 0..2 {
             assert!(
@@ -319,7 +321,7 @@ mod tests {
         let mut plan = ExecutionPlan::empty();
         plan.to_zero_poly.push(slot);
 
-        let _ready = apply_plan(plan, state, &mut *buf, &mut prev, &mut tx, 32);
+        let _ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         for frame in 0..2 {
             assert!(
@@ -335,7 +337,7 @@ mod tests {
         let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
         assert!(prev.is_none());
 
-        let _ready = apply_plan(ExecutionPlan::empty(), state, &mut *buf, &mut prev, &mut tx, 32);
+        let _ready = apply_plan(ExecutionPlan::empty(), state, &mut buf, &mut prev, &mut tx, 32);
 
         assert!(prev.is_some(), "plan should be stored in previous_plan");
         assert!(rx.pop().is_err(), "no DropPlan should be pushed on first adoption");
@@ -346,10 +348,10 @@ mod tests {
     fn apply_plan_second_adoption_pushes_drop_plan() {
         let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
 
-        let state = apply_plan(ExecutionPlan::empty(), state, &mut *buf, &mut prev, &mut tx, 32);
+        let state = apply_plan(ExecutionPlan::empty(), state, &mut buf, &mut prev, &mut tx, 32);
         let _ = rx.pop(); // ignore any first-adoption items
 
-        let _ready = apply_plan(ExecutionPlan::empty(), state, &mut *buf, &mut prev, &mut tx, 32);
+        let _ready = apply_plan(ExecutionPlan::empty(), state, &mut buf, &mut prev, &mut tx, 32);
 
         match rx.pop() {
             Ok(CleanupAction::DropPlan(_)) => {}

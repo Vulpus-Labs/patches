@@ -631,8 +631,8 @@ mod tests {
         let mut buf = vec![1.0f32; n];
         fft.forward(&mut buf);
         assert_within!(n as f32, buf[0], 1e-4);
-        for k in 1..n {
-            assert_within!(0.0, buf[k], 1e-4, "bin {k}: {}", buf[k]);
+        for (k, &v) in buf.iter().enumerate().skip(1) {
+            assert_within!(0.0, v, 1e-4, "bin {k}: {v}");
         }
     }
 

@@ -305,10 +305,10 @@ mod tests {
         {
             let cp = CablePool::new(&mut pool, 1);
             let read_val = cp.read_poly(&input);
-            for i in 0..16 {
+            for (i, &v) in read_val.iter().enumerate() {
                 assert_eq!(
-                    read_val[i], i as f32 * 0.5,
-                    "tick 1 channel {i}: expected {} got {}", i as f32 * 0.5, read_val[i]
+                    v, i as f32 * 0.5,
+                    "tick 1 channel {i}: expected {} got {v}", i as f32 * 0.5
                 );
             }
         }

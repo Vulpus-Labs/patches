@@ -465,7 +465,7 @@ mod tests {
             for &x in &[-2.0, -1.0, 0.0, 1.0, 2.0] {
                 let y = saturate(x, drive);
                 assert!(
-                    y >= -1.01 && y <= 1.01,
+                    (-1.01..=1.01).contains(&y),
                     "saturate({x}, {drive}) = {y} is out of [-1, 1]"
                 );
             }
@@ -474,7 +474,7 @@ mod tests {
         for &x in &[-1.0, -0.5, 0.0, 0.5, 1.0] {
             let y = saturate(x, 0.0);
             assert!(
-                y >= -1.0 && y <= 1.0,
+                (-1.0..=1.0).contains(&y),
                 "saturate({x}, 0) = {y} is out of [-1, 1]"
             );
         }
@@ -506,7 +506,7 @@ mod tests {
         for _ in 0..5000 {
             let v = mt.tick();
             assert!(
-                v >= -1.0 && v <= 1.0,
+                (-1.0..=1.0).contains(&v),
                 "metallic tone output out of [-1, 1]: {v}"
             );
         }
@@ -576,9 +576,9 @@ mod tests {
         // Second half of first burst should be silent
         let silent_start = spacing_samples / 2;
         let silent_end = spacing_samples;
-        for i in silent_start..silent_end {
+        for (i, &v) in output.iter().enumerate().take(silent_end).skip(silent_start) {
             assert_within!(
-                0.0, output[i], 1e-6,
+                0.0, v, 1e-6,
                 "gap between bursts should be silent at sample {i}"
             );
         }

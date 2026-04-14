@@ -646,7 +646,6 @@ mod tests {
             let mut cp_half = CablePool::new(&mut buf_half, wi);
             // SAFETY: states rebuilt from consistent plans+pools; no tombstoning since.
             state_half.tick(&mut cp_half);
-            drop(cp_half);
             let mut cp_full = CablePool::new(&mut buf_full, wi);
             state_full.tick(&mut cp_full);
         }

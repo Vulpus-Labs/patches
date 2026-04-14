@@ -248,12 +248,10 @@ mod tests {
         // Bins below 100 Hz should be near 0 dB (±3 dB)
         let bin_100hz = (100.0 * fft_size as f32 / SR_48K).round() as usize; // ~2
         // Start from bin 1 (skip DC which can be odd)
-        for bin in 1..=bin_100hz {
+        for (bin, &v) in db.iter().enumerate().take(bin_100hz + 1).skip(1) {
             assert!(
-                db[bin].abs() <= 3.0,
-                "tone=0 low-freq bin {} should be near 0 dB, got {:.2} dB",
-                bin,
-                db[bin]
+                v.abs() <= 3.0,
+                "tone=0 low-freq bin {bin} should be near 0 dB, got {v:.2} dB"
             );
         }
 

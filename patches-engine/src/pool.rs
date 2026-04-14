@@ -202,9 +202,10 @@ mod tests {
         let mut pool = ModulePool::new(4);
         pool.install(2, Box::new(ConstSource::new(0.75)));
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cp = CablePool::new(&mut bufs, 0);
-        pool.process(2, &mut cp);
-        drop(cp);
+        {
+            let mut cp = CablePool::new(&mut bufs, 0);
+            pool.process(2, &mut cp);
+        }
         assert!(matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 0.75).abs() < 1e-12));
     }
 
@@ -214,9 +215,10 @@ mod tests {
         pool.install(0, Box::new(ConstSource::new(1.0)));
         pool.install(0, Box::new(ConstSource::new(2.0)));
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cp = CablePool::new(&mut bufs, 0);
-        pool.process(0, &mut cp);
-        drop(cp);
+        {
+            let mut cp = CablePool::new(&mut bufs, 0);
+            pool.process(0, &mut cp);
+        }
         assert!(matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 2.0).abs() < 1e-12),
             "slot should hold the most recently installed module");
     }

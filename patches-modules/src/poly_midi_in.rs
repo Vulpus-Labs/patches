@@ -210,7 +210,7 @@ impl Module for PolyMidiIn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{AudioEnvironment, CableValue, MidiEvent, MidiFrame, GLOBAL_MIDI};
+    use patches_core::AudioEnvironment;
     use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, send_midi};
 
     fn make_kbd(poly_voices: usize) -> ModuleHarness {
@@ -232,8 +232,8 @@ mod tests {
         assert_within!(5.0, v_oct[0], 1e-10_f32);
         assert_eq!(trigger[0], 1.0, "trigger[0] should fire");
         assert_eq!(gate[0],    1.0, "gate[0] should be high");
-        for i in 1..4 {
-            assert_eq!(gate[i], 0.0, "voice {i} gate should be 0");
+        for (i, &g) in gate.iter().enumerate().take(4).skip(1) {
+            assert_eq!(g, 0.0, "voice {i} gate should be 0");
         }
     }
 

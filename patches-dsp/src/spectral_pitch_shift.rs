@@ -693,7 +693,7 @@ mod tests {
         while (pos as usize) + window_size <= signal.len() + window_size {
             let mut frame = vec![0.0f32; window_size];
             for i in 0..window_size {
-                let idx = pos as isize + i as isize;
+                let idx = pos + i as isize;
                 if idx >= 0 && (idx as usize) < signal.len() {
                     frame[i] = signal[idx as usize] * hann[i];
                 }
@@ -705,7 +705,7 @@ mod tests {
 
             // Overlap-add with synthesis window
             for i in 0..window_size {
-                let idx = pos as isize + i as isize;
+                let idx = pos + i as isize;
                 if idx >= 0 && (idx as usize) < out_len {
                     let oi = idx as usize;
                     output[oi] += frame[i] * hann[i];
@@ -747,9 +747,8 @@ mod tests {
         let fft_size = 2048;
         let fft = RealPackedFft::new(fft_size);
         let mut buf = vec![0.0f32; fft_size];
-        for i in 0..fft_size.min(output.len() - analysis_start) {
-            buf[i] = output[analysis_start + i];
-        }
+        let copy_len = fft_size.min(output.len() - analysis_start);
+        buf[..copy_len].copy_from_slice(&output[analysis_start..analysis_start + copy_len]);
         fft.forward(&mut buf);
 
         let peak = dominant_bin(&buf, fft_size);

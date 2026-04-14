@@ -365,7 +365,7 @@ mod tests {
         h.disconnect_output("red");
         for samples in h.run_poly(512, "brown") {
             for (i, &v) in samples.iter().enumerate() {
-                assert!(v >= -1.0 && v <= 1.0, "poly brown voice {i} out of [-1, 1]: {v}");
+                assert!((-1.0..=1.0).contains(&v), "poly brown voice {i} out of [-1, 1]: {v}");
             }
         }
     }

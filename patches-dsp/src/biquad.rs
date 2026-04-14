@@ -443,11 +443,10 @@ mod tests {
             let x = ((i as f32) * 0.07).sin();
             let y_mono = mono.tick(x, false);
             let y_poly = poly.tick_all(&[x; 16], false, false);
-            for v in 0..16 {
+            for (v, &yv) in y_poly.iter().enumerate() {
                 assert!(
-                    (y_poly[v] - y_mono).abs() < 1e-6,
-                    "voice {v} sample {i}: poly={}, mono={y_mono}",
-                    y_poly[v]
+                    (yv - y_mono).abs() < 1e-6,
+                    "voice {v} sample {i}: poly={yv}, mono={y_mono}"
                 );
             }
         }
@@ -474,11 +473,10 @@ mod tests {
         for k in 0..10_000_usize {
             let x = ((k as f32 * 0.12345).sin() + (k as f32 * 0.6789).cos()) * 0.5;
             let y = poly.tick_all(&[x; 16], false, false);
-            for v in 0..16 {
+            for (v, &yv) in y.iter().enumerate() {
                 assert!(
-                    y[v].is_finite() && y[v].abs() < 1000.0,
-                    "voice {v} sample {k}: instability y={}",
-                    y[v]
+                    yv.is_finite() && yv.abs() < 1000.0,
+                    "voice {v} sample {k}: instability y={yv}"
                 );
             }
         }

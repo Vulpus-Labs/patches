@@ -662,16 +662,20 @@ mod tests {
     fn trigger_no_edge_on_first_call_below_threshold() {
         let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
         let cp = CablePool::new(&mut pool, 0);
-        let mut t = TriggerInput::default();
-        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut t = TriggerInput {
+            inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
         assert!(!t.tick(&cp));
     }
 
     #[test]
     fn trigger_rising_edge_on_0_to_1() {
         let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
-        let mut t = TriggerInput::default();
-        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut t = TriggerInput {
+            inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
 
         // First tick: low
         {
@@ -690,8 +694,10 @@ mod tests {
     #[test]
     fn trigger_no_retrigger_when_held_high() {
         let mut pool = make_cable_pool(&[CableValue::Mono(1.0)]);
-        let mut t = TriggerInput::default();
-        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut t = TriggerInput {
+            inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
 
         // First tick: rising from 0 → 1
         {
@@ -708,8 +714,10 @@ mod tests {
     #[test]
     fn trigger_value_returns_last_read() {
         let mut pool = make_cable_pool(&[CableValue::Mono(0.75)]);
-        let mut t = TriggerInput::default();
-        t.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut t = TriggerInput {
+            inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
         let cp = CablePool::new(&mut pool, 0);
         t.tick(&cp);
         assert_eq!(t.value(), 0.75);
@@ -723,8 +731,10 @@ mod tests {
         channels[0] = 1.0; // voice 0 high
         channels[3] = 1.0; // voice 3 high
         let mut pool = make_cable_pool(&[CableValue::Poly(channels)]);
-        let mut t = PolyTriggerInput::default();
-        t.inner = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut t = PolyTriggerInput {
+            inner: PolyInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
 
         let cp = CablePool::new(&mut pool, 0);
         let result = t.tick(&cp);
@@ -738,8 +748,10 @@ mod tests {
     #[test]
     fn gate_rising_and_falling_edges() {
         let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
-        let mut g = GateInput::default();
-        g.inner = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut g = GateInput {
+            inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
 
         // Low → no edges
         {
@@ -785,8 +797,10 @@ mod tests {
     #[test]
     fn poly_gate_per_voice_edges() {
         let mut pool = make_cable_pool(&[CableValue::Poly([0.0; 16])]);
-        let mut g = PolyGateInput::default();
-        g.inner = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+        let mut g = PolyGateInput {
+            inner: PolyInput { cable_idx: 0, scale: 1.0, connected: true },
+            ..Default::default()
+        };
 
         // All low
         {

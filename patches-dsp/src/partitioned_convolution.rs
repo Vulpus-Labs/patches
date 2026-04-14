@@ -835,11 +835,10 @@ mod tests {
         let mut output = vec![0.0f32; block_size];
         conv.process_block(&input, &mut output);
 
-        for i in 0..block_size {
+        for (i, &v) in output.iter().enumerate().take(block_size) {
             assert!(
-                (output[i] - 1.0).abs() < 1e-3,
-                "sample {i}: got {} expected 1.0",
-                output[i],
+                (v - 1.0).abs() < 1e-3,
+                "sample {i}: got {v} expected 1.0",
             );
         }
     }
@@ -1002,11 +1001,10 @@ mod tests {
         let mut output = vec![0.0f32; block_size];
         conv.process_block(&input, &mut output);
 
-        for i in 0..block_size {
+        for (i, &v) in output.iter().enumerate().take(block_size) {
             assert!(
-                (output[i] - 1.0).abs() < 1e-3,
-                "sample {i}: got {} expected 1.0",
-                output[i],
+                (v - 1.0).abs() < 1e-3,
+                "sample {i}: got {v} expected 1.0",
             );
         }
     }
@@ -1078,11 +1076,10 @@ mod tests {
         }
 
         // Samples before `delay` should be zero.
-        for i in 0..delay {
+        for (i, &v) in all_output.iter().enumerate().take(delay) {
             assert!(
-                all_output[i].abs() < 1e-6,
-                "expected zero at sample {i}, got {}",
-                all_output[i]
+                v.abs() < 1e-6,
+                "expected zero at sample {i}, got {v}"
             );
         }
         // Sample at `delay` should be non-zero.
@@ -1142,11 +1139,10 @@ mod tests {
         }
 
         // Samples 0..delay must be zero
-        for i in 0..delay {
+        for (i, &v) in all_output.iter().enumerate().take(delay) {
             assert!(
-                all_output[i].abs() < 1e-6,
-                "sample {i}: expected silence before delay, got {}",
-                all_output[i]
+                v.abs() < 1e-6,
+                "sample {i}: expected silence before delay, got {v}"
             );
         }
         // Sample at exactly `delay` must be the impulse

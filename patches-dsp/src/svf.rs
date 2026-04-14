@@ -504,11 +504,10 @@ mod tests {
         for i in 0..4096_usize {
             let x = if i % 2 == 0 { 1.0_f32 } else { -1.0_f32 };
             let (_, hp, _) = kernel.tick(x);
-            if i > 2048 {
-                if hp.abs() > peak {
+            if i > 2048
+                && hp.abs() > peak {
                     peak = hp.abs();
                 }
-            }
         }
         // Chamberlin SVF HP at Nyquist should be in passband (> 0.5) but may overshoot
         assert!(
@@ -549,7 +548,7 @@ mod tests {
     fn t5_stability_adsr_fm_sweep_high_q() {
         let q_norm = 0.95_f32;
         let base_cutoff_voct = 6.0_f32; // ~1047 Hz
-        let c0_freq = 16.351_597_8_f32;
+        let c0_freq = 16.351_599_f32;
 
         let d = q_to_damp(q_norm);
         let base_fc = (c0_freq * base_cutoff_voct.exp2()).clamp(1.0, SAMPLE_RATE * 0.499);
@@ -593,7 +592,7 @@ mod tests {
     fn t5_poly_stability_adsr_fm_sweep_high_q() {
         let q_norm = 0.95_f32;
         let base_cutoff_voct = 6.0_f32;
-        let c0_freq = 16.351_597_8_f32;
+        let c0_freq = 16.351_599_f32;
 
         let d = q_to_damp(q_norm);
         let base_fc = (c0_freq * base_cutoff_voct.exp2()).clamp(1.0, SAMPLE_RATE * 0.499);
@@ -925,22 +924,20 @@ mod tests {
 
         // Bins below 100 Hz: bin <= 2
         let low_end = (100.0 * fft_size as f32 / SAMPLE_RATE).floor() as usize; // 2
-        for bin in 1..=low_end {
+        for (bin, &v) in response_db.iter().enumerate().take(low_end + 1).skip(1) {
             assert!(
-                response_db[bin] <= peak_db - 12.0,
-                "bin {} at {:.1} dB should be at least 12 dB below peak {:.1} dB",
-                bin, response_db[bin], peak_db
+                v <= peak_db - 12.0,
+                "bin {bin} at {v:.1} dB should be at least 12 dB below peak {peak_db:.1} dB"
             );
         }
 
         // Bins above 10 kHz: bin >= 214
         let high_start = (10_000.0 * fft_size as f32 / SAMPLE_RATE).ceil() as usize; // 214
         let nyquist_bin = fft_size / 2;
-        for bin in high_start..=nyquist_bin {
+        for (bin, &v) in response_db.iter().enumerate().take(nyquist_bin + 1).skip(high_start) {
             assert!(
-                response_db[bin] <= peak_db - 12.0,
-                "bin {} at {:.1} dB should be at least 12 dB below peak {:.1} dB",
-                bin, response_db[bin], peak_db
+                v <= peak_db - 12.0,
+                "bin {bin} at {v:.1} dB should be at least 12 dB below peak {peak_db:.1} dB"
             );
         }
     }

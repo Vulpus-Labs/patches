@@ -647,7 +647,7 @@ mod tests {
             let out = interp.read(&buf, offset);
             assert!(out.is_finite(), "output not finite at sample {i}: {out}");
             assert!(
-                out >= -2.0 && out <= 2.0,
+                (-2.0..=2.0).contains(&out),
                 "output out of bounds at sample {i}: {out}"
             );
         }

@@ -504,7 +504,7 @@ mod tests {
         let sig = sine_signal(440.0, 44100.0, 100);
         assert_eq!(sig.len(), 100);
         for &v in &sig {
-            assert!(v >= -1.0 && v <= 1.0, "sine sample out of range: {v}");
+            assert!((-1.0..=1.0).contains(&v), "sine sample out of range: {v}");
         }
     }
 

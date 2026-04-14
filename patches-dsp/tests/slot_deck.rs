@@ -368,7 +368,7 @@ fn slow_processor_degrades_gracefully() {
         // Only process every 3rd frame — simulate slow processor
         while let Some(slot) = handle.pop() {
             frame_count += 1;
-            if frame_count % 3 == 0 {
+            if frame_count.is_multiple_of(3) {
                 let _ = handle.push(slot);
             }
             // Frames not pushed back are dropped — the buffer is lost.

@@ -455,9 +455,10 @@ mod tests {
         let mut ready = stale.rebuild(&plan, 32);
 
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cable_pool = CablePool::new(&mut bufs, 0);
-        ready.tick(&mut cable_pool);
-        drop(cable_pool);
+        {
+            let mut cable_pool = CablePool::new(&mut bufs, 0);
+            ready.tick(&mut cable_pool);
+        }
 
         assert!(
             matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 0.5).abs() < 1e-12),
@@ -485,9 +486,10 @@ mod tests {
         let mut ready2 = stale.rebuild(&plan2, 32);
 
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cable_pool = CablePool::new(&mut bufs, 0);
-        ready2.tick(&mut cable_pool);
-        drop(cable_pool);
+        {
+            let mut cable_pool = CablePool::new(&mut bufs, 0);
+            ready2.tick(&mut cable_pool);
+        }
 
         assert!(
             matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 2.0).abs() < 1e-12),

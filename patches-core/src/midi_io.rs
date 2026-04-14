@@ -175,8 +175,8 @@ mod tests {
     fn make_frame(events: &[MidiEvent], total_count: usize) -> [f32; 16] {
         let mut frame = [0.0f32; 16];
         let packed = events.len().min(MidiFrame::MAX_EVENTS);
-        for i in 0..packed {
-            MidiFrame::write_event(&mut frame, i, events[i]);
+        for (i, &ev) in events.iter().enumerate().take(packed) {
+            MidiFrame::write_event(&mut frame, i, ev);
         }
         MidiFrame::set_event_count(&mut frame, total_count);
         frame

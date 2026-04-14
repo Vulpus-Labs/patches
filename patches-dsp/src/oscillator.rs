@@ -207,11 +207,11 @@ mod tests {
             for m in monos.iter_mut() { m.advance(); }
             poly.advance_all();
 
-            for v in 0..16 {
+            for (v, (pp, mm)) in poly.phases.iter().zip(monos.iter()).enumerate() {
                 assert_eq!(
-                    poly.phases[v].to_bits(), monos[v].phase.to_bits(),
-                    "voice {v} step {step}: poly={} mono={}",
-                    poly.phases[v], monos[v].phase
+                    pp.to_bits(), mm.phase.to_bits(),
+                    "voice {v} step {step}: poly={pp} mono={}",
+                    mm.phase
                 );
             }
         }
@@ -232,10 +232,10 @@ mod tests {
         poly.reset(3);
 
         assert_eq!(poly.phases[3], 0.0, "voice 3 should be reset");
-        for v in 0..16 {
+        for (v, (&pp, &pb)) in poly.phases.iter().zip(phases_before.iter()).enumerate() {
             if v != 3 {
                 assert_eq!(
-                    poly.phases[v], phases_before[v],
+                    pp, pb,
                     "voice {v} should be unaffected by resetting voice 3"
                 );
             }

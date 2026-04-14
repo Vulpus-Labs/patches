@@ -299,7 +299,7 @@ mod tests {
         );
         h.disconnect_all_inputs();
         for v in h.run_mono(period, "saw_up") {
-            assert!(v >= 0.0 && v <= 1.0, "unipolar_positive saw_up must be in [0, 1]; got {v}");
+            assert!((0.0..=1.0).contains(&v), "unipolar_positive saw_up must be in [0, 1]; got {v}");
         }
     }
 
@@ -318,7 +318,7 @@ mod tests {
             h.tick();
             let cycle_value = h.read_mono("random");
             assert!(
-                cycle_value >= 0.0 && cycle_value <= 1.0,
+                (0.0..=1.0).contains(&cycle_value),
                 "random output must be in [0, 1] in unipolar_positive mode; got {cycle_value}"
             );
             for _ in 1..(period - 1) {

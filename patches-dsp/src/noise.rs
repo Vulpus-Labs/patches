@@ -143,7 +143,7 @@ mod tests {
         // Uniform distribution on [-1, 1] has variance 1/3 ≈ 0.333.
         // Allow generous bounds due to non-uniform xorshift output.
         assert!(
-            variance >= 0.2 && variance <= 0.4,
+            (0.2..=0.4).contains(&variance),
             "white noise variance {variance} must be in [0.2, 0.4]"
         );
     }

@@ -185,102 +185,6 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
-#[cfg(test)]
-mod tests {
-    use std::any::Any;
-    use std::sync::{Arc, Mutex};
-
-    use patches_core::{AudioEnvironment, InstanceId, Module, ModuleDescriptor, ModuleShape};
-    use patches_core::parameter_map::ParameterMap;
-
-    use super::CleanupAction;
-
-    struct ThreadIdDropSpy {
-        instance_id: InstanceId,
-        descriptor: ModuleDescriptor,
-        drop_thread: Arc<Mutex<Option<String>>>,
-    }
-
-    impl ThreadIdDropSpy {
-        fn new(drop_thread: Arc<Mutex<Option<String>>>) -> Self {
-            Self {
-                instance_id: InstanceId::next(),
-                descriptor: ModuleDescriptor {
-                    module_name: "ThreadIdDropSpy",
-                    shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-                    inputs: vec![],
-                    outputs: vec![],
-                    parameters: vec![],
-                },
-                drop_thread,
-            }
-        }
-    }
-
-    impl Drop for ThreadIdDropSpy {
-        fn drop(&mut self) {
-            let name = std::thread::current().name().map(str::to_owned);
-            *self.drop_thread.lock().unwrap() = name;
-        }
-    }
-
-    impl Module for ThreadIdDropSpy {
-        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "ThreadIdDropSpy",
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-                inputs: vec![],
-                outputs: vec![],
-                parameters: vec![],
-            }
-        }
-
-        fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
-            Self {
-                instance_id,
-                descriptor,
-                drop_thread: Arc::new(Mutex::new(None)),
-            }
-        }
-
-        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
-
-        fn descriptor(&self) -> &ModuleDescriptor {
-            &self.descriptor
-        }
-
-        fn instance_id(&self) -> InstanceId {
-            self.instance_id
-        }
-
-        fn process(&mut self, _pool: &mut patches_core::CablePool<'_>) {}
-
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-    }
-
-    /// The cleanup channel and thread can be exercised in isolation without CPAL.
-    ///
-    /// A `ThreadIdDropSpy` wrapped in `CleanupAction::DropModule` must be dropped
-    /// on the thread named `"patches-cleanup"`, not on the test thread.
-    #[test]
-    fn tombstoned_module_dropped_on_cleanup_thread() {
-        let drop_thread: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let spy = Box::new(ThreadIdDropSpy::new(Arc::clone(&drop_thread)));
-        let (mut tx, rx) = rtrb::RingBuffer::<CleanupAction>::new(16);
-
-        let handle = crate::kernel::spawn_cleanup_thread(rx).unwrap();
-
-        tx.push(CleanupAction::DropModule(spy)).unwrap();
-        drop(tx); // abandon producer → cleanup thread exits
-        handle.join().unwrap();
-
-        let recorded = drop_thread.lock().unwrap().clone();
-        assert_eq!(recorded, Some("patches-cleanup".to_owned()));
-    }
-}
-
 /// Drives an [`ExecutionPlan`] continuously, writing stereo output to the
 /// default hardware audio device via CPAL.
 ///
@@ -595,5 +499,101 @@ impl SoundEngine {
     /// wall-clock event timestamps to sample positions.
     pub fn clock(&self) -> Arc<AudioClock> {
         Arc::clone(&self.clock)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::sync::{Arc, Mutex};
+
+    use patches_core::{AudioEnvironment, InstanceId, Module, ModuleDescriptor, ModuleShape};
+    use patches_core::parameter_map::ParameterMap;
+
+    use super::CleanupAction;
+
+    struct ThreadIdDropSpy {
+        instance_id: InstanceId,
+        descriptor: ModuleDescriptor,
+        drop_thread: Arc<Mutex<Option<String>>>,
+    }
+
+    impl ThreadIdDropSpy {
+        fn new(drop_thread: Arc<Mutex<Option<String>>>) -> Self {
+            Self {
+                instance_id: InstanceId::next(),
+                descriptor: ModuleDescriptor {
+                    module_name: "ThreadIdDropSpy",
+                    shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                    inputs: vec![],
+                    outputs: vec![],
+                    parameters: vec![],
+                },
+                drop_thread,
+            }
+        }
+    }
+
+    impl Drop for ThreadIdDropSpy {
+        fn drop(&mut self) {
+            let name = std::thread::current().name().map(str::to_owned);
+            *self.drop_thread.lock().unwrap() = name;
+        }
+    }
+
+    impl Module for ThreadIdDropSpy {
+        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
+            ModuleDescriptor {
+                module_name: "ThreadIdDropSpy",
+                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                inputs: vec![],
+                outputs: vec![],
+                parameters: vec![],
+            }
+        }
+
+        fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+            Self {
+                instance_id,
+                descriptor,
+                drop_thread: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+
+        fn descriptor(&self) -> &ModuleDescriptor {
+            &self.descriptor
+        }
+
+        fn instance_id(&self) -> InstanceId {
+            self.instance_id
+        }
+
+        fn process(&mut self, _pool: &mut patches_core::CablePool<'_>) {}
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// The cleanup channel and thread can be exercised in isolation without CPAL.
+    ///
+    /// A `ThreadIdDropSpy` wrapped in `CleanupAction::DropModule` must be dropped
+    /// on the thread named `"patches-cleanup"`, not on the test thread.
+    #[test]
+    fn tombstoned_module_dropped_on_cleanup_thread() {
+        let drop_thread: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let spy = Box::new(ThreadIdDropSpy::new(Arc::clone(&drop_thread)));
+        let (mut tx, rx) = rtrb::RingBuffer::<CleanupAction>::new(16);
+
+        let handle = crate::kernel::spawn_cleanup_thread(rx).unwrap();
+
+        tx.push(CleanupAction::DropModule(spy)).unwrap();
+        drop(tx); // abandon producer → cleanup thread exits
+        handle.join().unwrap();
+
+        let recorded = drop_thread.lock().unwrap().clone();
+        assert_eq!(recorded, Some("patches-cleanup".to_owned()));
     }
 }

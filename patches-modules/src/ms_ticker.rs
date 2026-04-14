@@ -144,7 +144,7 @@ mod tests {
             }
         }
         // 2000 / 441 ≈ 4.53, so expect 4 triggers
-        assert!(trigger_count >= 4 && trigger_count <= 5,
+        assert!((4..=5).contains(&trigger_count),
             "expected 4-5 triggers in 2000 samples at 10ms, got {trigger_count}");
     }
 
@@ -168,9 +168,9 @@ mod tests {
             }
         }
         // Approximately half should be high, half low (±2 for boundary)
-        assert!((gate_high as i32 - 100).abs() <= 2,
+        assert!((gate_high - 100_i32).abs() <= 2,
             "expected ~100 gate-high samples, got {gate_high}");
-        assert!((gate_low as i32 - 100).abs() <= 2,
+        assert!((gate_low - 100_i32).abs() <= 2,
             "expected ~100 gate-low samples, got {gate_low}");
     }
 
@@ -210,7 +210,7 @@ mod tests {
             }
         }
         // 500 samples / (5ms * 44.1 samples/ms) ≈ 500/220.5 ≈ 2.27 → expect 2-3
-        assert!(triggers_in_window >= 1 && triggers_in_window <= 4,
+        assert!((1..=4).contains(&triggers_in_window),
             "expected 2-3 triggers after interval change, got {triggers_in_window}");
     }
 
