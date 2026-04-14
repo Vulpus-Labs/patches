@@ -17,8 +17,19 @@ use crate::ast::{
 use crate::ast::{PatternDef, Step, StepOrGenerator};
 use crate::flat::{
     FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatPortRef,
-    FlatSongDef, PortDirection,
+    FlatSongDef, FlatSongRow, PatternIdx, PortDirection,
 };
+
+/// A song whose rows still carry [`SongCell`] values; resolved to
+/// [`FlatSongDef`] once all patterns are known (see [`resolve_songs`]).
+#[derive(Debug)]
+struct AssembledSong {
+    name: QName,
+    channels: Vec<Ident>,
+    rows: Vec<SongRow>,
+    loop_point: Option<usize>,
+    span: Span,
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -90,8 +101,10 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         file.patterns.iter().map(|p| expand_pattern_def(p, None)).collect();
     patterns.extend(result.patterns);
 
-    // Flatten top-level songs.
-    let mut songs: Vec<FlatSongDef> = Vec::new();
+    // Flatten top-level songs. Rows still carry raw `SongCell`s — resolution
+    // to pattern indices happens after all inline patterns are collected so
+    // the name→index map is complete.
+    let mut songs: Vec<AssembledSong> = Vec::new();
     for song in &file.songs {
         let (flat, inline_patterns) =
             flatten_song(song, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
@@ -100,16 +113,82 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     }
     songs.extend(result.songs);
 
+    // Canonicalise: sort patterns alphabetically by qualified name so that
+    // `FlatPatch::patterns` has a stable, deterministic order irrespective of
+    // template expansion order. `resolve_songs` emits indices into this
+    // sorted list.
+    patterns.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let resolved_songs = resolve_songs(&patterns, songs)?;
+
     Ok(ExpandResult {
         patch: FlatPatch {
             modules: result.modules,
             connections: result.connections,
             patterns,
-            songs,
+            songs: resolved_songs,
             port_refs: result.port_refs,
         },
         warnings: vec![],
     })
+}
+
+/// Final post-pass: convert each [`AssembledSong`] row to a [`FlatSongRow`]
+/// with pattern indices into `patterns`. Errors if a cell references an
+/// unknown pattern, or if a `ParamRef` survived expansion (which would
+/// indicate an expansion bug).
+fn resolve_songs(
+    patterns: &[FlatPatternDef],
+    songs: Vec<AssembledSong>,
+) -> Result<Vec<FlatSongDef>, ExpandError> {
+    let name_to_idx: HashMap<String, PatternIdx> = patterns
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.name.to_string(), i))
+        .collect();
+
+    let mut out = Vec::with_capacity(songs.len());
+    for song in songs {
+        let mut rows = Vec::with_capacity(song.rows.len());
+        for row in song.rows {
+            let mut cells = Vec::with_capacity(row.cells.len());
+            for cell in row.cells {
+                match cell {
+                    SongCell::Silence => cells.push(None),
+                    SongCell::Pattern(ident) => match name_to_idx.get(&ident.name) {
+                        Some(&idx) => cells.push(Some(idx)),
+                        None => {
+                            return Err(ExpandError {
+                                span: ident.span,
+                                message: format!(
+                                    "song '{}': pattern '{}' not found",
+                                    song.name, ident.name,
+                                ),
+                            });
+                        }
+                    },
+                    SongCell::ParamRef { name, span } => {
+                        return Err(ExpandError {
+                            span,
+                            message: format!(
+                                "song '{}': unresolved `<{}>` param reference after expansion",
+                                song.name, name,
+                            ),
+                        });
+                    }
+                }
+            }
+            rows.push(FlatSongRow { cells, span: row.span });
+        }
+        out.push(FlatSongDef {
+            name: song.name,
+            channels: song.channels,
+            rows,
+            loop_point: song.loop_point,
+            span: song.span,
+        });
+    }
+    Ok(out)
 }
 
 /// Expand a `PatternDef` by resolving all slide generators into concrete steps.
@@ -306,7 +385,7 @@ fn flatten_song(
     param_env: &HashMap<String, Scalar>,
     param_types: &HashMap<String, ParamType>,
     parent_scope: &NameScope<'_>,
-) -> Result<(FlatSongDef, Vec<FlatPatternDef>), ExpandError> {
+) -> Result<(AssembledSong, Vec<FlatPatternDef>), ExpandError> {
     let song_ns = qualify(namespace, &song.name.name);
 
     // Pass 1: collect song-local sections and inline patterns, flagging dups.
@@ -415,7 +494,7 @@ fn flatten_song(
         .collect();
 
     Ok((
-        FlatSongDef {
+        AssembledSong {
             name: song_ns,
             channels: song.lanes.clone(),
             rows,
@@ -582,7 +661,7 @@ struct BodyResult {
     /// Port maps (only meaningful when this result comes from a template body).
     ports: TemplatePorts,
     /// Songs defined inside the body (collected from templates).
-    songs: Vec<FlatSongDef>,
+    songs: Vec<AssembledSong>,
     /// Patterns defined inside the body (collected from templates).
     patterns: Vec<FlatPatternDef>,
     /// Port references made at template boundaries; bubbled up for interpreter
@@ -875,7 +954,7 @@ impl<'a> Expander<'a> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
         let mut instance_ports: HashMap<String, TemplatePorts> = HashMap::new();
-        let mut songs: Vec<FlatSongDef> = Vec::new();
+        let mut songs: Vec<AssembledSong> = Vec::new();
         let mut patterns: Vec<FlatPatternDef> = Vec::new();
         let mut port_refs: Vec<FlatPortRef> = Vec::new();
 

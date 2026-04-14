@@ -3,6 +3,17 @@
 //! These mirror the structure of `patches_dsl::ast` but use `Option<T>` for
 //! fields that may be absent due to parse errors in incomplete source. They
 //! are independent of `patches-dsl` — no shared types.
+//!
+//! # Staying in sync with `patches_dsl::ast`
+//!
+//! This AST is intentionally a *tolerant mirror* of `patches_dsl::ast`. Shape
+//! parity is not required (the LSP uses `Option` fields, collapses some
+//! variants, and omits blocks it does not yet analyse), but the **set of
+//! kinds** the LSP can reason about should track the DSL as it grows. Any new
+//! variant added to a DSL enum should either gain an LSP counterpart or be
+//! explicitly marked as "not mirrored" in the drift tests at the bottom of
+//! this file. Those tests use exhaustive `match` on DSL enums, so a new DSL
+//! variant is a hard compile error here until triaged.
 
 /// Byte-offset range into the source string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,4 +292,197 @@ pub(crate) struct File {
     pub songs: Vec<SongBlock>,
     pub patch: Option<Patch>,
     pub span: Span,
+}
+
+// ─── Drift check ────────────────────────────────────────────────────────────
+//
+// Each test exhaustively matches a DSL enum. If a variant is added to the DSL
+// without touching this file, the build fails here — forcing triage:
+//   * add an LSP counterpart, or
+//   * mark the variant as "not mirrored — intentional" in the arm.
+//
+// The assertions are purely compile-time (patterns, not values); the tests
+// themselves just call the inner `_name` helpers to keep them exercised.
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod drift {
+    use patches_dsl::ast as dsl;
+
+    /// Map every DSL `Scalar` variant to its LSP counterpart name.
+    fn scalar_map(s: &dsl::Scalar) -> &'static str {
+        match s {
+            dsl::Scalar::Int(_) => "LSP: Scalar::Int",
+            dsl::Scalar::Float(_) => "LSP: Scalar::Float",
+            dsl::Scalar::Bool(_) => "LSP: Scalar::Bool",
+            dsl::Scalar::Str(_) => "LSP: Scalar::Str",
+            dsl::Scalar::ParamRef(_) => "LSP: Scalar::ParamRef",
+        }
+    }
+
+    fn value_map(v: &dsl::Value) -> &'static str {
+        match v {
+            dsl::Value::Scalar(_) => "LSP: Value::Scalar",
+            // LSP also carries Array/Table/File; DSL only has Scalar/File.
+            dsl::Value::File(_) => "LSP: Value::File",
+        }
+    }
+
+    fn shape_arg_value_map(v: &dsl::ShapeArgValue) -> &'static str {
+        match v {
+            dsl::ShapeArgValue::Scalar(_) => "LSP: ShapeArgValue::Scalar",
+            dsl::ShapeArgValue::AliasList(_) => "LSP: ShapeArgValue::AliasList",
+        }
+    }
+
+    fn param_index_map(p: &dsl::ParamIndex) -> &'static str {
+        match p {
+            dsl::ParamIndex::Literal(_) => "LSP: ParamIndex::Literal",
+            dsl::ParamIndex::Arity(_) => "LSP: ParamIndex::Arity",
+            dsl::ParamIndex::Alias(_) => "LSP: ParamIndex::Alias",
+        }
+    }
+
+    fn at_block_index_map(i: &dsl::AtBlockIndex) -> &'static str {
+        match i {
+            dsl::AtBlockIndex::Literal(_) => "LSP: AtBlockIndex::Literal",
+            dsl::AtBlockIndex::Alias(_) => "LSP: AtBlockIndex::Alias",
+        }
+    }
+
+    fn param_entry_map(p: &dsl::ParamEntry) -> &'static str {
+        match p {
+            dsl::ParamEntry::KeyValue { .. } => "LSP: ParamEntry::KeyValue",
+            dsl::ParamEntry::Shorthand(_) => "LSP: ParamEntry::Shorthand",
+            dsl::ParamEntry::AtBlock { .. } => "LSP: ParamEntry::AtBlock",
+        }
+    }
+
+    fn port_label_map(p: &dsl::PortLabel) -> &'static str {
+        match p {
+            dsl::PortLabel::Literal(_) => "LSP: PortLabel::Literal",
+            dsl::PortLabel::Param(_) => "LSP: PortLabel::Param",
+        }
+    }
+
+    fn port_index_map(p: &dsl::PortIndex) -> &'static str {
+        match p {
+            dsl::PortIndex::Literal(_) => "LSP: PortIndex::Literal",
+            dsl::PortIndex::Alias(_) => "LSP: PortIndex::Alias",
+            dsl::PortIndex::Arity(_) => "LSP: PortIndex::Arity",
+        }
+    }
+
+    fn direction_map(d: &dsl::Direction) -> &'static str {
+        match d {
+            dsl::Direction::Forward => "LSP: Direction::Forward",
+            dsl::Direction::Backward => "LSP: Direction::Backward",
+        }
+    }
+
+    fn statement_map(s: &dsl::Statement) -> &'static str {
+        match s {
+            dsl::Statement::Module(_) => "LSP: Statement::Module",
+            dsl::Statement::Connection(_) => "LSP: Statement::Connection",
+            dsl::Statement::Song(_) =>
+                "LSP: not mirrored — nested song defs surface via File::songs",
+            dsl::Statement::Pattern(_) =>
+                "LSP: not mirrored — nested pattern defs surface via File::patterns",
+        }
+    }
+
+    fn param_type_map(t: &dsl::ParamType) -> &'static str {
+        match t {
+            dsl::ParamType::Float => "LSP: ParamType::Float",
+            dsl::ParamType::Int => "LSP: ParamType::Int",
+            dsl::ParamType::Bool => "LSP: ParamType::Bool",
+            dsl::ParamType::Str => "LSP: ParamType::Str",
+            dsl::ParamType::Pattern =>
+                "LSP: not mirrored — pattern-typed template params are resolved during expansion",
+            dsl::ParamType::Song =>
+                "LSP: not mirrored — song-typed template params are resolved during expansion",
+        }
+    }
+
+    fn step_or_generator_map(s: &dsl::StepOrGenerator) -> &'static str {
+        match s {
+            dsl::StepOrGenerator::Step(_) => "LSP: collapsed — pattern channel step_count only",
+            dsl::StepOrGenerator::Slide { .. } => "LSP: collapsed — pattern channel step_count only",
+        }
+    }
+
+    fn song_cell_map(c: &dsl::SongCell) -> &'static str {
+        match c {
+            dsl::SongCell::Silence => "LSP: SongCellRef { is_silence: true }",
+            dsl::SongCell::Pattern(_) => "LSP: SongCellRef { name: Some(_), is_silence: false }",
+            dsl::SongCell::ParamRef { .. } =>
+                "LSP: not mirrored — param refs collapse to a missing name in SongCellRef",
+        }
+    }
+
+    fn row_group_map(r: &dsl::RowGroup) -> &'static str {
+        match r {
+            dsl::RowGroup::Row(_) => "LSP: SongRow (flattened — LSP does not model repeat groups)",
+            dsl::RowGroup::Repeat { .. } =>
+                "LSP: not mirrored — repeat groups are flattened in ast_builder",
+        }
+    }
+
+    fn play_atom_map(p: &dsl::PlayAtom) -> &'static str {
+        match p {
+            dsl::PlayAtom::Ref(_) =>
+                "LSP: not mirrored — play/section composition is outside the LSP semantic model",
+            dsl::PlayAtom::Group(_) =>
+                "LSP: not mirrored — play/section composition is outside the LSP semantic model",
+        }
+    }
+
+    fn play_body_map(p: &dsl::PlayBody) -> &'static str {
+        match p {
+            dsl::PlayBody::Inline { .. } =>
+                "LSP: not mirrored — play/section composition is outside the LSP semantic model",
+            dsl::PlayBody::NamedInline { .. } =>
+                "LSP: not mirrored — play/section composition is outside the LSP semantic model",
+            dsl::PlayBody::Expr(_) =>
+                "LSP: not mirrored — play/section composition is outside the LSP semantic model",
+        }
+    }
+
+    fn song_item_map(s: &dsl::SongItem) -> &'static str {
+        match s {
+            dsl::SongItem::Section(_) =>
+                "LSP: not mirrored — sections are flattened into SongBlock::rows",
+            dsl::SongItem::Pattern(_) =>
+                "LSP: not mirrored — inline song-local patterns are not surfaced",
+            dsl::SongItem::Play(_) =>
+                "LSP: not mirrored — play statements are not surfaced",
+            dsl::SongItem::LoopMarker(_) => "LSP: SongRow::is_loop_point",
+        }
+    }
+
+    #[test]
+    fn drift_maps_compile() {
+        // The real test is the exhaustive `match` in each helper — if a DSL
+        // variant is added, this module fails to compile.  The body here
+        // only has to reference the helpers so they aren't dead-code-pruned.
+        let _ = [
+            scalar_map as fn(&_) -> _ as usize,
+            value_map as fn(&_) -> _ as usize,
+            shape_arg_value_map as fn(&_) -> _ as usize,
+            param_index_map as fn(&_) -> _ as usize,
+            at_block_index_map as fn(&_) -> _ as usize,
+            param_entry_map as fn(&_) -> _ as usize,
+            port_label_map as fn(&_) -> _ as usize,
+            port_index_map as fn(&_) -> _ as usize,
+            direction_map as fn(&_) -> _ as usize,
+            statement_map as fn(&_) -> _ as usize,
+            param_type_map as fn(&_) -> _ as usize,
+            step_or_generator_map as fn(&_) -> _ as usize,
+            song_cell_map as fn(&_) -> _ as usize,
+            row_group_map as fn(&_) -> _ as usize,
+            play_atom_map as fn(&_) -> _ as usize,
+            play_body_map as fn(&_) -> _ as usize,
+            song_item_map as fn(&_) -> _ as usize,
+        ];
+    }
 }

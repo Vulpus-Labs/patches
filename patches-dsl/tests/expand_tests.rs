@@ -1320,12 +1320,8 @@ fn song_in_template_namespaced() {
     assert_eq!(flat.songs[0].name.to_string(), "v/my_song");
 
     // The song cell should resolve <pat> to the file-level "kick".
-    let cell = &flat.songs[0].rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "kick"),
-        "song cell should resolve to file-level pattern 'kick', got {:?}",
-        cell,
-    );
+    let idx = flat.songs[0].rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "kick");
 
     // The module param `song: my_song` should be namespaced to `v/my_song`.
     let seq = find_module(&flat, "v/seq");
@@ -1364,12 +1360,8 @@ fn pattern_in_template_namespaced() {
     assert_eq!(flat.patterns[0].name, "d/local_kick");
 
     // Song cell resolves to namespaced pattern.
-    let cell = &flat.songs[0].rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "d/local_kick"),
-        "song cell should resolve to 'd/local_kick', got {:?}",
-        cell,
-    );
+    let idx = flat.songs[0].rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "d/local_kick");
 }
 
 #[test]
@@ -1425,21 +1417,13 @@ fn nested_template_scoping() {
 
     // outer_song's cell should resolve to o/foo (outer's local pattern).
     let outer_song = flat.songs.iter().find(|s| s.name == "o/outer_song").unwrap();
-    let cell = &outer_song.rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/foo"),
-        "outer_song cell should be 'o/foo', got {:?}",
-        cell,
-    );
+    let idx = outer_song.rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "o/foo");
 
     // inner_song's cell should resolve to o/i/foo (inner's local pattern).
     let inner_song = flat.songs.iter().find(|s| s.name == "o/i/inner_song").unwrap();
-    let cell = &inner_song.rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/i/foo"),
-        "inner_song cell should be 'o/i/foo', got {:?}",
-        cell,
-    );
+    let idx = inner_song.rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "o/i/foo");
 }
 
 #[test]
@@ -1469,12 +1453,8 @@ fn template_song_cell_resolves_to_outer_scope() {
     let flat = parse_expand(src);
 
     // global_beat is file-level, no namespacing.
-    let cell = &flat.songs[0].rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "global_beat"),
-        "should resolve to file-level 'global_beat', got {:?}",
-        cell,
-    );
+    let idx = flat.songs[0].rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "global_beat");
 }
 
 // ─── Typed param enforcement ─────────────────────────────────────────────────
@@ -1622,10 +1602,6 @@ fn pattern_typed_param_accepts_known_pattern() {
         }
     "#;
     let flat = parse_expand(src);
-    let cell = &flat.songs[0].rows[0].cells[0];
-    assert!(
-        matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "kick"),
-        "should resolve to 'kick', got {:?}",
-        cell,
-    );
+    let idx = flat.songs[0].rows[0].cells[0].expect("cell should reference a pattern");
+    assert_eq!(flat.patterns[idx].name.to_string(), "kick");
 }

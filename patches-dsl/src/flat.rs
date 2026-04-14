@@ -1,6 +1,13 @@
 use patches_core::QName;
 
-use crate::ast::{Ident, Scalar, SongRow, Span, Step, Value};
+use crate::ast::{Ident, Scalar, Span, Step, Value};
+
+/// Index of a pattern within [`FlatPatch::patterns`].
+///
+/// Emitted by the expansion stage after all pattern names (template-qualified
+/// or file-level) have been resolved. Interpreter consumers index directly
+/// into the pattern list without rewalking song cells.
+pub type PatternIdx = usize;
 
 /// A concrete module instance with all template parameters resolved.
 #[derive(Debug, Clone)]
@@ -71,16 +78,25 @@ pub struct FlatPatternDef {
     pub span: Span,
 }
 
-/// A song definition with its name qualified by any enclosing scope.
+/// One row of a resolved song: `None` cells are silences, `Some(idx)` cells
+/// reference [`FlatPatch::patterns`] by position.
+#[derive(Debug, Clone)]
+pub struct FlatSongRow {
+    pub cells: Vec<Option<PatternIdx>>,
+    pub span: Span,
+}
+
+/// A song definition with its name qualified by any enclosing scope and all
+/// pattern references resolved to indices into [`FlatPatch::patterns`].
 ///
-/// Cells still carry plain [`SongCell`](crate::ast::SongCell) (with an
-/// [`Ident`] string for pattern references) — the expander resolves those
-/// strings to the fully-qualified pattern name via [`QName::to_string`].
+/// Resolution happens in the expansion stage, so downstream consumers never
+/// see raw [`SongCell`](crate::ast::SongCell) variants — in particular,
+/// `ParamRef` cells cannot appear after expansion.
 #[derive(Debug, Clone)]
 pub struct FlatSongDef {
     pub name: QName,
     pub channels: Vec<Ident>,
-    pub rows: Vec<SongRow>,
+    pub rows: Vec<FlatSongRow>,
     pub loop_point: Option<usize>,
     pub span: Span,
 }

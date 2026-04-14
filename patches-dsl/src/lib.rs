@@ -34,7 +34,10 @@ pub use ast::{
     Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
-pub use flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef};
+pub use flat::{
+    FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
+    FlatSongRow, PatternIdx,
+};
 pub use patches_core::QName;
 pub use include_frontier::{normalize_path, EnterResult, IncludeFrontier};
 pub use loader::{load_with, LoadError, LoadErrorKind, LoadResult};

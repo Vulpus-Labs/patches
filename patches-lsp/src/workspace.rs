@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use patches_core::Registry;
-use patches_dsl::include_frontier::{EnterResult, IncludeFrontier};
+use patches_dsl::include_frontier::{normalize_path, EnterResult, IncludeFrontier};
 use patches_modules::default_registry;
 use tower_lsp::lsp_types::*;
 use tree_sitter::{Parser, Tree};
@@ -391,14 +391,14 @@ impl DocumentWorkspace {
         let parent_dir = parent_path.parent().unwrap_or(std::path::Path::new("."));
 
         for inc in includes {
-            let resolved = parent_dir.join(&inc.path);
-            let resolved = match resolved.canonicalize() {
-                Ok(p) => p,
-                Err(_) => {
-                    diags.push((inc.span, format!("cannot read included file: {}", inc.path)));
-                    continue;
-                }
-            };
+            // Lexical normalisation only — does not touch the filesystem, so
+            // include targets that correspond to unsaved editor buffers still
+            // produce a usable URI.
+            let resolved = normalize_path(&parent_dir.join(&inc.path));
+            if !resolved.is_absolute() {
+                diags.push((inc.span, format!("include path did not resolve to an absolute path: {}", inc.path)));
+                continue;
+            }
 
             let inc_uri = match Url::from_file_path(&resolved) {
                 Ok(u) => u,
@@ -487,9 +487,9 @@ impl DocumentWorkspace {
                 if let Ok(doc_path) = uri.to_file_path() {
                     let doc_dir = doc_path.parent().unwrap_or(std::path::Path::new("."));
                     for child_inc in &file.includes {
-                        let child_resolved = doc_dir.join(&child_inc.path);
-                        if let Ok(canonical) = child_resolved.canonicalize() {
-                            if let Ok(child_uri) = Url::from_file_path(&canonical) {
+                        let child_resolved = normalize_path(&doc_dir.join(&child_inc.path));
+                        if child_resolved.is_absolute() {
+                            if let Ok(child_uri) = Url::from_file_path(&child_resolved) {
                                 if live.insert(child_uri.clone()) {
                                     queue.push(child_uri);
                                 }
@@ -540,9 +540,9 @@ fn direct_include_uris(
     };
     let parent_dir = parent_path.parent().unwrap_or(std::path::Path::new("."));
     for inc in includes {
-        let joined = parent_dir.join(&inc.path);
-        if let Ok(canon) = joined.canonicalize() {
-            if let Ok(u) = Url::from_file_path(&canon) {
+        let joined = normalize_path(&parent_dir.join(&inc.path));
+        if joined.is_absolute() {
+            if let Ok(u) = Url::from_file_path(&joined) {
                 out.insert(u);
             }
         }
@@ -820,6 +820,41 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("unknown module type")),
             "expected cascade to surface unknown-module on parent: {parent_diags:?}"
+        );
+    }
+
+    #[test]
+    fn editor_buffer_satisfies_include_without_disk_save() {
+        // The parent file exists on disk and includes "child.patches", but
+        // `child.patches` was never saved — only opened in the editor via
+        // `analyse`. The parent must still see the child's templates.
+        let tmp = TempDir::new("unsaved_include");
+        let parent_path = tmp.write(
+            "parent.patches",
+            "include \"child.patches\"\npatch { module inst : foo }\n",
+        );
+
+        let ws = DocumentWorkspace::new();
+
+        // Simulate the editor opening child.patches without saving — its
+        // source is only in memory. Use a path-based Url that does not
+        // require the file to exist on disk.
+        let child_logical = parent_path.parent().unwrap().join("child.patches");
+        let child_uri = Url::from_file_path(&child_logical).unwrap();
+        let child_src = "template foo(x: float) { in: a out: b module m : Osc }\n".to_string();
+        let _ = ws.analyse(&child_uri, child_src);
+
+        let parent_uri = tmp.uri("parent.patches");
+        let parent_src = std::fs::read_to_string(parent_uri.to_file_path().unwrap()).unwrap();
+        let diags = ws.analyse(&parent_uri, parent_src);
+
+        assert!(
+            !diags.iter().any(|d| d.message.contains("cannot read")),
+            "editor-buffered include should satisfy the parent: {diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("unknown module type")),
+            "template from editor buffer should be visible to parent: {diags:?}"
         );
     }
 

@@ -25,7 +25,7 @@ use patches_core::{
     PortRef,
     TrackerData, PatternBank, SongBank, Pattern, Song, TrackerStep,
 };
-use patches_dsl::ast::{Scalar, SongCell, Span, Value};
+use patches_dsl::ast::{Scalar, Span, Value};
 use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPortRef, PortDirection};
 
 /// An error produced during interpretation of a [`FlatPatch`].
@@ -145,19 +145,10 @@ fn build_tracker_data(
         return Ok(None);
     }
 
-    // Alphabetical bank-index mapping, keyed by `Display` of each pattern's QName.
-    let mut rendered_names: Vec<String> =
-        flat.patterns.iter().map(|p| p.name.to_string()).collect();
-    rendered_names.sort();
-    let name_to_index: HashMap<String, usize> = rendered_names
-        .into_iter()
-        .enumerate()
-        .map(|(i, name)| (name, i))
-        .collect();
-
-    let mut indexed_patterns: Vec<Option<Pattern>> = vec![None; flat.patterns.len()];
+    // Patterns Vec order follows `flat.patterns` positional order; expansion's
+    // `FlatSongRow` indices refer directly to this list.
+    let mut patterns: Vec<Pattern> = Vec::with_capacity(flat.patterns.len());
     for fp in &flat.patterns {
-        let bank_idx = name_to_index[&fp.name.to_string()];
         let max_steps = fp.channels.iter().map(|c| c.steps.len()).max().unwrap_or(0);
         let mut data = Vec::with_capacity(fp.channels.len());
         for ch in &fp.channels {
@@ -176,13 +167,19 @@ fn build_tracker_data(
             }
             data.push(steps);
         }
-        indexed_patterns[bank_idx] = Some(Pattern {
+        patterns.push(Pattern {
             channels: fp.channels.len(),
             steps: max_steps,
             data,
         });
     }
-    let patterns: Vec<Pattern> = indexed_patterns.into_iter().flatten().collect();
+
+    let pattern_display_name = |idx: usize| -> &str {
+        flat.patterns
+            .get(idx)
+            .map(|p| p.name.name.as_str())
+            .unwrap_or("?")
+    };
 
     // Convert DSL songs to runtime Songs (alphabetical order so that Vec
     // indices match the pre-computed song_name_to_index map in the caller).
@@ -190,36 +187,17 @@ fn build_tracker_data(
     sorted_song_defs.sort_by(|a, b| a.name.cmp(&b.name));
     let mut song_list: Vec<Song> = Vec::new();
     for song_def in &sorted_song_defs {
-        // Validate: every pattern name in the song must exist.
-        for (row_idx, row) in song_def.rows.iter().enumerate() {
-            for (col_idx, cell) in row.cells.iter().enumerate() {
-                if let SongCell::Pattern(ref pat_name) = cell {
-                    if !name_to_index.contains_key(pat_name.name.as_str()) {
-                        return Err(InterpretError {
-                            span: song_def.span,
-                            message: format!(
-                                "song '{}' row {} channel '{}': pattern '{}' not found",
-                                song_def.name,
-                                row_idx + 1,
-                                song_def.channels.get(col_idx).map_or("?", |c| &c.name),
-                                pat_name.name,
-                            ),
-                        });
-                    }
-                }
-            }
-        }
-
         // Validate: patterns within a single song column must have the same
-        // step count and channel count.
+        // step count and channel count. (Pattern existence is enforced in the
+        // expansion stage, so every `Some(idx)` is guaranteed to be in range.)
         for col_idx in 0..song_def.channels.len() {
             let col_name = &song_def.channels[col_idx].name;
             let mut col_step_count: Option<(usize, &str)> = None;
             let mut col_chan_count: Option<(usize, &str)> = None;
             for row in &song_def.rows {
-                if let Some(SongCell::Pattern(ref pat_name)) = row.cells.get(col_idx) {
-                    let bank_idx = name_to_index[pat_name.name.as_str()];
-                    let pat = &patterns[bank_idx];
+                if let Some(Some(idx)) = row.cells.get(col_idx) {
+                    let pat = &patterns[*idx];
+                    let pat_name = pattern_display_name(*idx);
                     if let Some((expected_steps, first_name)) = col_step_count {
                         if pat.steps != expected_steps {
                             return Err(InterpretError {
@@ -227,13 +205,13 @@ fn build_tracker_data(
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} steps but '{}' has {}",
                                     song_def.name, col_name,
-                                    pat_name.name, pat.steps,
+                                    pat_name, pat.steps,
                                     first_name, expected_steps,
                                 ),
                             });
                         }
                     } else {
-                        col_step_count = Some((pat.steps, &pat_name.name));
+                        col_step_count = Some((pat.steps, pat_name));
                     }
                     if let Some((expected_chans, first_name)) = col_chan_count {
                         if pat.channels != expected_chans {
@@ -242,26 +220,23 @@ fn build_tracker_data(
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} channels but '{}' has {}",
                                     song_def.name, col_name,
-                                    pat_name.name, pat.channels,
+                                    pat_name, pat.channels,
                                     first_name, expected_chans,
                                 ),
                             });
                         }
                     } else {
-                        col_chan_count = Some((pat.channels, &pat_name.name));
+                        col_chan_count = Some((pat.channels, pat_name));
                     }
                 }
             }
         }
 
-        let order: Vec<Vec<Option<usize>>> = song_def.rows.iter().map(|row| {
-            row.cells.iter().map(|cell| {
-                match cell {
-                    SongCell::Pattern(pat_name) => Some(name_to_index[pat_name.name.as_str()]),
-                    _ => None,
-                }
-            }).collect()
-        }).collect();
+        let order: Vec<Vec<Option<usize>>> = song_def
+            .rows
+            .iter()
+            .map(|row| row.cells.clone())
+            .collect();
 
         let song = Song {
             channels: song_def.channels.len(),
@@ -680,8 +655,9 @@ mod tests {
     use super::*;
     use patches_dsl::flat::{
         FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
+        FlatSongRow,
     };
-    use patches_dsl::ast::{Ident, Scalar, SongCell, SongRow, Span, Step, Value};
+    use patches_dsl::ast::{Ident, Scalar, Span, Step, Value};
 
     fn span() -> Span {
         Span { start: 0, end: 0 }
@@ -1081,9 +1057,12 @@ mod tests {
     }
 
     #[test]
-    fn pattern_bank_indices_are_alphabetical() {
+    fn pattern_bank_order_matches_flat_patterns() {
+        // Interpreter's invariant: `PatternBank.patterns` order mirrors
+        // `FlatPatch.patterns` order. Canonicalisation (alphabetical sort)
+        // is the expansion stage's responsibility; the interpreter just
+        // trusts whatever ordering it receives.
         let mut flat = empty_flat();
-        // Add patterns in non-alphabetical order.
         flat.patterns = vec![
             FlatPatternDef {
                 name: "charlie".into(),
@@ -1112,12 +1091,12 @@ mod tests {
         ];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();
-        // alpha=0, bravo=1, charlie=2
-        assert_eq!(td.patterns.patterns[0].steps, 1); // alpha: 1 step (rest)
-        assert!(!td.patterns.patterns[0].data[0][0].trigger);
-        assert_eq!(td.patterns.patterns[1].steps, 2); // bravo: 2 steps
-        assert_eq!(td.patterns.patterns[2].steps, 1); // charlie: 1 step (trigger)
-        assert!(td.patterns.patterns[2].data[0][0].trigger);
+        // Positional: charlie=0, alpha=1, bravo=2.
+        assert_eq!(td.patterns.patterns[0].steps, 1);
+        assert!(td.patterns.patterns[0].data[0][0].trigger); // charlie: trigger
+        assert_eq!(td.patterns.patterns[1].steps, 1);
+        assert!(!td.patterns.patterns[1].data[0][0].trigger); // alpha: rest
+        assert_eq!(td.patterns.patterns[2].steps, 2); // bravo
     }
 
     #[test]
@@ -1145,9 +1124,9 @@ mod tests {
             name: "my_song".into(),
             channels: vec![ident("drums")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("pat_a"))], span: span() },
-                SongRow { cells: vec![SongCell::Pattern(ident("pat_b"))], span: span() },
-                SongRow { cells: vec![SongCell::Silence], span: span() },
+                FlatSongRow { cells: vec![Some(0)], span: span() },
+                FlatSongRow { cells: vec![Some(1)], span: span() },
+                FlatSongRow { cells: vec![None], span: span() },
             ],
             loop_point: Some(1),
             span: span(),
@@ -1165,27 +1144,10 @@ mod tests {
         assert_eq!(song.loop_point, 1);
     }
 
-    #[test]
-    fn song_unknown_pattern_is_error() {
-        let mut flat = empty_flat();
-        flat.patterns = vec![FlatPatternDef {
-            name: "exists".into(),
-            channels: vec![FlatPatternChannel {
-                name: "ch".to_string(),
-                steps: vec![trigger_step()],
-            }],
-            span: span(),
-        }];
-        flat.songs = vec![FlatSongDef {
-            name: "song".into(),
-            channels: vec![ident("col")],
-            rows: vec![SongRow { cells: vec![SongCell::Pattern(ident("no_such_pattern"))], span: span() }],
-            loop_point: None,
-            span: Span { start: 10, end: 20 },
-        }];
-        let err = build(&flat, &registry(), &env()).unwrap_err();
-        assert!(err.message.contains("no_such_pattern"));
-    }
+    // Note: "unknown pattern" is enforced at expansion time now (every
+    // `FlatSongRow` cell is `Option<PatternIdx>` indexing into
+    // `FlatPatch::patterns`), so the check no longer lives in the interpreter.
+    // See `patches_dsl::expand::resolve_songs`.
 
     #[test]
     fn song_step_count_mismatch_is_error() {
@@ -1212,8 +1174,8 @@ mod tests {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("four_steps"))], span: span() },
-                SongRow { cells: vec![SongCell::Pattern(ident("two_steps"))], span: span() },
+                FlatSongRow { cells: vec![Some(0)], span: span() },
+                FlatSongRow { cells: vec![Some(1)], span: span() },
             ],
             loop_point: None,
             span: span(),
@@ -1247,8 +1209,8 @@ mod tests {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("one_ch"))], span: span() },
-                SongRow { cells: vec![SongCell::Pattern(ident("two_ch"))], span: span() },
+                FlatSongRow { cells: vec![Some(0)], span: span() },
+                FlatSongRow { cells: vec![Some(1)], span: span() },
             ],
             loop_point: None,
             span: span(),
