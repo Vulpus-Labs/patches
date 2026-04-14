@@ -59,67 +59,6 @@ patch {
           (param_entry (ident) (value (scalar (note_lit)))))))))
 
 ================================================================================
-Array params
-================================================================================
-
-patch {
-    module seq : Seq(length: 4) {
-        steps: [60, 62, 64, 65]
-    }
-}
-
---------------------------------------------------------------------------------
-
-(file
-  (patch
-    (statement
-      (module_decl
-        name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))
-        (param_block
-          (param_entry
-            (ident)
-            (value
-              (array
-                (value (scalar (int_lit)))
-                (value (scalar (int_lit)))
-                (value (scalar (int_lit)))
-                (value (scalar (int_lit)))))))))))
-
-================================================================================
-Table params
-================================================================================
-
-patch {
-    module pat : PatternSeq(length: 1) {
-        pattern: [
-            { note: 36, velocity: 1.0, gate: 0.5 }
-        ]
-    }
-}
-
---------------------------------------------------------------------------------
-
-(file
-  (patch
-    (statement
-      (module_decl
-        name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))
-        (param_block
-          (param_entry
-            (ident)
-            (value
-              (array
-                (value
-                  (table
-                    (table_entry (ident) (value (scalar (int_lit))))
-                    (table_entry (ident) (value (scalar (float_lit))))
-                    (table_entry (ident) (value (scalar (float_lit))))))))))))))
-
-================================================================================
 At-blocks
 ================================================================================
 
@@ -144,15 +83,15 @@ patch {
           (param_entry
             (at_block
               (at_block_index (ident))
-              (table
-                (table_entry (ident) (value (scalar (int_lit))))
-                (table_entry (ident) (value (scalar (float_lit)))))))
+              (at_block_body
+                (at_block_entry (ident) (value (scalar (int_lit))))
+                (at_block_entry (ident) (value (scalar (float_lit)))))))
           (param_entry
             (at_block
               (at_block_index (ident))
-              (table
-                (table_entry (ident) (value (scalar (int_lit))))
-                (table_entry (ident) (value (scalar (float_lit))))))))))))
+              (at_block_body
+                (at_block_entry (ident) (value (scalar (int_lit))))
+                (at_block_entry (ident) (value (scalar (float_lit))))))))))))
 
 ================================================================================
 Param references

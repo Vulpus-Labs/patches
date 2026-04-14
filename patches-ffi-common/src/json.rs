@@ -5,7 +5,6 @@
 //! `Box::leak`. This is intentional and bounded: one set of leaked strings per
 //! module type per library load.
 
-use std::sync::Arc;
 use patches_core::{
     CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind,
     ParameterMap, ParameterValue, PortDescriptor,
@@ -159,14 +158,6 @@ fn write_parameter_kind(out: &mut String, kind: &ParameterKind) {
         ParameterKind::SongName => {
             out.push_str("{\"type\":\"song_name\"}");
         }
-        ParameterKind::Array { default, length } => {
-            out.push_str(&format!("{{\"type\":\"array\",\"length\":{length},\"default\":["));
-            for (i, v) in default.iter().enumerate() {
-                if i > 0 { out.push(','); }
-                write_string(out, v);
-            }
-            out.push_str("]}");
-        }
     }
 }
 
@@ -223,14 +214,6 @@ fn write_parameter_value(out: &mut String, value: &ParameterValue) {
             // FloatBuffer is not serialized via JSON; it uses a binary sideband.
             // Write a placeholder so the JSON is valid.
             out.push_str("{\"type\":\"float_buffer\",\"v\":null}");
-        }
-        ParameterValue::Array(v) => {
-            out.push_str("{\"type\":\"array\",\"v\":[");
-            for (i, s) in v.iter().enumerate() {
-                if i > 0 { out.push(','); }
-                write_string(out, s);
-            }
-            out.push_str("]}");
         }
     }
 }
@@ -573,19 +556,6 @@ fn deserialize_parameter_kind(val: &JsonValue) -> Result<ParameterKind, String> 
             );
             Ok(ParameterKind::File { extensions })
         }
-        "array" => {
-            let length = val.get("length").and_then(|v| v.as_usize()).unwrap_or(0);
-            let default_arr = val.get("default")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| leak_str(s.to_string())))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let default = leak_static_slice(default_arr);
-            Ok(ParameterKind::Array { default, length })
-        }
         "song_name" => Ok(ParameterKind::SongName),
         other => Err(format!("unknown parameter kind: {other}")),
     }
@@ -636,13 +606,6 @@ fn deserialize_parameter_value(val: &JsonValue) -> Result<ParameterValue, String
             let v = val.get("v").and_then(|v| v.as_str()).ok_or("file missing v")?.to_string();
             Ok(ParameterValue::File(v))
         }
-        "array" => {
-            let arr = val.get("v").and_then(|v| v.as_array()).ok_or("array missing v")?;
-            let strings: Vec<String> = arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            Ok(ParameterValue::Array(Arc::from(strings)))
-        }
         other => Err(format!("unknown value type: {other}")),
     }
 }
@@ -682,7 +645,6 @@ mod tests {
                 ParameterDescriptor { name: "active", index: 0, parameter_type: ParameterKind::Bool { default: true } },
                 ParameterDescriptor { name: "voices", index: 0, parameter_type: ParameterKind::Int { min: 1, max: 8, default: 4 } },
                 ParameterDescriptor { name: "label", index: 0, parameter_type: ParameterKind::String { default: "default" } },
-                ParameterDescriptor { name: "steps", index: 0, parameter_type: ParameterKind::Array { default: &["C4", "E4"], length: 16 } },
             ],
         };
 
@@ -700,7 +662,7 @@ mod tests {
         assert_eq!(back.inputs[1].kind, CableKind::Poly);
         assert_eq!(back.outputs.len(), 1);
         assert_eq!(back.outputs[0].name, "out");
-        assert_eq!(back.parameters.len(), 6);
+        assert_eq!(back.parameters.len(), 5);
 
         // Float param
         match &back.parameters[0].parameter_type {
@@ -744,17 +706,6 @@ mod tests {
             ParameterKind::String { default } => assert_eq!(*default, "default"),
             other => panic!("expected String, got {other:?}"),
         }
-
-        // Array param
-        match &back.parameters[5].parameter_type {
-            ParameterKind::Array { default, length } => {
-                assert_eq!(*length, 16);
-                assert_eq!(default.len(), 2);
-                assert_eq!(default[0], "C4");
-                assert_eq!(default[1], "E4");
-            }
-            other => panic!("expected Array, got {other:?}"),
-        }
     }
 
     #[test]
@@ -766,9 +717,6 @@ mod tests {
         params.insert("voices".to_string(), ParameterValue::Int(6));
         params.insert("mode".to_string(), ParameterValue::Enum("log"));
         params.insert("path".to_string(), ParameterValue::String("/tmp/test.wav".to_string()));
-        params.insert("steps".to_string(), ParameterValue::Array(
-            vec!["C4".to_string(), "E4".to_string()].into(),
-        ));
 
         let json = serialize_parameter_map(&params);
         let back = deserialize_parameter_map(&json).expect("deserialize failed");
@@ -783,14 +731,6 @@ mod tests {
             other => panic!("expected Enum(\"log\"), got {other:?}"),
         }
         assert_eq!(back.get_scalar("path"), Some(&ParameterValue::String("/tmp/test.wav".to_string())));
-        match back.get_scalar("steps") {
-            Some(ParameterValue::Array(arr)) => {
-                assert_eq!(arr.len(), 2);
-                assert_eq!(arr[0], "C4");
-                assert_eq!(arr[1], "E4");
-            }
-            other => panic!("expected Array, got {other:?}"),
-        }
     }
 
     #[test]

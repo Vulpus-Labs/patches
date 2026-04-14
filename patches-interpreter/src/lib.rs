@@ -26,7 +26,7 @@ use patches_core::{
     TrackerData, PatternBank, SongBank, Pattern, Song, TrackerStep,
 };
 use patches_dsl::ast::{Scalar, SongCell, Span, Value};
-use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch};
+use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPortRef, PortDirection};
 
 /// An error produced during interpretation of a [`FlatPatch`].
 ///
@@ -115,6 +115,14 @@ pub fn build_with_base_dir(
     // forward references within a patch are not errors).
     for conn in &flat.connections {
         add_connection(&mut graph, conn)?;
+    }
+
+    // Stage 2.5 — validate template-boundary port refs that may have been
+    // dropped during expansion (e.g. an orphan `inner -> $.out` whose
+    // template out-port is never consumed). These refs never produce a
+    // FlatConnection, so they'd otherwise slip past port-name validation.
+    for port_ref in &flat.port_refs {
+        validate_port_ref(&graph, port_ref)?;
     }
 
     // Stage 3 — build tracker data from pattern and song blocks.
@@ -381,6 +389,39 @@ fn add_module(
         })
 }
 
+fn validate_port_ref(
+    graph: &ModuleGraph,
+    port_ref: &FlatPortRef,
+) -> Result<(), InterpretError> {
+    let id = patches_core::NodeId::from(port_ref.module.clone());
+    let node = graph.get_node(&id).ok_or_else(|| InterpretError {
+        span: port_ref.span,
+        message: format!("module '{}' not found", port_ref.module),
+    })?;
+    let (ports, kind) = match port_ref.direction {
+        PortDirection::Output => (&node.module_descriptor.outputs[..], "output"),
+        PortDirection::Input => (&node.module_descriptor.inputs[..], "input"),
+    };
+    if ports
+        .iter()
+        .any(|p| p.name == port_ref.port.as_str() && p.index == port_ref.index as usize)
+    {
+        return Ok(());
+    }
+    let available: Vec<String> = ports
+        .iter()
+        .map(|p| format!("{}/{}", p.name, p.index))
+        .collect();
+    Err(InterpretError {
+        span: port_ref.span,
+        message: format!(
+            "module '{}' has no {} port '{}/{}'; available {}s: [{}]",
+            port_ref.module, kind, port_ref.port, port_ref.index,
+            kind, available.join(", ")
+        ),
+    })
+}
+
 fn add_connection(
     graph: &mut ModuleGraph,
     conn: &FlatConnection,
@@ -617,16 +658,6 @@ fn convert_value(
                     .ok_or_else(|| format!("song '{s}' not found"))
             }
         }
-        (Value::Array(items), ParameterKind::Array { .. }) => {
-            let strings = items
-                .iter()
-                .map(|item| match item {
-                    Value::Scalar(Scalar::Str(s)) => Ok(s.clone()),
-                    _ => Err("array elements must be strings".to_string()),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(ParameterValue::Array(strings.into()))
-        }
         _ => Err(format!("expected {}, found {}", kind.kind_name(), value_kind_name(value))),
     }
 }
@@ -638,8 +669,6 @@ fn value_kind_name(value: &Value) -> &'static str {
         Value::Scalar(Scalar::Bool(_)) => "bool",
         Value::Scalar(Scalar::Str(_)) => "string",
         Value::Scalar(Scalar::ParamRef(_)) => "param-ref",
-        Value::Array(_) => "array",
-        Value::Table(_) => "table",
         Value::File(_) => "file",
     }
 }
@@ -708,6 +737,7 @@ mod tests {
             songs: vec![],
             modules: vec![],
             connections: vec![],
+            port_refs: vec![],
         }
     }
 
@@ -1115,9 +1145,9 @@ mod tests {
             name: "my_song".into(),
             channels: vec![ident("drums")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("pat_a"))] },
-                SongRow { cells: vec![SongCell::Pattern(ident("pat_b"))] },
-                SongRow { cells: vec![SongCell::Silence] },
+                SongRow { cells: vec![SongCell::Pattern(ident("pat_a"))], span: span() },
+                SongRow { cells: vec![SongCell::Pattern(ident("pat_b"))], span: span() },
+                SongRow { cells: vec![SongCell::Silence], span: span() },
             ],
             loop_point: Some(1),
             span: span(),
@@ -1149,7 +1179,7 @@ mod tests {
         flat.songs = vec![FlatSongDef {
             name: "song".into(),
             channels: vec![ident("col")],
-            rows: vec![SongRow { cells: vec![SongCell::Pattern(ident("no_such_pattern"))] }],
+            rows: vec![SongRow { cells: vec![SongCell::Pattern(ident("no_such_pattern"))], span: span() }],
             loop_point: None,
             span: Span { start: 10, end: 20 },
         }];
@@ -1182,8 +1212,8 @@ mod tests {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("four_steps"))] },
-                SongRow { cells: vec![SongCell::Pattern(ident("two_steps"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("four_steps"))], span: span() },
+                SongRow { cells: vec![SongCell::Pattern(ident("two_steps"))], span: span() },
             ],
             loop_point: None,
             span: span(),
@@ -1217,8 +1247,8 @@ mod tests {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                SongRow { cells: vec![SongCell::Pattern(ident("one_ch"))] },
-                SongRow { cells: vec![SongCell::Pattern(ident("two_ch"))] },
+                SongRow { cells: vec![SongCell::Pattern(ident("one_ch"))], span: span() },
+                SongRow { cells: vec![SongCell::Pattern(ident("two_ch"))], span: span() },
             ],
             loop_point: None,
             span: span(),

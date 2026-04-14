@@ -195,17 +195,17 @@ fn evicted_plan_freed_on_cleanup_thread() {
         build_patch(&graph, &registry, &ENV, &PlannerState::empty(), POOL_CAP, MODULE_CAP)
             .unwrap();
 
-    // Inject an Array value into plan_1.parameter_updates at pool slot 0
+    // Inject a FloatBuffer value into plan_1.parameter_updates at pool slot 0
     // (update_parameters on an empty slot is a no-op, so this is safe).
-    // The Arc<[String]> is the sentinel whose lifetime we track.
+    // The Arc<[f32]> is the sentinel whose lifetime we track.
     //
     // The plan passes `&mut ParameterMap` to modules during adoption but retains
     // ownership — the map (and its Arc) are deallocated when the plan is dropped
     // on the cleanup thread, not during adoption.
-    let sentinel: Arc<[String]> = vec!["sentinel".to_owned()].into();
+    let sentinel: Arc<[f32]> = vec![0.0f32; 4].into();
     let weak = Arc::downgrade(&sentinel);
     let mut sentinel_params = ParameterMap::new();
-    sentinel_params.insert("_sentinel".to_owned(), ParameterValue::Array(Arc::clone(&sentinel)));
+    sentinel_params.insert("_sentinel".to_owned(), ParameterValue::FloatBuffer(Arc::clone(&sentinel)));
     plan_1.parameter_updates.push((0, sentinel_params));
     drop(sentinel); // engine.plan is now the sole strong owner
 

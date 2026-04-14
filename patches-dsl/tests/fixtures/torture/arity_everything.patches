@@ -7,10 +7,10 @@
 #   [N]         — literal index at the call site
 #   -[<param>]-> — scale value from a scalar template param
 #
-# Group-param assignment forms (all three in one fixture):
-#   bus_b  { gains: 0.7 }             — broadcast  (scalar → all slots)
-#   bus_a  { gains: [0.8, 0.6, 0.4] } — explicit array
-#   bus_p  { gains[0]: 1.0, gains[1]: 0.3 } — per-index (slot 2 uses default)
+# Group-param assignment forms:
+#   bus_b  { gains: 0.7 }                         — broadcast  (scalar → all slots)
+#   bus_a  { gains[0]: 0.8, gains[1]: 0.6, gains[2]: 0.4 } — per-index, all slots
+#   bus_p  { gains[0]: 1.0, gains[1]: 0.3 }       — per-index, slot 2 uses default
 #
 # GainBus template:
 #   n        — int,   number of channels (required)
@@ -58,8 +58,10 @@ patch {
     # bus_b: broadcast gains — all three slots get 0.7; boost=0.9; solo=0
     module bus_b : GainBus(n: 3, boost: 0.9, solo: 0) { gains: 0.7 }
 
-    # bus_a: explicit array gains; boost=0.5; solo=1
-    module bus_a : GainBus(n: 3, solo: 1, boost: 0.5) { gains: [0.8, 0.6, 0.4] }
+    # bus_a: per-index gains, all slots set; boost=0.5; solo=1
+    module bus_a : GainBus(n: 3, solo: 1, boost: 0.5) {
+        gains[0]: 0.8, gains[1]: 0.6, gains[2]: 0.4
+    }
 
     # bus_p: per-index gains; slot 2 falls back to the declared default (0.5); solo=2
     module bus_p : GainBus(n: 3, solo: 2) { gains[0]: 1.0, gains[1]: 0.3 }

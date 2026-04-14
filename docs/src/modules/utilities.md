@@ -106,8 +106,13 @@ simultaneously on each rising edge (threshold 0.5).
 
 ## `Quant` — V/oct quantiser
 
-Snaps a continuous V/oct signal to the nearest note in a user-supplied semitone
-set. The formula applied before quantisation is:
+Snaps a continuous V/oct signal to the nearest pitch in a user-supplied set.
+The scale is declared via `channels` (an alias list or count), with one
+`pitch[i]` parameter per scale degree. Each pitch is a V/oct value reduced
+modulo 1.0 into `[0.0, 1.0)`, giving an octave-invariant pitch class. The
+quantiser is not restricted to 12-tone equal temperament: any microtonal or
+non-Western scale can be declared by supplying the desired V/oct fractions
+directly. The formula applied before quantisation is:
 
 ```text
 quantised_input = centre + in × scale
@@ -115,11 +120,21 @@ quantised_input = centre + in × scale
 
 Emits a one-sample pulse on `trig_out` whenever the quantised pitch changes.
 
+**Example**
+
+```text
+module quant : Quant(channels: [root, third, fifth]) {
+    pitch[root]:  C0,
+    pitch[third]: Eb0,
+    pitch[fifth]: G0
+}
+```
+
 **Parameters**
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `notes` | array (up to 12) | `["0"]` | Semitone offsets within an octave (0–11). Values are parsed as integers. |
+| `pitch[i]` | float (V/oct) | `0.0` | Target pitch per scale degree (i in 0..N−1, N = `channels`) |
 | `centre` | float (V/oct) | `0.0` | DC offset added to the input before quantisation (−4 to +4) |
 | `scale` | float | `1.0` | Gain applied to `in` before quantisation (−4 to +4) |
 
@@ -141,7 +156,7 @@ Emits a one-sample pulse on `trig_out` whenever the quantised pitch changes.
 ## `PolyQuant` — Polyphonic V/oct quantiser
 
 Applies the same quantisation logic as `Quant` independently to each of the 16
-polyphonic voices. All voices share the same `notes`, `centre`, and `scale`
+polyphonic voices. All voices share the same `pitch[i]`, `centre`, and `scale`
 parameters. Each voice has its own `trig_out` channel that fires independently
 when that voice's quantised pitch changes.
 
@@ -149,7 +164,7 @@ when that voice's quantised pitch changes.
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `notes` | array (up to 12) | `["0"]` | Semitone offsets within an octave (0–11) |
+| `pitch[i]` | float (V/oct) | `0.0` | Target pitch per scale degree (i in 0..N−1, N = `channels`) |
 | `centre` | float (V/oct) | `0.0` | DC offset added to each voice before quantisation (−4 to +4) |
 | `scale` | float | `1.0` | Gain applied to each voice before quantisation (−4 to +4) |
 

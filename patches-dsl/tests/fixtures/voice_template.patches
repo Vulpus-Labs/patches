@@ -21,13 +21,11 @@ template voice(attack: float = 0.01, decay: float = 0.1, sustain: float = 0.7) {
 }
 
 patch {
-    module clock : Clock { bpm: 120.0 }
-    module seq   : Seq(length: 8) { steps: ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4"] }
+    module seq   : MidiIn
     module v1    : voice(attack: 0.005, sustain: 0.6)   # decay uses default
     module v2    : voice                                  # all defaults
     module out   : AudioOut
 
-    clock.semiquaver ->       seq.clock
     seq.pitch        ->       v1.voct
     seq.gate         ->       v1.gate
     seq.pitch        -[0.5]-> v2.voct       # scaled template in-port  (->)

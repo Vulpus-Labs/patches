@@ -15,7 +15,6 @@ pub mod poly_sum;
 pub mod poly_osc;
 pub mod poly_to_mono;
 pub mod poly_vca;
-pub mod seq;
 pub mod sum;
 pub mod vca;
 pub mod glide;
@@ -77,7 +76,6 @@ pub use poly_sum::PolySum;
 pub use poly_osc::PolyOsc;
 pub use poly_to_mono::PolyToMono;
 pub use poly_vca::PolyVca;
-pub use seq::Seq;
 pub use sum::Sum;
 pub use vca::Vca;
 pub use glide::Glide;
@@ -126,7 +124,6 @@ pub fn default_registry() -> patches_core::Registry {
     r.register::<AudioOut>();
     r.register::<Adsr>();
     r.register::<Clock>();
-    r.register::<Seq>();
     r.register::<Glide>();
     r.register::<Lfo>();
     r.register::<ResonantLowpass>();
@@ -209,7 +206,6 @@ mod tests {
             "AudioOut",
             "Adsr",
             "Clock",
-            "Seq",
             "Glide",
             "Lfo",
             "Lowpass",

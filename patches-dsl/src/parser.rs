@@ -4,8 +4,9 @@ use pest::Parser as _;
 use crate::ast::{
     Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
     ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
-    PortGroupDecl, PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, SongCell,
-    SongDef, SongRow, Span, Statement, Step, StepOrGenerator, Template, Value,
+    PlayAtom, PlayBody, PlayExpr, PlayTerm, PortGroupDecl, PortIndex, PortLabel, PortRef,
+    RowGroup, Scalar, SectionDef, ShapeArg, ShapeArgValue, SongCell, SongDef, SongItem, SongRow,
+    Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 
 // ─── Pest glue ────────────────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ struct FileItems {
     templates: Vec<Template>,
     patterns: Vec<PatternDef>,
     songs: Vec<SongDef>,
+    sections: Vec<SectionDef>,
     patch: Option<Patch>,
     span: Span,
 }
@@ -204,6 +206,7 @@ fn build_file_items(pair: Pair<'_, Rule>) -> Result<FileItems, ParseError> {
         templates: Vec::new(),
         patterns: Vec::new(),
         songs: Vec::new(),
+        sections: Vec::new(),
         patch: None,
         span,
     };
@@ -213,6 +216,7 @@ fn build_file_items(pair: Pair<'_, Rule>) -> Result<FileItems, ParseError> {
             Rule::include_directive => items.includes.push(build_include_directive(inner)),
             Rule::template => items.templates.push(build_template(inner)?),
             Rule::pattern_block => items.patterns.push(build_pattern_block(inner)?),
+            Rule::section_def => items.sections.push(build_section_def(inner)?),
             Rule::song_block => items.songs.push(build_song_block(inner)?),
             Rule::patch => items.patch = Some(build_patch(inner)?),
             Rule::EOI => {}
@@ -230,6 +234,7 @@ fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
         templates: items.templates,
         patterns: items.patterns,
         songs: items.songs,
+        sections: items.sections,
         patch: items.patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
         span: items.span,
     })
@@ -242,6 +247,7 @@ fn build_include_file(pair: Pair<'_, Rule>) -> Result<IncludeFile, ParseError> {
         templates: items.templates,
         patterns: items.patterns,
         songs: items.songs,
+        sections: items.sections,
         span: items.span,
     })
 }
@@ -321,24 +327,6 @@ fn build_value(pair: Pair<'_, Rule>) -> Result<Value, ParseError> {
             Ok(Value::File(path))
         }
         Rule::scalar => Ok(Value::Scalar(build_scalar(inner)?)),
-        Rule::array => {
-            let items: Result<Vec<Value>, ParseError> =
-                inner.into_inner().map(build_value).collect();
-            Ok(Value::Array(items?))
-        }
-        Rule::table => {
-            let entries: Result<Vec<(Ident, Value)>, ParseError> = inner
-                .into_inner()
-                .map(|entry| {
-                    // entry is table_entry: ident ~ ":" ~ value
-                    let mut it = entry.into_inner();
-                    let key = build_ident(it.next().unwrap());
-                    let val = build_value(it.next().unwrap())?;
-                    Ok((key, val))
-                })
-                .collect();
-            Ok(Value::Table(entries?))
-        }
         _ => unreachable!("unexpected rule in value: {:?}", inner.as_rule()),
     }
 }
@@ -364,14 +352,12 @@ fn build_shape_arg(pair: Pair<'_, Rule>) -> Result<ShapeArg, ParseError> {
 
 fn build_at_block(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {
     // pair.as_rule() == Rule::at_block
-    // Grammar: at_block = { "@" ~ at_block_index ~ ":" ~ table }
-    // at_block_index = { nat | ident }
+    // Grammar: at_block = { "@" ~ at_block_index ~ ":"? ~ at_block_body }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
 
-    // at_block_index
-    let index_pair = it.next().unwrap(); // at_block_index rule
-    let index_inner = index_pair.into_inner().next().unwrap(); // nat or ident
+    let index_pair = it.next().unwrap();
+    let index_inner = index_pair.into_inner().next().unwrap();
     let index = match index_inner.as_rule() {
         Rule::nat => {
             let nat_span = span_of(&index_inner);
@@ -385,12 +371,10 @@ fn build_at_block(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {
         _ => unreachable!("unexpected rule in at_block_index: {:?}", index_inner.as_rule()),
     };
 
-    // table
-    let table_pair = it.next().unwrap(); // table rule
-    let entries: Result<Vec<(Ident, Value)>, ParseError> = table_pair
+    let body_pair = it.next().unwrap();
+    let entries: Result<Vec<(Ident, Value)>, ParseError> = body_pair
         .into_inner()
         .map(|entry| {
-            // entry is table_entry: ident ~ ":" ~ value
             let mut entry_it = entry.into_inner();
             let key = build_ident(entry_it.next().unwrap());
             let val = build_value(entry_it.next().unwrap())?;
@@ -861,7 +845,7 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
 }
 
 fn build_slide_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
-    // slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ (step_float | step_int) ~ "," ~ (step_float | step_int) ~ ")" }
+    // slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ slide_endpoint ~ "," ~ slide_endpoint ~ ")" }
     let mut it = pair.into_inner();
     let count_pair = it.next().unwrap();
     let count_span = span_of(&count_pair);
@@ -869,19 +853,28 @@ fn build_slide_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseE
         span: count_span,
         message: format!("invalid slide count: {:?}", count_pair.as_str()),
     })?;
-    let start_pair = it.next().unwrap();
-    let start_span = span_of(&start_pair);
-    let start: f32 = start_pair.as_str().parse().map_err(|_| ParseError {
-        span: start_span,
-        message: format!("invalid slide start: {:?}", start_pair.as_str()),
-    })?;
-    let end_pair = it.next().unwrap();
-    let end_span = span_of(&end_pair);
-    let end: f32 = end_pair.as_str().parse().map_err(|_| ParseError {
-        span: end_span,
-        message: format!("invalid slide end: {:?}", end_pair.as_str()),
-    })?;
+    let start = parse_slide_endpoint(it.next().unwrap())?;
+    let end = parse_slide_endpoint(it.next().unwrap())?;
     Ok(StepOrGenerator::Slide { count, start, end })
+}
+
+fn parse_slide_endpoint(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
+    // slide_endpoint wraps step_unit | step_note | step_float | step_int.
+    let span = span_of(&pair);
+    let inner = pair.into_inner().next().ok_or_else(|| ParseError {
+        span,
+        message: "empty slide endpoint".to_string(),
+    })?;
+    let inner_span = span_of(&inner);
+    match inner.as_rule() {
+        Rule::step_unit => parse_step_unit(inner.as_str(), inner_span),
+        Rule::step_note => parse_step_note(inner.as_str(), inner_span),
+        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), inner_span),
+        _ => Err(ParseError {
+            span: inner_span,
+            message: format!("unexpected slide endpoint: {:?}", inner.as_rule()),
+        }),
+    }
 }
 
 fn build_step_or_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
@@ -926,72 +919,182 @@ fn build_pattern_block(pair: Pair<'_, Rule>) -> Result<PatternDef, ParseError> {
     Ok(PatternDef { name, channels, span })
 }
 
+fn build_row_cell(pair: Pair<'_, Rule>) -> SongCell {
+    // row_cell = ${ song_silence | param_ref | ident }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::song_silence => SongCell::Silence,
+        Rule::ident => SongCell::Pattern(build_ident(inner)),
+        Rule::param_ref => {
+            let span = span_of(&inner);
+            let name = inner.into_inner().next().unwrap().as_str().to_owned();
+            SongCell::ParamRef { name, span }
+        }
+        _ => unreachable!("unexpected rule in row_cell: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_song_row(pair: Pair<'_, Rule>) -> SongRow {
+    // song_row = ${ row_cell ~ ("," ~ row_cell)* }
+    let span = span_of(&pair);
+    let cells: Vec<SongCell> = pair
+        .into_inner()
+        .filter(|p| p.as_rule() == Rule::row_cell)
+        .map(build_row_cell)
+        .collect();
+    SongRow { cells, span }
+}
+
+fn build_row_group(pair: Pair<'_, Rule>) -> Result<RowGroup, ParseError> {
+    // row_group = ${ repeat_group | song_row }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::song_row => Ok(RowGroup::Row(build_song_row(inner))),
+        Rule::repeat_group => build_repeat_group(inner),
+        _ => unreachable!("unexpected rule in row_group: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_repeat_group(pair: Pair<'_, Rule>) -> Result<RowGroup, ParseError> {
+    // repeat_group = ${ "(" ~ row_seq ~ ")" ~ "*" ~ nat }
+    let span = span_of(&pair);
+    let mut body: Option<Vec<RowGroup>> = None;
+    let mut count: Option<u32> = None;
+    for child in pair.into_inner() {
+        match child.as_rule() {
+            Rule::row_seq => body = Some(build_row_seq(child)?),
+            Rule::nat => {
+                let n_span = span_of(&child);
+                let n: u32 = child.as_str().parse().map_err(|_| ParseError {
+                    span: n_span,
+                    message: format!("invalid repeat count: {:?}", child.as_str()),
+                })?;
+                if n == 0 {
+                    return Err(ParseError {
+                        span: n_span,
+                        message: "row-group repeat count must be positive".to_owned(),
+                    });
+                }
+                count = Some(n);
+            }
+            _ => unreachable!("unexpected rule in repeat_group: {:?}", child.as_rule()),
+        }
+    }
+    Ok(RowGroup::Repeat {
+        body: body.unwrap(),
+        count: count.unwrap(),
+        span,
+    })
+}
+
+fn build_row_seq(pair: Pair<'_, Rule>) -> Result<Vec<RowGroup>, ParseError> {
+    // row_seq = ${ ... row_group (row_sep row_group)* ... }
+    pair.into_inner()
+        .filter(|p| p.as_rule() == Rule::row_group)
+        .map(build_row_group)
+        .collect()
+}
+
+fn build_section_def(pair: Pair<'_, Rule>) -> Result<SectionDef, ParseError> {
+    // section_def = { "section" ~ ident ~ "{" ~ row_seq ~ "}" }
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+    let name = build_ident(it.next().unwrap());
+    let body = build_row_seq(it.next().unwrap())?;
+    Ok(SectionDef { name, body, span })
+}
+
+fn build_play_expr(pair: Pair<'_, Rule>) -> Result<PlayExpr, ParseError> {
+    // play_expr = { play_term ~ ("," ~ play_term)* }
+    let span = span_of(&pair);
+    let terms: Result<Vec<PlayTerm>, ParseError> =
+        pair.into_inner().map(build_play_term).collect();
+    Ok(PlayExpr { terms: terms?, span })
+}
+
+fn build_play_term(pair: Pair<'_, Rule>) -> Result<PlayTerm, ParseError> {
+    // play_term = { play_atom ~ ("*" ~ nat)? }
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+    let atom = build_play_atom(it.next().unwrap())?;
+    let repeat = if let Some(nat_pair) = it.next() {
+        let n_span = span_of(&nat_pair);
+        let n: u32 = nat_pair.as_str().parse().map_err(|_| ParseError {
+            span: n_span,
+            message: format!("invalid repeat count: {:?}", nat_pair.as_str()),
+        })?;
+        if n == 0 {
+            return Err(ParseError {
+                span: n_span,
+                message: "play repeat count must be positive".to_owned(),
+            });
+        }
+        n
+    } else {
+        1
+    };
+    Ok(PlayTerm { atom, repeat, span })
+}
+
+fn build_play_atom(pair: Pair<'_, Rule>) -> Result<PlayAtom, ParseError> {
+    // play_atom = { play_atom_group | ident }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::ident => Ok(PlayAtom::Ref(build_ident(inner))),
+        Rule::play_atom_group => {
+            let expr_pair = inner.into_inner().next().unwrap();
+            Ok(PlayAtom::Group(Box::new(build_play_expr(expr_pair)?)))
+        }
+        _ => unreachable!("unexpected rule in play_atom: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_play_body(pair: Pair<'_, Rule>) -> Result<PlayBody, ParseError> {
+    // play_body = { inline_block | named_inline | play_expr }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::inline_block => {
+            let span = span_of(&inner);
+            let row_seq_pair = inner.into_inner().next().unwrap();
+            let body = build_row_seq(row_seq_pair)?;
+            Ok(PlayBody::Inline { body, span })
+        }
+        Rule::named_inline => {
+            let span = span_of(&inner);
+            let mut it = inner.into_inner();
+            let name = build_ident(it.next().unwrap());
+            let body = build_row_seq(it.next().unwrap())?;
+            Ok(PlayBody::NamedInline { name, body, span })
+        }
+        Rule::play_expr => Ok(PlayBody::Expr(build_play_expr(inner)?)),
+        _ => unreachable!("unexpected rule in play_body: {:?}", inner.as_rule()),
+    }
+}
+
+fn build_song_item(pair: Pair<'_, Rule>) -> Result<SongItem, ParseError> {
+    // song_item = { section_def | pattern_block | play_stmt | loop_marker }
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::section_def => Ok(SongItem::Section(build_section_def(inner)?)),
+        Rule::pattern_block => Ok(SongItem::Pattern(build_pattern_block(inner)?)),
+        Rule::play_stmt => {
+            let body_pair = inner.into_inner().next().unwrap();
+            Ok(SongItem::Play(build_play_body(body_pair)?))
+        }
+        Rule::loop_marker => Ok(SongItem::LoopMarker(span_of(&inner))),
+        _ => unreachable!("unexpected rule in song_item: {:?}", inner.as_rule()),
+    }
+}
+
 fn build_song_block(pair: Pair<'_, Rule>) -> Result<SongDef, ParseError> {
-    // song_block = { "song" ~ ident ~ "{" ~ song_header_row ~ song_data_row+ ~ "}" }
+    // song_block = { "song" ~ ident ~ song_lanes ~ "{" ~ song_item* ~ "}" }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
     let name = build_ident(it.next().unwrap());
 
-    // Header row
-    let header_pair = it.next().unwrap();
-    let channels: Vec<Ident> = header_pair.into_inner().map(build_ident).collect();
+    let lanes_pair = it.next().unwrap();
+    let lanes: Vec<Ident> = lanes_pair.into_inner().map(build_ident).collect();
 
-    // Data rows
-    let mut rows = Vec::new();
-    let mut loop_point: Option<usize> = None;
-
-    for row_pair in it {
-        // song_data_row = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }
-        let row_span = span_of(&row_pair);
-        let mut patterns = Vec::new();
-        let mut has_loop = false;
-
-        for child in row_pair.into_inner() {
-            match child.as_rule() {
-                Rule::song_cell => {
-                    let cell_inner = child.into_inner().next().unwrap();
-                    match cell_inner.as_rule() {
-                        Rule::ident => {
-                            patterns.push(SongCell::Pattern(build_ident(cell_inner)));
-                        }
-                        Rule::song_silence => {
-                            patterns.push(SongCell::Silence);
-                        }
-                        Rule::param_ref => {
-                            let span = span_of(&cell_inner);
-                            let name = cell_inner
-                                .into_inner()
-                                .next()
-                                .unwrap()
-                                .as_str()
-                                .to_owned();
-                            patterns.push(SongCell::ParamRef { name, span });
-                        }
-                        _ => unreachable!(
-                            "unexpected rule in song_cell: {:?}",
-                            cell_inner.as_rule()
-                        ),
-                    }
-                }
-                Rule::song_loop => {
-                    has_loop = true;
-                }
-                _ => unreachable!("unexpected rule in song_data_row: {:?}", child.as_rule()),
-            }
-        }
-
-        if has_loop {
-            if loop_point.is_some() {
-                return Err(ParseError {
-                    span: row_span,
-                    message: "multiple @loop annotations in song block".to_owned(),
-                });
-            }
-            loop_point = Some(rows.len());
-        }
-
-        rows.push(SongRow { cells: patterns });
-    }
-
-    Ok(SongDef { name, channels, rows, loop_point, span })
+    let items: Result<Vec<SongItem>, ParseError> = it.map(build_song_item).collect();
+    Ok(SongDef { name, lanes, items: items?, span })
 }

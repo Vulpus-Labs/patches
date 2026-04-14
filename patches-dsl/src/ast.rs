@@ -33,8 +33,6 @@ pub enum Scalar {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Scalar(Scalar),
-    Array(Vec<Value>),
-    Table(Vec<(Ident, Value)>),
     /// `file("path")` — a file reference. The string is the raw path from the
     /// DSL source; path resolution happens in the interpreter.
     File(String),
@@ -284,7 +282,7 @@ pub struct PatternDef {
     pub span: Span,
 }
 
-/// A single cell in a song data row.
+/// A single cell in a song row (either a `section` or an inline `play` body).
 #[derive(Debug, Clone, PartialEq)]
 pub enum SongCell {
     /// Silence marker (`_`).
@@ -295,23 +293,80 @@ pub enum SongCell {
     ParamRef { name: String, span: Span },
 }
 
-/// One row in a song order table.
+/// One row: a comma-separated list of cells (one cell per lane).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SongRow {
-    /// Cells per channel: pattern name, silence, or param ref.
+    /// Cells per lane: pattern name, silence, or param ref.
     pub cells: Vec<SongCell>,
+    pub span: Span,
 }
 
-/// A `song <name> { ... }` block.
+/// An element of a row sequence: either a single row, or a parenthesised
+/// sub-sequence with an integer repeat count.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowGroup {
+    Row(SongRow),
+    Repeat { body: Vec<RowGroup>, count: u32, span: Span },
+}
+
+/// A named `section <name> { ... }` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionDef {
+    pub name: Ident,
+    pub body: Vec<RowGroup>,
+    pub span: Span,
+}
+
+/// `play <atom>(* N)? (, <atom>(* N)?)*` — a composition of named sections.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayExpr {
+    pub terms: Vec<PlayTerm>,
+    pub span: Span,
+}
+
+/// One term in a play expression: an atom plus a repeat count (default 1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayTerm {
+    pub atom: PlayAtom,
+    pub repeat: u32,
+    pub span: Span,
+}
+
+/// A play atom: either a named section reference or a parenthesised sub-expression.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayAtom {
+    Ref(Ident),
+    Group(Box<PlayExpr>),
+}
+
+/// The body of a `play` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayBody {
+    /// `play { row ... }` — anonymous inline rows.
+    Inline { body: Vec<RowGroup>, span: Span },
+    /// `play <name> { row ... }` — registers `name` as a song-local section and plays it once.
+    NamedInline { name: Ident, body: Vec<RowGroup>, span: Span },
+    /// `play <expr>` — compose previously defined sections.
+    Expr(PlayExpr),
+}
+
+/// An item inside a `song { ... }` body.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SongItem {
+    Section(SectionDef),
+    Pattern(PatternDef),
+    Play(PlayBody),
+    LoopMarker(Span),
+}
+
+/// A `song <name>(<lane>, ...) { <item>... }` block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SongDef {
     pub name: Ident,
-    /// Channel names from the header row.
-    pub channels: Vec<Ident>,
-    /// Arrangement rows (pattern assignments per channel).
-    pub rows: Vec<SongRow>,
-    /// Row index to loop back to; `None` means loop from beginning (row 0).
-    pub loop_point: Option<usize>,
+    /// Lane names declared in the song header (one per cell per row).
+    pub lanes: Vec<Ident>,
+    /// Song items: sections, patterns, play statements, and the `@loop` marker.
+    pub items: Vec<SongItem>,
     pub span: Span,
 }
 
@@ -339,6 +394,8 @@ pub struct File {
     pub templates: Vec<Template>,
     pub patterns: Vec<PatternDef>,
     pub songs: Vec<SongDef>,
+    /// Top-level `section` blocks, visible to all songs.
+    pub sections: Vec<SectionDef>,
     pub patch: Patch,
     pub span: Span,
 }
@@ -350,5 +407,7 @@ pub struct IncludeFile {
     pub templates: Vec<Template>,
     pub patterns: Vec<PatternDef>,
     pub songs: Vec<SongDef>,
+    /// Top-level `section` blocks, visible to all songs.
+    pub sections: Vec<SectionDef>,
     pub span: Span,
 }

@@ -3,12 +3,13 @@ use patches_core::{
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use crate::quant_util::{parse_notes, quantise_note};
+use crate::quant_util::{parse_pitches, quantise_note};
 
 /// Polyphonic V/OCT quantiser.
 ///
 /// Applies the same quantisation logic as [`Quant`](crate::quant::Quant)
-/// independently to each of 16 voices. Always free-running.
+/// independently to each of 16 voices. The scale is declared via `channels`
+/// and one `pitch[i]` parameter per scale degree.
 ///
 /// # Inputs
 ///
@@ -27,7 +28,7 @@ use crate::quant_util::{parse_notes, quantise_note};
 ///
 /// | Name | Type | Range | Default | Description |
 /// |------|------|-------|---------|-------------|
-/// | `notes` | str array | up to 12 entries | `["0"]` | Semitone values in the scale |
+/// | `pitch[i]` | float (v/oct) | -8.0--8.0 | `0.0` | Target pitch per scale degree (i in 0..N-1, N = channels) |
 /// | `centre` | float | -4.0--4.0 | `0.0` | Offset added before quantisation |
 /// | `scale` | float | -4.0--4.0 | `1.0` | Multiplier applied to input before quantisation |
 pub struct PolyQuant {
@@ -46,11 +47,12 @@ pub struct PolyQuant {
 
 impl Module for PolyQuant {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+        let n = shape.channels.max(1);
         ModuleDescriptor::new("PolyQuant", shape.clone())
             .poly_in("in")
             .poly_out("out")
             .poly_out("trig_out")
-            .array_param("notes", &["0"], 12)
+            .float_param_multi("pitch", n, -8.0, 8.0, 0.0)
             .float_param("centre", -4.0, 4.0, 0.0)
             .float_param("scale", -4.0, 4.0, 1.0)
     }
@@ -74,9 +76,8 @@ impl Module for PolyQuant {
     }
 
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Array(strings)) = params.get_scalar("notes") {
-            parse_notes(strings, &mut self.notes_buf, &mut self.notes_len);
-        }
+        let channels = self.descriptor.shape.channels.max(1);
+        parse_pitches(params, channels, &mut self.notes_buf, &mut self.notes_len);
         if let Some(ParameterValue::Float(v)) = params.get_scalar("centre") {
             self.centre = *v;
         }
@@ -101,9 +102,9 @@ impl Module for PolyQuant {
         for (i, &x) in voices.iter().enumerate() {
             let centred_and_scaled = self.centre + x * self.scale;
             let octave = centred_and_scaled.floor();
-            let semitone_frac = (centred_and_scaled - octave) * 12.0;
-            let (nearest, octave_adj) = quantise_note(semitone_frac, notes);
-            let new_quant = octave + octave_adj as f32 + nearest / 12.0;
+            let voct_frac = centred_and_scaled - octave;
+            let (nearest, octave_adj) = quantise_note(voct_frac, notes);
+            let new_quant = octave + octave_adj as f32 + nearest;
             if (new_quant - self.last_quantised[i]).abs() > 1e-6 {
                 self.pending_trig_out[i] = 1.0;
                 self.last_quantised[i] = new_quant;
@@ -127,52 +128,64 @@ impl Module for PolyQuant {
 mod tests {
     use super::*;
     use patches_core::test_support::ModuleHarness;
-    use patches_core::parameter_map::ParameterValue;
+    use patches_core::parameter_map::{ParameterMap, ParameterValue};
+    use patches_core::ModuleShape;
 
-    fn make_poly_quant(notes: &[&str]) -> ModuleHarness {
-        let arr: Vec<String> = notes.iter().map(|s| s.to_string()).collect();
-        ModuleHarness::build::<PolyQuant>(&[("notes", ParameterValue::Array(arr.into()))])
+    fn shape(n: usize) -> ModuleShape {
+        ModuleShape { channels: n, length: 0, ..Default::default() }
+    }
+
+    fn pitch_map(pitches: &[f32]) -> ParameterMap {
+        let mut map = ParameterMap::new();
+        for (i, &p) in pitches.iter().enumerate() {
+            map.insert_param("pitch".to_string(), i, ParameterValue::Float(p));
+        }
+        map
+    }
+
+    fn make_poly_quant(pitches: &[f32]) -> ModuleHarness {
+        let mut h = ModuleHarness::build_with_shape::<PolyQuant>(&[], shape(pitches.len()));
+        h.update_params_map(&pitch_map(pitches));
+        h
     }
 
     #[test]
     fn quantises_each_voice_independently() {
-        let mut h = make_poly_quant(&["0", "7"]);
+        let mut h = make_poly_quant(&[0.0, 7.0 / 12.0]);
         let mut input = [0.0f32; 16];
-        input[0] = 0.0;          // → 0.0  (root)
-        input[1] = 7.0 / 12.0;  // → 7/12 (fifth)
+        input[0] = 0.0;
+        input[1] = 7.0 / 12.0;
         h.set_poly("in", input);
         h.tick();
         let out = h.read_poly("out");
-        assert!((out[0] - 0.0).abs() < 1e-5, "voice 0 expected 0.0 got {}", out[0]);
-        assert!((out[1] - 7.0 / 12.0).abs() < 1e-5, "voice 1 expected 7/12 got {}", out[1]);
+        assert!((out[0] - 0.0).abs() < 1e-5, "voice 0 got {}", out[0]);
+        assert!((out[1] - 7.0 / 12.0).abs() < 1e-5, "voice 1 got {}", out[1]);
     }
 
     #[test]
     fn per_voice_trig_out_fires_independently() {
-        let mut h = make_poly_quant(&["0", "7"]);
-        // First tick with all zeros: no change from initial state (last_quantised starts at 0.0)
+        let mut h = make_poly_quant(&[0.0, 7.0 / 12.0]);
         h.set_poly("in", [0.0; 16]);
         h.tick();
 
-        // Change voice 1 only
         let mut input = [0.0f32; 16];
         input[1] = 7.0 / 12.0;
         h.set_poly("in", input);
         h.tick();
         let trig = h.read_poly("trig_out");
-        assert_eq!(trig[0], 0.0, "voice 0 should not fire");
-        assert_eq!(trig[1], 1.0, "voice 1 should fire");
+        assert_eq!(trig[0], 0.0);
+        assert_eq!(trig[1], 1.0);
     }
 
     #[test]
     fn trig_out_clears_next_sample() {
-        let mut h = make_poly_quant(&["0", "7"]);
+        let mut h = make_poly_quant(&[0.0, 7.0 / 12.0]);
         let mut input = [0.0f32; 16];
-        input[0] = 7.0 / 12.0; // triggers a change
+        input[0] = 7.0 / 12.0;
         h.set_poly("in", input);
         h.tick();
-        h.tick(); // same input, no change
+        h.tick();
         let trig = h.read_poly("trig_out");
-        assert_eq!(trig[0], 0.0, "trig_out must clear after one sample");
+        assert_eq!(trig[0], 0.0);
     }
 }

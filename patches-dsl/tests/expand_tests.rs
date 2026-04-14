@@ -70,7 +70,7 @@ fn single_template_modules_namespaced() {
 
     // Top-level and template inner modules
     assert_modules_exist(&flat, &[
-        "clock", "seq", "out",
+        "seq", "out",
         "v1/osc", "v1/env", "v1/vca",
         "v2/osc", "v2/env", "v2/vca",
     ]);
@@ -707,60 +707,6 @@ patch {
     assert_eq!(get_param(g, "level/2"), Some(&Value::Scalar(Scalar::Float(0.8))));
 }
 
-// ── Group param — explicit array ──────────────────────────────────────────────
-
-#[test]
-fn group_param_explicit_array() {
-    let src = r#"
-template Levelled(size: int, level[size]: float = 1.0) {
-    in:  x
-    out: y
-    module g : Gain { <level/0>, <level/1>, <level/2> }
-    g.in[0] <- $.x
-    $.y <- g.out[0]
-}
-patch {
-    module osc : Osc
-    module lv  : Levelled(size: 3) { level: [0.1, 0.2, 0.3] }
-    module out : AudioOut
-    osc.sine[0] -[1.0]-> lv.x
-    out.in_left[0] <-[1.0]- lv.y
-}
-"#;
-    let flat = parse_expand(src);
-    let g = find_module(&flat, "lv/g");
-    assert_eq!(get_param(g, "level/0"), Some(&Value::Scalar(Scalar::Float(0.1))));
-    assert_eq!(get_param(g, "level/1"), Some(&Value::Scalar(Scalar::Float(0.2))));
-    assert_eq!(get_param(g, "level/2"), Some(&Value::Scalar(Scalar::Float(0.3))));
-}
-
-#[test]
-fn group_param_explicit_array_length_mismatch_error() {
-    let src = r#"
-template Levelled(size: int, level[size]: float = 1.0) {
-    in:  x
-    out: y
-    module g : Gain { <level/0>, <level/1> }
-    g.in[0] <- $.x
-    $.y <- g.out[0]
-}
-patch {
-    module osc : Osc
-    module lv  : Levelled(size: 2) { level: [0.1, 0.2, 0.3] }
-    module out : AudioOut
-    osc.sine[0] -[1.0]-> lv.x
-    out.in_left[0] <-[1.0]- lv.y
-}
-"#;
-    let file = parse(src).expect("parse ok");
-    let err = expand(&file).expect_err("expected expand error for array length mismatch");
-    assert!(
-        err.message.contains("length") || err.message.contains("arity"),
-        "unexpected error: {}",
-        err.message
-    );
-}
-
 // ── Group param — per-index ───────────────────────────────────────────────────
 
 #[test]
@@ -805,7 +751,7 @@ template LimitedMixer(size: int, level[size]: float = 1.0) {
 }
 patch {
     module src : Osc
-    module lm  : LimitedMixer(size: 3) { level: [0.8, 0.9, 0.7] }
+    module lm  : LimitedMixer(size: 3) { level[0]: 0.8, level[1]: 0.9, level[2]: 0.7 }
     module out : AudioOut
     src.sine[0] -[1.0]-> lm.in[0]
     src.sine[0] -[1.0]-> lm.in[1]
@@ -1317,10 +1263,11 @@ fn expand_round_trip_patterns_and_songs() {
             snare: . . x . . . x .
         }
 
-        song arrangement {
-            | ch1   |
-            | drums |
-            | drums |
+        song arrangement(ch1) {
+            play {
+                drums
+                drums
+            }
         }
 
         patch {
@@ -1351,9 +1298,10 @@ fn song_in_template_namespaced() {
             in: dummy
             out: dummy
 
-            song my_song {
-                | ch   |
-                | <pat> |
+            song my_song(ch) {
+                play {
+                    <pat>
+                }
             }
 
             module seq : MasterSequencer(channels: [ch]) { song: my_song }
@@ -1394,9 +1342,10 @@ fn pattern_in_template_namespaced() {
 
             pattern local_kick { trig: x . x . }
 
-            song drums {
-                | ch         |
-                | local_kick |
+            song drums(ch) {
+                play {
+                    local_kick
+                }
             }
 
             module seq : MasterSequencer(channels: [ch]) { song: drums }
@@ -1437,9 +1386,8 @@ fn nested_template_scoping() {
 
             pattern foo { trig: . x . x }
 
-            song inner_song {
-                | ch  |
-                | foo |
+            song inner_song(ch) {
+                play { foo }
             }
 
             module seq : MasterSequencer(channels: [ch]) { song: inner_song }
@@ -1453,9 +1401,8 @@ fn nested_template_scoping() {
 
             pattern foo { trig: . x }
 
-            song outer_song {
-                | ch  |
-                | foo |
+            song outer_song(ch) {
+                play { foo }
             }
 
             module i : inner
@@ -1506,9 +1453,8 @@ fn template_song_cell_resolves_to_outer_scope() {
             in: dummy
             out: dummy
 
-            song my_song {
-                | ch          |
-                | global_beat |
+            song my_song(ch) {
+                play { global_beat }
             }
 
             module seq : MasterSequencer(channels: [ch]) { song: my_song }
@@ -1540,9 +1486,8 @@ fn song_cell_rejects_str_typed_param() {
 
         template bad(pat: str) {
             in: d out: d
-            song s {
-                | ch    |
-                | <pat> |
+            song s(ch) {
+                play { <pat> }
             }
             module seq : MasterSequencer(channels: [ch]) { song: s }
             module out : AudioOut
@@ -1564,16 +1509,14 @@ fn song_cell_rejects_str_typed_param() {
 fn song_cell_rejects_song_typed_param() {
     let src = r#"
         pattern kick { trig: x . }
-        song my_song {
-            | ch   |
-            | kick |
+        song my_song(ch) {
+            play { kick }
         }
 
         template bad(s: song) {
             in: d out: d
-            song s2 {
-                | ch  |
-                | <s> |
+            song s2(ch) {
+                play { <s> }
             }
             module seq : MasterSequencer(channels: [ch]) { song: s2 }
             module out : AudioOut
@@ -1596,9 +1539,8 @@ fn pattern_typed_param_rejects_unknown_name() {
     let src = r#"
         template t(pat: pattern) {
             in: d out: d
-            song s {
-                | ch    |
-                | <pat> |
+            song s(ch) {
+                play { <pat> }
             }
             module seq : MasterSequencer(channels: [ch]) { song: s }
             module out : AudioOut
@@ -1667,9 +1609,8 @@ fn pattern_typed_param_accepts_known_pattern() {
 
         template t(pat: pattern) {
             in: d out: d
-            song s {
-                | ch    |
-                | <pat> |
+            song s(ch) {
+                play { <pat> }
             }
             module seq : MasterSequencer(channels: [ch]) { song: s }
             module out : AudioOut

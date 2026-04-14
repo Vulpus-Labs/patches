@@ -56,17 +56,6 @@ pub enum ParameterKind {
     Enum  { variants: &'static [&'static str], default: &'static str },
     /// A single runtime string (e.g. a file path).
     String { default: &'static str },
-    /// Variable-length array of strings (e.g. a step-sequencer pattern).
-    ///
-    /// The `default` field uses `&'static [&'static str]` so that the descriptor itself
-    /// never allocates (consistent with ADR 0011). The `ParameterValue` it produces does
-    /// allocate, but only at the non-realtime boundary.
-    ///
-    /// `length` is the maximum number of elements the pre-allocated backing array can hold.
-    /// It must match `ModuleShape::length` for the module that declares this parameter.
-    /// `validate_parameters` rejects any `ParameterValue::Array` whose element count
-    /// exceeds this limit.
-    Array { default: &'static [&'static str], length: usize },
     /// A file path parameter. The DSL writes `file("path")` which the interpreter
     /// resolves to an absolute path against the patch file's directory.
     ///
@@ -93,9 +82,6 @@ impl ParameterKind {
             ParameterKind::Bool  { default }     => ParameterValue::Bool(*default),
             ParameterKind::Enum  { default, .. } => ParameterValue::Enum(default),
             ParameterKind::String { default }    => ParameterValue::String(default.to_string()),
-            ParameterKind::Array { default, .. } => ParameterValue::Array(
-                default.iter().map(|s| s.to_string()).collect::<Vec<_>>().into()
-            ),
             ParameterKind::File { .. } => ParameterValue::File(String::new()),
             ParameterKind::SongName => ParameterValue::Int(-1),
         }
@@ -109,7 +95,6 @@ impl ParameterKind {
             ParameterKind::Bool  { .. } => "bool",
             ParameterKind::Enum   { .. } => "enum",
             ParameterKind::String { .. } => "string",
-            ParameterKind::Array  { .. } => "array",
             ParameterKind::File  { .. } => "file",
             ParameterKind::SongName => "song_name",
         }
@@ -291,21 +276,6 @@ impl ModuleDescriptor {
         self
     }
 
-    // array_param has no _multi sibling so it is written by hand.
-    pub fn array_param(
-        mut self,
-        name: &'static str,
-        default: &'static [&'static str],
-        length: usize,
-    ) -> Self {
-        self.parameters.push(ParameterDescriptor {
-            name,
-            index: 0,
-            parameter_type: ParameterKind::Array { default, length },
-        });
-        self
-    }
-
 }
 
 #[cfg(test)]
@@ -410,10 +380,9 @@ mod tests {
             .float_param("gain", 0.0, 1.0, 0.5)
             .int_param("voices", 1, 8, 4)
             .bool_param("active", true)
-            .enum_param("wave", &["sine", "saw", "square"], "sine")
-            .array_param("pattern", &["C4", "E4"], 16);
+            .enum_param("wave", &["sine", "saw", "square"], "sine");
 
-        assert_eq!(m.parameters.len(), 5);
+        assert_eq!(m.parameters.len(), 4);
 
         let p = &m.parameters[0];
         assert_eq!(p.name, "gain");
@@ -434,11 +403,6 @@ mod tests {
         assert_eq!(p.name, "wave");
         assert_eq!(p.index, 0);
         assert!(matches!(p.parameter_type, ParameterKind::Enum { default, .. } if default == "sine"));
-
-        let p = &m.parameters[4];
-        assert_eq!(p.name, "pattern");
-        assert_eq!(p.index, 0);
-        assert!(matches!(p.parameter_type, ParameterKind::Array { length, .. } if length == 16));
     }
 
     #[test]

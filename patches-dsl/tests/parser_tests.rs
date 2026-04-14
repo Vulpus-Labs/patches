@@ -23,7 +23,6 @@ fn positive_fixtures_parse_ok() {
     let fixtures: &[(&str, &str)] = &[
         ("simple",             include_str!("fixtures/simple.patches")),
         ("scaled_and_indexed", include_str!("fixtures/scaled_and_indexed.patches")),
-        ("array_params",       include_str!("fixtures/array_params.patches")),
         ("voice_template",     include_str!("fixtures/voice_template.patches")),
         ("nested_templates",   include_str!("fixtures/nested_templates.patches")),
     ];
@@ -175,66 +174,6 @@ fn scaled_and_indexed_ast_scales_and_indices() {
             && c.arrow.scale == Some(Scalar::Float(-0.5))
     }).expect("expected backward connection with scale -0.5");
     assert_eq!(c2.lhs.index, Some(patches_dsl::PortIndex::Literal(2)));
-}
-
-// ─── T-0247: array_params fixture AST inspection ────────────────────────────
-
-#[test]
-fn array_params_ast_structure() {
-    let src = include_str!("fixtures/array_params.patches");
-    let file = parse(src).unwrap();
-
-    // Find module "seq" and check its "steps" array param.
-    let seq = file.patch.body.iter().find_map(|s| {
-        if let Statement::Module(m) = s {
-            if m.name.name == "seq" { Some(m) } else { None }
-        } else { None }
-    }).expect("expected module 'seq'");
-
-    let steps_entry = seq.params.iter().find_map(|e| {
-        if let patches_dsl::ParamEntry::KeyValue { name, value, .. } = e {
-            if name.name == "steps" { Some(value) } else { None }
-        } else { None }
-    }).expect("expected 'steps' param");
-
-    match steps_entry {
-        Value::Array(items) => {
-            assert_eq!(items.len(), 8, "expected 8 steps");
-            // First element should be Int(60)
-            assert_eq!(items[0], Value::Scalar(Scalar::Int(60)));
-            assert_eq!(items[7], Value::Scalar(Scalar::Int(72)));
-        }
-        other => panic!("expected Array, got {other:?}"),
-    }
-
-    // Find module "pat" and check its "pattern" array-of-tables param.
-    let pat = file.patch.body.iter().find_map(|s| {
-        if let Statement::Module(m) = s {
-            if m.name.name == "pat" { Some(m) } else { None }
-        } else { None }
-    }).expect("expected module 'pat'");
-
-    let pattern_entry = pat.params.iter().find_map(|e| {
-        if let patches_dsl::ParamEntry::KeyValue { name, value, .. } = e {
-            if name.name == "pattern" { Some(value) } else { None }
-        } else { None }
-    }).expect("expected 'pattern' param");
-
-    match pattern_entry {
-        Value::Array(items) => {
-            assert_eq!(items.len(), 4, "expected 4 pattern entries");
-            // Each item should be a table with keys: note, velocity, gate.
-            if let Value::Table(fields) = &items[0] {
-                let keys: Vec<&str> = fields.iter().map(|(k, _)| k.name.as_str()).collect();
-                assert!(keys.contains(&"note"), "expected 'note' key");
-                assert!(keys.contains(&"velocity"), "expected 'velocity' key");
-                assert!(keys.contains(&"gate"), "expected 'gate' key");
-            } else {
-                panic!("expected Table in pattern array, got {:?}", items[0]);
-            }
-        }
-        other => panic!("expected Array, got {other:?}"),
-    }
 }
 
 // ─── T-0247: dB literal edge cases ──────────────────────────────────────────
@@ -625,6 +564,35 @@ fn pattern_slide_generator() {
     }
 }
 
+#[test]
+fn slide_generator_accepts_note_endpoints() {
+    // G2 = v/oct -1.0 + 7/12 ≈ -0.4167; F2 ≈ -0.5833.
+    let src = "pattern p { bass: slide(2, G2, F2) }\npatch { module osc : Osc }\n";
+    let file = parse(src).expect("slide with note endpoints should parse");
+    let ch = &file.patterns[0].channels[0];
+    assert_eq!(ch.steps.len(), 1);
+    match &ch.steps[0] {
+        StepOrGenerator::Slide { count, start, end } => {
+            assert_eq!(*count, 2);
+            // v/oct relative to C0: G2 = 2 + 7/12, F2 = 2 + 5/12.
+            assert!((*start - (2.0 + 7.0 / 12.0)).abs() < 1e-4, "start={start}");
+            assert!((*end - (2.0 + 5.0 / 12.0)).abs() < 1e-4, "end={end}");
+        }
+        _ => panic!("expected Slide generator"),
+    }
+}
+
+#[test]
+fn slide_generator_accepts_hz_endpoints() {
+    let src = "pattern p { cut: slide(2, 500Hz, 2kHz) }\npatch { module osc : Osc }\n";
+    let file = parse(src).expect("slide with Hz endpoints should parse");
+    let ch = &file.patterns[0].channels[0];
+    match &ch.steps[0] {
+        StepOrGenerator::Slide { count, .. } => assert_eq!(*count, 2),
+        _ => panic!("expected Slide generator"),
+    }
+}
+
 // ─── Song block parsing ─────────────────────────────────────────────────────
 
 #[test]
@@ -634,60 +602,58 @@ fn song_basic_parses() {
     assert_eq!(file.songs.len(), 1);
     let song = &file.songs[0];
     assert_eq!(song.name.name, "my_song");
-    assert_eq!(song.channels.len(), 2);
-    assert_eq!(song.channels[0].name, "drums");
-    assert_eq!(song.channels[1].name, "bass");
-    assert_eq!(song.rows.len(), 4);
-    assert!(song.loop_point.is_none());
+    assert_eq!(song.lanes.len(), 2);
+    assert_eq!(song.lanes[0].name, "drums");
+    assert_eq!(song.lanes[1].name, "bass");
+    assert_eq!(song.items.len(), 1);
+    assert!(matches!(&song.items[0], patches_dsl::SongItem::Play(_)));
 }
 
 #[test]
-fn song_pattern_refs() {
-    let src = include_str!("fixtures/song_basic.patches");
-    let file = parse(src).unwrap();
-    let song = &file.songs[0];
-    // First row: verse_drums, bass_a
-    assert!(matches!(&song.rows[0].cells[0], patches_dsl::SongCell::Pattern(id) if id.name == "verse_drums"));
-    assert!(matches!(&song.rows[0].cells[1], patches_dsl::SongCell::Pattern(id) if id.name == "bass_a"));
-    // Third row: fill_drums, bass_a
-    assert!(matches!(&song.rows[2].cells[0], patches_dsl::SongCell::Pattern(id) if id.name == "fill_drums"));
-}
-
-#[test]
-fn song_loop_point() {
+fn song_loop_marker_parses() {
     let src = include_str!("fixtures/song_loop.patches");
     let file = parse(src).expect("song_loop should parse");
     let song = &file.songs[0];
-    assert_eq!(song.loop_point, Some(1), "loop point should be row index 1");
-    assert_eq!(song.rows.len(), 4);
+    // Items: play { a }, @loop, play { a b a }
+    assert_eq!(song.items.len(), 3);
+    assert!(matches!(&song.items[1], patches_dsl::SongItem::LoopMarker(_)));
 }
 
 #[test]
-fn song_silence_marker() {
+fn song_silence_parses() {
     let src = include_str!("fixtures/song_silence.patches");
     let file = parse(src).expect("song_silence should parse");
     let song = &file.songs[0];
-    // Row 0: a, _
-    assert!(matches!(&song.rows[0].cells[0], patches_dsl::SongCell::Pattern(_)));
-    assert!(matches!(&song.rows[0].cells[1], patches_dsl::SongCell::Silence), "_ should parse as Silence");
-    // Row 1: _, a
-    assert!(matches!(&song.rows[1].cells[0], patches_dsl::SongCell::Silence));
-    assert!(matches!(&song.rows[1].cells[1], patches_dsl::SongCell::Pattern(_)));
+    assert_eq!(song.lanes.len(), 2);
+    assert_eq!(song.items.len(), 1);
 }
 
 #[test]
-fn song_multiple_loops_is_error() {
+fn bare_cell_repeat_is_rejected() {
     let src = r#"
         pattern a { ch: x . }
-        song bad {
-            | main |
-            | a    | @loop
-            | a    | @loop
+        song bad(ch) {
+            play { a * 2 }
         }
         patch { module o : AudioOut }
     "#;
-    let err = parse(src);
-    assert!(err.is_err(), "multiple @loop should be a parse error");
+    assert!(parse(src).is_err(), "bare cell `*N` must be a parse error");
+}
+
+#[test]
+fn inline_block_inside_composition_is_rejected() {
+    let src = r#"
+        pattern a { ch: x . }
+        section s { a }
+        song bad(ch) {
+            play s, { a }
+        }
+        patch { module o : AudioOut }
+    "#;
+    assert!(
+        parse(src).is_err(),
+        "inline block as play atom must be a parse error",
+    );
 }
 
 #[test]
@@ -696,15 +662,15 @@ fn multiple_songs_in_file() {
         pattern a { ch: x . }
         pattern b { ch: . x }
 
-        song first {
-            | main |
-            | a    |
+        song first(ch) {
+            play { a }
         }
 
-        song second {
-            | main |
-            | b    |
-            | a    |
+        song second(ch) {
+            play {
+                b
+                a
+            }
         }
 
         patch { module o : AudioOut }
@@ -713,6 +679,81 @@ fn multiple_songs_in_file() {
     assert_eq!(file.songs.len(), 2);
     assert_eq!(file.songs[0].name.name, "first");
     assert_eq!(file.songs[1].name.name, "second");
+}
+
+#[test]
+fn song_with_sections_and_play_composition() {
+    let src = r#"
+        pattern a { ch: x . }
+        pattern b { ch: . x }
+
+        song arr(ch) {
+            section verse { a }
+            section chorus { b }
+            play (verse, chorus) * 2
+            play chorus
+        }
+
+        patch { module o : AudioOut }
+    "#;
+    let file = parse(src).expect("sections + play composition should parse");
+    let song = &file.songs[0];
+    let sections: Vec<_> = song
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            patches_dsl::SongItem::Section(s) => Some(&s.name.name),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sections, vec!["verse", "chorus"]);
+}
+
+#[test]
+fn top_level_section_block() {
+    let src = r#"
+        pattern a { ch: x . }
+        section intro { a }
+        song s(ch) {
+            play intro
+        }
+        patch { module o : AudioOut }
+    "#;
+    let file = parse(src).expect("top-level section should parse");
+    assert_eq!(file.sections.len(), 1);
+    assert_eq!(file.sections[0].name.name, "intro");
+}
+
+#[test]
+fn nested_row_groups_parse() {
+    let src = r#"
+        pattern a { ch: x . }
+        pattern b { ch: . x }
+        song s(ch) {
+            section verse {
+                (a
+                 (b) * 2) * 3
+            }
+            play verse
+        }
+        patch { module o : AudioOut }
+    "#;
+    parse(src).expect("nested row groups should parse");
+}
+
+#[test]
+fn named_inline_play_body() {
+    let src = r#"
+        pattern a { ch: x . }
+        song s(ch) {
+            play chorus {
+                a
+            }
+            play chorus
+        }
+        patch { module o : AudioOut }
+    "#;
+    parse(src).expect("named-inline play body should parse");
 }
 
 #[test]
@@ -730,9 +771,8 @@ fn patterns_and_templates_coexist() {
             kick: x . . . x . . .
         }
 
-        song my_song {
-            | ch1   |
-            | drums |
+        song my_song(ch1) {
+            play { drums }
         }
 
         patch {

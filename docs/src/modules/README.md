@@ -10,7 +10,7 @@ Each module type is documented with its ports, parameters, and behaviour. The ca
 | [Amplifiers & VCAs](vcas.md)         | `Vca`, `PolyVca`, `StereoVca`                                                  | Voltage-controlled amplitude             |
 | [Mixers](mixers.md)                  | `Sum`, `PolySum`, `StereoMixer`, `MonoToMono`                                  | Signal summing and routing               |
 | [Noise](noise.md)                    | `Noise`                                                                        | White, pink, brown, and red noise        |
-| [Sequencers & clocks](sequencers.md) | `Clock`, `Seq`                                                                 | Tempo-locked trigger and step sequencing |
+| [Sequencers & clocks](sequencers.md) | `Clock`                                                                        | Tempo-locked trigger generation          |
 | [Tracker sequencer](tracker.md)      | `MasterSequencer`, `PatternPlayer`                                             | Song-driven pattern sequencing           |
 | [Drum synthesis](drum-synthesis.md)  | `Kick`, `Snare`, `ClosedHiHat`, `OpenHiHat`, `Tom`, `Cymbal`, `Clap`, `Claves` | 808-style electronic drum synthesis      |
 | [MIDI](midi.md)                      | `MidiIn`, `PolyMidiIn`                                                         | MIDI keyboard and controller input       |

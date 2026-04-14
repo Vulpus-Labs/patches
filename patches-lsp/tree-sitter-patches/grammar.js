@@ -11,7 +11,7 @@ module.exports = grammar({
     // ─── File root ──────────────────────────────────────────────────────
     file: ($) =>
       seq(
-        repeat(choice($.include_directive, $.template, $.pattern_block, $.song_block)),
+        repeat(choice($.include_directive, $.template, $.pattern_block, $.section_def, $.song_block)),
         optional($.patch)
       ),
 
@@ -68,12 +68,7 @@ module.exports = grammar({
     // file("path") — a file reference, syntactically distinct from a plain string.
     file_ref: ($) => seq("file", "(", choice($.string_lit, $.param_ref), ")"),
 
-    array: ($) => seq("[", comma_list($.value), "]"),
-
-    table_entry: ($) => seq($.ident, ":", $.value),
-    table: ($) => seq("{", comma_list($.table_entry), "}"),
-
-    value: ($) => choice($.file_ref, $.table, $.array, $.scalar),
+    value: ($) => choice($.file_ref, $.scalar),
 
     // ─── Shape and param blocks ─────────────────────────────────────────
     alias_list: ($) => seq("[", comma_list($.ident), "]"),
@@ -90,7 +85,9 @@ module.exports = grammar({
 
     // at-block
     at_block_index: ($) => choice($.nat, $.ident),
-    at_block: ($) => seq("@", $.at_block_index, optional(":"), $.table),
+    at_block_entry: ($) => seq($.ident, ":", $.value),
+    at_block_body: ($) => seq("{", comma_list($.at_block_entry), "}"),
+    at_block: ($) => seq("@", $.at_block_index, optional(":"), $.at_block_body),
 
     // param_entry
     param_entry: ($) =>
@@ -258,32 +255,57 @@ module.exports = grammar({
     slide_generator: ($) =>
       seq("slide", "(", $.step_value, ",", $.step_value, ",", $.step_value, ")"),
 
-    // ─── Song block ─────────────────────────────────────────────────────
+    // ─── Song block (ADR 0035) ───────────────────────────────────────────
+    // song name(lane, ...) { section | pattern | play | @loop ... }
     //
-    // song name {
-    //     | channel1 | channel2 |
-    //     | pattern1 | pattern2 |
-    //     | pattern3 | pattern4 |  @loop
-    // }
+    // The tree-sitter grammar intentionally loosens row-sequence structure
+    // (newline-significance) — the canonical pest grammar is the source of
+    // truth. Here rows reduce to a bag of cells and row-groups; LSP uses
+    // the result for navigation only.
     song_block: ($) =>
       seq(
         "song",
         field("name", $.ident),
+        $.song_lanes,
         "{",
-        repeat($.song_row),
+        repeat($.song_item),
         "}"
       ),
 
-    song_row: ($) =>
-      seq(
-        repeat1(seq("|", $.song_cell)),
-        "|",
-        optional($.loop_annotation)
-      ),
+    song_lanes: ($) => seq("(", sep1($.ident, ","), ")"),
+
+    song_item: ($) =>
+      choice($.section_def, $.pattern_block, $.play_stmt, $.loop_marker),
+
+    section_def: ($) =>
+      seq("section", field("name", $.ident), "{", repeat($.row_elem), "}"),
+
+    // A loose row element: a cell, a parenthesised repeat group, or a
+    // comma (acts as filler).
+    row_elem: ($) => choice($.song_cell, $.repeat_group, ","),
+
+    repeat_group: ($) =>
+      seq("(", repeat($.row_elem), ")", "*", $.nat),
 
     song_cell: ($) => choice($.param_ref, $.ident, "_"),
 
-    loop_annotation: (_) => token(seq("@", "loop")),
+    play_stmt: ($) => seq("play", $.play_body),
+
+    play_body: ($) =>
+      choice($.inline_block, $.named_inline, $.play_expr),
+
+    inline_block: ($) => seq("{", repeat($.row_elem), "}"),
+
+    named_inline: ($) =>
+      seq(field("name", $.ident), "{", repeat($.row_elem), "}"),
+
+    play_expr: ($) => sep1($.play_term, ","),
+
+    play_term: ($) => seq($.play_atom, optional(seq("*", $.nat))),
+
+    play_atom: ($) => choice(seq("(", $.play_expr, ")"), $.ident),
+
+    loop_marker: (_) => token(seq("@", "loop")),
 
     // ─── Patch ──────────────────────────────────────────────────────────
     patch: ($) => seq("patch", "{", repeat($.statement), "}"),

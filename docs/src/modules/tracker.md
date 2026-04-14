@@ -71,7 +71,7 @@ The clock bus carries four poly voices:
 **Shape arguments**
 
 The `channels` shape argument defines the song channels. Use named aliases
-to match the song column headers:
+to match the song's lane names:
 
 ```patches
 module seq: MasterSequencer(channels: [bass, lead, drums]) {
@@ -114,8 +114,8 @@ module pp: PatternPlayer(channels: [note, vel])
 
 ### Output conventions
 
-For note channels, `cv1` carries the V/oct pitch (same convention as `Osc`
-and `Seq`) and `trigger`/`gate` signal note-on events. For drum/trigger
+For note channels, `cv1` carries the V/oct pitch (same convention as `Osc`)
+and `trigger`/`gate` signal note-on events. For drum/trigger
 channels, `trigger` fires on each hit and `cv2` carries the velocity value.
 
 ### Slides and repeats

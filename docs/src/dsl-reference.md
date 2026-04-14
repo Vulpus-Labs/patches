@@ -13,9 +13,10 @@ pattern kick_basic {
 }
 
 # optional: song definitions referencing patterns
-song my_song {
-    | kick           | bass       |
-    | kick_basic     | bass_verse |
+song my_song(kick, bass) {
+    play {
+        kick_basic, bass_verse
+    }
 }
 
 # optional: templates
@@ -86,7 +87,6 @@ module mix : Mixer(channels: [drums, bass, lead]) {
 | `true` / `false`   | boolean   |                                               |
 | `linear`           | string    | unquoted; `"linear"` also works               |
 | `"hello world"`    | string    | quotes required if value contains spaces      |
-| `[1, 2, 3]`        | array     |                                               |
 
 Frequency, note, and dB literals are case-insensitive. There is no time-unit suffix; durations are bare floats in seconds.
 
@@ -275,22 +275,77 @@ duty cycle gate.
 
 ## Songs
 
-A song block defines a playback order — a sequence of rows, each assigning a
-pattern to every song channel.
+A song block defines a playback order built from named `section` blocks and
+`play` statements. See [ADR 0035](../../adr/0035-song-sections-play-composition.md)
+for the design.
 
 ```patches
-song my_song {
-    | bass       | lead        | drums      |
-    | bass_verse | lead_verse  | drums_a    |
-    | bass_verse | lead_verse  | drums_b    |
-    | bass_chor  | lead_chor   | drums_a    |  @loop
+song my_song(bass, lead, drums) {
+    section verse {
+        bass_verse, lead_verse, drums_a
+        bass_verse, lead_verse, drums_b
+    }
+    section chorus {
+        bass_chor, lead_chor, drums_a
+    }
+
+    play verse
+    @loop
+    play (verse, chorus) * 2
 }
 ```
 
-- The **first row** is the header: it names the song channels. These must
-  match the `channels` shape argument on the `MasterSequencer`.
-- Each subsequent row assigns one pattern per channel. The pattern name must
-  match a `pattern` block defined earlier in the file.
-- The `@loop` marker (optional) on a row indicates the loop-back point when
-  the `MasterSequencer` has `loop: true`. If omitted, the song loops from
-  the beginning.
+### Lanes
+
+The **lanes** — the identifiers in parentheses after the song name — declare
+one column per pattern assignment. Every row must supply exactly this many
+cells. Lane names must match the `channels` shape argument on the
+`MasterSequencer`.
+
+### Cells
+
+A row is a comma-separated list of cells. A cell is one of:
+
+- a pattern name — the pattern played in that lane for that row;
+- `_` — silence on that lane;
+- `<param>` — a template-parameter reference, resolved at expansion time.
+
+Rows are separated by newlines (newlines are significant inside row
+sequences). A parenthesised sub-sequence can be repeated: `(a, b
+                                                               c, d) * 2`.
+A bare `cell * N` (without parentheses) is rejected at parse time.
+
+### Sections
+
+A `section` block is a named, reusable row sequence. Sections may be defined
+inside a song (song-local scope) or at file top level (visible to all songs).
+A section has no lane count of its own; it is validated against the invoking
+song's lanes when `play` references it.
+
+### Play statements
+
+`play` composes sections into the song's running row list:
+
+- `play verse` — append `verse`.
+- `play verse, chorus` — append `verse`, then `chorus`.
+- `play chorus * 2` — append `chorus` twice (`*` binds tighter than `,`).
+- `play (verse, chorus) * 4` — append the group four times.
+- `play { row, ... }` — an anonymous inline body (no section name).
+- `play chorus { row, ... }` — defines `chorus` as a song-local section and
+  plays it once. Later `play chorus` / `chorus` references replay it.
+
+Inline bodies (`play { ... }` and `play name { ... }`) appear only as the
+entire body of a single `play` statement. They cannot be mixed into a
+composition expression such as `play a, { row, ... }, b`.
+
+### Loop marker
+
+`@loop` is a standalone song item between `play` statements. It sets the
+loop-back row index in the emitted song. A song may contain at most one
+`@loop`; omitting it loops the song from the beginning.
+
+### Inline patterns
+
+`pattern` blocks may appear as song items alongside `section` and `play`.
+Inline patterns are song-local: their names are mangled under the enclosing
+song so two songs may each define a `fill` pattern without collision.

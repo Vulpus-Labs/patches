@@ -177,7 +177,6 @@ The core engine and a practical set of modules are in place:
 | `PitchShift` | Spectral pitch shifter (WOLA phase vocoder, optional formant preservation) |
 | **Sequencers & clocks** | |
 | `Clock` | Bar/beat/quaver/semiquaver trigger generator |
-| `Seq` | Step sequencer (note strings, gate, trigger) |
 | **Utilities** | |
 | `Glide` | Portamento / pitch smoothing |
 | `Tuner`, `PolyTuner` | Pitch offset (octave + semitones + cents) |

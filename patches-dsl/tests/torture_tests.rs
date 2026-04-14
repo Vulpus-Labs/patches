@@ -484,32 +484,6 @@ patch {
 }
 
 #[test]
-fn error_table_element_in_group_param_array() {
-    // { vals: [{a: 1.0}, {b: 2.0}] } — array elements must be scalars, not tables.
-    let src = r#"
-template TableInArray(n: int, vals[n]: float = 0.0) {
-    in:  x
-    out: y
-    module m : Gain { <vals/0> }
-    m.in[0] <- $.x
-    $.y <- m.out[0]
-}
-patch {
-    module t   : TableInArray(n: 2) { vals: [{a: 1.0}, {b: 2.0}] }
-    module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
-}
-"#;
-    let file = parse(src).expect("parse ok — table arrays are syntactically valid");
-    let err = expand(&file).expect_err("expected expand error: table element in group param array");
-    assert!(
-        err.message.contains("scalar") || err.message.contains("element") || err.message.contains("array"),
-        "unexpected error message: {}",
-        err.message
-    );
-}
-
-#[test]
 fn error_scalar_param_in_param_block() {
     // Scalar params belong in the shape block (...), not the param block {...}.
     let src = r#"
@@ -687,32 +661,6 @@ patch {
     });
     assert!(va_internal, "expected duo/va/osc → duo/va/vca");
     assert!(vb_internal, "expected duo/vb/osc → duo/vb/vca");
-}
-
-#[test]
-fn group_param_array_length_mismatch_exact_error() {
-    // Supply a 4-element array to a 3-slot group param.
-    let src = r#"
-template G3(n: int, v[n]: float = 0.0) {
-    in:  x
-    out: y
-    module m : Gain { <v/0>, <v/1>, <v/2> }
-    m.in[0] <- $.x
-    $.y <- m.out[0]
-}
-patch {
-    module t   : G3(n: 3) { v: [1.0, 2.0, 3.0, 4.0] }
-    module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
-}
-"#;
-    let file = parse(src).expect("parse ok");
-    let err = expand(&file).expect_err("expected error for array length mismatch");
-    assert!(
-        err.message.contains("length") || err.message.contains("arity") || err.message.contains("mismatch"),
-        "unexpected error: {}",
-        err.message
-    );
 }
 
 #[test]

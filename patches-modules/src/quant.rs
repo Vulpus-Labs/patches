@@ -3,14 +3,21 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use crate::quant_util::{parse_notes, quantise_note};
+use crate::quant_util::{parse_pitches, quantise_note};
 
 /// Mono V/OCT quantiser.
 ///
-/// Snaps a continuous V/OCT signal to the nearest note in a user-supplied
-/// semitone set. The input is transformed as `centre + in * scale` before
-/// quantisation. Emits a one-sample pulse on `trig_out` whenever the
-/// quantised pitch changes.
+/// Snaps a continuous V/OCT signal to the nearest pitch in a user-supplied
+/// set. The set is declared via `channels` (an alias list or count) and one
+/// `pitch[i]` parameter per channel. Each pitch is a v/oct value reduced
+/// modulo 1.0 into `[0.0, 1.0)`, giving an octave-invariant pitch class.
+/// The quantiser is not restricted to 12-tone equal temperament: any
+/// microtonal or non-Western scale can be declared by supplying the desired
+/// v/oct fractions directly.
+///
+/// The input is transformed as `centre + in * scale` before quantisation.
+/// Emits a one-sample pulse on `trig_out` whenever the quantised pitch
+/// changes.
 ///
 /// # Inputs
 ///
@@ -29,7 +36,7 @@ use crate::quant_util::{parse_notes, quantise_note};
 ///
 /// | Name | Type | Range | Default | Description |
 /// |------|------|-------|---------|-------------|
-/// | `notes` | str array | up to 12 entries | `["0"]` | Semitone values in the scale |
+/// | `pitch[i]` | float (v/oct) | -8.0--8.0 | `0.0` | Target pitch per scale degree (i in 0..N-1, N = channels) |
 /// | `centre` | float | -4.0--4.0 | `0.0` | Offset added before quantisation |
 /// | `scale` | float | -4.0--4.0 | `1.0` | Multiplier applied to input before quantisation |
 pub struct Quant {
@@ -48,11 +55,12 @@ pub struct Quant {
 
 impl Module for Quant {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+        let n = shape.channels.max(1);
         ModuleDescriptor::new("Quant", shape.clone())
             .mono_in("in")
             .mono_out("out")
             .mono_out("trig_out")
-            .array_param("notes", &["0"], 12)
+            .float_param_multi("pitch", n, -8.0, 8.0, 0.0)
             .float_param("centre", -4.0, 4.0, 0.0)
             .float_param("scale", -4.0, 4.0, 1.0)
     }
@@ -76,9 +84,8 @@ impl Module for Quant {
     }
 
     fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Array(strings)) = params.get_scalar("notes") {
-            parse_notes(strings, &mut self.notes_buf, &mut self.notes_len);
-        }
+        let channels = self.descriptor.shape.channels.max(1);
+        parse_pitches(params, channels, &mut self.notes_buf, &mut self.notes_len);
         if let Some(ParameterValue::Float(v)) = params.get_scalar("centre") {
             self.centre = *v;
         }
@@ -99,10 +106,10 @@ impl Module for Quant {
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let x = self.centre + pool.read_mono(&self.in_sig) * self.scale;
         let octave = x.floor();
-        let semitone_frac = (x - octave) * 12.0;
+        let voct_frac = x - octave;
 
-        let (nearest, octave_adj) = quantise_note(semitone_frac, &self.notes_buf[..self.notes_len]);
-        let new_quant = octave + octave_adj as f32 + nearest / 12.0;
+        let (nearest, octave_adj) = quantise_note(voct_frac, &self.notes_buf[..self.notes_len]);
+        let new_quant = octave + octave_adj as f32 + nearest;
 
         if (new_quant - self.last_quantised).abs() > 1e-6 {
             self.pending_trig_out = 1.0;
@@ -120,66 +127,87 @@ impl Module for Quant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::test_support::{ModuleHarness, params};
-    use patches_core::parameter_map::ParameterValue;
+    use patches_core::test_support::ModuleHarness;
+    use patches_core::parameter_map::{ParameterMap, ParameterValue};
+    use patches_core::ModuleShape;
 
-    fn make_quant(notes: &[&str]) -> ModuleHarness {
-        let arr: Vec<String> = notes.iter().map(|s| s.to_string()).collect();
-        ModuleHarness::build::<Quant>(&[("notes", ParameterValue::Array(arr.into()))])
+    fn shape(n: usize) -> ModuleShape {
+        ModuleShape { channels: n, length: 0, ..Default::default() }
+    }
+
+    fn pitch_map(pitches: &[f32]) -> ParameterMap {
+        let mut map = ParameterMap::new();
+        for (i, &p) in pitches.iter().enumerate() {
+            map.insert_param("pitch".to_string(), i, ParameterValue::Float(p));
+        }
+        map
+    }
+
+    fn make_quant(pitches: &[f32]) -> ModuleHarness {
+        let mut h = ModuleHarness::build_with_shape::<Quant>(&[], shape(pitches.len()));
+        h.update_params_map(&pitch_map(pitches));
+        h
     }
 
     #[test]
     fn snaps_to_root_with_default_notes() {
-        let mut h = ModuleHarness::build::<Quant>(params![]);
-        h.set_mono("in", 0.5); // 0.5 voct → halfway between C0 and C1, semitone 6
+        let mut h = ModuleHarness::build_with_shape::<Quant>(&[], shape(1));
+        h.set_mono("in", 0.5);
         h.tick();
-        // Only note is 0 (C), so it should snap to C in the nearest octave.
         let out = h.read_mono("out");
         assert!(out == 0.0 || out == 1.0, "expected 0.0 or 1.0, got {out}");
     }
 
     #[test]
     fn snaps_to_nearest_of_root_and_fifth() {
-        let mut h = make_quant(&["0", "7"]);
-        // Input 0.0 voct → semitone 0 → exact match root → out = 0.0
+        // C0 = 0.0 v/oct (root), G0 = 7/12 v/oct (fifth).
+        let mut h = make_quant(&[0.0, 7.0 / 12.0]);
         h.set_mono("in", 0.0);
         h.tick();
-        assert!((h.read_mono("out") - 0.0).abs() < 1e-5, "expected 0.0 got {}", h.read_mono("out"));
+        assert!((h.read_mono("out") - 0.0).abs() < 1e-5, "got {}", h.read_mono("out"));
 
-        // Input = 0 + 7/12 → semitone 7 → exact match fifth → out = 7/12
         h.set_mono("in", 7.0 / 12.0);
         h.tick();
-        let expected = 7.0 / 12.0;
-        assert!((h.read_mono("out") - expected).abs() < 1e-5);
+        assert!((h.read_mono("out") - 7.0 / 12.0).abs() < 1e-5);
     }
 
     #[test]
     fn trig_out_fires_on_change_then_clears() {
-        let mut h = make_quant(&["0", "7"]);
+        let mut h = make_quant(&[0.0, 7.0 / 12.0]);
         h.set_mono("in", 0.0);
-        h.tick(); // first quantise: change from initial 0.0 - no change, stays 0.0
-        // Actually initial last_quantised is 0.0 and first quantise is 0.0 so no trig
+        h.tick();
         assert_eq!(h.read_mono("trig_out"), 0.0);
 
         h.set_mono("in", 7.0 / 12.0);
         h.tick();
-        assert_eq!(h.read_mono("trig_out"), 1.0, "trig_out should fire on pitch change");
+        assert_eq!(h.read_mono("trig_out"), 1.0);
 
-        h.tick(); // same input
-        assert_eq!(h.read_mono("trig_out"), 0.0, "trig_out should clear next sample");
+        h.tick();
+        assert_eq!(h.read_mono("trig_out"), 0.0);
     }
 
     #[test]
     fn centre_and_scale_applied() {
-        let arr = vec!["0".to_string()];
-        let mut h = ModuleHarness::build::<Quant>(&[
-            ("notes", ParameterValue::Array(arr.into())),
-            ("centre", ParameterValue::Float(1.0)),
-            ("scale", ParameterValue::Float(0.5)),
-        ]);
+        let mut h = ModuleHarness::build_with_shape::<Quant>(
+            &[
+                ("centre", ParameterValue::Float(1.0)),
+                ("scale", ParameterValue::Float(0.5)),
+            ],
+            shape(1),
+        );
         h.set_mono("in", 0.0);
         h.tick();
-        // quantised_voct = 0.0, out = 1.0 + 0.0 * 0.5 = 1.0
         assert!((h.read_mono("out") - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pitches_reduced_modulo_octave() {
+        // C0 and C1 both reduce to class 0 → single-note scale.
+        let mut h = make_quant(&[0.0, 1.0]);
+        h.set_mono("in", 0.3);
+        h.tick();
+        // Should snap to nearest C (either 0.0 or 1.0).
+        let out = h.read_mono("out");
+        assert!(out == 0.0 || out == 1.0, "got {out}");
     }
 }

@@ -59,10 +59,6 @@ impl fmt::Display for ParameterKey {
 
 // ── ParameterValue ────────────────────────────────────────────────────────────
 
-/// An `Array` value stores its strings in an `Arc<[String]>` so that cloning
-/// the value is O(1) — the data is shared, not copied.  Mutation requires
-/// cloning the inner slice (copy-on-write pattern), which is only needed when
-/// the DSL hot-reloads a new pattern, not on every audio tick.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterValue {
     Float(f32),
@@ -72,11 +68,6 @@ pub enum ParameterValue {
     /// A single runtime string (e.g. a file path). Owned because values come
     /// from the DSL at runtime.
     String(String),
-    // Array parameter values own their strings via Arc so that cloning is O(1).
-    // Patterns come from the DSL at runtime and cannot be required to be 'static
-    // (unlike Enum variants, which are a closed compile-time set declared in the
-    // descriptor).
-    Array(Arc<[String]>),
     /// A resolved absolute file path. Produced by the interpreter from
     /// `file("path")` DSL syntax. The planner replaces this with `FloatBuffer`
     /// after calling the module's `FileProcessor::process_file`.
@@ -96,7 +87,6 @@ impl ParameterValue {
             ParameterValue::Bool(_) => "bool",
             ParameterValue::Enum(_) => "enum",
             ParameterValue::String(_) => "string",
-            ParameterValue::Array(_) => "array",
             ParameterValue::File(_) => "file",
             ParameterValue::FloatBuffer(_) => "float_buffer",
         }

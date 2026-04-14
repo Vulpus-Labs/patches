@@ -32,12 +32,10 @@ template filtered_voice(attack: float = 0.01, sustain: float = 0.7, cutoff: floa
 }
 
 patch {
-    module clock : Clock { bpm: 100.0 }
-    module seq   : Seq(length: 4) { steps: ["C2", "E2", "G2", "C3"] }
+    module seq   : MidiIn
     module fv    : filtered_voice(attack: 0.02, cutoff: 6.2)
     module out   : AudioOut
 
-    clock.semiquaver -> seq.clock
     seq.pitch        -> fv.voct
     seq.gate         -> fv.gate
     out.in_left         <- fv.audio

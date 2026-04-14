@@ -44,8 +44,12 @@ patch {
     # ── Quantiser: major pentatonic C D E G A across two octaves around C4 ───
     # centre: 4.0 shifts the base to C4 (voct 4.0); the ±3 oct noise range
     # means the melody spans roughly C1–C7.
-    module quant : Quant {
-        notes:  ["0", "2", "4", "7", "9"],
+    module quant : Quant(channels: [root, second, third, fifth, sixth]) {
+        pitch[root]:   C0,
+        pitch[second]: D0,
+        pitch[third]:  E0,
+        pitch[fifth]:  G0,
+        pitch[sixth]:  A0,
         centre: 4.0,
         scale:  3.0
     }

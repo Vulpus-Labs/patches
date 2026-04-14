@@ -2,7 +2,7 @@ use patches_core::{AUDIO_OUT_L, CablePool, CableValue, Module, ModuleGraph, Modu
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::PlannerState;
 use patches_engine::{build_patch, ExecutionPlan, ReadyState, StaleState, ModulePool};
-use patches_modules::{AudioOut, Oscillator, Seq, Sum};
+use patches_modules::{AudioOut, Mixer, Oscillator, Sum};
 use patches_integration_tests::{p, pi, env, POOL_CAP, MODULE_CAP};
 
 /// Oscillator → AudioOut (sine output).
@@ -406,30 +406,19 @@ fn initial_plan_uses_provided_sample_rate() {
     assert!(out_val.abs() <= 1.0, "audio output must be bounded");
 }
 
-/// Changing the shape of a sequencer node (e.g. length 4 → 8) forces the old
-/// instance to be tombstoned and a fresh one to be created, even though the
-/// NodeId and module type are unchanged.
+/// Changing a shape-dependent module's `channels` forces the old instance to
+/// be tombstoned and a fresh one to be created, even though the NodeId and
+/// module type are unchanged.
 #[test]
 fn shape_change_forces_re_instantiation() {
     let registry = patches_modules::default_registry();
 
-    // Build a minimal graph: StepSequencer("seq") → AudioOut("out").
-    // First build: length = 4.
-    let seq_steps_a: Vec<String> = ["C3", "D3", "E3", "F3"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let mut seq_params_a = patches_core::parameter_map::ParameterMap::new();
-    seq_params_a.insert(
-        "steps".to_string(),
-        patches_core::parameter_map::ParameterValue::Array(seq_steps_a.into()),
-    );
-
+    // First build: Mixer with 2 channels.
     let mut graph_a = patches_core::ModuleGraph::new();
     graph_a.add_module(
-        "seq",
-        Seq::describe(&ModuleShape { channels: 0, length: 4, ..Default::default() }),
-        &seq_params_a,
+        "mix",
+        Mixer::describe(&ModuleShape { channels: 2, length: 0, ..Default::default() }),
+        &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.add_module(
         "out",
@@ -437,17 +426,10 @@ fn shape_change_forces_re_instantiation() {
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.connect(
-        &patches_core::NodeId::from("seq"),
-        p("pitch"),
+        &patches_core::NodeId::from("mix"),
+        p("out"),
         &patches_core::NodeId::from("out"),
         p("in_left"),
-        1.0,
-    ).unwrap();
-    graph_a.connect(
-        &patches_core::NodeId::from("seq"),
-        p("pitch"),
-        &patches_core::NodeId::from("out"),
-        p("in_right"),
         1.0,
     ).unwrap();
 
@@ -455,25 +437,15 @@ fn shape_change_forces_re_instantiation() {
         build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP)
             .unwrap();
 
-    let seq_id_a = state_a.nodes[&patches_core::NodeId::from("seq")].instance_id;
+    let mix_id_a = state_a.nodes[&patches_core::NodeId::from("mix")].instance_id;
     assert!(!plan_a.new_modules.is_empty(), "first build must produce new modules");
 
-    // Second build: same NodeId "seq", same module type, but length = 8.
-    let seq_steps_b: Vec<String> = ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let mut seq_params_b = patches_core::parameter_map::ParameterMap::new();
-    seq_params_b.insert(
-        "steps".to_string(),
-        patches_core::parameter_map::ParameterValue::Array(seq_steps_b.into()),
-    );
-
+    // Second build: same NodeId, same module type, but channels = 4.
     let mut graph_b = patches_core::ModuleGraph::new();
     graph_b.add_module(
-        "seq",
-        Seq::describe(&ModuleShape { channels: 0, length: 8, ..Default::default() }),
-        &seq_params_b,
+        "mix",
+        Mixer::describe(&ModuleShape { channels: 4, length: 0, ..Default::default() }),
+        &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.add_module(
         "out",
@@ -481,38 +453,28 @@ fn shape_change_forces_re_instantiation() {
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.connect(
-        &patches_core::NodeId::from("seq"),
-        p("pitch"),
+        &patches_core::NodeId::from("mix"),
+        p("out"),
         &patches_core::NodeId::from("out"),
         p("in_left"),
-        1.0,
-    ).unwrap();
-    graph_b.connect(
-        &patches_core::NodeId::from("seq"),
-        p("pitch"),
-        &patches_core::NodeId::from("out"),
-        p("in_right"),
         1.0,
     ).unwrap();
 
     let (plan_b, state_b) =
         build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
 
-    let seq_id_b = state_b.nodes[&patches_core::NodeId::from("seq")].instance_id;
+    let mix_id_b = state_b.nodes[&patches_core::NodeId::from("mix")].instance_id;
 
-    // The shape changed, so the "seq" node must get a brand-new InstanceId.
     assert_ne!(
-        seq_id_a, seq_id_b,
-        "shape change (length 4 → 8) must produce a new InstanceId for the sequencer"
+        mix_id_a, mix_id_b,
+        "shape change (channels 2 → 4) must produce a new InstanceId"
     );
-    // The old instance must be tombstoned.
     assert!(
         !plan_b.tombstones.is_empty(),
-        "shape change must tombstone the old sequencer instance"
+        "shape change must tombstone the old instance"
     );
-    // A fresh module must appear in new_modules.
     assert!(
-        plan_b.new_modules.iter().any(|(_, m)| m.instance_id() == seq_id_b),
-        "shape change must install a new sequencer module"
+        plan_b.new_modules.iter().any(|(_, m)| m.instance_id() == mix_id_b),
+        "shape change must install a new module"
     );
 }

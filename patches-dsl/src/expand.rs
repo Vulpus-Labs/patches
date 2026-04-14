@@ -10,12 +10,14 @@ use patches_core::QName;
 
 use crate::ast::{
     AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamEntry, ParamIndex,
-    ParamType, PortIndex, PortLabel, Scalar, ShapeArg, ShapeArgValue, SongCell, SongDef, SongRow,
-    Span, Statement, Template, Value,
+    ParamType, PlayAtom, PlayBody, PlayExpr, PortIndex, PortLabel, RowGroup, Scalar, SectionDef,
+    ShapeArg, ShapeArgValue, SongCell, SongDef, SongItem, SongRow, Span, Statement, Template,
+    Value,
 };
 use crate::ast::{PatternDef, Step, StepOrGenerator};
 use crate::flat::{
-    FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
+    FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatPortRef,
+    FlatSongDef, PortDirection,
 };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -74,26 +76,28 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     let templates: HashMap<&str, &Template> =
         file.templates.iter().map(|t| (t.name.name.as_str(), t)).collect();
 
-    let root_scope = NameScope::root(&file.songs, &file.patterns);
-    let result =
-        Expander::new(&templates).expand_body(&file.patch.body, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
+    let root_scope = NameScope::root(&file.songs, &file.patterns, &file.sections);
+    let result = Expander::new(&templates).expand_body(
+        &file.patch.body,
+        None,
+        &HashMap::new(),
+        &HashMap::new(),
+        &root_scope,
+    )?;
 
     // Expand patterns: merge top-level with template-local, resolve generators.
     let mut patterns: Vec<FlatPatternDef> =
         file.patterns.iter().map(|p| expand_pattern_def(p, None)).collect();
     patterns.extend(result.patterns);
-    // Top-level songs are rehomed as FlatSongDef with a bare QName.
-    let mut songs: Vec<FlatSongDef> = file
-        .songs
-        .iter()
-        .map(|s| FlatSongDef {
-            name: QName::bare(s.name.name.clone()),
-            channels: s.channels.clone(),
-            rows: s.rows.clone(),
-            loop_point: s.loop_point,
-            span: s.span,
-        })
-        .collect();
+
+    // Flatten top-level songs.
+    let mut songs: Vec<FlatSongDef> = Vec::new();
+    for song in &file.songs {
+        let (flat, inline_patterns) =
+            flatten_song(song, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
+        songs.push(flat);
+        patterns.extend(inline_patterns);
+    }
     songs.extend(result.songs);
 
     Ok(ExpandResult {
@@ -102,6 +106,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
             connections: result.connections,
             patterns,
             songs,
+            port_refs: result.port_refs,
         },
         warnings: vec![],
     })
@@ -139,10 +144,15 @@ fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
                 for i in 0..n {
                     let from = start + step_size * i as f32;
                     let to = start + step_size * (i + 1) as f32;
+                    // Only the first subdivision triggers the envelope — the
+                    // remainder are ties so the gate stays high through the
+                    // slide, matching the ADR's "gate stays high through the
+                    // slide" semantics.
+                    let trigger = i == 0;
                     out.push(Step {
                         cv1: from,
                         cv2: 0.0,
-                        trigger: true,
+                        trigger,
                         gate: true,
                         cv1_end: Some(to),
                         cv2_end: None,
@@ -155,97 +165,265 @@ fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
     out
 }
 
-/// Expand a song definition: namespace its name, resolve `<param>` references
-/// in cells, and resolve literal pattern names through the scope chain.
-///
-/// `param_types` maps parameter names to their declared types, used to enforce
-/// that only `pattern`-typed params appear in song cells.
-fn expand_song_def(
+/// Resolve one cell: pattern references are looked up through `scope`; param
+/// refs are substituted from `param_env` (and checked against `param_types`).
+fn resolve_song_cell(
+    cell: &SongCell,
+    param_env: &HashMap<String, Scalar>,
+    param_types: &HashMap<String, ParamType>,
+    scope: &NameScope<'_>,
+) -> Result<SongCell, ExpandError> {
+    match cell {
+        SongCell::Silence => Ok(SongCell::Silence),
+        SongCell::Pattern(ident) => {
+            let resolved = scope
+                .resolve_pattern(&ident.name)
+                .map(|q| q.to_string())
+                .unwrap_or_else(|| ident.name.clone());
+            Ok(SongCell::Pattern(Ident {
+                name: resolved,
+                span: ident.span,
+            }))
+        }
+        SongCell::ParamRef { name, span } => {
+            if let Some(ty) = param_types.get(name.as_str()) {
+                if *ty != ParamType::Pattern {
+                    return Err(ExpandError {
+                        span: *span,
+                        message: format!(
+                            "song cell '<{}>': param is {}-typed, expected pattern",
+                            name,
+                            param_type_name(ty),
+                        ),
+                    });
+                }
+            }
+            match param_env.get(name.as_str()) {
+                Some(Scalar::Str(s)) => {
+                    let resolved = scope
+                        .resolve_pattern(s)
+                        .map(|q| q.to_string())
+                        .unwrap_or_else(|| s.clone());
+                    Ok(SongCell::Pattern(Ident {
+                        name: resolved,
+                        span: *span,
+                    }))
+                }
+                Some(other) => Err(ExpandError {
+                    span: *span,
+                    message: format!(
+                        "song cell param '<{}>': expected a pattern name, got {:?}",
+                        name, other,
+                    ),
+                }),
+                None => Err(ExpandError {
+                    span: *span,
+                    message: format!("unresolved param '<{}>' in song cell", name),
+                }),
+            }
+        }
+    }
+}
+
+/// Flatten one [`RowGroup`] tree into a sequence of concrete [`SongRow`]s,
+/// validating lane count and resolving cells.
+fn flatten_row_groups(
+    groups: &[RowGroup],
+    lanes: &[Ident],
+    param_env: &HashMap<String, Scalar>,
+    param_types: &HashMap<String, ParamType>,
+    scope: &NameScope<'_>,
+    out: &mut Vec<SongRow>,
+) -> Result<(), ExpandError> {
+    for g in groups {
+        match g {
+            RowGroup::Row(row) => {
+                if row.cells.len() != lanes.len() {
+                    return Err(ExpandError {
+                        span: row.span,
+                        message: format!(
+                            "row has {} cells but song declares {} lane(s)",
+                            row.cells.len(),
+                            lanes.len(),
+                        ),
+                    });
+                }
+                let cells = row
+                    .cells
+                    .iter()
+                    .map(|c| resolve_song_cell(c, param_env, param_types, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                out.push(SongRow { cells, span: row.span });
+            }
+            RowGroup::Repeat { body, count, .. } => {
+                let start = out.len();
+                flatten_row_groups(body, lanes, param_env, param_types, scope, out)?;
+                let inner_len = out.len() - start;
+                for _ in 1..*count {
+                    for i in 0..inner_len {
+                        out.push(out[start + i].clone());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Evaluate a [`PlayExpr`] against the per-song section table, appending the
+/// produced rows to `out`.
+fn eval_play_expr(
+    expr: &PlayExpr,
+    section_rows: &HashMap<String, Vec<SongRow>>,
+    out: &mut Vec<SongRow>,
+) -> Result<(), ExpandError> {
+    for term in &expr.terms {
+        let mut buf: Vec<SongRow> = Vec::new();
+        match &term.atom {
+            PlayAtom::Ref(ident) => match section_rows.get(&ident.name) {
+                Some(rows) => buf.extend(rows.iter().cloned()),
+                None => {
+                    return Err(ExpandError {
+                        span: ident.span,
+                        message: format!("unknown section '{}' in play expression", ident.name),
+                    });
+                }
+            },
+            PlayAtom::Group(inner) => eval_play_expr(inner, section_rows, &mut buf)?,
+        }
+        for _ in 0..term.repeat {
+            out.extend(buf.iter().cloned());
+        }
+    }
+    Ok(())
+}
+
+/// Flatten a [`SongDef`] into a [`FlatSongDef`] plus any song-local inline
+/// [`FlatPatternDef`]s. Also enforces scope/duplication rules for song items.
+fn flatten_song(
     song: &SongDef,
     namespace: Option<&QName>,
     param_env: &HashMap<String, Scalar>,
     param_types: &HashMap<String, ParamType>,
-    scope: &NameScope<'_>,
-) -> Result<FlatSongDef, ExpandError> {
-    let name = qualify(namespace, &song.name.name);
-    let rows = song
-        .rows
-        .iter()
-        .map(|row| {
-            let cells = row
-                .cells
-                .iter()
-                .map(|cell| match cell {
-                    SongCell::Silence => Ok(SongCell::Silence),
-                    SongCell::Pattern(ident) => {
-                        // Literal pattern name — resolve via pattern scope.
-                        let resolved = scope
-                            .resolve_pattern(&ident.name)
-                            .map(|q| q.to_string())
-                            .unwrap_or_else(|| ident.name.clone());
-                        Ok(SongCell::Pattern(Ident {
-                            name: resolved,
-                            span: ident.span,
-                        }))
-                    }
-                    SongCell::ParamRef { name, span } => {
-                        // Verify the param is pattern-typed.
-                        if let Some(ty) = param_types.get(name.as_str()) {
-                            if *ty != ParamType::Pattern {
-                                return Err(ExpandError {
-                                    span: *span,
-                                    message: format!(
-                                        "song cell '<{}>': param is {}-typed, expected pattern",
-                                        name,
-                                        param_type_name(ty),
-                                    ),
-                                });
-                            }
-                        }
-                        if let Some(val) = param_env.get(name.as_str()) {
-                            match val {
-                                Scalar::Str(s) => {
-                                    // Resolve through the pattern scope.
-                                    let resolved = scope
-                                        .resolve_pattern(s)
-                                        .map(|q| q.to_string())
-                                        .unwrap_or_else(|| s.clone());
-                                    Ok(SongCell::Pattern(Ident {
-                                        name: resolved,
-                                        span: *span,
-                                    }))
-                                }
-                                other => Err(ExpandError {
-                                    span: *span,
-                                    message: format!(
-                                        "song cell param '<{}>': expected a pattern name, got {:?}",
-                                        name, other,
-                                    ),
-                                }),
-                            }
-                        } else {
-                            Err(ExpandError {
-                                span: *span,
-                                message: format!(
-                                    "unresolved param '<{}>' in song cell",
-                                    name,
-                                ),
-                            })
-                        }
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(SongRow { cells })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    parent_scope: &NameScope<'_>,
+) -> Result<(FlatSongDef, Vec<FlatPatternDef>), ExpandError> {
+    let song_ns = qualify(namespace, &song.name.name);
 
-    Ok(FlatSongDef {
-        name,
-        channels: song.channels.clone(),
-        rows,
-        loop_point: song.loop_point,
-        span: song.span,
-    })
+    // Pass 1: collect song-local sections and inline patterns, flagging dups.
+    let mut local_sections: HashMap<String, &SectionDef> = HashMap::new();
+    let mut local_patterns: Vec<&PatternDef> = Vec::new();
+    for item in &song.items {
+        match item {
+            SongItem::Section(sd) => {
+                if local_sections.insert(sd.name.name.clone(), sd).is_some() {
+                    return Err(ExpandError {
+                        span: sd.span,
+                        message: format!("duplicate section '{}' in song", sd.name.name),
+                    });
+                }
+            }
+            SongItem::Pattern(pd) => {
+                if local_patterns.iter().any(|p| p.name.name == pd.name.name) {
+                    return Err(ExpandError {
+                        span: pd.span,
+                        message: format!("duplicate inline pattern '{}' in song", pd.name.name),
+                    });
+                }
+                local_patterns.push(pd);
+            }
+            _ => {}
+        }
+    }
+
+    // Build the song-local scope: its patterns qualify under `song_ns`.
+    let scope = NameScope::song_scope(parent_scope, &local_patterns, &song_ns);
+
+    // Flatten each song-local section into its row list (and cache on demand).
+    let mut section_rows: HashMap<String, Vec<SongRow>> = HashMap::new();
+    for (name, sd) in &local_sections {
+        let mut rows = Vec::new();
+        flatten_row_groups(&sd.body, &song.lanes, param_env, param_types, &scope, &mut rows)?;
+        section_rows.insert(name.clone(), rows);
+    }
+
+    // Eagerly flatten file-level sections available via the parent scope.
+    // (They expand against this song's lanes, so the same section may be
+    // reused across songs with different lane counts.)
+    let top_sections = parent_scope.top_level_sections();
+    for (name, sd) in top_sections {
+        if local_sections.contains_key(&name) {
+            continue;
+        }
+        let mut rows = Vec::new();
+        flatten_row_groups(&sd.body, &song.lanes, param_env, param_types, &scope, &mut rows)?;
+        section_rows.insert(name, rows);
+    }
+
+    // Pass 2: process play / loop items in source order.
+    let mut rows: Vec<SongRow> = Vec::new();
+    let mut loop_point: Option<usize> = None;
+
+    for item in &song.items {
+        match item {
+            SongItem::Section(_) | SongItem::Pattern(_) => {}
+            SongItem::LoopMarker(span) => {
+                if loop_point.is_some() {
+                    return Err(ExpandError {
+                        span: *span,
+                        message: "multiple @loop markers in song".to_owned(),
+                    });
+                }
+                loop_point = Some(rows.len());
+            }
+            SongItem::Play(body) => match body {
+                PlayBody::Inline { body, .. } => {
+                    flatten_row_groups(body, &song.lanes, param_env, param_types, &scope, &mut rows)?;
+                }
+                PlayBody::NamedInline { name, body, span } => {
+                    if section_rows.contains_key(&name.name) {
+                        return Err(ExpandError {
+                            span: *span,
+                            message: format!(
+                                "section '{}' already defined in song",
+                                name.name,
+                            ),
+                        });
+                    }
+                    let mut section_only = Vec::new();
+                    flatten_row_groups(
+                        body,
+                        &song.lanes,
+                        param_env,
+                        param_types,
+                        &scope,
+                        &mut section_only,
+                    )?;
+                    rows.extend(section_only.iter().cloned());
+                    section_rows.insert(name.name.clone(), section_only);
+                }
+                PlayBody::Expr(expr) => {
+                    eval_play_expr(expr, &section_rows, &mut rows)?;
+                }
+            },
+        }
+    }
+
+    // Emit flat pattern defs for song-local inline patterns.
+    let flat_patterns: Vec<FlatPatternDef> = local_patterns
+        .iter()
+        .map(|p| expand_pattern_def(p, Some(&song_ns)))
+        .collect();
+
+    Ok((
+        FlatSongDef {
+            name: song_ns,
+            channels: song.lanes.clone(),
+            rows,
+            loop_point,
+            span: song.span,
+        },
+        flat_patterns,
+    ))
 }
 
 fn param_type_name(ty: &ParamType) -> &'static str {
@@ -268,12 +446,14 @@ fn param_type_name(ty: &ParamType) -> &'static str {
 struct NameScope<'a> {
     songs: HashMap<String, QName>,
     patterns: HashMap<String, QName>,
+    /// Section definitions visible in this scope by name.
+    sections: HashMap<String, &'a SectionDef>,
     parent: Option<&'a NameScope<'a>>,
 }
 
 impl<'a> NameScope<'a> {
-    /// Build a root scope from file-level song and pattern names (bare QNames).
-    fn root(songs: &[SongDef], patterns: &[PatternDef]) -> Self {
+    /// Build a root scope from file-level song, pattern, and section names.
+    fn root(songs: &[SongDef], patterns: &[PatternDef], sections: &'a [SectionDef]) -> Self {
         NameScope {
             songs: songs
                 .iter()
@@ -283,6 +463,7 @@ impl<'a> NameScope<'a> {
                 .iter()
                 .map(|p| (p.name.name.clone(), QName::bare(p.name.name.clone())))
                 .collect(),
+            sections: sections.iter().map(|s| (s.name.name.clone(), s)).collect(),
             parent: None,
         }
     }
@@ -307,7 +488,38 @@ impl<'a> NameScope<'a> {
                 _ => {}
             }
         }
-        NameScope { songs, patterns, parent: Some(parent) }
+        NameScope {
+            songs,
+            patterns,
+            sections: HashMap::new(),
+            parent: Some(parent),
+        }
+    }
+
+    /// Build a song-local scope: patterns in `patterns` qualify under `song_ns`.
+    fn song_scope(
+        parent: &'a NameScope<'a>,
+        patterns: &[&PatternDef],
+        song_ns: &QName,
+    ) -> Self {
+        let patterns = patterns
+            .iter()
+            .map(|p| (p.name.name.clone(), song_ns.child(p.name.name.clone())))
+            .collect();
+        NameScope {
+            songs: HashMap::new(),
+            patterns,
+            sections: HashMap::new(),
+            parent: Some(parent),
+        }
+    }
+
+    /// Walk up to the root scope and collect its section table.
+    fn top_level_sections(&self) -> HashMap<String, &'a SectionDef> {
+        match self.parent {
+            Some(p) => p.top_level_sections(),
+            None => self.sections.clone(),
+        }
     }
 
     fn resolve_pattern(&self, name: &str) -> Option<QName> {
@@ -373,6 +585,9 @@ struct BodyResult {
     songs: Vec<FlatSongDef>,
     /// Patterns defined inside the body (collected from templates).
     patterns: Vec<FlatPatternDef>,
+    /// Port references made at template boundaries; bubbled up for interpreter
+    /// validation regardless of whether the enclosing scope consumes them.
+    port_refs: Vec<FlatPortRef>,
 }
 
 // ─── Index resolution ─────────────────────────────────────────────────────────
@@ -547,18 +762,6 @@ impl<'a> Expander<'a> {
     ) -> Result<Value, ExpandError> {
         match value {
             Value::Scalar(s) => Ok(Value::Scalar(self.subst_scalar(s, param_env, span)?)),
-            Value::Array(items) => {
-                let resolved: Result<Vec<Value>, ExpandError> =
-                    items.iter().map(|v| self.subst_value(v, param_env, span)).collect();
-                Ok(Value::Array(resolved?))
-            }
-            Value::Table(entries) => {
-                let resolved: Result<Vec<(crate::ast::Ident, Value)>, ExpandError> = entries
-                    .iter()
-                    .map(|(k, v)| Ok((k.clone(), self.subst_value(v, param_env, span)?)))
-                    .collect();
-                Ok(Value::Table(resolved?))
-            }
             Value::File(path) => Ok(Value::File(path.clone())),
         }
     }
@@ -674,6 +877,7 @@ impl<'a> Expander<'a> {
         let mut instance_ports: HashMap<String, TemplatePorts> = HashMap::new();
         let mut songs: Vec<FlatSongDef> = Vec::new();
         let mut patterns: Vec<FlatPatternDef> = Vec::new();
+        let mut port_refs: Vec<FlatPortRef> = Vec::new();
 
         // Build a scope for this body's local song/pattern definitions.
         let scope = NameScope::child(parent_scope, stmts, namespace);
@@ -695,6 +899,7 @@ impl<'a> Expander<'a> {
                 flat_connections.extend(sub.connections);
                 songs.extend(sub.songs);
                 patterns.extend(sub.patterns);
+                port_refs.extend(sub.port_refs);
                 instance_ports.insert(decl.name.name.clone(), sub.ports);
             } else {
                 let inst_id = qualify(namespace, &decl.name.name);
@@ -755,6 +960,7 @@ impl<'a> Expander<'a> {
                 &instance_ports,
                 &mut flat_connections,
                 &mut boundary,
+                &mut port_refs,
             )?;
         }
 
@@ -765,7 +971,10 @@ impl<'a> Expander<'a> {
                 Statement::Song(sd) => sd,
                 _ => continue,
             };
-            songs.push(expand_song_def(song_def, namespace, param_env, param_types, &scope)?);
+            let (flat, inline_patterns) =
+                flatten_song(song_def, namespace, param_env, param_types, &scope)?;
+            songs.push(flat);
+            patterns.extend(inline_patterns);
         }
 
         // ── Pass 4: patterns ─────────────────────────────────────────────────
@@ -784,6 +993,7 @@ impl<'a> Expander<'a> {
             ports: boundary,
             songs,
             patterns,
+            port_refs,
         })
     }
 
@@ -1100,6 +1310,7 @@ impl<'a> Expander<'a> {
     ///
     /// Handles arity expansion: if either port index carries `PortIndex::Arity`,
     /// the connection is emitted N times with concrete indices.
+    #[allow(clippy::too_many_arguments)]
     fn expand_connection(
         &mut self,
         conn: &Connection,
@@ -1108,6 +1319,7 @@ impl<'a> Expander<'a> {
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
+        port_refs: &mut Vec<FlatPortRef>,
     ) -> Result<(), ExpandError> {
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
@@ -1148,6 +1360,7 @@ impl<'a> Expander<'a> {
                 instance_ports,
                 flat_connections,
                 boundary,
+                port_refs,
                 &conn.span,
             )?;
         }
@@ -1176,6 +1389,7 @@ impl<'a> Expander<'a> {
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
+        port_refs: &mut Vec<FlatPortRef>,
         span: &Span,
     ) -> Result<(), ExpandError> {
         // Boundary key: "port/i" for arity-expanded ports, plain "port" otherwise.
@@ -1196,6 +1410,15 @@ impl<'a> Expander<'a> {
                 let dsts = resolve_to(
                     to_module, to_port, to_i, namespace, instance_ports, span,
                 )?;
+                for (m, p, i, _) in &dsts {
+                    port_refs.push(FlatPortRef {
+                        module: m.clone(),
+                        port: p.clone(),
+                        index: *i,
+                        direction: PortDirection::Input,
+                        span: *span,
+                    });
+                }
                 let scaled: Vec<PortEntry> =
                     dsts.into_iter().map(|(m, p, i, s)| (m, p, i, arrow_scale * s)).collect();
                 boundary.in_ports.entry(from_bkey).or_default().extend(scaled);
@@ -1206,6 +1429,13 @@ impl<'a> Expander<'a> {
                 let (src_m, src_p, src_i, inner_scale) = resolve_from(
                     from_module, from_port, from_i, namespace, instance_ports, span,
                 )?;
+                port_refs.push(FlatPortRef {
+                    module: src_m.clone(),
+                    port: src_p.clone(),
+                    index: src_i,
+                    direction: PortDirection::Output,
+                    span: *span,
+                });
                 boundary
                     .out_ports
                     .insert(to_bkey, (src_m, src_p, src_i, inner_scale * arrow_scale));
@@ -1320,33 +1550,10 @@ fn resolve_group_param_value(
         }
         match &calls[0].1 {
             Value::Scalar(s) => Ok(s.clone()),
-            Value::Array(arr) => {
-                if arr.len() != total {
-                    return Err(ExpandError {
-                        span: *span,
-                        message: format!(
-                            "group param '{}' array length {} does not match arity {}",
-                            param_name,
-                            arr.len(),
-                            total
-                        ),
-                    });
-                }
-                match &arr[index] {
-                    Value::Scalar(s) => Ok(s.clone()),
-                    _ => Err(ExpandError {
-                        span: *span,
-                        message: format!(
-                            "group param '{}' array element at index {} must be a scalar",
-                            param_name, index
-                        ),
-                    }),
-                }
-            }
             _ => Err(ExpandError {
                 span: *span,
                 message: format!(
-                    "group param '{}' call-site value must be a scalar or array",
+                    "group param '{}' call-site value must be a scalar",
                     param_name
                 ),
             }),

@@ -135,7 +135,8 @@ fn try_completion_from_node(
             "port_ref" | "connection" => {
                 return Some(complete_port_ref(source, byte_offset, node, tree, model));
             }
-            "song_row" | "song_cell" => {
+            "song_row" | "song_cell" | "row_elem" | "inline_block"
+            | "named_inline" | "section_def" => {
                 return Some(complete_pattern_names(model));
             }
             _ => {}
@@ -738,9 +739,6 @@ pub(crate) fn format_parameter_kind(kind: &patches_core::ParameterKind) -> Strin
         patches_core::ParameterKind::String { default } => {
             format!("string (default \"{default}\")")
         }
-        patches_core::ParameterKind::Array { length, .. } => {
-            format!("array (length {length})")
-        }
         patches_core::ParameterKind::File { extensions } => {
             let exts = extensions.join(", ");
             format!("file ({exts})")
@@ -892,10 +890,10 @@ mod tests {
 
     #[test]
     fn completions_for_pattern_names_in_song_row() {
-        let source = "pattern drums {\n    kick: x . x .\n}\n\nsong my_song {\n    | ch |\n    | \n}\n\npatch {}";
+        let source = "pattern drums {\n    kick: x . x .\n}\n\nsong my_song(ch) {\n    play {\n        \n    }\n}\n\npatch {}";
         let (tree, model, registry) = setup(source);
-        // Position cursor inside the song row after `| `
-        let byte_offset = source.find("| \n}").unwrap() + 2;
+        // Position cursor inside the play block before the closing brace.
+        let byte_offset = source.find("        \n    }").unwrap() + 8;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
@@ -906,7 +904,7 @@ mod tests {
 
     #[test]
     fn completions_for_song_names_in_master_sequencer() {
-        let source = "song my_song {\n    | ch |\n}\n\npatch {\n    module seq : MasterSequencer(channels: [ch]) {\n        song: \n    }\n}";
+        let source = "song my_song(ch) {\n    play {}\n}\n\npatch {\n    module seq : MasterSequencer(channels: [ch]) {\n        song: \n    }\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find("song: \n").unwrap() + 6;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);

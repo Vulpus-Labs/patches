@@ -47,10 +47,7 @@ file_ref    = { "file" ~ "(" ~ (string_lit | param_ref) ~ ")" }
 //   note_lit before ident (so "C1" is a note, not a bare string)
 //   bool_lit before ident (existing; "true"/"false" have word-boundary check)
 scalar      = { float_unit | float_lit | int_lit | bool_lit | note_lit | string_lit | param_ref | ident }
-array       = { "[" ~ (value ~ ","?)* ~ "]" }
-table_entry = { ident ~ ":" ~ value }
-table       = { "{" ~ (table_entry ~ ","?)* ~ "}" }
-value       = { file_ref | table | array | scalar }
+value       = { file_ref | scalar }
 
 // ─── Shape and param blocks ───────────────────────────────────────────────────
 // alias_list: a bracketed list of identifiers; used in shape args to declare
@@ -74,11 +71,12 @@ param_index       = { "[" ~ (param_index_arity | nat | ident) ~ "]" }
 //   pan: 0.0          → key "pan", no index
 //   pan[0]: -0.5      → key "pan", index Literal(0)
 //   pan[*size]: 0.0   → key "pan", index Arity("size") — expands over 0..size
-//   pan: [0.1, 0.2]   → key "pan", value Array (broadcast/array form)
 //   @0: { freq: 200.0 }        → AtBlock, index Literal(0)
 //   @low: { freq: 200.0 }      → AtBlock, index Alias("low")
 at_block_index = { nat | ident }
-at_block       = { "@" ~ at_block_index ~ ":"? ~ table }
+at_block_body  = { "{" ~ (at_block_entry ~ ","?)* ~ "}" }
+at_block_entry = { ident ~ ":" ~ value }
+at_block       = { "@" ~ at_block_index ~ ":"? ~ at_block_body }
 // param_entry rule: at_block must come before ident to ensure "@" is not parsed differently.
 param_entry = { at_block | ident ~ param_index? ~ ":" ~ value }
 // A param block item is either a shorthand `<ident>` or a regular `key: value`.
@@ -161,8 +159,10 @@ step_valued   = { (step_unit | step_note | step_trigger | step_float | step_int)
 step          = { step_rest | step_tie | step_valued }
 
 // ─── Slide generator ─────────────────────────────────────────────────────────
-// slide(count, start, end) — expands to `count` slide steps.
-slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ (step_float | step_int) ~ "," ~ (step_float | step_int) ~ ")" }
+// slide(count, start, end) — expands to `count` slide steps. Endpoints
+// may be note literals, unit-suffixed numbers, or plain floats/ints.
+slide_endpoint  = { step_unit | step_note | step_float | step_int }
+slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ slide_endpoint ~ "," ~ slide_endpoint ~ ")" }
 
 // ─── Pattern blocks ──────────────────────────────────────────────────────────
 // A channel row: "label: step step ... [| continuation ...]"
@@ -172,20 +172,57 @@ channel_row_cont   = { "|" ~ step_or_generator* }
 channel_row        = { ident ~ ":" ~ step_or_generator* ~ channel_row_cont* }
 pattern_block      = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
 
-// ─── Song blocks ─────────────────────────────────────────────────────────────
-// Pipe-delimited table format:
-//   | col1 | col2 | ... |          (header)
-//   | pat1 | pat2 | ... |  @loop   (data row with optional loop annotation)
+// ─── Song composition (ADR 0035) ─────────────────────────────────────────────
+// Lanes are declared in the song header. Song bodies contain `section`,
+// `play`, `pattern`, and `@loop` items. `section`s hold row sequences; row
+// sequences are newline-significant.
 song_silence    = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
-song_cell       = { song_silence | param_ref | ident }
-song_loop       = { "@loop" }
-song_header_row = { "|" ~ (ident ~ "|")+ }
-song_data_row   = { "|" ~ (song_cell ~ "|")+ ~ song_loop? }
-song_block      = { "song" ~ ident ~ "{" ~ song_header_row ~ song_data_row+ ~ "}" }
+
+// Inline whitespace only (no newlines) — used inside compound-atomic rules.
+iws             = _{ (" " | "\t" | ("#" ~ (!"\n" ~ ANY)*))+ }
+// Whitespace that may include newlines (for inside parenthesised row groups).
+aws             = _{ (" " | "\t" | ("#" ~ (!"\n" ~ ANY)*) | "\r" | "\n")* }
+// Row separator: at least one newline, possibly interleaved with inline ws.
+row_sep         = _{ (iws? ~ ("\r"? ~ "\n"))+ ~ (iws? ~ ("\r"? ~ "\n"))* ~ iws? }
+
+// A cell. Compound-atomic so it sees no implicit whitespace; its children
+// (song_silence/param_ref/ident) are themselves atomic or compound-atomic.
+row_cell        = ${ song_silence | param_ref | ident }
+// A row: at least one cell, separated by commas with optional inline ws.
+song_row        = ${ row_cell ~ (iws? ~ "," ~ iws? ~ row_cell)* }
+// A parenthesised repeatable group.
+repeat_group    = ${ "(" ~ aws ~ row_seq ~ aws ~ ")" ~ iws? ~ "*" ~ iws? ~ nat }
+// A row group: either a repeatable parenthesised group or a single row.
+// repeat_group must come first so an initial "(" is not misread.
+row_group       = ${ repeat_group | song_row }
+// A row sequence: rows separated by one or more newlines.
+row_seq         = ${ (iws? ~ ("\r"? ~ "\n"))* ~ iws? ~ row_group ~ (row_sep ~ row_group)* ~ (iws? ~ ("\r"? ~ "\n"))* ~ iws? }
+
+// Section definitions. Allowed at file top level, inside songs, and inside
+// templates/patches (as a statement — see `statement`).
+section_def     = { "section" ~ ident ~ "{" ~ row_seq ~ "}" }
+
+// Play composition.
+play_atom_group = { "(" ~ play_expr ~ ")" }
+play_atom       = { play_atom_group | ident }
+play_term       = { play_atom ~ ("*" ~ nat)? }
+play_expr       = { play_term ~ ("," ~ play_term)* }
+inline_block    = { "{" ~ row_seq ~ "}" }
+named_inline    = { ident ~ "{" ~ row_seq ~ "}" }
+// Order: inline_block ("{...") before named_inline (ident "{...") before play_expr (ident-led).
+play_body       = { inline_block | named_inline | play_expr }
+play_stmt       = { "play" ~ play_body }
+
+loop_marker     = @{ "@loop" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+
+// Song item: sections, patterns, play statements, and the loop marker.
+song_item       = { section_def | pattern_block | play_stmt | loop_marker }
+song_lanes      = { "(" ~ ident ~ ("," ~ ident)* ~ ")" }
+song_block      = { "song" ~ ident ~ song_lanes ~ "{" ~ song_item* ~ "}" }
 
 // ─── Include directives ──────────────────────────────────────────────────────
 include_directive = { "include" ~ string_lit }
 
 // ─── File root ────────────────────────────────────────────────────────────────
-file         = { SOI ~ (include_directive | template | pattern_block | song_block)* ~ patch ~ EOI }
-include_file = { SOI ~ (include_directive | template | pattern_block | song_block)* ~ EOI }
+file         = { SOI ~ (include_directive | template | pattern_block | section_def | song_block)* ~ patch ~ EOI }
+include_file = { SOI ~ (include_directive | template | pattern_block | section_def | song_block)* ~ EOI }

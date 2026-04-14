@@ -85,19 +85,6 @@ pub fn validate_parameters(
             (ParameterKind::SongName, ParameterValue::Int(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::File(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::FloatBuffer(_)) => {}
-            (ParameterKind::Array { length, .. }, ParameterValue::Array(v)) => {
-                if v.len() > *length {
-                    return Err(BuildError::Custom {
-                        module: descriptor.module_name,
-                        message: format!(
-                            "parameter '{}' has {} elements but capacity is {}",
-                            param_desc.name,
-                            v.len(),
-                            length,
-                        ),
-                    });
-                }
-            }
             _ => {
                 return Err(BuildError::InvalidParameterType {
                     module: descriptor.module_name,
@@ -352,54 +339,28 @@ mod tests {
     use crate::build_error::BuildError;
     use crate::modules::{ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterMap, ParameterValue};
 
-    fn array_descriptor() -> ModuleDescriptor {
+    fn float_descriptor() -> ModuleDescriptor {
         ModuleDescriptor {
-            module_name: "TestArrayModule",
-            shape: ModuleShape { channels: 0, length: 16, ..Default::default() },
+            module_name: "TestFloatModule",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
             outputs: vec![],
             parameters: vec![ParameterDescriptor {
-                name: "steps",
+                name: "gain",
                 index: 0,
-                parameter_type: ParameterKind::Array { default: &[], length: 16 },
+                parameter_type: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
             }],
         }
     }
 
     #[test]
-    fn array_value_passes_validation_for_array_parameter() {
+    fn bool_value_against_float_descriptor_returns_invalid_parameter_type() {
         let mut params = ParameterMap::new();
-        params.insert(
-            "steps".to_string(),
-            ParameterValue::Array(vec!["C3".to_string()].into()),
-        );
-        let desc = array_descriptor();
-        assert!(validate_parameters(&params, &desc).is_ok());
-    }
-
-    #[test]
-    fn array_value_exceeding_length_returns_error() {
-        let mut params = ParameterMap::new();
-        params.insert(
-            "steps".to_string(),
-            ParameterValue::Array(vec!["C3".to_string(); 17].into()),
-        );
-        let desc = array_descriptor();
+        params.insert("gain".to_string(), ParameterValue::Bool(true));
+        let desc = float_descriptor();
         let err = validate_parameters(&params, &desc).unwrap_err();
         assert!(
-            matches!(err, BuildError::Custom { module: "TestArrayModule", .. }),
-            "expected Custom error for capacity exceeded, got: {err:?}"
-        );
-    }
-
-    #[test]
-    fn float_value_against_array_descriptor_returns_invalid_parameter_type() {
-        let mut params = ParameterMap::new();
-        params.insert("steps".to_string(), ParameterValue::Float(1.0));
-        let desc = array_descriptor();
-        let err = validate_parameters(&params, &desc).unwrap_err();
-        assert!(
-            matches!(err, BuildError::InvalidParameterType { parameter: "steps", .. }),
+            matches!(err, BuildError::InvalidParameterType { parameter: "gain", .. }),
             "expected InvalidParameterType, got: {err:?}"
         );
     }
