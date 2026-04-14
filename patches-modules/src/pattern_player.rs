@@ -139,11 +139,33 @@ impl PatternPlayer {
         }
 
         if !step.trigger {
-            // Tie: gate stays high, no trigger, cv carries over
+            // Tie: gate stays high, no trigger. If the tie carries slide
+            // targets (cv1_end / cv2_end) the slide continues through the
+            // tie — otherwise cv carries over unchanged. This supports
+            // multi-step slides (e.g. `slide(N, a, b)` expands to N chained
+            // subdivisions where only the first triggers).
             self.gate[channel] = true;
             self.trigger_pending[channel] = false;
-            self.slide_active[channel] = false;
             self.repeat_active[channel] = false;
+            if step.cv1_end.is_some() || step.cv2_end.is_some() {
+                let elapsed_samples = step_fraction * self.current_tick_duration_samples;
+                self.slide_active[channel] = true;
+                self.slide_cv1_start[channel] = step.cv1;
+                self.slide_cv1_end[channel] = step.cv1_end.unwrap_or(step.cv1);
+                self.slide_cv2_start[channel] = step.cv2;
+                self.slide_cv2_end[channel] = step.cv2_end.unwrap_or(step.cv2);
+                self.slide_samples_total[channel] = self.current_tick_duration_samples;
+                self.slide_samples_elapsed[channel] = elapsed_samples;
+                let t = if self.current_tick_duration_samples > 0.0 {
+                    (elapsed_samples / self.current_tick_duration_samples).min(1.0)
+                } else {
+                    0.0
+                };
+                self.cv1[channel] = step.cv1 + t * (step.cv1_end.unwrap_or(step.cv1) - step.cv1);
+                self.cv2[channel] = step.cv2 + t * (step.cv2_end.unwrap_or(step.cv2) - step.cv2);
+            } else {
+                self.slide_active[channel] = false;
+            }
             return;
         }
 
