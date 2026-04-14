@@ -2,6 +2,10 @@
 
 **Date:** 2026-04-11
 **Status:** proposed
+**Superseded in part by:** [ADR 0035](0035-song-sections-play-composition.md)
+— the pipe-table song-body syntax has been replaced by lane-declared song
+headers with `section` and `play` composition. The `pattern`,
+`MasterSequencer`, and `PatternPlayer` portions of this ADR are unchanged.
 
 ---
 

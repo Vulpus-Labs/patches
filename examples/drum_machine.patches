@@ -79,12 +79,13 @@ pattern cymbal_rest {
 
 # ── Song ──────────────────────────────────────────────────────────────────
 
-song drums {
-    | kick            | snare       | hat            | ohat       | clap       | tom      | claves       | cymbal       |
-    | kick_basic      | snare_basic | hat_eighths    | ohat_basic | clap_basic | tom_rest | claves_rest  | cymbal_crash |
-    | kick_basic      | snare_basic | hat_eighths    | ohat_basic | clap_basic | tom_rest | claves_clave | cymbal_rest  |
-    | kick_syncopated | snare_busy  | hat_sixteenths | ohat_basic | clap_basic | tom_rest | claves_clave | cymbal_rest  |
-    | kick_syncopated | snare_busy  | hat_sixteenths | ohat_fill  | clap_fill  | tom_fill | claves_clave | cymbal_crash |
+song drums(kick, snare, hat, ohat, clap, tom, claves, cymbal) {
+    play {
+        kick_basic,      snare_basic, hat_eighths,    ohat_basic, clap_basic, tom_rest, claves_rest,  cymbal_crash
+        kick_basic,      snare_basic, hat_eighths,    ohat_basic, clap_basic, tom_rest, claves_clave, cymbal_rest
+        kick_syncopated, snare_busy,  hat_sixteenths, ohat_basic, clap_basic, tom_rest, claves_clave, cymbal_rest
+        kick_syncopated, snare_busy,  hat_sixteenths, ohat_fill,  clap_fill,  tom_fill, claves_clave, cymbal_crash
+    }
 }
 
 # ── Patch ─────────────────────────────────────────────────────────────────

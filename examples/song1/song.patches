@@ -1,0 +1,112 @@
+include "instruments.patches"
+include "drum_machine.patches"
+
+pattern bass1 {
+    bass: G1 . G2 G2 G2 G2 . G2 G1 G1 G2 G2 . G2. G2
+}
+
+pattern bass2 {
+    bass: G1 . G2 G2 G2 G2 . G2 G1 G1 G2 G2 . D2 F2 A2
+}
+
+pattern bass3 {
+    bass: G1 . G2 G2 G2 G2 . G2 G1 G1 slide(2, G2, F2) . F2 . F2
+}
+
+pattern drum1 {
+    kick:  x . . . x . . . x . . . x . . .
+    snare: . . x . . . x . . x . . . . x .
+    hat:   x x . x x x . x x x . x x x . x
+    ohat:  . . x . . . x . . . x . . . x .
+    clap:  . . x . . . x . . . x . . . x .
+    cymb:  x . . . . . . . . . . . . . . .
+    tom:   . . . . . . . x . . x . . . . .
+}
+
+song bassline(drums, bass) {
+    play {
+        drum1, bass1
+        drum1, bass2
+        drum1, bass1
+        drum1, bass3
+        drum1, _
+        drum1, _
+        drum1, _
+        drum1, _
+    }
+}
+
+patch {
+    module seq : MasterSequencer(channels: [drums, bass]) {
+        autostart: true
+        song: bassline,
+        bpm: 120
+    }
+
+    module drum_player : PatternPlayer(channels: [kick, snare, hat, ohat, clap, cymbal, tom])
+    module bass_player : PatternPlayer(channels: 1)
+
+    seq.clock[bass] -> bass_player.clock
+    seq.clock[drums] -> drum_player.clock
+
+    module bass_cutoff_lfo : Lfo { rate: 0.01 }
+    module bass : bass
+    bass_cutoff_lfo.sine -> bass.cutoff   
+    bass_player.cv1 -> bass.voct
+    bass_player.trigger -> bass.trigger
+    bass_player.gate -> bass.gate
+
+    module lfo : Lfo { rate: 0.5 }
+    
+    drum_player.trigger[cymbal] -> lfo.sync
+    module drive : Drive { tone: 0.5, drive: 2.0 }
+
+    lfo.saw_up -> drive.drive_cv
+    bass.out -> drive.in
+    drive.out -> mix.in[bass]
+
+    module drums : drum_machine
+    drum_player.trigger[kick] -> drums.kick
+    drum_player.trigger[snare] -> drums.snare
+    drum_player.trigger[hat] -> drums.hat
+    drum_player.trigger[ohat] -> drums.ohat, drums.claves
+    drum_player.trigger[clap] -> drums.clap
+    drum_player.trigger[cymbal] -> drums.cymbal
+    drum_player.trigger[tom] -> drums.tom
+
+    drums.out_left -> mix.in[drum_l]
+    drums.out_right -> mix.in[drum_r]
+
+    module mix : StereoMixer(channels: [drum_l, drum_r, bass]) {
+        @drum_l { pan: -1, send_a: 0.3 }
+        @drum_r { pan: 1, send_a: 0.3 }
+        @bass { pan: 0, send_a: 0.3, level: 0.4 }
+    }
+
+    module hi_l : Highpass { cutoff: 500Hz }
+    module hi_r : Highpass { cutoff : 500Hz }
+    module delay : StereoDelay(channels: 1) {
+        delay_ms: 375,
+        feedback: 0.3,
+        dry_wet: 1.0,
+        pingpong: true,
+        drive: 2.0,
+        tone: 0.5
+    }
+
+    mix.send_a_left -> hi_l.in
+    hi_l.out -> delay.in_left
+    mix.send_a_right -> hi_r.in
+    hi_r.out -> delay.in_right
+
+    delay.out_left -> mix.return_a_left
+    delay.out_right -> mix.return_a_right
+
+    module limit : StereoLimiter
+    mix.out_left -> limit.in_left
+    mix.out_right -> limit.in_right
+
+    limit.out_left -> out.in_left
+    limit.out_right -> out.in_right
+    module out : AudioOut
+}

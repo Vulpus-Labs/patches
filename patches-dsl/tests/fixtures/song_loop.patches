@@ -1,12 +1,16 @@
 pattern a { ch: x . }
 pattern b { ch: . x }
 
-song looped {
-    | main |
-    | a    |
-    | a    |  @loop
-    | b    |
-    | a    |
+song looped(main) {
+    play {
+        a
+    }
+    @loop
+    play {
+        a
+        b
+        a
+    }
 }
 
 patch {

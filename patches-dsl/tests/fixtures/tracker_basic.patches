@@ -6,10 +6,12 @@ pattern fill {
     kick: x x x x x x x x
 }
 
-song my_song {
-    | drums   |
-    | drums   |
-    | fill    |
+song my_song(drums) {
+    play {
+        drums
+        drums
+        fill
+    }
 }
 
 patch {

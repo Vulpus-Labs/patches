@@ -12,12 +12,13 @@ pattern bass_a {
     note: C2 . . ~ E2 . G2 .
 }
 
-song my_song {
-    | drums       | bass   |
-    | verse_drums | bass_a |
-    | verse_drums | bass_a |
-    | fill_drums  | bass_a |
-    | verse_drums | bass_a |
+song my_song(drums, bass) {
+    play {
+        verse_drums, bass_a
+        verse_drums, bass_a
+        fill_drums,  bass_a
+        verse_drums, bass_a
+    }
 }
 
 patch {

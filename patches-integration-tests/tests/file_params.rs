@@ -76,6 +76,7 @@ fn file_extension_validation_rejects_unsupported() {
             span: Span { start: 0, end: 0 },
         }],
         connections: vec![],
+        port_refs: vec![],
     };
     let result = patches_interpreter::build(&flat, &registry(), &env());
     let err = result;
@@ -103,6 +104,7 @@ fn nonexistent_file_fails_at_plan_build() {
             span: Span { start: 0, end: 0 },
         }],
         connections: vec![],
+        port_refs: vec![],
     };
 
     // The interpreter should succeed (file existence is not checked at parse time).
@@ -131,6 +133,7 @@ fn relative_path_resolved_against_base_dir() {
             span: Span { start: 0, end: 0 },
         }],
         connections: vec![],
+        port_refs: vec![],
     };
 
     let base_dir = std::path::Path::new("/my/patch/dir");

@@ -124,6 +124,7 @@ fn unknown_type_returns_error() {
             span: Span { start: 0, end: 10 },
         }],
         connections: vec![],
+        port_refs: vec![],
     };
 
     let result = patches_interpreter::build(&flat, &registry(), &env());
@@ -164,6 +165,7 @@ fn unknown_port_returns_error() {
             scale: 1.0,
             span: Span { start: 0, end: 5 },
         }],
+        port_refs: vec![],
     };
 
     let result = patches_interpreter::build(&flat, &registry(), &env());

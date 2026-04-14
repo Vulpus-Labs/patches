@@ -1,9 +1,10 @@
 pattern a { ch: x . }
 
-song with_silence {
-    | left | right |
-    | a    | _     |
-    | _    | a     |
+song with_silence(left, right) {
+    play {
+        a, _
+        _, a
+    }
 }
 
 patch {

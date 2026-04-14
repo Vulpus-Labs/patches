@@ -124,10 +124,11 @@ pattern b_pat {
     kick: 0.5 .
 }
 
-song switch_song {
-    | ch1   |
-    | a_pat |
-    | b_pat |
+song switch_song(ch1) {
+    play {
+        a_pat
+        b_pat
+    }
 }
 
 patch {
@@ -196,11 +197,15 @@ pattern p {
     ch: x
 }
 
-song loop_song {
-    | c     |
-    | p     |
-    | p     |  @loop
-    | p     |
+song loop_song(c) {
+    play {
+        p
+    }
+    @loop
+    play {
+        p
+        p
+    }
 }
 
 patch {
@@ -256,11 +261,15 @@ pattern loop_b {
     ch: 0.9
 }
 
-song s {
-    | c       |
-    | intro   |
-    | loop_a  |  @loop
-    | loop_b  |
+song s(c) {
+    play {
+        intro
+    }
+    @loop
+    play {
+        loop_a
+        loop_b
+    }
 }
 
 patch {
@@ -320,9 +329,8 @@ pattern p {
     ch: x x x x x x x x
 }
 
-song s {
-    | c |
-    | p |
+song s(c) {
+    play { p }
 }
 
 patch {
@@ -401,9 +409,8 @@ pattern p {
     ch: x x x x
 }
 
-song s {
-    | c |
-    | p |
+song s(c) {
+    play { p }
 }
 
 patch {
@@ -437,9 +444,8 @@ pattern slide_pat {
     ch: 0.0>1.0
 }
 
-song s {
-    | c         |
-    | slide_pat |
+song s(c) {
+    play { slide_pat }
 }
 
 patch {
@@ -498,9 +504,8 @@ pattern rep_pat {
     ch: x*3
 }
 
-song s {
-    | c       |
-    | rep_pat |
+song s(c) {
+    play { rep_pat }
 }
 
 patch {
@@ -549,9 +554,8 @@ pattern rep_pat {
     ch: C4*3
 }
 
-song s {
-    | c       |
-    | rep_pat |
+song s(c) {
+    play { rep_pat }
 }
 
 patch {
@@ -611,9 +615,8 @@ pattern rep_pat {
     ch: C4*3
 }
 
-song s {
-    | c       |
-    | rep_pat |
+song s(c) {
+    play { rep_pat }
 }
 
 patch {

@@ -6,9 +6,10 @@ template stutter(rhythm: pattern) {
     in: in_left, in_right
     out: out_left, out_right
 
-    song pattern {
-        | trigger      |
-        | <rhythm>    |
+    song pattern(trigger) {
+        play {
+            <rhythm>
+        }
     }
 
     module seq : MasterSequencer(channels: [trigger]) { song: pattern }

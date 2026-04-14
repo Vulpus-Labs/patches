@@ -35,6 +35,27 @@ pub struct FlatConnection {
     pub span: Span,
 }
 
+/// Direction of a port reference recorded at a template boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortDirection {
+    Input,
+    Output,
+}
+
+/// A port reference made at a template boundary (`inner -> $.out` or
+/// `$.in -> inner`) that may not survive into any [`FlatConnection`] — e.g.
+/// if the enclosing scope never drives or consumes the template port. The
+/// interpreter validates each ref against the target module's descriptor so
+/// bogus port names are rejected even when the mapping is orphaned.
+#[derive(Debug, Clone)]
+pub struct FlatPortRef {
+    pub module: QName,
+    pub port: String,
+    pub index: u32,
+    pub direction: PortDirection,
+    pub span: Span,
+}
+
 /// A pattern channel with slide generators expanded into concrete steps.
 #[derive(Debug, Clone)]
 pub struct FlatPatternChannel {
@@ -78,4 +99,8 @@ pub struct FlatPatch {
     pub patterns: Vec<FlatPatternDef>,
     /// Song definitions (names qualified under any enclosing template scope).
     pub songs: Vec<FlatSongDef>,
+    /// Port references made at template boundaries that may have been dropped
+    /// during flattening. Interpreter validates these against module
+    /// descriptors so bogus port names are rejected even when orphaned.
+    pub port_refs: Vec<FlatPortRef>,
 }

@@ -3,51 +3,50 @@
 # Lead 1 is a saw with a bright filter. Lead 2 is a square with filter sweep.
 # Stereo delay on the leads and a reverb on the master bus.
 
-# ── Patterns ──────────────────────────────────────────────────────────────
-
-pattern bass_verse {
-    note: C2  .  .  ~  Eb2 .  G1  .  C2  .  .  ~  Ab1 .  .  .
-    vel:  1.0 .  .  ~  0.8 .  0.9 .  1.0 .  .  ~  0.7 .  .  .
-}
-
-pattern bass_chorus {
-    note: C2  .  Eb2 .  F2  .  G2  .  Ab2 .  G2  .  F2  .  Eb2 .
-    vel:  1.0 .  0.9 .  1.0 .  0.8 .  0.9 .  0.8 .  0.7 .  0.9 .
-}
-
-pattern lead1_verse {
-    note: .   .   Eb4 .   .   .   C4  ~   .   .   G4  .   .   .   F4  .
-    vel:  .   .   0.7 .   .   .   0.8 ~   .   .   0.6 .   .   .   0.7 .
-}
-
-pattern lead1_chorus {
-    note: G4*2  .   Eb4*2 .   F4  ~   ~   .   Ab4 .   G4  .   F4>Eb4  .   .   .
-    vel:  0.9 .   0.8 .   0.7 ~   ~   .   1.0 .   0.8 .   0.7     .   .   .
-}
-
-pattern lead2_verse {
-    note: .   .   .   .   G4  .   .   .   .   .   .   .   Eb4 .   .   .
-    vel:  .   .   .   .   0.6 .   .   .   .   .   .   .   0.5 .   .   .
-}
-
-pattern lead2_chorus {
-    note: Eb5 .   .   .   C5  .   .   ~   Bb4 .   .   .   Ab4 .   .   .
-    vel:  0.8 .   .   .   0.9 .   .   ~   0.7 .   .   .   0.6 .   .   .
-}
-
-pattern lead2_fill {
-    note: C6 Eb5 Bb5 G5  Eb5  .  F5  .  Eb5 .  .  .  C5>Bb4  .  .  .
-    vel:  0.9 0.8 0.9 0.7 1.0 .  0.8 .  0.7   .  .  .  0.6     .  .  .
-}
-
 # ── Song ──────────────────────────────────────────────────────────────────
 
-song demo {
-    | bass        | lead1        | lead2        |
-    | bass_verse  | lead1_verse  | lead2_verse  |
-    | bass_verse  | lead1_verse  | lead2_verse   |
-    | bass_chorus  | lead1_chorus | lead2_chorus |
-    | bass_chorus | lead2_fill | lead2_fill   |
+song demo(bass, lead1, lead2) {
+    pattern bass_verse {
+        note: C2  .  .  ~  Eb2 .  G1  .  C2  .  .  ~  Ab1 .  .  .
+        vel:  1.0 .  .  ~  0.8 .  0.9 .  1.0 .  .  ~  0.7 .  .  .
+    }
+
+    pattern bass_chorus {
+        note: C2  .  Eb2 .  F2  .  G2  .  Ab2 .  G2  .  F2  .  Eb2 .
+        vel:  1.0 .  0.9 .  1.0 .  0.8 .  0.9 .  0.8 .  0.7 .  0.9 .
+    }
+
+    pattern lead1_verse {
+        note: .   .   Eb4 .   .   .   C4  ~   .   .   G4  .   .   .   F4  .
+        vel:  .   .   0.7 .   .   .   0.8 ~   .   .   0.6 .   .   .   0.7 .
+    }
+
+    pattern lead1_chorus {
+        note: G4*2  .   Eb4*2 .   F4  ~   ~   .   Ab4 .   G4  .   F4>Eb4  .   .   .
+        vel:  0.9 .   0.8 .   0.7 ~   ~   .   1.0 .   0.8 .   0.7     .   .   .
+    }
+
+    pattern lead2_verse {
+        note: .   .   .   .   G4  .   .   .   .   .   .   .   Eb4 .   .   .
+        vel:  .   .   .   .   0.6 .   .   .   .   .   .   .   0.5 .   .   .
+    }
+
+    pattern lead2_chorus {
+        note: Eb5 .   .   .   C5  .   .   ~   Bb4 .   .   .   Ab4 .   .   .
+        vel:  0.8 .   .   .   0.9 .   .   ~   0.7 .   .   .   0.6 .   .   .
+    }
+
+    pattern lead2_fill {
+        note: C6 Eb5 Bb5 G5  Eb5  .  F5  .  Eb5 .  .  .  C5>Bb4  .  .  .
+        vel:  0.9 0.8 0.9 0.7 1.0 .  0.8 .  0.7   .  .  .  0.6     .  .  .
+    }
+
+    play {
+        (bass_verse,  lead1_verse,  lead2_verse
+        bass_verse,  lead1_verse,  lead2_verse) * 2
+        (bass_chorus, lead1_chorus, lead2_chorus
+        bass_chorus, lead2_chorus,   lead2_fill) * 2
+    }
 }
 
 # ── Voice template ────────────────────────────────────────────────────────
