@@ -7,9 +7,20 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use patches_core::source_map::SourceMap;
+use patches_diagnostics::RenderedDiagnostic;
+
 /// Upper bound on retained status messages. Older entries drop off the
 /// front when the log grows past this size.
 pub const STATUS_LOG_CAPACITY: usize = 100;
+
+/// Structured diagnostics from the most recent compile attempt, paired with
+/// the source map used to resolve their spans. Cleared on successful compile.
+#[derive(Clone, Default)]
+pub struct DiagnosticView {
+    pub diagnostics: Vec<RenderedDiagnostic>,
+    pub source_map: Option<SourceMap>,
+}
 
 /// Shared state between the plugin and the embedded GUI.
 #[derive(Default)]
@@ -22,6 +33,8 @@ pub struct GuiState {
     pub reload_requested: bool,
     /// Rolling log of the most recent status messages (newest last).
     pub status_log: VecDeque<String>,
+    /// Current diagnostics plus the source map needed to render them.
+    pub diagnostic_view: DiagnosticView,
 }
 
 impl GuiState {

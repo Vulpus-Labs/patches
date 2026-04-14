@@ -94,7 +94,7 @@ impl Module for DylibModule {
             unsafe { (self.vtable.free_bytes)(error_out) };
             Err(BuildError::Custom {
                 module: self.descriptor.module_name,
-                message: msg,
+                message: msg, origin: None,
             })
         } else {
             Ok(())
@@ -206,7 +206,7 @@ impl ModuleBuilder for DylibModuleBuilder {
         if handle.is_null() {
             return Err(BuildError::Custom {
                 module: descriptor.module_name,
-                message: "plugin prepare returned null".to_string(),
+                message: "plugin prepare returned null".to_string(), origin: None,
             });
         }
 

@@ -1,12 +1,8 @@
-/// Byte-offset range into the source string.
-///
-/// Line/column pairs can be computed on demand from the source text; storing
-/// raw offsets keeps every node small.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
+// `Span` and `SourceId` live in `patches-core` so error types in that crate
+// (and other crates that don't depend on `patches-dsl`) can carry source
+// provenance. Re-exported here so existing `patches_dsl::ast::Span` paths
+// continue to work.
+pub use patches_core::{SourceId, Span};
 
 /// An identifier together with its source location.
 #[derive(Debug, Clone, PartialEq, Eq)]

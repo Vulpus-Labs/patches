@@ -56,7 +56,7 @@ impl Planner {
     /// Create a new `Planner` with a specific buffer pool capacity.
     ///
     /// `pool_capacity` must match the capacity of the [`SoundEngine`]'s buffer
-    /// pool so that [`BuildError::PoolExhausted`] is detected at plan-build time
+    /// pool so that [`BuildErrorKind::PoolExhausted`] is detected at plan-build time
     /// rather than at index-access time.
     ///
     /// The module pool capacity defaults to [`DEFAULT_MODULE_POOL_CAPACITY`].

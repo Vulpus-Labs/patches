@@ -25,22 +25,35 @@ use patches_core::{
     PortRef,
     TrackerData, PatternBank, SongBank, Pattern, Song, TrackerStep,
 };
+use patches_core::Provenance;
 use patches_dsl::ast::{Scalar, Span, Value};
 use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPortRef, PortDirection};
 
 /// An error produced during interpretation of a [`FlatPatch`].
 ///
-/// Carries the source [`Span`] of the offending construct and a
-/// human-readable message describing the problem.
+/// Carries the [`Provenance`] of the offending construct (innermost site plus
+/// the chain of template call sites that led there) and a human-readable
+/// message describing the problem.
+///
+/// `span` returns the innermost site (`provenance.site`) for callers that
+/// only care about the immediate location.
 #[derive(Debug)]
 pub struct InterpretError {
-    pub span: Span,
+    pub provenance: Provenance,
     pub message: String,
+}
+
+impl InterpretError {
+    /// Convenience accessor for the innermost source span.
+    pub fn span(&self) -> Span {
+        self.provenance.site
+    }
 }
 
 impl std::fmt::Display for InterpretError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (at {}..{})", self.message, self.span.start, self.span.end)
+        let s = self.provenance.site;
+        write!(f, "{} (at {}..{})", self.message, s.start, s.end)
     }
 }
 
@@ -111,10 +124,19 @@ pub fn build_with_base_dir(
         add_module(&mut graph, flat_module, registry, base_dir, &song_name_to_index)?;
     }
 
+    // Per-module reverse alias map (index → alias name) for diagnostics: when
+    // we list available ports, we want to show the user's declared aliases
+    // (e.g. `clock[bass]`) rather than raw numeric indices.
+    let port_aliases: HashMap<patches_core::QName, HashMap<u32, String>> = flat
+        .modules
+        .iter()
+        .map(|m| (m.id.clone(), m.port_aliases.iter().cloned().collect()))
+        .collect();
+
     // Stage 2 — add all connections (after all nodes are present so that
     // forward references within a patch are not errors).
     for conn in &flat.connections {
-        add_connection(&mut graph, conn)?;
+        add_connection(&mut graph, conn, &port_aliases)?;
     }
 
     // Stage 2.5 — validate template-boundary port refs that may have been
@@ -122,7 +144,7 @@ pub fn build_with_base_dir(
     // template out-port is never consumed). These refs never produce a
     // FlatConnection, so they'd otherwise slip past port-name validation.
     for port_ref in &flat.port_refs {
-        validate_port_ref(&graph, port_ref)?;
+        validate_port_ref(&graph, port_ref, &port_aliases)?;
     }
 
     // Stage 3 — build tracker data from pattern and song blocks.
@@ -201,7 +223,7 @@ fn build_tracker_data(
                     if let Some((expected_steps, first_name)) = col_step_count {
                         if pat.steps != expected_steps {
                             return Err(InterpretError {
-                                span: song_def.span,
+                                provenance: song_def.provenance.clone(),
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} steps but '{}' has {}",
                                     song_def.name, col_name,
@@ -216,7 +238,7 @@ fn build_tracker_data(
                     if let Some((expected_chans, first_name)) = col_chan_count {
                         if pat.channels != expected_chans {
                             return Err(InterpretError {
-                                span: song_def.span,
+                                provenance: song_def.provenance.clone(),
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} channels but '{}' has {}",
                                     song_def.name, col_name,
@@ -297,7 +319,7 @@ fn validate_sequencer_songs(
         if let Some(song_name) = song_name {
             let Some(&song_idx) = song_name_to_index.get(song_name) else {
                 return Err(InterpretError {
-                    span: flat_module.span,
+                    provenance: flat_module.provenance.clone(),
                     message: format!(
                         "MasterSequencer '{}': song '{}' not found",
                         flat_module.id, song_name,
@@ -316,7 +338,7 @@ fn validate_sequencer_songs(
             }).unwrap_or(0);
             if seq_channels != song.channels {
                 return Err(InterpretError {
-                    span: flat_module.span,
+                    provenance: flat_module.provenance.clone(),
                     message: format!(
                         "MasterSequencer '{}': has {} channels but song '{}' has {} columns",
                         flat_module.id, seq_channels, song_name, song.channels,
@@ -342,24 +364,24 @@ fn add_module(
     let descriptor = registry
         .describe(&flat_module.type_name, &shape)
         .map_err(|e| InterpretError {
-            span: flat_module.span,
+            provenance: flat_module.provenance.clone(),
             message: e.to_string(),
         })?;
 
     let params = convert_params(&flat_module.params, &descriptor, base_dir, song_name_to_index)
         .map_err(|msg| {
-            InterpretError { span: flat_module.span, message: msg }
+            InterpretError { provenance: flat_module.provenance.clone(), message: msg }
         })?;
 
     patches_core::validate_parameters(&params, &descriptor).map_err(|e| InterpretError {
-        span: flat_module.span,
+        provenance: flat_module.provenance.clone(),
         message: e.to_string(),
     })?;
 
     graph
         .add_module(flat_module.id.clone(), descriptor, &params)
         .map_err(|e| InterpretError {
-            span: flat_module.span,
+            provenance: flat_module.provenance.clone(),
             message: e.to_string(),
         })
 }
@@ -367,10 +389,11 @@ fn add_module(
 fn validate_port_ref(
     graph: &ModuleGraph,
     port_ref: &FlatPortRef,
+    port_aliases: &HashMap<patches_core::QName, HashMap<u32, String>>,
 ) -> Result<(), InterpretError> {
     let id = patches_core::NodeId::from(port_ref.module.clone());
     let node = graph.get_node(&id).ok_or_else(|| InterpretError {
-        span: port_ref.span,
+        provenance: port_ref.provenance.clone(),
         message: format!("module '{}' not found", port_ref.module),
     })?;
     let (ports, kind) = match port_ref.direction {
@@ -383,23 +406,51 @@ fn validate_port_ref(
     {
         return Ok(());
     }
-    let available: Vec<String> = ports
-        .iter()
-        .map(|p| format!("{}/{}", p.name, p.index))
-        .collect();
+    let aliases = port_aliases.get(&port_ref.module);
+    let available = format_available_ports(ports, aliases);
     Err(InterpretError {
-        span: port_ref.span,
+        provenance: port_ref.provenance.clone(),
         message: format!(
-            "module '{}' has no {} port '{}/{}'; available {}s: [{}]",
-            port_ref.module, kind, port_ref.port, port_ref.index,
-            kind, available.join(", ")
+            "module '{}' has no {} port '{}'; available {}s: [{}]",
+            port_ref.module,
+            kind,
+            format_port_label(&port_ref.port, port_ref.index, aliases),
+            kind,
+            available
         ),
     })
+}
+
+/// Format a single `port[alias]` (when alias known) or `port/index` label.
+fn format_port_label(
+    port: &str,
+    index: u32,
+    aliases: Option<&HashMap<u32, String>>,
+) -> String {
+    match aliases.and_then(|m| m.get(&index)) {
+        Some(alias) => format!("{}[{}]", port, alias),
+        None => format!("{}/{}", port, index),
+    }
+}
+
+/// Format the bracketed `[port[alias], ...]` list of available ports for an
+/// error message. Indexed ports (those with a matching alias) collapse to one
+/// `port[alias]` entry per slot; unaliased ports show as `port/index`.
+fn format_available_ports(
+    ports: &[patches_core::PortDescriptor],
+    aliases: Option<&HashMap<u32, String>>,
+) -> String {
+    ports
+        .iter()
+        .map(|p| format_port_label(p.name, p.index as u32, aliases))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn add_connection(
     graph: &mut ModuleGraph,
     conn: &FlatConnection,
+    port_aliases: &HashMap<patches_core::QName, HashMap<u32, String>>,
 ) -> Result<(), InterpretError> {
     let from_id = patches_core::NodeId::from(conn.from_module.clone());
     let to_id = patches_core::NodeId::from(conn.to_module.clone());
@@ -408,7 +459,7 @@ fn add_connection(
     // the descriptor so we can call connect() without holding the borrow.
     let output_port = {
         let from_node = graph.get_node(&from_id).ok_or_else(|| InterpretError {
-            span: conn.span,
+            provenance: conn.provenance.clone(),
             message: format!("module '{}' not found", conn.from_module),
         })?;
         from_node
@@ -418,14 +469,14 @@ fn add_connection(
             .find(|p| p.name == conn.from_port.as_str() && p.index == conn.from_index as usize)
             .map(|p| PortRef { name: p.name, index: p.index })
             .ok_or_else(|| {
-                let available: Vec<String> = from_node.module_descriptor.outputs.iter()
-                    .map(|p| format!("{}/{}", p.name, p.index))
-                    .collect();
+                let aliases = port_aliases.get(&conn.from_module);
                 InterpretError {
-                    span: conn.span,
+                    provenance: conn.provenance.clone(),
                     message: format!(
-                        "module '{}' has no output port '{}/{}'; available outputs: [{}]",
-                        conn.from_module, conn.from_port, conn.from_index, available.join(", ")
+                        "module '{}' has no output port '{}'; available outputs: [{}]",
+                        conn.from_module,
+                        format_port_label(&conn.from_port, conn.from_index, aliases),
+                        format_available_ports(&from_node.module_descriptor.outputs, aliases),
                     ),
                 }
             })?
@@ -434,7 +485,7 @@ fn add_connection(
     // Resolve destination input port.
     let input_port = {
         let to_node = graph.get_node(&to_id).ok_or_else(|| InterpretError {
-            span: conn.span,
+            provenance: conn.provenance.clone(),
             message: format!("module '{}' not found", conn.to_module),
         })?;
         to_node
@@ -444,14 +495,14 @@ fn add_connection(
             .find(|p| p.name == conn.to_port.as_str() && p.index == conn.to_index as usize)
             .map(|p| PortRef { name: p.name, index: p.index })
             .ok_or_else(|| {
-                let available: Vec<String> = to_node.module_descriptor.inputs.iter()
-                    .map(|p| format!("{}/{}", p.name, p.index))
-                    .collect();
+                let aliases = port_aliases.get(&conn.to_module);
                 InterpretError {
-                    span: conn.span,
+                    provenance: conn.provenance.clone(),
                     message: format!(
-                        "module '{}' has no input port '{}/{}'; available inputs: [{}]",
-                        conn.to_module, conn.to_port, conn.to_index, available.join(", ")
+                        "module '{}' has no input port '{}'; available inputs: [{}]",
+                        conn.to_module,
+                        format_port_label(&conn.to_port, conn.to_index, aliases),
+                        format_available_ports(&to_node.module_descriptor.inputs, aliases),
                     ),
                 }
             })?
@@ -460,7 +511,7 @@ fn add_connection(
     graph
         .connect(&from_id, output_port, &to_id, input_port, conn.scale as f32)
         .map_err(|e| InterpretError {
-            span: conn.span,
+            provenance: conn.provenance.clone(),
             message: e.to_string(),
         })
 }
@@ -657,10 +708,11 @@ mod tests {
         FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
         FlatSongRow,
     };
-    use patches_dsl::ast::{Ident, Scalar, Span, Step, Value};
+    use patches_dsl::ast::{Ident, Scalar, SourceId, Span, Step, Value};
+    use patches_dsl::Provenance;
 
     fn span() -> Span {
-        Span { start: 0, end: 0 }
+        Span::synthetic()
     }
 
     fn env() -> AudioEnvironment {
@@ -677,7 +729,8 @@ mod tests {
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![],
-            span: span(),
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
         }
     }
 
@@ -687,7 +740,8 @@ mod tests {
             type_name: "Sum".to_string(),
             shape: vec![("channels".to_string(), Scalar::Int(channels))],
             params: vec![],
-            span: span(),
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
         }
     }
 
@@ -703,7 +757,7 @@ mod tests {
             to_port: to_port.to_string(),
             to_index,
             scale: 1.0,
-            span: span(),
+            provenance: Provenance::root(span()),
         }
     }
 
@@ -765,11 +819,12 @@ mod tests {
             type_name: "NonExistentModule".to_string(),
             shape: vec![],
             params: vec![],
-            span: Span { start: 10, end: 20 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 10, 20)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("NonExistentModule"));
-        assert_eq!(err.span, Span { start: 10, end: 20 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 10, 20));
     }
 
     #[test]
@@ -784,11 +839,11 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            span: Span { start: 5, end: 15 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 5, 15)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("no_such_out"));
-        assert_eq!(err.span, Span { start: 5, end: 15 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 5, 15));
     }
 
     #[test]
@@ -803,11 +858,11 @@ mod tests {
             to_port: "no_such_in".to_string(),
             to_index: 0,
             scale: 1.0,
-            span: Span { start: 3, end: 9 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 3, 9)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("no_such_in"));
-        assert_eq!(err.span, Span { start: 3, end: 9 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 3, 9));
     }
 
     #[test]
@@ -817,7 +872,8 @@ mod tests {
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![],
-            span: span(),
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
         };
         let dup_conn = FlatConnection {
             from_module: "osc2".into(),
@@ -827,7 +883,7 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            span: Span { start: 50, end: 60 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60)),
         };
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];
@@ -836,7 +892,7 @@ mod tests {
             dup_conn,
         ];
         let err = build(&flat, &registry(), &env()).unwrap_err();
-        assert_eq!(err.span, Span { start: 50, end: 60 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 50, 60));
         // Two outputs feeding "mix.in/0" — must surface as the
         // already-connected GraphError, not a generic "build failed".
         assert!(
@@ -855,7 +911,8 @@ mod tests {
             params: vec![
                 ("frequency".to_string(), Value::Scalar(Scalar::Float((440.0_f64 / 16.351_597_831_287_414).log2()))),
             ],
-            span: span(),
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
         }];
         assert!(build(&flat, &registry(), &env()).is_ok());
     }
@@ -870,7 +927,8 @@ mod tests {
             params: vec![
                 ("fm_type".to_string(), Value::Scalar(Scalar::Str("logarithmic".to_string()))),
             ],
-            span: span(),
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
         }];
         assert!(build(&flat, &registry(), &env()).is_ok());
     }
@@ -912,7 +970,8 @@ mod tests {
                 type_name: "Osc".to_string(),
                 shape: vec![],
                 params: vec![],
-                span: Span { start: 30, end: 33 },
+                port_aliases: vec![],
+                provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 30, 33)),
             },
         ];
         let err = build(&flat, &registry(), &env()).unwrap_err();
@@ -920,7 +979,7 @@ mod tests {
             err.message.contains("dup") && err.message.to_lowercase().contains("duplicate"),
             "expected duplicate-id error mentioning 'dup', got: {}", err.message
         );
-        assert_eq!(err.span, Span { start: 30, end: 33 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 30, 33));
     }
 
     #[test]
@@ -938,7 +997,7 @@ mod tests {
                 to_port: "in".to_string(),
                 to_index: 0,
                 scale: 1.0,
-                span: Span { start: 77, end: 88 },
+                provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 77, 88)),
             },
         ];
         let err = build(&flat, &registry(), &env()).unwrap_err();
@@ -946,7 +1005,7 @@ mod tests {
             err.message.to_lowercase().contains("already"),
             "expected input-already-connected error, got: {}", err.message
         );
-        assert_eq!(err.span, Span { start: 77, end: 88 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 77, 88));
     }
 
     #[test]
@@ -961,14 +1020,14 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 2.5,
-            span: Span { start: 11, end: 19 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 11, 19)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(
             err.message.to_lowercase().contains("scale"),
             "expected scale-out-of-range error, got: {}", err.message
         );
-        assert_eq!(err.span, Span { start: 11, end: 19 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 11, 19));
     }
 
     #[test]
@@ -982,7 +1041,8 @@ mod tests {
                 type_name: "PolyOsc".to_string(),
                 shape: vec![],
                 params: vec![],
-                span: span(),
+                port_aliases: vec![],
+                provenance: Provenance::root(span()),
             },
         ];
         flat.connections = vec![FlatConnection {
@@ -993,14 +1053,14 @@ mod tests {
             to_port: "voct".to_string(),
             to_index: 0,
             scale: 1.0,
-            span: Span { start: 100, end: 120 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 100, 120)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(
             err.message.to_lowercase().contains("kind") || err.message.to_lowercase().contains("arit"),
             "expected cable-kind-mismatch error, got: {}", err.message
         );
-        assert_eq!(err.span, Span { start: 100, end: 120 });
+        assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 100, 120));
     }
 
     #[test]
@@ -1013,7 +1073,8 @@ mod tests {
             params: vec![
                 ("no_such_param".to_string(), Value::Scalar(Scalar::Float(1.0))),
             ],
-            span: Span { start: 1, end: 5 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 1, 5)),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("no_such_param"));
@@ -1042,7 +1103,7 @@ mod tests {
                     steps: vec![rest_step(), rest_step(), trigger_step(), rest_step()],
                 },
             ],
-            span: span(),
+            provenance: Provenance::root(span()),
         }];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();
@@ -1070,7 +1131,7 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![trigger_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
             FlatPatternDef {
                 name: "alpha".into(),
@@ -1078,7 +1139,7 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![rest_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
             FlatPatternDef {
                 name: "bravo".into(),
@@ -1086,7 +1147,7 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(), rest_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
         ];
         let result = build(&flat, &registry(), &env()).unwrap();
@@ -1109,7 +1170,7 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![trigger_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
             FlatPatternDef {
                 name: "pat_b".into(),
@@ -1117,19 +1178,19 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![rest_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
         ];
         flat.songs = vec![FlatSongDef {
             name: "my_song".into(),
             channels: vec![ident("drums")],
             rows: vec![
-                FlatSongRow { cells: vec![Some(0)], span: span() },
-                FlatSongRow { cells: vec![Some(1)], span: span() },
-                FlatSongRow { cells: vec![None], span: span() },
+                FlatSongRow { cells: vec![Some(0)], provenance: Provenance::root(span()) },
+                FlatSongRow { cells: vec![Some(1)], provenance: Provenance::root(span()) },
+                FlatSongRow { cells: vec![None], provenance: Provenance::root(span()) },
             ],
             loop_point: Some(1),
-            span: span(),
+            provenance: Provenance::root(span()),
         }];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();
@@ -1159,7 +1220,7 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(); 4],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
             FlatPatternDef {
                 name: "two_steps".into(),
@@ -1167,18 +1228,18 @@ mod tests {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(); 2],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
         ];
         flat.songs = vec![FlatSongDef {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                FlatSongRow { cells: vec![Some(0)], span: span() },
-                FlatSongRow { cells: vec![Some(1)], span: span() },
+                FlatSongRow { cells: vec![Some(0)], provenance: Provenance::root(span()) },
+                FlatSongRow { cells: vec![Some(1)], provenance: Provenance::root(span()) },
             ],
             loop_point: None,
-            span: span(),
+            provenance: Provenance::root(span()),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("steps"));
@@ -1194,7 +1255,7 @@ mod tests {
                     name: "a".to_string(),
                     steps: vec![trigger_step()],
                 }],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
             FlatPatternDef {
                 name: "two_ch".into(),
@@ -1202,18 +1263,18 @@ mod tests {
                     FlatPatternChannel { name: "a".to_string(), steps: vec![trigger_step()] },
                     FlatPatternChannel { name: "b".to_string(), steps: vec![rest_step()] },
                 ],
-                span: span(),
+                provenance: Provenance::root(span()),
             },
         ];
         flat.songs = vec![FlatSongDef {
             name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
-                FlatSongRow { cells: vec![Some(0)], span: span() },
-                FlatSongRow { cells: vec![Some(1)], span: span() },
+                FlatSongRow { cells: vec![Some(0)], provenance: Provenance::root(span()) },
+                FlatSongRow { cells: vec![Some(1)], provenance: Provenance::root(span()) },
             ],
             loop_point: None,
-            span: span(),
+            provenance: Provenance::root(span()),
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("channels"));
@@ -1234,7 +1295,7 @@ mod tests {
                     steps: vec![trigger_step(); 2],
                 },
             ],
-            span: span(),
+            provenance: Provenance::root(span()),
         }];
         let result = build(&flat, &registry(), &env()).unwrap();
         let td = result.tracker_data.unwrap();

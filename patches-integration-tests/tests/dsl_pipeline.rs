@@ -7,7 +7,8 @@
 
 use patches_core::{AudioEnvironment, NodeId};
 use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch};
-use patches_dsl::ast::Span;
+use patches_dsl::ast::{SourceId, Span};
+use patches_dsl::Provenance;
 
 fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
@@ -28,7 +29,7 @@ fn load_fixture(name: &str) -> String {
 }
 
 fn zero_span() -> Span {
-    Span { start: 0, end: 0 }
+    Span::new(SourceId::SYNTHETIC, 0, 0)
 }
 
 // ── Fixture pipeline tests ─────────────────────────────────────────────────────
@@ -121,7 +122,8 @@ fn unknown_type_returns_error() {
             type_name: "NoSuchModule".to_string(),
             shape: vec![],
             params: vec![],
-            span: Span { start: 0, end: 10 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 10)),
         }],
         connections: vec![],
         port_refs: vec![],
@@ -145,14 +147,16 @@ fn unknown_port_returns_error() {
                 type_name: "Osc".to_string(),
                 shape: vec![],
                 params: vec![],
-                span: zero_span(),
+                port_aliases: vec![],
+                provenance: Provenance::root(zero_span()),
             },
             FlatModule {
                 id: "out".into(),
                 type_name: "AudioOut".to_string(),
                 shape: vec![],
                 params: vec![],
-                span: zero_span(),
+                port_aliases: vec![],
+                provenance: Provenance::root(zero_span()),
             },
         ],
         connections: vec![FlatConnection {
@@ -163,7 +167,7 @@ fn unknown_port_returns_error() {
             to_port: "in_left".to_string(),
             to_index: 0,
             scale: 1.0,
-            span: Span { start: 0, end: 5 },
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 5)),
         }],
         port_refs: vec![],
     };

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use patches_core::{
-    make_decisions, PlanDecisions,
+    make_decisions, PlanDecisions, Provenance,
     AudioEnvironment, BufferAllocState, CableKind, InputPort, InstanceId,
     MonoInput, MonoOutput, Module, ModuleAllocState, ModuleGraph, NodeDecision, NodeId,
     NodeState, OutputPort, PlanError, PlannerState, PolyInput, PolyOutput, Registry,
@@ -22,7 +22,7 @@ use crate::pool::ModulePool;
 /// off the audio thread. Do not propagate `BuildError` construction — or any
 /// of its `format!` call sites — onto the audio thread.
 #[derive(Debug)]
-pub enum BuildError {
+pub enum BuildErrorKind {
     /// An internal consistency invariant was violated (indicates a bug in the builder).
     InternalError(String),
     /// The number of output ports would exceed the buffer pool capacity.
@@ -33,13 +33,39 @@ pub enum BuildError {
     ModuleCreationError(String),
 }
 
+/// An engine-builder error, optionally tagged with the DSL provenance of the
+/// FlatModule / FlatConnection that triggered it.
+#[derive(Debug)]
+pub struct BuildError {
+    pub kind: BuildErrorKind,
+    pub origin: Option<Provenance>,
+}
+
+impl BuildError {
+    pub fn new(kind: BuildErrorKind) -> Self {
+        Self { kind, origin: None }
+    }
+
+    pub fn with_origin(mut self, provenance: Provenance) -> Self {
+        self.origin = Some(provenance);
+        self
+    }
+}
+
+impl From<BuildErrorKind> for BuildError {
+    fn from(kind: BuildErrorKind) -> Self {
+        Self::new(kind)
+    }
+}
+
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BuildError::InternalError(msg) => write!(f, "internal builder error: {msg}"),
-            BuildError::PoolExhausted => write!(f, "buffer pool exhausted: too many output ports"),
-            BuildError::ModulePoolExhausted => write!(f, "module pool exhausted: too many modules"),
-            BuildError::ModuleCreationError(msg) => write!(f, "module creation failed: {msg}"),
+        // Display omits provenance; rendering belongs to the caller (0414).
+        match &self.kind {
+            BuildErrorKind::InternalError(msg) => write!(f, "internal builder error: {msg}"),
+            BuildErrorKind::PoolExhausted => write!(f, "buffer pool exhausted: too many output ports"),
+            BuildErrorKind::ModulePoolExhausted => write!(f, "module pool exhausted: too many modules"),
+            BuildErrorKind::ModuleCreationError(msg) => write!(f, "module creation failed: {msg}"),
         }
     }
 }
@@ -48,11 +74,12 @@ impl std::error::Error for BuildError {}
 
 impl From<PlanError> for BuildError {
     fn from(e: PlanError) -> Self {
-        match e {
-            PlanError::BufferPoolExhausted => BuildError::PoolExhausted,
-            PlanError::ModulePoolExhausted => BuildError::ModulePoolExhausted,
-            PlanError::Internal(msg) => BuildError::InternalError(msg),
-        }
+        let kind = match e {
+            PlanError::BufferPoolExhausted => BuildErrorKind::PoolExhausted,
+            PlanError::ModulePoolExhausted => BuildErrorKind::ModulePoolExhausted,
+            PlanError::Internal(msg) => BuildErrorKind::InternalError(msg),
+        };
+        BuildError::new(kind)
     }
 }
 
@@ -201,10 +228,10 @@ fn partition_inputs(resolved: Vec<(usize, f32)>) -> PartitionedInputs {
 /// [`new`](Self::new), then call [`build_patch`](Self::build_patch).
 pub struct PatchBuilder {
     /// Buffer pool slot capacity; must match the [`SoundEngine`]'s pool so that
-    /// [`BuildError::PoolExhausted`] is detected at plan-build time.
+    /// [`BuildErrorKind::PoolExhausted`] is detected at plan-build time.
     pub pool_capacity: usize,
     /// Module pool slot capacity; must match the [`SoundEngine`]'s pool so that
-    /// [`BuildError::ModulePoolExhausted`] is detected at plan-build time.
+    /// [`BuildErrorKind::ModulePoolExhausted`] is detected at plan-build time.
     pub module_pool_capacity: usize,
 }
 
@@ -245,7 +272,7 @@ impl PatchBuilder {
                     let new_id = InstanceId::next();
                     let m = registry
                         .create(module_name, env, shape, &resolved_params, new_id)
-                        .map_err(|e| BuildError::ModuleCreationError(e.to_string()))?;
+                        .map_err(|e| BuildErrorKind::ModuleCreationError(e.to_string()))?;
                     instance_ids.insert(id.clone(), new_id);
                     fresh_modules.insert(id.clone(), m);
                 }
@@ -254,7 +281,7 @@ impl PatchBuilder {
                     // Resolve file params in the diff for surviving modules.
                     if param_diff.iter().any(|(_, _, v)| matches!(v, ParameterValue::File(_))) {
                         let node = index.get_node(id).ok_or_else(|| {
-                            BuildError::InternalError(format!("node {id:?} missing from graph"))
+                            BuildErrorKind::InternalError(format!("node {id:?} missing from graph"))
                         })?;
                         let module_name = node.module_descriptor.module_name;
                         let shape = &node.module_descriptor.shape;
@@ -288,12 +315,12 @@ impl PatchBuilder {
 
         for (id, decision) in decisions {
             let node = index.get_node(&id).ok_or_else(|| {
-                BuildError::InternalError(format!("node {id:?} missing from graph"))
+                BuildErrorKind::InternalError(format!("node {id:?} missing from graph"))
             })?;
             let desc = &node.module_descriptor;
             let instance_id = instance_ids[&id];
             let pool_index = *module_diff.slot_map.get(&instance_id).ok_or_else(|| {
-                BuildError::InternalError(format!(
+                BuildErrorKind::InternalError(format!(
                     "instance {instance_id:?} missing from module_diff slot_map"
                 ))
             })?;
@@ -310,7 +337,7 @@ impl PatchBuilder {
                         .get(&(id.clone(), port_idx))
                         .copied()
                         .ok_or_else(|| {
-                            BuildError::InternalError(format!(
+                            BuildErrorKind::InternalError(format!(
                                 "buffer for ({id:?}, {port_idx}) not found"
                             ))
                         })
@@ -361,7 +388,7 @@ impl PatchBuilder {
             let is_periodic = match decision {
                 NodeDecision::Install { .. } => {
                     let mut fresh = fresh_modules.remove(&id).ok_or_else(|| {
-                        BuildError::InternalError(format!(
+                        BuildErrorKind::InternalError(format!(
                             "fresh module for install node {id:?} is missing"
                         ))
                     })?;
@@ -491,10 +518,10 @@ fn resolve_file_params(
             ParameterValue::File(path) => {
                 let data = registry
                     .process_file(module_name, env, shape, name, path)
-                    .ok_or_else(|| BuildError::ModuleCreationError(format!(
+                    .ok_or_else(|| BuildErrorKind::ModuleCreationError(format!(
                         "module '{module_name}' has file parameter '{name}' but no FileProcessor is registered"
                     )))?
-                    .map_err(|e| BuildError::ModuleCreationError(format!(
+                    .map_err(|e| BuildErrorKind::ModuleCreationError(format!(
                         "module '{module_name}' file parameter '{name}': {e}"
                     )))?;
                 resolved.insert_param(name.to_string(), idx, ParameterValue::FloatBuffer(Arc::from(data)));
@@ -794,7 +821,7 @@ mod tests {
         let env = default_env();
         assert!(matches!(
             PatchBuilder::new(1, 256).build_patch(&graph, &registry, &env, &PlannerState::empty()),
-            Err(BuildError::PoolExhausted)
+            Err(BuildError { kind: BuildErrorKind::PoolExhausted, .. })
         ));
     }
 

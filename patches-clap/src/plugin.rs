@@ -34,15 +34,17 @@ use clap_sys::process::{
     clap_process, clap_process_status, CLAP_PROCESS_CONTINUE,
 };
 
+use patches_core::source_map::SourceMap;
 use patches_core::{
     AudioEnvironment, MidiEvent, ModuleGraph, Registry, BASE_PERIODIC_UPDATE_INTERVAL,
 };
+use patches_diagnostics::{RenderedDiagnostic, Severity, Snippet, SnippetKind};
 use patches_engine::builder::ExecutionPlan;
 use patches_engine::{CleanupAction, PatchProcessor, Planner};
 
 use crate::error::CompileError;
 use crate::extensions;
-use crate::gui::GuiState;
+use crate::gui::{DiagnosticView, GuiState};
 
 /// The runtime state of a single plugin instance.
 ///
@@ -79,6 +81,11 @@ pub struct PatchesClapPlugin {
 
     pub(crate) sample_rate: f64,
 
+    /// Source map from the most recent successful `load_or_parse` — retained
+    /// so downstream `CompileError`s can be rendered as structured diagnostics
+    /// in the GUI. Reset to `None` in `deactivate`.
+    pub(crate) last_source_map: Option<SourceMap>,
+
     // ── Transport edge detection ───────────────────────────────────
     /// Previous beat position, used to detect beat boundary crossings.
     pub(crate) prev_beat: f64,
@@ -99,7 +106,8 @@ impl PatchesClapPlugin {
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
         let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
-        let file = self.load_or_parse()?;
+        let (file, source_map) = self.load_or_parse()?;
+        self.last_source_map = Some(source_map);
         let result = patches_dsl::expand(&file)?;
         let build_result = patches_interpreter::build_with_base_dir(
             &result.patch,
@@ -119,13 +127,21 @@ impl PatchesClapPlugin {
         Ok(())
     }
 
+    /// Most recently built source map — held so that a `CompileError` can be
+    /// converted into structured [`RenderedDiagnostic`]s for GUI rendering.
+    pub(crate) fn take_diagnostic_view(&mut self, err: &CompileError) -> DiagnosticView {
+        let source_map = self.last_source_map.clone().unwrap_or_default();
+        let diagnostics = compile_error_to_diagnostics(err, &source_map);
+        DiagnosticView { diagnostics, source_map: Some(source_map) }
+    }
+
     /// Load the master file using the include loader (resolving includes) when
     /// a file path is available on disk, or fall back to parsing `dsl_source`
     /// directly (e.g. state restored without original files).
     ///
     /// The master file is read from `self.dsl_source` (already loaded by the
     /// caller) to avoid a redundant disk read and TOCTOU inconsistency.
-    fn load_or_parse(&self) -> Result<patches_dsl::File, CompileError> {
+    fn load_or_parse(&self) -> Result<(patches_dsl::File, SourceMap), CompileError> {
         let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
         if let Some(path) = file_path {
             if path.exists() {
@@ -141,11 +157,13 @@ impl PatchesClapPlugin {
                         std::fs::read_to_string(p)
                     }
                 })?;
-                return Ok(load_result.file);
+                return Ok((load_result.file, load_result.source_map));
             }
         }
-        // Fallback: parse the in-memory source (no include resolution).
-        Ok(patches_dsl::parse(&self.dsl_source)?)
+        // Fallback: parse the in-memory source (no include resolution) — emit
+        // an empty SourceMap; diagnostics from this path have no resolvable
+        // paths but still render with line/column derived from the span text.
+        Ok((patches_dsl::parse(&self.dsl_source)?, SourceMap::new()))
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.
@@ -156,6 +174,110 @@ impl PatchesClapPlugin {
                 f(self.host);
             }
         }
+    }
+}
+
+// ── Diagnostic construction ─────────────────────────────────────────
+
+fn compile_error_to_diagnostics(err: &CompileError, source_map: &SourceMap) -> Vec<RenderedDiagnostic> {
+    let d = match err {
+        CompileError::NotActivated => synthetic_diagnostic("not activated", "not-activated"),
+        CompileError::Load(e) => synthetic_diagnostic(&e.to_string(), "load"),
+        CompileError::Parse(e) => span_diagnostic(e.span, &e.message, "parse"),
+        CompileError::Expand(e) => RenderedDiagnostic::from_expand_error(e, source_map),
+        CompileError::Interpret(e) => interpret_diagnostic(e),
+        CompileError::Plan(e) => plan_diagnostic(e),
+    };
+    vec![d]
+}
+
+fn synthetic_diagnostic(message: &str, code: &str) -> RenderedDiagnostic {
+    use patches_core::source_span::SourceId;
+    RenderedDiagnostic {
+        severity: Severity::Error,
+        code: Some(code.to_string()),
+        message: message.to_string(),
+        primary: Snippet {
+            source: SourceId::SYNTHETIC,
+            range: 0..0,
+            label: "here".to_string(),
+            kind: SnippetKind::Primary,
+        },
+        related: Vec::new(),
+    }
+}
+
+fn span_diagnostic(span: patches_dsl::ast::Span, message: &str, code: &str) -> RenderedDiagnostic {
+    RenderedDiagnostic {
+        severity: Severity::Error,
+        code: Some(code.to_string()),
+        message: message.to_string(),
+        primary: Snippet {
+            source: span.source,
+            range: span.start..span.end,
+            label: "here".to_string(),
+            kind: SnippetKind::Primary,
+        },
+        related: Vec::new(),
+    }
+}
+
+fn interpret_diagnostic(err: &patches_interpreter::InterpretError) -> RenderedDiagnostic {
+    let primary = Snippet {
+        source: err.provenance.site.source,
+        range: err.provenance.site.start..err.provenance.site.end,
+        label: "here".to_string(),
+        kind: SnippetKind::Primary,
+    };
+    let related = err
+        .provenance
+        .expansion
+        .iter()
+        .map(|s| Snippet {
+            source: s.source,
+            range: s.start..s.end,
+            label: "expanded from here".to_string(),
+            kind: SnippetKind::Expansion,
+        })
+        .collect();
+    RenderedDiagnostic {
+        severity: Severity::Error,
+        code: Some("interpret".to_string()),
+        message: err.message.clone(),
+        primary,
+        related,
+    }
+}
+
+fn plan_diagnostic(err: &patches_engine::builder::BuildError) -> RenderedDiagnostic {
+    let message = err.to_string();
+    match &err.origin {
+        Some(prov) => {
+            let primary = Snippet {
+                source: prov.site.source,
+                range: prov.site.start..prov.site.end,
+                label: "here".to_string(),
+                kind: SnippetKind::Primary,
+            };
+            let related = prov
+                .expansion
+                .iter()
+                .map(|s| Snippet {
+                    source: s.source,
+                    range: s.start..s.end,
+                    label: "expanded from here".to_string(),
+                    kind: SnippetKind::Expansion,
+                })
+                .collect();
+            RenderedDiagnostic {
+                severity: Severity::Error,
+                code: Some("plan".to_string()),
+                message,
+                primary,
+                related,
+            }
+        }
+        None => synthetic_diagnostic(&message, "plan"),
     }
 }
 
@@ -290,6 +412,11 @@ unsafe extern "C" fn plugin_activate(
     if !p.dsl_source.is_empty() {
         if let Err(e) = p.compile_and_push_plan() {
             eprintln!("patches-clap: initial compile failed: {e}");
+            let view = p.take_diagnostic_view(&e);
+            lock_gui_mut(&p.gui_state, |g| {
+                g.push_status(format!("Error: {e}"));
+                g.diagnostic_view = view;
+            });
             // Not fatal — plugin is still usable, just silent.
         }
         // Immediately adopt any pending plan so audio starts right away.
@@ -610,10 +737,15 @@ fn set_status_from_load(
             match p.compile_and_push_plan() {
                 Ok(()) => lock_gui_mut(&p.gui_state, |g| {
                     g.push_status(success_msg);
+                    g.diagnostic_view = DiagnosticView::default();
                 }),
-                Err(e) => lock_gui_mut(&p.gui_state, |g| {
-                    g.push_status(format!("Error: {e}"));
-                }),
+                Err(e) => {
+                    let view = p.take_diagnostic_view(&e);
+                    lock_gui_mut(&p.gui_state, |g| {
+                        g.push_status(format!("Error: {e}"));
+                        g.diagnostic_view = view;
+                    });
+                }
             }
         }
         Err(e) => lock_gui_mut(&p.gui_state, |g| {

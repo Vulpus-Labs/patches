@@ -10,7 +10,7 @@ use patches_core::QName;
 
 use crate::ast::{
     AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamEntry, ParamIndex,
-    ParamType, PlayAtom, PlayBody, PlayExpr, PortIndex, PortLabel, RowGroup, Scalar, SectionDef,
+    ParamType, PlayAtom, PlayBody, PlayExpr, PortIndex, PortLabel, PortRef, RowGroup, Scalar, SectionDef,
     ShapeArg, ShapeArgValue, SongCell, SongDef, SongItem, SongRow, Span, Statement, Template,
     Value,
 };
@@ -19,6 +19,7 @@ use crate::flat::{
     FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatPortRef,
     FlatSongDef, FlatSongRow, PatternIdx, PortDirection,
 };
+use crate::provenance::Provenance;
 
 /// A song whose rows still carry [`SongCell`] values; resolved to
 /// [`FlatSongDef`] once all patterns are known (see [`resolve_songs`]).
@@ -29,6 +30,8 @@ struct AssembledSong {
     rows: Vec<SongRow>,
     loop_point: Option<usize>,
     span: Span,
+    /// Call chain at the point this song was assembled (innermost-first).
+    call_chain: Vec<Span>,
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -94,11 +97,12 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         &HashMap::new(),
         &HashMap::new(),
         &root_scope,
+        &[],
     )?;
 
     // Expand patterns: merge top-level with template-local, resolve generators.
     let mut patterns: Vec<FlatPatternDef> =
-        file.patterns.iter().map(|p| expand_pattern_def(p, None)).collect();
+        file.patterns.iter().map(|p| expand_pattern_def(p, None, &[])).collect();
     patterns.extend(result.patterns);
 
     // Flatten top-level songs. Rows still carry raw `SongCell`s — resolution
@@ -107,7 +111,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     let mut songs: Vec<AssembledSong> = Vec::new();
     for song in &file.songs {
         let (flat, inline_patterns) =
-            flatten_song(song, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
+            flatten_song(song, None, &HashMap::new(), &HashMap::new(), &root_scope, &[])?;
         songs.push(flat);
         patterns.extend(inline_patterns);
     }
@@ -178,21 +182,29 @@ fn resolve_songs(
                     }
                 }
             }
-            rows.push(FlatSongRow { cells, span: row.span });
+            rows.push(FlatSongRow {
+                cells,
+                provenance: Provenance::with_chain(row.span, &song.call_chain),
+            });
         }
+        let song_provenance = Provenance::with_chain(song.span, &song.call_chain);
         out.push(FlatSongDef {
             name: song.name,
             channels: song.channels,
             rows,
             loop_point: song.loop_point,
-            span: song.span,
+            provenance: song_provenance,
         });
     }
     Ok(out)
 }
 
 /// Expand a `PatternDef` by resolving all slide generators into concrete steps.
-fn expand_pattern_def(pattern: &PatternDef, namespace: Option<&QName>) -> FlatPatternDef {
+fn expand_pattern_def(
+    pattern: &PatternDef,
+    namespace: Option<&QName>,
+    call_chain: &[Span],
+) -> FlatPatternDef {
     let channels = pattern
         .channels
         .iter()
@@ -204,7 +216,7 @@ fn expand_pattern_def(pattern: &PatternDef, namespace: Option<&QName>) -> FlatPa
     FlatPatternDef {
         name: qualify(namespace, &pattern.name.name),
         channels,
-        span: pattern.span,
+        provenance: Provenance::with_chain(pattern.span, call_chain),
     }
 }
 
@@ -385,6 +397,7 @@ fn flatten_song(
     param_env: &HashMap<String, Scalar>,
     param_types: &HashMap<String, ParamType>,
     parent_scope: &NameScope<'_>,
+    call_chain: &[Span],
 ) -> Result<(AssembledSong, Vec<FlatPatternDef>), ExpandError> {
     let song_ns = qualify(namespace, &song.name.name);
 
@@ -490,7 +503,7 @@ fn flatten_song(
     // Emit flat pattern defs for song-local inline patterns.
     let flat_patterns: Vec<FlatPatternDef> = local_patterns
         .iter()
-        .map(|p| expand_pattern_def(p, Some(&song_ns)))
+        .map(|p| expand_pattern_def(p, Some(&song_ns), call_chain))
         .collect();
 
     Ok((
@@ -500,6 +513,7 @@ fn flatten_song(
             rows,
             loop_point,
             span: song.span,
+            call_chain: call_chain.to_vec(),
         },
         flat_patterns,
     ))
@@ -669,6 +683,21 @@ struct BodyResult {
     port_refs: Vec<FlatPortRef>,
 }
 
+/// Format a (possibly-absent) iterator of names as a sorted, comma-separated
+/// list for diagnostic suggestions. Used to add "known X: ..." hints to
+/// fail-fast errors so users aren't left guessing.
+fn list_keys<'a, I: Iterator<Item = &'a str>>(iter: Option<I>) -> String {
+    match iter {
+        None => "(none)".to_owned(),
+        Some(it) => {
+            let mut v: Vec<&str> = it.collect();
+            v.sort_unstable();
+            v.dedup();
+            if v.is_empty() { "(none)".to_owned() } else { v.join(", ") }
+        }
+    }
+}
+
 // ─── Index resolution ─────────────────────────────────────────────────────────
 
 /// Resolved form of a port index.
@@ -711,14 +740,23 @@ fn resolve_port_index(
             }
             let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError {
                 span: *span,
-                message: format!("unknown alias or param '{}' in port index", name),
+                message: format!(
+                    "unknown alias or param '{}' in port index; known aliases: {}; known params: {}",
+                    name,
+                    list_keys(alias_map.map(|m| m.keys().map(|s| s.as_str()))),
+                    list_keys(Some(param_env.keys().map(|s| s.as_str()))),
+                ),
             })?;
             Ok(IndexResolution::Keyed(scalar_to_u32(scalar, span)?))
         }
         Some(PortIndex::Arity(name)) => {
             let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError {
                 span: *span,
-                message: format!("unknown arity param '{}' in port index [*{}]", name, name),
+                message: format!(
+                    "unknown arity param '{}' in port index [*{}]; known params: {}",
+                    name, name,
+                    list_keys(Some(param_env.keys().map(|s| s.as_str()))),
+                ),
             })?;
             Ok(IndexResolution::Arity(scalar_to_u32(scalar, span)?))
         }
@@ -943,6 +981,7 @@ impl<'a> Expander<'a> {
     ///
     /// Two-pass: modules first (so `instance_ports` is populated before
     /// connections are processed), then connections.
+    #[allow(clippy::too_many_arguments)]
     fn expand_body(
         &mut self,
         stmts: &[Statement],
@@ -950,6 +989,7 @@ impl<'a> Expander<'a> {
         param_env: &HashMap<String, Scalar>,
         param_types: &HashMap<String, ParamType>,
         parent_scope: &NameScope<'_>,
+        call_chain: &[Span],
     ) -> Result<BodyResult, ExpandError> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
@@ -957,6 +997,7 @@ impl<'a> Expander<'a> {
         let mut songs: Vec<AssembledSong> = Vec::new();
         let mut patterns: Vec<FlatPatternDef> = Vec::new();
         let mut port_refs: Vec<FlatPortRef> = Vec::new();
+        let mut module_names: HashSet<String> = HashSet::new();
 
         // Build a scope for this body's local song/pattern definitions.
         let scope = NameScope::child(parent_scope, stmts, namespace);
@@ -973,13 +1014,14 @@ impl<'a> Expander<'a> {
 
             if self.templates.contains_key(type_name.as_str()) {
                 let sub =
-                    self.expand_template_instance(decl, namespace, param_env, &scope)?;
+                    self.expand_template_instance(decl, namespace, param_env, &scope, call_chain)?;
                 flat_modules.extend(sub.modules);
                 flat_connections.extend(sub.connections);
                 songs.extend(sub.songs);
                 patterns.extend(sub.patterns);
                 port_refs.extend(sub.port_refs);
                 instance_ports.insert(decl.name.name.clone(), sub.ports);
+                module_names.insert(decl.name.name.clone());
             } else {
                 let inst_id = qualify(namespace, &decl.name.name);
                 let instance_alias_map = build_alias_map(&decl.shape);
@@ -1010,13 +1052,19 @@ impl<'a> Expander<'a> {
                 )?;
                 // Resolve song/pattern references via the scope chain.
                 scope.resolve_params(&mut params);
+                let port_aliases: Vec<(u32, String)> = alias_map_ref
+                    .iter()
+                    .map(|(name, idx)| (*idx, name.clone()))
+                    .collect();
                 flat_modules.push(FlatModule {
                     id: inst_id,
                     type_name: type_name.clone(),
                     shape,
                     params,
-                    span: decl.span,
+                    port_aliases,
+                    provenance: Provenance::with_chain(decl.span, call_chain),
                 });
+                module_names.insert(decl.name.name.clone());
             }
         }
 
@@ -1037,9 +1085,11 @@ impl<'a> Expander<'a> {
                 namespace,
                 param_env,
                 &instance_ports,
+                &module_names,
                 &mut flat_connections,
                 &mut boundary,
                 &mut port_refs,
+                call_chain,
             )?;
         }
 
@@ -1051,7 +1101,7 @@ impl<'a> Expander<'a> {
                 _ => continue,
             };
             let (flat, inline_patterns) =
-                flatten_song(song_def, namespace, param_env, param_types, &scope)?;
+                flatten_song(song_def, namespace, param_env, param_types, &scope, call_chain)?;
             songs.push(flat);
             patterns.extend(inline_patterns);
         }
@@ -1063,7 +1113,7 @@ impl<'a> Expander<'a> {
                 Statement::Pattern(pd) => pd,
                 _ => continue,
             };
-            patterns.push(expand_pattern_def(pat_def, namespace));
+            patterns.push(expand_pattern_def(pat_def, namespace, call_chain));
         }
 
         Ok(BodyResult {
@@ -1086,6 +1136,7 @@ impl<'a> Expander<'a> {
         namespace: Option<&QName>,
         param_env: &HashMap<String, Scalar>,
         scope: &NameScope<'_>,
+        call_chain: &[Span],
     ) -> Result<BodyResult, ExpandError> {
         let type_name = &decl.type_name.name;
         let template = self.templates[type_name.as_str()];
@@ -1372,12 +1423,14 @@ impl<'a> Expander<'a> {
 
         let child_namespace = qualify(namespace, &decl.name.name);
         self.call_stack.insert(type_name.clone());
+        let child_chain = Provenance::extend(call_chain, decl.span);
         let sub = self.expand_body(
             &template.body,
             Some(&child_namespace),
             &sub_param_env,
             &sub_param_types,
             scope,
+            &child_chain,
         );
         self.call_stack.remove(type_name.as_str());
         let sub = sub?;
@@ -1396,9 +1449,11 @@ impl<'a> Expander<'a> {
         namespace: Option<&QName>,
         param_env: &HashMap<String, Scalar>,
         instance_ports: &HashMap<String, TemplatePorts>,
+        module_names: &HashSet<String>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
+        call_chain: &[Span],
     ) -> Result<(), ExpandError> {
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
@@ -1411,9 +1466,42 @@ impl<'a> Expander<'a> {
             Direction::Backward => (&conn.rhs, &conn.lhs),
         };
 
+        // Fail-fast: the highest-level structural error in a port reference is
+        // the module not existing. Catch it before resolving ports/indices so
+        // the user is not misled by a downstream alias-lookup failure.
+        let check_module = |pr: &PortRef| -> Result<(), ExpandError> {
+            if pr.module == "$" || module_names.contains(pr.module.as_str()) {
+                Ok(())
+            } else {
+                let mut known: Vec<&str> =
+                    module_names.iter().map(|s| s.as_str()).collect();
+                known.sort_unstable();
+                let list = if known.is_empty() {
+                    "(none)".to_owned()
+                } else {
+                    known.join(", ")
+                };
+                Err(ExpandError {
+                    span: pr.span,
+                    message: format!(
+                        "unknown module '{}'; known modules: {}",
+                        pr.module, list
+                    ),
+                })
+            }
+        };
+        check_module(from_ref)?;
+        check_module(to_ref)?;
 
         let from_port = resolve_port_label(&from_ref.port, param_env, &from_ref.span)?;
         let to_port = resolve_port_label(&to_ref.port, param_env, &to_ref.span)?;
+
+        // Fail-fast: for template-instance refs, validate the port name exists
+        // on the boundary map before resolving any port-index alias on it.
+        // (Plain modules' port descriptors are unknown to the DSL — the
+        // interpreter validates those against the registry.)
+        check_template_port(from_ref, &from_port, instance_ports, PortDirection::Output)?;
+        check_template_port(to_ref, &to_port, instance_ports, PortDirection::Input)?;
 
         let from_alias_map = self.alias_maps.get(from_ref.module.as_str());
         let to_alias_map = self.alias_maps.get(to_ref.module.as_str());
@@ -1441,6 +1529,7 @@ impl<'a> Expander<'a> {
                 boundary,
                 port_refs,
                 &conn.span,
+                call_chain,
             )?;
         }
 
@@ -1470,6 +1559,7 @@ impl<'a> Expander<'a> {
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
         span: &Span,
+        call_chain: &[Span],
     ) -> Result<(), ExpandError> {
         // Boundary key: "port/i" for arity-expanded ports, plain "port" otherwise.
         let from_bkey = if from_is_arity {
@@ -1495,7 +1585,7 @@ impl<'a> Expander<'a> {
                         port: p.clone(),
                         index: *i,
                         direction: PortDirection::Input,
-                        span: *span,
+                        provenance: Provenance::with_chain(*span, call_chain),
                     });
                 }
                 let scaled: Vec<PortEntry> =
@@ -1513,7 +1603,7 @@ impl<'a> Expander<'a> {
                     port: src_p.clone(),
                     index: src_i,
                     direction: PortDirection::Output,
-                    span: *span,
+                    provenance: Provenance::with_chain(*span, call_chain),
                 });
                 boundary
                     .out_ports
@@ -1547,7 +1637,7 @@ impl<'a> Expander<'a> {
                             to_port: dst_p,
                             to_index: dst_i,
                             scale: composed * to_inner,
-                            span: *span,
+                            provenance: Provenance::with_chain(*span, call_chain),
                         });
                     }
                     flat_connections.push(FlatConnection {
@@ -1558,7 +1648,7 @@ impl<'a> Expander<'a> {
                         to_port: last_dst_p,
                         to_index: last_dst_i,
                         scale: composed * last_to_inner,
-                        span: *span,
+                        provenance: Provenance::with_chain(*span, call_chain),
                     });
                 }
             }
@@ -1793,6 +1883,58 @@ fn resolve_scale(
                 }),
             }
         }
+    }
+}
+
+/// Fail-fast: if `pr` refers to a known template instance, verify that
+/// `port` appears in the appropriate boundary map (in or out) before any
+/// downstream index-alias resolution. `$` and plain (non-template) modules
+/// are skipped — boundaries are defined on the fly, and plain-module port
+/// descriptors aren't visible to the DSL.
+fn check_template_port(
+    pr: &PortRef,
+    port: &str,
+    instance_ports: &HashMap<String, TemplatePorts>,
+    dir: PortDirection,
+) -> Result<(), ExpandError> {
+    if pr.module == "$" {
+        return Ok(());
+    }
+    let Some(ports) = instance_ports.get(pr.module.as_str()) else {
+        return Ok(());
+    };
+    let keys: Vec<&String> = match dir {
+        PortDirection::Output => ports.out_ports.keys().collect(),
+        PortDirection::Input => ports.in_ports.keys().collect(),
+    };
+    let prefix = format!("{}/", port);
+    let exists = keys.iter().any(|k| k.as_str() == port || k.starts_with(&prefix));
+    if exists {
+        Ok(())
+    } else {
+        let kind = match dir {
+            PortDirection::Output => "out-port",
+            PortDirection::Input => "in-port",
+        };
+        // Collapse "port/i" keys to bare base names for the suggestion list.
+        let mut names: Vec<&str> = keys
+            .iter()
+            .map(|k| k.split_once('/').map(|(b, _)| b).unwrap_or(k.as_str()))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let known = if names.is_empty() {
+            "(none)".to_owned()
+        } else {
+            names.join(", ")
+        };
+        Err(ExpandError {
+            span: pr.span,
+            message: format!(
+                "template instance '{}' has no {} '{}'; known {}s: {}",
+                pr.module, kind, port, kind, known
+            ),
+        })
     }
 }
 

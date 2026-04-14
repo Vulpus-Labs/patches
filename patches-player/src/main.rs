@@ -16,28 +16,113 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use patches_core::AudioEnvironment;
+use patches_core::{AudioEnvironment, SourceMap};
+use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::{new_event_queue, DeviceConfig, EventScheduler, MidiConnector, OversamplingFactor, PatchEngine, PatchEngineError, enumerate_devices};
+
+mod diagnostic_render;
 
 struct LoadedPatch {
     build_result: patches_interpreter::BuildResult,
     dependencies: Vec<PathBuf>,
 }
 
+/// Errors surfaced by `load_patch`. Carries a `SourceMap` for path/line
+/// resolution when the failure has a [`patches_core::Provenance`].
+#[derive(Debug)]
+enum LoadPatchError {
+    Load(patches_dsl::LoadError),
+    Expand {
+        err: patches_dsl::ExpandError,
+        source_map: SourceMap,
+    },
+    Interpret {
+        err: patches_interpreter::InterpretError,
+        source_map: SourceMap,
+    },
+}
+
+impl std::fmt::Display for LoadPatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadPatchError::Load(e) => write!(f, "{e}"),
+            LoadPatchError::Expand { err, .. } => write!(f, "expand error: {}", err.message),
+            LoadPatchError::Interpret { err, .. } => write!(f, "build error: {}", err.message),
+        }
+    }
+}
+
+impl std::error::Error for LoadPatchError {}
+
+impl LoadPatchError {
+    /// Render this error to stderr as a structured diagnostic (when
+    /// source-located). `LoadError` variants have no provenance and fall
+    /// back to plain-text printing.
+    fn render_to_stderr(&self) {
+        match self {
+            LoadPatchError::Load(e) => eprintln!("error: {e}"),
+            LoadPatchError::Expand { err, source_map } => {
+                let d = RenderedDiagnostic::from_expand_error(err, source_map);
+                diagnostic_render::render_to_stderr(&d, source_map);
+            }
+            LoadPatchError::Interpret { err, source_map } => {
+                let d = interpret_diagnostic(err);
+                diagnostic_render::render_to_stderr(&d, source_map);
+            }
+        }
+    }
+}
+
+/// Build a structured diagnostic from an [`patches_interpreter::InterpretError`].
+/// Interpret errors carry a full [`patches_core::Provenance`] chain but no
+/// [`patches_core::build_error::BuildError`] code — synthesise a minimal one.
+fn interpret_diagnostic(err: &patches_interpreter::InterpretError) -> RenderedDiagnostic {
+    use patches_diagnostics::{Severity, Snippet, SnippetKind};
+    let primary = Snippet {
+        source: err.provenance.site.source,
+        range: err.provenance.site.start..err.provenance.site.end,
+        label: "here".to_string(),
+        kind: SnippetKind::Primary,
+    };
+    let related = err
+        .provenance
+        .expansion
+        .iter()
+        .map(|s| Snippet {
+            source: s.source,
+            range: s.start..s.end,
+            label: "expanded from here".to_string(),
+            kind: SnippetKind::Expansion,
+        })
+        .collect();
+    RenderedDiagnostic {
+        severity: Severity::Error,
+        code: Some("interpret".to_string()),
+        message: err.message.clone(),
+        primary,
+        related,
+    }
+}
+
 fn load_patch(
     path: &str,
     registry: &patches_core::Registry,
     sample_rate: f32,
-) -> Result<LoadedPatch, Box<dyn std::error::Error>> {
+) -> Result<LoadedPatch, LoadPatchError> {
     let master_path = Path::new(path);
-    let load_result = patches_dsl::load_with(master_path, |p| fs::read_to_string(p))?;
-    let result = patches_dsl::expand(&load_result.file)?;
+    let load_result = patches_dsl::load_with(master_path, |p| fs::read_to_string(p))
+        .map_err(LoadPatchError::Load)?;
+    let source_map = load_result.source_map;
+    let result = patches_dsl::expand(&load_result.file).map_err(|err| {
+        LoadPatchError::Expand { err, source_map: source_map.clone() }
+    })?;
     for w in &result.warnings {
         eprintln!("dsl warning: {w}");
     }
     let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let base_dir = master_path.parent();
-    let build_result = patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)?;
+    let build_result = patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)
+        .map_err(|err| LoadPatchError::Interpret { err, source_map })?;
     Ok(LoadedPatch {
         build_result,
         dependencies: load_result.dependencies,
@@ -74,7 +159,13 @@ fn run(
 
     // Build with a placeholder rate; we rebuild after starting the engine to
     // use the actual device sample rate.
-    let loaded = load_patch(path, &registry, 44_100.0)?;
+    let loaded = match load_patch(path, &registry, 44_100.0) {
+        Ok(l) => l,
+        Err(e) => {
+            e.render_to_stderr();
+            return Err("failed to load patch".into());
+        }
+    };
 
     let engine_registry = patches_modules::default_registry();
     let mut engine = PatchEngine::with_device_config(
@@ -97,7 +188,10 @@ fn run(
     if (sample_rate - 44_100.0).abs() > 1.0 {
         match load_patch(path, &registry, sample_rate) {
             Ok(reloaded) => push_build_result(&mut engine, &reloaded.build_result),
-            Err(e) => eprintln!("warn: rebuild at device sample rate failed: {e}"),
+            Err(e) => {
+                eprintln!("warn: rebuild at device sample rate failed");
+                e.render_to_stderr();
+            }
         }
     }
     let scheduler = EventScheduler::new(sample_rate, 128);
@@ -170,7 +264,8 @@ fn run(
                     }
                 }
                 Err(e) => {
-                    eprintln!("parse error (keeping current patch): {e}");
+                    eprintln!("parse error (keeping current patch):");
+                    e.render_to_stderr();
                     // Update mtimes so we don't spam errors on every poll.
                     for (p, last) in watched.iter_mut() {
                         if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
@@ -284,6 +379,8 @@ fn main() {
     };
 
     if let Err(e) = run(&path, record_path.as_deref(), oversampling, no_stdin, device_config) {
+        // Structured diagnostics (LoadPatchError) have already been rendered
+        // to stderr at the source. Non-source errors surface as plain text.
         eprintln!("error: {e}");
         process::exit(1);
     }

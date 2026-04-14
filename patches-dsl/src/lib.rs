@@ -23,6 +23,12 @@ mod expand;
 pub mod flat;
 mod parser;
 
+// Provenance, SourceId, Span, and SourceMap are owned by `patches-core` so
+// they can appear in core types like `BuildError`. Re-exported here for the
+// historical paths.
+pub use patches_core::provenance;
+pub use patches_core::source_map;
+
 pub mod include_frontier;
 pub mod loader;
 
@@ -31,7 +37,7 @@ pub use ast::{
     ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
     PlayAtom, PlayBody, PlayExpr, PlayTerm, PortGroupDecl, PortIndex, PortLabel, PortRef,
     RowGroup, Scalar, SectionDef, ShapeArg, ShapeArgValue, SongCell, SongDef, SongItem, SongRow,
-    Span, Statement, Step, StepOrGenerator, Template, Value,
+    SourceId, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use flat::{
@@ -41,4 +47,8 @@ pub use flat::{
 pub use patches_core::QName;
 pub use include_frontier::{normalize_path, EnterResult, IncludeFrontier};
 pub use loader::{load_with, LoadError, LoadErrorKind, LoadResult};
-pub use parser::{parse, parse_include_file, ParseError};
+pub use parser::{
+    parse, parse_include_file, parse_include_file_with_source, parse_with_source, ParseError,
+};
+pub use provenance::Provenance;
+pub use source_map::{line_col, SourceEntry, SourceMap};

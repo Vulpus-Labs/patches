@@ -215,14 +215,14 @@ impl Module for WasmModule {
         let ptr = self.write_bytes(&params_json)
             .map_err(|e| BuildError::Custom {
                 module: self.descriptor.module_name,
-                message: e,
+                message: e, origin: None,
             })?;
         let result = self.fn_update_params.call(
             &mut self.store,
             (ptr, params_json.len() as i32),
         ).map_err(|e| BuildError::Custom {
             module: self.descriptor.module_name,
-            message: format!("patches_update_parameters trapped: {e}"),
+            message: format!("patches_update_parameters trapped: {e}"), origin: None,
         })?;
         let _ = self.fn_free.call(&mut self.store, (ptr, params_json.len() as i32));
 
@@ -235,7 +235,7 @@ impl Module for WasmModule {
             self.free_length_prefixed(result, data_len);
             Err(BuildError::Custom {
                 module: self.descriptor.module_name,
-                message: msg,
+                message: msg, origin: None,
             })
         } else {
             Ok(())
@@ -477,45 +477,45 @@ impl ModuleBuilder for WasmModuleBuilder {
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
         let (mut store, instance, memory) = self.create_instance()
-            .map_err(|e| BuildError::Custom { module: "wasm", message: e })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: e, origin: None })?;
 
         // Get all function handles
         let fn_describe: TypedFunc<(i32, i32, i32), i32> = instance
             .get_typed_func(&mut store, "patches_describe")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_prepare: PrepareFunc = instance
             .get_typed_func(&mut store, "patches_prepare")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_process: TypedFunc<(i32, i32, i32), ()> = instance
             .get_typed_func(&mut store, "patches_process")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_set_ports: TypedFunc<(i32, i32, i32, i32), ()> = instance
             .get_typed_func(&mut store, "patches_set_ports")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_update_validated_params: TypedFunc<(i32, i32), ()> = instance
             .get_typed_func(&mut store, "patches_update_validated_parameters")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_update_params: TypedFunc<(i32, i32), i32> = instance
             .get_typed_func(&mut store, "patches_update_parameters")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_periodic_update: TypedFunc<(i32, i32, i32), i32> = instance
             .get_typed_func(&mut store, "patches_periodic_update")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_supports_periodic: TypedFunc<(), i32> = instance
             .get_typed_func(&mut store, "patches_supports_periodic")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_alloc: TypedFunc<i32, i32> = instance
             .get_typed_func(&mut store, "patches_alloc")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
         let fn_free: TypedFunc<(i32, i32), ()> = instance
             .get_typed_func(&mut store, "patches_free")
-            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}") })?;
+            .map_err(|e| BuildError::Custom { module: "wasm", message: format!("{e}"), origin: None })?;
 
         // 1. Describe
         let result_ptr = fn_describe.call(
             &mut store,
             (shape.channels as i32, shape.length as i32, shape.high_quality as i32),
-        ).map_err(|e| BuildError::Custom { module: "wasm", message: format!("describe: {e}") })?;
+        ).map_err(|e| BuildError::Custom { module: "wasm", message: format!("describe: {e}"), origin: None })?;
 
         let descriptor = {
             let mem_data = memory.data(&store);
@@ -525,7 +525,7 @@ impl ModuleBuilder for WasmModuleBuilder {
             ) as usize;
             let json_data = &mem_data[offset + 4..offset + 4 + len];
             json::deserialize_module_descriptor(json_data)
-                .map_err(|e| BuildError::Custom { module: "wasm", message: e })?
+                .map_err(|e| BuildError::Custom { module: "wasm", message: e, origin: None })?
         };
 
         // Free the describe result
@@ -541,7 +541,7 @@ impl ModuleBuilder for WasmModuleBuilder {
         // 2. Serialize descriptor for prepare
         let desc_json = json::serialize_module_descriptor(&descriptor);
         let desc_ptr = fn_alloc.call(&mut store, desc_json.len() as i32)
-            .map_err(|e| BuildError::Custom { module: descriptor.module_name, message: format!("alloc: {e}") })?;
+            .map_err(|e| BuildError::Custom { module: descriptor.module_name, message: format!("alloc: {e}"), origin: None })?;
         {
             let mem_data = memory.data_mut(&mut store);
             let offset = desc_ptr as usize;
@@ -565,7 +565,7 @@ impl ModuleBuilder for WasmModuleBuilder {
                 id_lo,
                 id_hi,
             ),
-        ).map_err(|e| BuildError::Custom { module: descriptor.module_name, message: format!("prepare: {e}") })?;
+        ).map_err(|e| BuildError::Custom { module: descriptor.module_name, message: format!("prepare: {e}"), origin: None })?;
 
         let _ = fn_free.call(&mut store, (desc_ptr, desc_json.len() as i32));
 

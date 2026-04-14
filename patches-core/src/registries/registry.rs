@@ -76,7 +76,7 @@ impl Registry {
         self.builders
             .get(name)
             .map(|builder| builder.describe(shape))
-            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string() })
+            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })
     }
 
     /// Call the registered [`FileProcessor`] for the given module type.
@@ -112,7 +112,7 @@ impl Registry {
         let builder = self
             .builders
             .get(name)
-            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string() })?;
+            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })?;
 
         builder.build(audio_environment, shape, params, instance_id)
     }

@@ -1,6 +1,7 @@
 use patches_core::QName;
 
-use crate::ast::{Ident, Scalar, Span, Step, Value};
+use crate::ast::{Ident, Scalar, Step, Value};
+use crate::provenance::Provenance;
 
 /// Index of a pattern within [`FlatPatch::patterns`].
 ///
@@ -21,8 +22,14 @@ pub struct FlatModule {
     pub shape: Vec<(String, Scalar)>,
     /// Initialisation parameters (name, value).
     pub params: Vec<(String, Value)>,
-    /// Source span for error reporting.
-    pub span: Span,
+    /// Index → alias name for indexed ports declared via shape alias lists
+    /// (e.g. `(channels: [drums, bass])`). Used by downstream diagnostics so
+    /// "available ports" lists can show user-visible alias labels rather than
+    /// raw numeric indices.
+    pub port_aliases: Vec<(u32, String)>,
+    /// Source provenance: innermost site (`provenance.site`) plus the chain of
+    /// template call sites that led here.
+    pub provenance: Provenance,
 }
 
 /// A concrete, fully resolved connection between two module ports.
@@ -38,8 +45,8 @@ pub struct FlatConnection {
     pub to_index: u32,
     /// Cable scale, composed from all template-boundary scales along the path.
     pub scale: f64,
-    /// Source span for error reporting.
-    pub span: Span,
+    /// Source provenance.
+    pub provenance: Provenance,
 }
 
 /// Direction of a port reference recorded at a template boundary.
@@ -60,7 +67,7 @@ pub struct FlatPortRef {
     pub port: String,
     pub index: u32,
     pub direction: PortDirection,
-    pub span: Span,
+    pub provenance: Provenance,
 }
 
 /// A pattern channel with slide generators expanded into concrete steps.
@@ -75,7 +82,7 @@ pub struct FlatPatternChannel {
 pub struct FlatPatternDef {
     pub name: QName,
     pub channels: Vec<FlatPatternChannel>,
-    pub span: Span,
+    pub provenance: Provenance,
 }
 
 /// One row of a resolved song: `None` cells are silences, `Some(idx)` cells
@@ -83,7 +90,7 @@ pub struct FlatPatternDef {
 #[derive(Debug, Clone)]
 pub struct FlatSongRow {
     pub cells: Vec<Option<PatternIdx>>,
-    pub span: Span,
+    pub provenance: Provenance,
 }
 
 /// A song definition with its name qualified by any enclosing scope and all
@@ -98,7 +105,7 @@ pub struct FlatSongDef {
     pub channels: Vec<Ident>,
     pub rows: Vec<FlatSongRow>,
     pub loop_point: Option<usize>,
-    pub span: Span,
+    pub provenance: Provenance,
 }
 
 /// A flat, template-free description of a patch.

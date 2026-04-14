@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 use vizia::prelude::*;
 use vizia::ParentWindow;
 
-use crate::gui::GuiState;
+use crate::diagnostic_widget::build_diagnostic_view;
+use crate::gui::{DiagnosticView, GuiState};
 
 // ── Host pointer wrapper ───────────────────────────────────────────
 
@@ -77,6 +78,7 @@ impl Model for PluginUiData {
 struct UiSignals {
     path: Signal<String>,
     status: Signal<String>,
+    diagnostics: Signal<DiagnosticView>,
 }
 
 // Safety: Signal<T> is just an ID + PhantomData — no thread-local state.
@@ -117,7 +119,7 @@ pub(crate) unsafe fn create_gui(
         return None;
     }
 
-    let (initial_path, initial_status) = {
+    let (initial_path, initial_status, initial_view) = {
         let gui = gui_state.lock().expect("gui_state mutex poisoned");
         let path = gui
             .file_path
@@ -125,7 +127,8 @@ pub(crate) unsafe fn create_gui(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| "No file loaded".into());
         let status = gui.status_text();
-        (path, status)
+        let view = gui.diagnostic_view.clone();
+        (path, status, view)
     };
 
     let signals: Arc<Mutex<Option<UiSignals>>> = Arc::new(Mutex::new(None));
@@ -137,11 +140,13 @@ pub(crate) unsafe fn create_gui(
     let window_handle = Application::new(move |cx| {
         let path_sig = Signal::new(initial_path.clone());
         let status_sig = Signal::new(initial_status.clone());
+        let diag_sig: Signal<DiagnosticView> = Signal::new(initial_view.clone());
 
         *signals_app.lock().expect("gui_state mutex poisoned") =
             Some(UiSignals {
                 path: path_sig,
                 status: status_sig,
+                diagnostics: diag_sig,
             });
 
         PluginUiData {
@@ -168,11 +173,19 @@ pub(crate) unsafe fn create_gui(
             .horizontal_gap(Pixels(4.0))
             .height(Auto);
 
-            // Scrollable status log.
+            // Scrollable error surface: either structured diagnostics (when
+            // the last compile failed) or the plain status log.
             ScrollView::new(cx, move |cx| {
-                Label::new(cx, status_sig)
-                    .width(Stretch(1.0))
-                    .text_wrap(true);
+                Binding::new(cx, diag_sig, move |cx| {
+                    let view = diag_sig.get();
+                    if view.diagnostics.is_empty() {
+                        Label::new(cx, status_sig)
+                            .width(Stretch(1.0))
+                            .text_wrap(true);
+                    } else {
+                        build_diagnostic_view(cx, &view);
+                    }
+                });
             })
             .width(Stretch(1.0))
             .height(Stretch(1.0))
@@ -195,9 +208,11 @@ pub(crate) unsafe fn create_gui(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| "No file loaded".into());
         let new_status = gui.status_text();
+        let new_view = gui.diagnostic_view.clone();
         drop(gui);
         sigs.path.set(new_path);
         sigs.status.set(new_status);
+        sigs.diagnostics.set(new_view);
     })
     .open_parented(&ParentWindow(parent));
 

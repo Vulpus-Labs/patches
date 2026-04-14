@@ -10,16 +10,21 @@ use std::path::{Path, PathBuf};
 
 use crate::ast::{File, Span};
 use crate::include_frontier::{normalize_path, EnterResult, IncludeFrontier};
-use crate::parser::{parse, parse_include_file, ParseError};
+use crate::parser::{parse_include_file_with_source, parse_with_source, ParseError};
+use crate::source_map::SourceMap;
 
-/// The result of a successful load: a merged [`File`] and the full set of
-/// loaded file paths (for hot-reload dependency tracking).
+/// The result of a successful load: a merged [`File`], the source map for
+/// every loaded file, and the full set of loaded file paths.
 #[derive(Debug)]
 pub struct LoadResult {
     pub file: File,
     /// All file paths that were loaded (master + all transitive includes),
     /// canonicalized. Suitable for setting up file watchers.
     pub dependencies: Vec<PathBuf>,
+    /// Source map: maps the [`crate::ast::SourceId`] carried on every span in
+    /// `file` back to its `(path, source text)`. Renderers consult this to
+    /// resolve spans to file/line/column.
+    pub source_map: SourceMap,
 }
 
 /// The specific cause of a [`LoadError`].
@@ -143,12 +148,16 @@ where
 {
     let master_path = normalize_path(master_path);
     let src = read_file(&master_path).map_err(|e| LoadError::from_io_error(e, &master_path))?;
-    let mut master = parse(&src).map_err(|e| LoadError::from_parse_error(e, &master_path))?;
+    let mut source_map = SourceMap::new();
+    let master_source_id = source_map.add(master_path.clone(), src.clone());
+    let mut master = parse_with_source(&src, master_source_id)
+        .map_err(|e| LoadError::from_parse_error(e, &master_path))?;
 
     let mut ctx = ResolveContext {
         frontier: IncludeFrontier::with_root(master_path.clone()),
         all_paths: vec![master_path.clone()],
         defined_names: HashMap::new(),
+        source_map: &mut source_map,
     };
 
     // Collect names defined in the master file for collision detection.
@@ -171,14 +180,16 @@ where
     Ok(LoadResult {
         file: master,
         dependencies: ctx.all_paths,
+        source_map,
     })
 }
 
 /// Mutable state threaded through the recursive include resolution.
-struct ResolveContext {
+struct ResolveContext<'a> {
     frontier: IncludeFrontier<PathBuf>,
     all_paths: Vec<PathBuf>,
     defined_names: HashMap<String, PathBuf>,
+    source_map: &'a mut SourceMap,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -186,7 +197,7 @@ fn resolve_includes<F>(
     parent_path: &Path,
     includes: &[crate::ast::IncludeDirective],
     read_file: &F,
-    ctx: &mut ResolveContext,
+    ctx: &mut ResolveContext<'_>,
     templates: &mut Vec<crate::ast::Template>,
     patterns: &mut Vec<crate::ast::PatternDef>,
     songs: &mut Vec<crate::ast::SongDef>,
@@ -219,7 +230,8 @@ where
             err
         })?;
 
-        let inc_file = parse_include_file(&src).map_err(|e| {
+        let inc_source_id = ctx.source_map.add(resolved.clone(), src.clone());
+        let inc_file = parse_include_file_with_source(&src, inc_source_id).map_err(|e| {
             let mut err = LoadError::from_parse_error(e, &resolved);
             err.include_chain.push((parent_path.to_path_buf(), inc.span));
             err

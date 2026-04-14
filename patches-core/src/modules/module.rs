@@ -54,7 +54,7 @@ pub fn validate_parameters(
                         parameter: param_desc.name,
                         min: *min,
                         max: *max,
-                        found: *v,
+                        found: *v, origin: None,
                     });
                 }
             }
@@ -65,7 +65,7 @@ pub fn validate_parameters(
                         parameter: param_desc.name,
                         min: *min as f32,
                         max: *max as f32,
-                        found: *v as f32,
+                        found: *v as f32, origin: None,
                     });
                 }
             }
@@ -77,7 +77,7 @@ pub fn validate_parameters(
                         message: format!(
                             "parameter '{}' has unrecognised value '{v}'",
                             param_desc.name
-                        ),
+                        ), origin: None,
                     });
                 }
             }
@@ -90,7 +90,7 @@ pub fn validate_parameters(
                     module: descriptor.module_name,
                     parameter: param_desc.name,
                     expected: param_desc.parameter_type.kind_name(),
-                    found: value.kind_name(),
+                    found: value.kind_name(), origin: None,
                 });
             }
         }
@@ -123,7 +123,7 @@ fn unknown_parameter_error(descriptor: &ModuleDescriptor, name: &str, idx: usize
         message: format!(
             "unknown parameter '{key_display}'; known parameters: {}",
             known.join(", ")
-        ),
+        ), origin: None,
     }
 }
 

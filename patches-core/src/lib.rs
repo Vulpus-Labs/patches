@@ -16,16 +16,20 @@ pub mod test_support;
 pub mod audio_environment;
 pub mod build_error;
 pub mod cable_pool;
+pub mod diagnostics;
 pub mod cables;
 pub mod frames;
 pub mod graphs;
 pub mod midi;
 pub mod midi_io;
 pub mod modules;
+pub mod provenance;
 pub mod qname;
 pub mod tracker;
 pub mod random_walk;
 pub mod registries;
+pub mod source_map;
+pub mod source_span;
 
 // ── Crate-internal path aliases ───────────────────────────────────────────────
 // These make `crate::X::Y` paths work inside this crate; they are not public API.
@@ -51,6 +55,10 @@ pub use random_walk::{BoundedRandomWalk, GLOBAL_DRIFT_STEP, OSCILLATOR_DRIFT_STE
 pub use registries::FileProcessor;
 pub use registries::ModuleBuilder;
 pub use registries::Registry;
+pub use provenance::Provenance;
+pub use source_map::{line_col, SourceEntry, SourceMap};
+pub use source_span::{SourceId, Span};
+pub use diagnostics::{format_provenance, format_span};
 pub use graphs::planner::{
     allocate_buffers, classify_nodes, make_decisions,
     BufferAllocState, BufferAllocation, GraphIndex, ModuleAllocState, NodeDecision, NodeState,

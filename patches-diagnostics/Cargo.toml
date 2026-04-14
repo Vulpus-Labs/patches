@@ -1,0 +1,10 @@
+[package]
+name = "patches-diagnostics"
+version = "0.1.0"
+edition = "2021"
+description = "Presentation-neutral structured form for author-facing diagnostics"
+publish = false
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsl = { path = "../patches-dsl" }

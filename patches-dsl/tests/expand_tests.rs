@@ -1605,3 +1605,85 @@ fn pattern_typed_param_accepts_known_pattern() {
     let idx = flat.songs[0].rows[0].cells[0].expect("cell should reference a pattern");
     assert_eq!(flat.patterns[idx].name.to_string(), "kick");
 }
+
+// ─── Source provenance (E075) ────────────────────────────────────────────────
+
+#[test]
+fn provenance_root_for_unwrapped_module() {
+    let src = "patch { module osc : Osc }";
+    let file = parse(src).expect("parse ok");
+    let flat = expand(&file).expect("expand ok").patch;
+    let osc = flat.modules.iter().find(|m| m.id == "osc").unwrap();
+    assert!(osc.provenance.expansion.is_empty(), "top-level node has empty chain");
+}
+
+#[test]
+fn provenance_chain_two_level_nested_template() {
+    let src = r#"
+        template inner() {
+            in: a out: b
+            module gain : Gain
+            $.a -> gain.in
+            gain.out -> $.b
+        }
+        template outer() {
+            in: a out: b
+            module i : inner
+            $.a -> i.a
+            i.b -> $.b
+        }
+        patch {
+            module o : outer
+            module out : AudioOut
+            o.b -> out.in_left
+        }
+    "#;
+    let file = parse(src).expect("parse ok");
+    let flat = expand(&file).expect("expand ok").patch;
+    let gain = flat
+        .modules
+        .iter()
+        .find(|m| m.type_name == "Gain")
+        .expect("gain present");
+    assert_eq!(
+        gain.provenance.expansion.len(),
+        2,
+        "chain should have two entries (inner call + outer call), got {:?}",
+        gain.provenance.expansion
+    );
+}
+
+#[test]
+fn provenance_sibling_template_calls_do_not_share_chain() {
+    let src = r#"
+        template t() {
+            in: a out: b
+            module g : Gain
+            $.a -> g.in
+            g.out -> $.b
+        }
+        patch {
+            module a : t
+            module b : t
+            module out : AudioOut
+            a.b -> out.in_left
+            b.b -> out.in_right
+        }
+    "#;
+    let file = parse(src).expect("parse ok");
+    let flat = expand(&file).expect("expand ok").patch;
+    let gains: Vec<_> = flat
+        .modules
+        .iter()
+        .filter(|m| m.type_name == "Gain")
+        .collect();
+    assert_eq!(gains.len(), 2, "two gain instances expected");
+    for g in &gains {
+        assert_eq!(g.provenance.expansion.len(), 1, "each gets one call site");
+    }
+    assert_ne!(
+        gains[0].provenance.expansion[0],
+        gains[1].provenance.expansion[0],
+        "sibling expansions must record distinct call sites"
+    );
+}

@@ -461,10 +461,10 @@ fn xml_escape(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_dsl::{FlatConnection, FlatModule, FlatPatch};
+    use patches_dsl::{FlatConnection, FlatModule, FlatPatch, Provenance};
 
     fn span() -> patches_dsl::ast::Span {
-        patches_dsl::ast::Span { start: 0, end: 0 }
+        patches_dsl::ast::Span::synthetic()
     }
 
     fn sample_patch() -> FlatPatch {
@@ -475,14 +475,16 @@ mod tests {
                     type_name: "Osc".into(),
                     shape: vec![],
                     params: vec![],
-                    span: span(),
+                    port_aliases: vec![],
+                    provenance: Provenance::root(span()),
                 },
                 FlatModule {
                     id: "vca".into(),
                     type_name: "Vca".into(),
                     shape: vec![],
                     params: vec![],
-                    span: span(),
+                    port_aliases: vec![],
+                    provenance: Provenance::root(span()),
                 },
             ],
             connections: vec![FlatConnection {
@@ -493,7 +495,7 @@ mod tests {
                 to_port: "in".into(),
                 to_index: 0,
                 scale: 1.0,
-                span: span(),
+                provenance: Provenance::root(span()),
             }],
             patterns: vec![],
             songs: vec![],
@@ -562,7 +564,8 @@ mod tests {
                 type_name: "<Odd>".into(),
                 shape: vec![],
                 params: vec![],
-                span: span(),
+                port_aliases: vec![],
+                provenance: Provenance::root(span()),
             }],
             connections: vec![],
             patterns: vec![],

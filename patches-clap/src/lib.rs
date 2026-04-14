@@ -10,6 +10,7 @@
 //! can wrap it as a VST3 without loss of functionality.
 
 pub mod descriptor;
+pub mod diagnostic_widget;
 pub mod entry;
 pub mod error;
 pub mod extensions;

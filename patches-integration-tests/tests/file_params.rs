@@ -2,7 +2,8 @@
 //! DSL `file("path")` syntax → interpreter → planner → module.
 
 use patches_core::{AudioEnvironment, NodeId};
-use patches_dsl::ast::{Span, Value};
+use patches_dsl::ast::{SourceId, Span, Value};
+use patches_dsl::Provenance;
 use patches_dsl::flat::{FlatModule, FlatPatch};
 
 fn env() -> AudioEnvironment {
@@ -73,7 +74,8 @@ fn file_extension_validation_rejects_unsupported() {
             params: vec![
                 ("ir_data".to_string(), Value::File("test.mp3".to_string())),
             ],
-            span: Span { start: 0, end: 0 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
         }],
         connections: vec![],
         port_refs: vec![],
@@ -101,7 +103,8 @@ fn nonexistent_file_fails_at_plan_build() {
             params: vec![
                 ("ir_data".to_string(), Value::File("/nonexistent/path/to/ir.wav".to_string())),
             ],
-            span: Span { start: 0, end: 0 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
         }],
         connections: vec![],
         port_refs: vec![],
@@ -130,7 +133,8 @@ fn relative_path_resolved_against_base_dir() {
             params: vec![
                 ("ir_data".to_string(), Value::File("relative/ir.wav".to_string())),
             ],
-            span: Span { start: 0, end: 0 },
+            port_aliases: vec![],
+            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
         }],
         connections: vec![],
         port_refs: vec![],
