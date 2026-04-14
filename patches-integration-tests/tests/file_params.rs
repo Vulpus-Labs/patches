@@ -67,7 +67,7 @@ fn file_extension_validation_rejects_unsupported() {
         patterns: vec![],
         songs: vec![],
         modules: vec![FlatModule {
-            id: "verb".to_string(),
+            id: "verb".into(),
             type_name: "StereoConvReverb".to_string(),
             shape: vec![],
             params: vec![
@@ -94,7 +94,7 @@ fn nonexistent_file_fails_at_plan_build() {
         patterns: vec![],
         songs: vec![],
         modules: vec![FlatModule {
-            id: "verb".to_string(),
+            id: "verb".into(),
             type_name: "StereoConvReverb".to_string(),
             shape: vec![],
             params: vec![
@@ -122,7 +122,7 @@ fn relative_path_resolved_against_base_dir() {
         patterns: vec![],
         songs: vec![],
         modules: vec![FlatModule {
-            id: "verb".to_string(),
+            id: "verb".into(),
             type_name: "StereoConvReverb".to_string(),
             shape: vec![],
             params: vec![

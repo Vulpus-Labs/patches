@@ -13,7 +13,7 @@ pub mod layout;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use patches_dsl::{FlatModule, FlatPatch};
+use patches_dsl::{FlatModule, FlatPatch, QName};
 
 use crate::layout::{
     layout_graph, node_height, GraphLayout, LayoutConfig, LayoutEdge, LayoutNode,
@@ -81,10 +81,10 @@ pub fn flat_to_layout_input(
     flat: &FlatPatch,
     config: &LayoutConfig,
 ) -> (Vec<LayoutNode>, Vec<LayoutEdge>) {
-    let mut inputs_by_node: HashMap<String, Vec<String>> = HashMap::new();
-    let mut outputs_by_node: HashMap<String, Vec<String>> = HashMap::new();
-    let mut input_seen: HashSet<(String, String)> = HashSet::new();
-    let mut output_seen: HashSet<(String, String)> = HashSet::new();
+    let mut inputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
+    let mut outputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
+    let mut input_seen: HashSet<(QName, String)> = HashSet::new();
+    let mut output_seen: HashSet<(QName, String)> = HashSet::new();
 
     let mut edges = Vec::with_capacity(flat.connections.len());
     for c in &flat.connections {
@@ -103,9 +103,9 @@ pub fn flat_to_layout_input(
                 .push(to_port.clone());
         }
         edges.push(LayoutEdge {
-            from_node: c.from_module.clone(),
+            from_node: c.from_module.to_string(),
             from_port,
-            to_node: c.to_module.clone(),
+            to_node: c.to_module.to_string(),
             to_port,
         });
     }
@@ -119,7 +119,7 @@ pub fn flat_to_layout_input(
         let outputs = outputs_by_node.remove(&m.id).unwrap_or_default();
         let port_rows = inputs.len().max(outputs.len());
         nodes.push(LayoutNode {
-            id: m.id.clone(),
+            id: m.id.to_string(),
             width: NODE_WIDTH,
             height: node_height(port_rows, config),
             label: format!("{} : {}", m.id, m.type_name),

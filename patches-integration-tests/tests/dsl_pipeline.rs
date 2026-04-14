@@ -117,7 +117,7 @@ fn unknown_type_returns_error() {
         patterns: vec![],
         songs: vec![],
         modules: vec![FlatModule {
-            id: "x".to_string(),
+            id: "x".into(),
             type_name: "NoSuchModule".to_string(),
             shape: vec![],
             params: vec![],
@@ -127,7 +127,7 @@ fn unknown_type_returns_error() {
     };
 
     let result = patches_interpreter::build(&flat, &registry(), &env());
-    let err = result.err().expect("expected build to fail for unknown type");
+    let err = result.expect_err("expected build to fail for unknown type");
     assert!(!err.message.is_empty());
 }
 
@@ -140,14 +140,14 @@ fn unknown_port_returns_error() {
         songs: vec![],
         modules: vec![
             FlatModule {
-                id: "osc".to_string(),
+                id: "osc".into(),
                 type_name: "Osc".to_string(),
                 shape: vec![],
                 params: vec![],
                 span: zero_span(),
             },
             FlatModule {
-                id: "out".to_string(),
+                id: "out".into(),
                 type_name: "AudioOut".to_string(),
                 shape: vec![],
                 params: vec![],
@@ -155,10 +155,10 @@ fn unknown_port_returns_error() {
             },
         ],
         connections: vec![FlatConnection {
-            from_module: "osc".to_string(),
+            from_module: "osc".into(),
             from_port: "no_such_port".to_string(),
             from_index: 0,
-            to_module: "out".to_string(),
+            to_module: "out".into(),
             to_port: "in_left".to_string(),
             to_index: 0,
             scale: 1.0,
@@ -167,6 +167,6 @@ fn unknown_port_returns_error() {
     };
 
     let result = patches_interpreter::build(&flat, &registry(), &env());
-    let err = result.err().expect("expected build to fail for unknown port");
+    let err = result.expect_err("expected build to fail for unknown port");
     assert!(!err.message.is_empty());
 }

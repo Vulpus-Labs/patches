@@ -1,4 +1,4 @@
-use patches_dsl::{parse, Connection, Direction, ParseError, Scalar, Statement, Step, StepOrGenerator, Value};
+use patches_dsl::{parse, Connection, Direction, ParseError, Scalar, Statement, StepOrGenerator, Value};
 
 /// Assert `parse(src)` errors and the lowercased message contains every
 /// substring in `expected`. Use to lock in *which* error fired, not just

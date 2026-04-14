@@ -35,9 +35,9 @@ fn deep_alias_module_ids_namespaced() {
     let ids = module_ids(&flat);
 
     // Intermediate template instances must not appear as FlatModules.
-    assert!(!ids.contains(&"top"),       "top must not be a FlatModule");
-    assert!(!ids.contains(&"top/mid"),   "top/mid must not be a FlatModule");
-    assert!(!ids.contains(&"top/mid/i"), "top/mid/i must not be a FlatModule");
+    assert!(!ids.iter().any(|s| s == "top"),       "top must not be a FlatModule");
+    assert!(!ids.iter().any(|s| s == "top/mid"),   "top/mid must not be a FlatModule");
+    assert!(!ids.iter().any(|s| s == "top/mid/i"), "top/mid/i must not be a FlatModule");
 }
 
 #[test]

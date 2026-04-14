@@ -101,9 +101,9 @@ pub fn build_with_base_dir(
     // the Vec order used when building SongBank in stage 3). This is needed
     // in stage 1 so that SongName parameters can be resolved to indices.
     let song_name_to_index: HashMap<String, usize> = {
-        let mut names: Vec<&str> = flat.songs.iter().map(|s| s.name.name.as_str()).collect();
+        let mut names: Vec<String> = flat.songs.iter().map(|s| s.name.to_string()).collect();
         names.sort();
-        names.iter().enumerate().map(|(i, &n)| (n.to_string(), i)).collect()
+        names.into_iter().enumerate().map(|(i, n)| (n, i)).collect()
     };
 
     // Stage 1 — add all module nodes.
@@ -137,19 +137,19 @@ fn build_tracker_data(
         return Ok(None);
     }
 
-    // Build the name → bank index mapping (alphabetical sort on pattern names).
-    let mut sorted_names: Vec<&str> = flat.patterns.iter().map(|p| p.name.as_str()).collect();
-    sorted_names.sort();
-    let name_to_index: HashMap<&str, usize> = sorted_names
-        .iter()
+    // Alphabetical bank-index mapping, keyed by `Display` of each pattern's QName.
+    let mut rendered_names: Vec<String> =
+        flat.patterns.iter().map(|p| p.name.to_string()).collect();
+    rendered_names.sort();
+    let name_to_index: HashMap<String, usize> = rendered_names
+        .into_iter()
         .enumerate()
-        .map(|(i, &name)| (name, i))
+        .map(|(i, name)| (name, i))
         .collect();
 
-    // Convert DSL patterns to runtime Patterns.
     let mut indexed_patterns: Vec<Option<Pattern>> = vec![None; flat.patterns.len()];
     for fp in &flat.patterns {
-        let bank_idx = name_to_index[fp.name.as_str()];
+        let bank_idx = name_to_index[&fp.name.to_string()];
         let max_steps = fp.channels.iter().map(|c| c.steps.len()).max().unwrap_or(0);
         let mut data = Vec::with_capacity(fp.channels.len());
         for ch in &fp.channels {
@@ -179,7 +179,7 @@ fn build_tracker_data(
     // Convert DSL songs to runtime Songs (alphabetical order so that Vec
     // indices match the pre-computed song_name_to_index map in the caller).
     let mut sorted_song_defs: Vec<&_> = flat.songs.iter().collect();
-    sorted_song_defs.sort_by_key(|s| &s.name.name);
+    sorted_song_defs.sort_by(|a, b| a.name.cmp(&b.name));
     let mut song_list: Vec<Song> = Vec::new();
     for song_def in &sorted_song_defs {
         // Validate: every pattern name in the song must exist.
@@ -191,7 +191,7 @@ fn build_tracker_data(
                             span: song_def.span,
                             message: format!(
                                 "song '{}' row {} channel '{}': pattern '{}' not found",
-                                song_def.name.name,
+                                song_def.name,
                                 row_idx + 1,
                                 song_def.channels.get(col_idx).map_or("?", |c| &c.name),
                                 pat_name.name,
@@ -218,7 +218,7 @@ fn build_tracker_data(
                                 span: song_def.span,
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} steps but '{}' has {}",
-                                    song_def.name.name, col_name,
+                                    song_def.name, col_name,
                                     pat_name.name, pat.steps,
                                     first_name, expected_steps,
                                 ),
@@ -233,7 +233,7 @@ fn build_tracker_data(
                                 span: song_def.span,
                                 message: format!(
                                     "song '{}' channel '{}': pattern '{}' has {} channels but '{}' has {}",
-                                    song_def.name.name, col_name,
+                                    song_def.name, col_name,
                                     pat_name.name, pat.channels,
                                     first_name, expected_chans,
                                 ),
@@ -649,8 +649,10 @@ fn value_kind_name(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternDef, FlatPatternChannel};
-    use patches_dsl::ast::{Ident, Scalar, SongCell, SongDef, SongRow, Span, Step, Value};
+    use patches_dsl::flat::{
+        FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
+    };
+    use patches_dsl::ast::{Ident, Scalar, SongCell, SongRow, Span, Step, Value};
 
     fn span() -> Span {
         Span { start: 0, end: 0 }
@@ -666,7 +668,7 @@ mod tests {
 
     fn osc_module(id: &str) -> FlatModule {
         FlatModule {
-            id: id.to_string(),
+            id: id.into(),
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![],
@@ -676,7 +678,7 @@ mod tests {
 
     fn sum_module(id: &str, channels: i64) -> FlatModule {
         FlatModule {
-            id: id.to_string(),
+            id: id.into(),
             type_name: "Sum".to_string(),
             shape: vec![("channels".to_string(), Scalar::Int(channels))],
             params: vec![],
@@ -689,10 +691,10 @@ mod tests {
         to_module: &str, to_port: &str, to_index: u32,
     ) -> FlatConnection {
         FlatConnection {
-            from_module: from_module.to_string(),
+            from_module: from_module.into(),
             from_port: from_port.to_string(),
             from_index,
-            to_module: to_module.to_string(),
+            to_module: to_module.into(),
             to_port: to_port.to_string(),
             to_index,
             scale: 1.0,
@@ -718,7 +720,7 @@ mod tests {
     }
 
     fn ident(name: &str) -> Ident {
-        Ident { name: name.to_string(), span: span() }
+        Ident { name: name.into(), span: span() }
     }
 
     // ── Existing module/connection tests ─────────────────────────────────
@@ -753,7 +755,7 @@ mod tests {
     fn unknown_type_name_returns_interpret_error() {
         let mut flat = empty_flat();
         flat.modules = vec![FlatModule {
-            id: "x".to_string(),
+            id: "x".into(),
             type_name: "NonExistentModule".to_string(),
             shape: vec![],
             params: vec![],
@@ -769,10 +771,10 @@ mod tests {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), sum_module("mix", 1)];
         flat.connections = vec![FlatConnection {
-            from_module: "osc1".to_string(),
+            from_module: "osc1".into(),
             from_port: "no_such_out".to_string(),
             from_index: 0,
-            to_module: "mix".to_string(),
+            to_module: "mix".into(),
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
@@ -788,10 +790,10 @@ mod tests {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), sum_module("mix", 1)];
         flat.connections = vec![FlatConnection {
-            from_module: "osc1".to_string(),
+            from_module: "osc1".into(),
             from_port: "sine".to_string(),
             from_index: 0,
-            to_module: "mix".to_string(),
+            to_module: "mix".into(),
             to_port: "no_such_in".to_string(),
             to_index: 0,
             scale: 1.0,
@@ -805,17 +807,17 @@ mod tests {
     #[test]
     fn graph_error_wrapped_with_span() {
         let osc2 = FlatModule {
-            id: "osc2".to_string(),
+            id: "osc2".into(),
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![],
             span: span(),
         };
         let dup_conn = FlatConnection {
-            from_module: "osc2".to_string(),
+            from_module: "osc2".into(),
             from_port: "sine".to_string(),
             from_index: 0,
-            to_module: "mix".to_string(),
+            to_module: "mix".into(),
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
@@ -841,7 +843,7 @@ mod tests {
     fn float_param_is_accepted() {
         let mut flat = empty_flat();
         flat.modules = vec![FlatModule {
-            id: "osc1".to_string(),
+            id: "osc1".into(),
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![
@@ -856,7 +858,7 @@ mod tests {
     fn enum_param_is_accepted() {
         let mut flat = empty_flat();
         flat.modules = vec![FlatModule {
-            id: "osc1".to_string(),
+            id: "osc1".into(),
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![
@@ -900,7 +902,7 @@ mod tests {
         flat.modules = vec![
             osc_module("dup"),
             FlatModule {
-                id: "dup".to_string(),
+                id: "dup".into(),
                 type_name: "Osc".to_string(),
                 shape: vec![],
                 params: vec![],
@@ -923,10 +925,10 @@ mod tests {
         flat.connections = vec![
             connection("a", "sine", 0, "mix", "in", 0),
             FlatConnection {
-                from_module: "b".to_string(),
+                from_module: "b".into(),
                 from_port: "sine".to_string(),
                 from_index: 0,
-                to_module: "mix".to_string(),
+                to_module: "mix".into(),
                 to_port: "in".to_string(),
                 to_index: 0,
                 scale: 1.0,
@@ -946,10 +948,10 @@ mod tests {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc"), sum_module("mix", 1)];
         flat.connections = vec![FlatConnection {
-            from_module: "osc".to_string(),
+            from_module: "osc".into(),
             from_port: "sine".to_string(),
             from_index: 0,
-            to_module: "mix".to_string(),
+            to_module: "mix".into(),
             to_port: "in".to_string(),
             to_index: 0,
             scale: 2.5,
@@ -970,7 +972,7 @@ mod tests {
         flat.modules = vec![
             osc_module("mono_src"),
             FlatModule {
-                id: "poly_dst".to_string(),
+                id: "poly_dst".into(),
                 type_name: "PolyOsc".to_string(),
                 shape: vec![],
                 params: vec![],
@@ -978,10 +980,10 @@ mod tests {
             },
         ];
         flat.connections = vec![FlatConnection {
-            from_module: "mono_src".to_string(),
+            from_module: "mono_src".into(),
             from_port: "sine".to_string(),
             from_index: 0,
-            to_module: "poly_dst".to_string(),
+            to_module: "poly_dst".into(),
             to_port: "voct".to_string(),
             to_index: 0,
             scale: 1.0,
@@ -999,7 +1001,7 @@ mod tests {
     fn unknown_param_name_returns_interpret_error() {
         let mut flat = empty_flat();
         flat.modules = vec![FlatModule {
-            id: "osc1".to_string(),
+            id: "osc1".into(),
             type_name: "Osc".to_string(),
             shape: vec![],
             params: vec![
@@ -1023,7 +1025,7 @@ mod tests {
     fn single_pattern_builds_tracker_data() {
         let mut flat = empty_flat();
         flat.patterns = vec![FlatPatternDef {
-            name: "drums".to_string(),
+            name: "drums".into(),
             channels: vec![
                 FlatPatternChannel {
                     name: "kick".to_string(),
@@ -1054,7 +1056,7 @@ mod tests {
         // Add patterns in non-alphabetical order.
         flat.patterns = vec![
             FlatPatternDef {
-                name: "charlie".to_string(),
+                name: "charlie".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![trigger_step()],
@@ -1062,7 +1064,7 @@ mod tests {
                 span: span(),
             },
             FlatPatternDef {
-                name: "alpha".to_string(),
+                name: "alpha".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![rest_step()],
@@ -1070,7 +1072,7 @@ mod tests {
                 span: span(),
             },
             FlatPatternDef {
-                name: "bravo".to_string(),
+                name: "bravo".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(), rest_step()],
@@ -1093,7 +1095,7 @@ mod tests {
         let mut flat = empty_flat();
         flat.patterns = vec![
             FlatPatternDef {
-                name: "pat_a".to_string(),
+                name: "pat_a".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![trigger_step()],
@@ -1101,7 +1103,7 @@ mod tests {
                 span: span(),
             },
             FlatPatternDef {
-                name: "pat_b".to_string(),
+                name: "pat_b".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![rest_step()],
@@ -1109,8 +1111,8 @@ mod tests {
                 span: span(),
             },
         ];
-        flat.songs = vec![SongDef {
-            name: ident("my_song"),
+        flat.songs = vec![FlatSongDef {
+            name: "my_song".into(),
             channels: vec![ident("drums")],
             rows: vec![
                 SongRow { cells: vec![SongCell::Pattern(ident("pat_a"))] },
@@ -1137,15 +1139,15 @@ mod tests {
     fn song_unknown_pattern_is_error() {
         let mut flat = empty_flat();
         flat.patterns = vec![FlatPatternDef {
-            name: "exists".to_string(),
+            name: "exists".into(),
             channels: vec![FlatPatternChannel {
                 name: "ch".to_string(),
                 steps: vec![trigger_step()],
             }],
             span: span(),
         }];
-        flat.songs = vec![SongDef {
-            name: ident("song"),
+        flat.songs = vec![FlatSongDef {
+            name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![SongRow { cells: vec![SongCell::Pattern(ident("no_such_pattern"))] }],
             loop_point: None,
@@ -1160,7 +1162,7 @@ mod tests {
         let mut flat = empty_flat();
         flat.patterns = vec![
             FlatPatternDef {
-                name: "four_steps".to_string(),
+                name: "four_steps".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(); 4],
@@ -1168,7 +1170,7 @@ mod tests {
                 span: span(),
             },
             FlatPatternDef {
-                name: "two_steps".to_string(),
+                name: "two_steps".into(),
                 channels: vec![FlatPatternChannel {
                     name: "ch".to_string(),
                     steps: vec![trigger_step(); 2],
@@ -1176,8 +1178,8 @@ mod tests {
                 span: span(),
             },
         ];
-        flat.songs = vec![SongDef {
-            name: ident("song"),
+        flat.songs = vec![FlatSongDef {
+            name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
                 SongRow { cells: vec![SongCell::Pattern(ident("four_steps"))] },
@@ -1195,7 +1197,7 @@ mod tests {
         let mut flat = empty_flat();
         flat.patterns = vec![
             FlatPatternDef {
-                name: "one_ch".to_string(),
+                name: "one_ch".into(),
                 channels: vec![FlatPatternChannel {
                     name: "a".to_string(),
                     steps: vec![trigger_step()],
@@ -1203,7 +1205,7 @@ mod tests {
                 span: span(),
             },
             FlatPatternDef {
-                name: "two_ch".to_string(),
+                name: "two_ch".into(),
                 channels: vec![
                     FlatPatternChannel { name: "a".to_string(), steps: vec![trigger_step()] },
                     FlatPatternChannel { name: "b".to_string(), steps: vec![rest_step()] },
@@ -1211,8 +1213,8 @@ mod tests {
                 span: span(),
             },
         ];
-        flat.songs = vec![SongDef {
-            name: ident("song"),
+        flat.songs = vec![FlatSongDef {
+            name: "song".into(),
             channels: vec![ident("col")],
             rows: vec![
                 SongRow { cells: vec![SongCell::Pattern(ident("one_ch"))] },
@@ -1229,7 +1231,7 @@ mod tests {
     fn shorter_channels_padded_with_rests() {
         let mut flat = empty_flat();
         flat.patterns = vec![FlatPatternDef {
-            name: "uneven".to_string(),
+            name: "uneven".into(),
             channels: vec![
                 FlatPatternChannel {
                     name: "long".to_string(),

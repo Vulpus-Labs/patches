@@ -32,6 +32,18 @@ impl From<String> for NodeId {
     }
 }
 
+impl From<crate::qname::QName> for NodeId {
+    fn from(q: crate::qname::QName) -> Self {
+        Self(Rc::from(q.to_string().as_str()))
+    }
+}
+
+impl From<&crate::qname::QName> for NodeId {
+    fn from(q: &crate::qname::QName) -> Self {
+        Self(Rc::from(q.to_string().as_str()))
+    }
+}
+
 impl fmt::Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", &*self.0)

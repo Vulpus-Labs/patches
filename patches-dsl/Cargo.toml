@@ -9,5 +9,6 @@ path = "src/lib.rs"
 doctest = false
 
 [dependencies]
+patches-core = { path = "../patches-core" }
 pest       = "2"
 pest_derive = "2"

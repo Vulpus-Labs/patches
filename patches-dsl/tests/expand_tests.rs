@@ -76,8 +76,8 @@ fn single_template_modules_namespaced() {
     ]);
     // v1 and v2 themselves must NOT appear as modules
     let ids = module_ids(&flat);
-    assert!(!ids.contains(&"v1"), "template instance 'v1' must not appear as a FlatModule");
-    assert!(!ids.contains(&"v2"), "template instance 'v2' must not appear as a FlatModule");
+    assert!(!ids.iter().any(|s| s == "v1"), "template instance 'v1' must not appear as a FlatModule");
+    assert!(!ids.iter().any(|s| s == "v2"), "template instance 'v2' must not appear as a FlatModule");
 }
 
 #[test]
@@ -154,8 +154,8 @@ fn nested_template_modules_namespaced() {
     assert_modules_exist(&flat, &["fv/v/osc", "fv/v/env", "fv/v/vca", "fv/filt"]);
     // Intermediate template instances must not appear as modules
     let ids = module_ids(&flat);
-    assert!(!ids.contains(&"fv"), "fv must not be a FlatModule");
-    assert!(!ids.contains(&"fv/v"), "fv/v must not be a FlatModule");
+    assert!(!ids.iter().any(|s| s == "fv"), "fv must not be a FlatModule");
+    assert!(!ids.iter().any(|s| s == "fv/v"), "fv/v must not be a FlatModule");
 }
 
 #[test]
@@ -1279,7 +1279,7 @@ fn expand_preserves_songs() {
     let src = include_str!("fixtures/song_basic.patches");
     let flat = parse_expand(src);
     assert_eq!(flat.songs.len(), 1);
-    assert_eq!(flat.songs[0].name.name, "my_song");
+    assert_eq!(flat.songs[0].name.to_string(), "my_song");
     assert_eq!(flat.songs[0].channels.len(), 2);
     assert_eq!(flat.songs[0].rows.len(), 4);
 }
@@ -1337,7 +1337,7 @@ fn expand_round_trip_patterns_and_songs() {
     assert_eq!(flat.patterns[0].name, "drums");
     // Song passed through
     assert_eq!(flat.songs.len(), 1);
-    assert_eq!(flat.songs[0].name.name, "arrangement");
+    assert_eq!(flat.songs[0].name.to_string(), "arrangement");
 }
 
 // ─── Songs and patterns in templates ─────────────────────────────────────────
@@ -1369,7 +1369,7 @@ fn song_in_template_namespaced() {
 
     // Song should be namespaced under the instance.
     assert_eq!(flat.songs.len(), 1);
-    assert_eq!(flat.songs[0].name.name, "v/my_song");
+    assert_eq!(flat.songs[0].name.to_string(), "v/my_song");
 
     // The song cell should resolve <pat> to the file-level "kick".
     let cell = &flat.songs[0].rows[0].cells[0];
@@ -1471,13 +1471,13 @@ fn nested_template_scoping() {
     let flat = parse_expand(src);
 
     // Three patterns: file-level foo, o/foo, o/i/foo.
-    let pat_names: Vec<&str> = flat.patterns.iter().map(|p| p.name.as_str()).collect();
-    assert!(pat_names.contains(&"foo"), "file-level foo missing");
-    assert!(pat_names.contains(&"o/foo"), "outer's foo missing");
-    assert!(pat_names.contains(&"o/i/foo"), "inner's foo missing");
+    let pat_names: Vec<String> = flat.patterns.iter().map(|p| p.name.to_string()).collect();
+    assert!(pat_names.iter().any(|s| s == "foo"), "file-level foo missing");
+    assert!(pat_names.iter().any(|s| s == "o/foo"), "outer's foo missing");
+    assert!(pat_names.iter().any(|s| s == "o/i/foo"), "inner's foo missing");
 
     // outer_song's cell should resolve to o/foo (outer's local pattern).
-    let outer_song = flat.songs.iter().find(|s| s.name.name == "o/outer_song").unwrap();
+    let outer_song = flat.songs.iter().find(|s| s.name == "o/outer_song").unwrap();
     let cell = &outer_song.rows[0].cells[0];
     assert!(
         matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/foo"),
@@ -1486,7 +1486,7 @@ fn nested_template_scoping() {
     );
 
     // inner_song's cell should resolve to o/i/foo (inner's local pattern).
-    let inner_song = flat.songs.iter().find(|s| s.name.name == "o/i/inner_song").unwrap();
+    let inner_song = flat.songs.iter().find(|s| s.name == "o/i/inner_song").unwrap();
     let cell = &inner_song.rows[0].cells[0];
     assert!(
         matches!(cell, patches_dsl::SongCell::Pattern(id) if id.name == "o/i/foo"),

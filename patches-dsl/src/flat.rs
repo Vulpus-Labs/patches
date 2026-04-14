@@ -1,10 +1,13 @@
-use crate::ast::{Scalar, SongDef, Span, Step, Value};
+use patches_core::QName;
+
+use crate::ast::{Ident, Scalar, SongRow, Span, Step, Value};
 
 /// A concrete module instance with all template parameters resolved.
 #[derive(Debug, Clone)]
 pub struct FlatModule {
-    /// The unique instance identifier (e.g. `"osc"` or `"v1/osc"`).
-    pub id: String,
+    /// Fully-qualified instance identifier (e.g. `QName::bare("osc")` or
+    /// `QName { path: ["v1"], name: "osc" }`).
+    pub id: QName,
     /// The module type name as it appears in the registry.
     pub type_name: String,
     /// Shape arguments (name, scalar value).
@@ -18,11 +21,11 @@ pub struct FlatModule {
 /// A concrete, fully resolved connection between two module ports.
 #[derive(Debug, Clone)]
 pub struct FlatConnection {
-    pub from_module: String,
+    pub from_module: QName,
     pub from_port: String,
     /// Port index; `0` for unindexed references.
     pub from_index: u32,
-    pub to_module: String,
+    pub to_module: QName,
     pub to_port: String,
     /// Port index; `0` for unindexed references.
     pub to_index: u32,
@@ -42,8 +45,22 @@ pub struct FlatPatternChannel {
 /// A pattern definition with all generators expanded.
 #[derive(Debug, Clone)]
 pub struct FlatPatternDef {
-    pub name: String,
+    pub name: QName,
     pub channels: Vec<FlatPatternChannel>,
+    pub span: Span,
+}
+
+/// A song definition with its name qualified by any enclosing scope.
+///
+/// Cells still carry plain [`SongCell`](crate::ast::SongCell) (with an
+/// [`Ident`] string for pattern references) — the expander resolves those
+/// strings to the fully-qualified pattern name via [`QName::to_string`].
+#[derive(Debug, Clone)]
+pub struct FlatSongDef {
+    pub name: QName,
+    pub channels: Vec<Ident>,
+    pub rows: Vec<SongRow>,
+    pub loop_point: Option<usize>,
     pub span: Span,
 }
 
@@ -59,6 +76,6 @@ pub struct FlatPatch {
     pub connections: Vec<FlatConnection>,
     /// Pattern definitions with slide generators expanded.
     pub patterns: Vec<FlatPatternDef>,
-    /// Song definitions (passed through unchanged from the AST).
-    pub songs: Vec<SongDef>,
+    /// Song definitions (names qualified under any enclosing template scope).
+    pub songs: Vec<FlatSongDef>,
 }

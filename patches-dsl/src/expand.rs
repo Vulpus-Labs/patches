@@ -6,13 +6,17 @@
 
 use std::collections::{HashMap, HashSet};
 
+use patches_core::QName;
+
 use crate::ast::{
     AtBlockIndex, Connection, Direction, File, Ident, ModuleDecl, ParamEntry, ParamIndex,
     ParamType, PortIndex, PortLabel, Scalar, ShapeArg, ShapeArgValue, SongCell, SongDef, SongRow,
     Span, Statement, Template, Value,
 };
 use crate::ast::{PatternDef, Step, StepOrGenerator};
-use crate::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef};
+use crate::flat::{
+    FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
+};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -75,10 +79,21 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         Expander::new(&templates).expand_body(&file.patch.body, None, &HashMap::new(), &HashMap::new(), &root_scope)?;
 
     // Expand patterns: merge top-level with template-local, resolve generators.
-    let mut patterns: Vec<FlatPatternDef> = file.patterns.iter().map(expand_pattern_def).collect();
+    let mut patterns: Vec<FlatPatternDef> =
+        file.patterns.iter().map(|p| expand_pattern_def(p, None)).collect();
     patterns.extend(result.patterns);
-    // Songs: merge top-level songs with songs collected from template bodies.
-    let mut songs = file.songs.clone();
+    // Top-level songs are rehomed as FlatSongDef with a bare QName.
+    let mut songs: Vec<FlatSongDef> = file
+        .songs
+        .iter()
+        .map(|s| FlatSongDef {
+            name: QName::bare(s.name.name.clone()),
+            channels: s.channels.clone(),
+            rows: s.rows.clone(),
+            loop_point: s.loop_point,
+            span: s.span,
+        })
+        .collect();
     songs.extend(result.songs);
 
     Ok(ExpandResult {
@@ -93,7 +108,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
 }
 
 /// Expand a `PatternDef` by resolving all slide generators into concrete steps.
-fn expand_pattern_def(pattern: &PatternDef) -> FlatPatternDef {
+fn expand_pattern_def(pattern: &PatternDef, namespace: Option<&QName>) -> FlatPatternDef {
     let channels = pattern
         .channels
         .iter()
@@ -103,7 +118,7 @@ fn expand_pattern_def(pattern: &PatternDef) -> FlatPatternDef {
         })
         .collect();
     FlatPatternDef {
-        name: pattern.name.name.clone(),
+        name: qualify(namespace, &pattern.name.name),
         channels,
         span: pattern.span,
     }
@@ -147,15 +162,12 @@ fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
 /// that only `pattern`-typed params appear in song cells.
 fn expand_song_def(
     song: &SongDef,
-    namespace: Option<&str>,
+    namespace: Option<&QName>,
     param_env: &HashMap<String, Scalar>,
     param_types: &HashMap<String, ParamType>,
     scope: &NameScope<'_>,
-) -> Result<SongDef, ExpandError> {
-    let name = Ident {
-        name: qualify(namespace, &song.name.name),
-        span: song.name.span,
-    };
+) -> Result<FlatSongDef, ExpandError> {
+    let name = qualify(namespace, &song.name.name);
     let rows = song
         .rows
         .iter()
@@ -169,6 +181,7 @@ fn expand_song_def(
                         // Literal pattern name — resolve via pattern scope.
                         let resolved = scope
                             .resolve_pattern(&ident.name)
+                            .map(|q| q.to_string())
                             .unwrap_or_else(|| ident.name.clone());
                         Ok(SongCell::Pattern(Ident {
                             name: resolved,
@@ -195,6 +208,7 @@ fn expand_song_def(
                                     // Resolve through the pattern scope.
                                     let resolved = scope
                                         .resolve_pattern(s)
+                                        .map(|q| q.to_string())
                                         .unwrap_or_else(|| s.clone());
                                     Ok(SongCell::Pattern(Ident {
                                         name: resolved,
@@ -225,7 +239,7 @@ fn expand_song_def(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(SongDef {
+    Ok(FlatSongDef {
         name,
         channels: song.channels.clone(),
         rows,
@@ -252,17 +266,23 @@ fn param_type_name(ty: &ParamType) -> &'static str {
 /// Songs and patterns occupy separate namespaces so that a pattern named `foo`
 /// cannot accidentally resolve as a song (or vice versa).
 struct NameScope<'a> {
-    songs: HashMap<String, String>,
-    patterns: HashMap<String, String>,
+    songs: HashMap<String, QName>,
+    patterns: HashMap<String, QName>,
     parent: Option<&'a NameScope<'a>>,
 }
 
 impl<'a> NameScope<'a> {
-    /// Build a root scope from file-level song and pattern names (identity mapping).
+    /// Build a root scope from file-level song and pattern names (bare QNames).
     fn root(songs: &[SongDef], patterns: &[PatternDef]) -> Self {
         NameScope {
-            songs: songs.iter().map(|s| (s.name.name.clone(), s.name.name.clone())).collect(),
-            patterns: patterns.iter().map(|p| (p.name.name.clone(), p.name.name.clone())).collect(),
+            songs: songs
+                .iter()
+                .map(|s| (s.name.name.clone(), QName::bare(s.name.name.clone())))
+                .collect(),
+            patterns: patterns
+                .iter()
+                .map(|p| (p.name.name.clone(), QName::bare(p.name.name.clone())))
+                .collect(),
             parent: None,
         }
     }
@@ -272,7 +292,7 @@ impl<'a> NameScope<'a> {
     fn child(
         parent: &'a NameScope<'a>,
         stmts: &[Statement],
-        namespace: Option<&str>,
+        namespace: Option<&QName>,
     ) -> Self {
         let mut songs = HashMap::new();
         let mut patterns = HashMap::new();
@@ -290,18 +310,14 @@ impl<'a> NameScope<'a> {
         NameScope { songs, patterns, parent: Some(parent) }
     }
 
-    /// Resolve a pattern name through the scope chain.
-    /// Returns `None` if not found in any scope.
-    fn resolve_pattern(&self, name: &str) -> Option<String> {
+    fn resolve_pattern(&self, name: &str) -> Option<QName> {
         if let Some(qualified) = self.patterns.get(name) {
             return Some(qualified.clone());
         }
         self.parent.and_then(|p| p.resolve_pattern(name))
     }
 
-    /// Resolve a song name through the scope chain.
-    /// Returns `None` if not found in any scope.
-    fn resolve_song(&self, name: &str) -> Option<String> {
+    fn resolve_song(&self, name: &str) -> Option<QName> {
         if let Some(qualified) = self.songs.get(name) {
             return Some(qualified.clone());
         }
@@ -311,7 +327,7 @@ impl<'a> NameScope<'a> {
     /// Resolve a name that could be either a song or a pattern (for untyped
     /// contexts like module params where the expander can't know which).
     /// Songs are checked first, then patterns.
-    fn resolve_any(&self, name: &str) -> Option<String> {
+    fn resolve_any(&self, name: &str) -> Option<QName> {
         self.resolve_song(name).or_else(|| self.resolve_pattern(name))
     }
 
@@ -322,7 +338,7 @@ impl<'a> NameScope<'a> {
         for (_key, value) in params.iter_mut() {
             if let Value::Scalar(Scalar::Str(ref mut s)) = value {
                 if let Some(resolved) = self.resolve_any(s) {
-                    *s = resolved;
+                    *s = resolved.to_string();
                 }
             }
         }
@@ -332,7 +348,7 @@ impl<'a> NameScope<'a> {
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 /// A resolved port endpoint: (module_id, port_name, index, scale).
-type PortEntry = (String, String, u32, f64);
+type PortEntry = (QName, String, u32, f64);
 
 /// Port maps produced when expanding a template body.
 struct TemplatePorts {
@@ -354,7 +370,7 @@ struct BodyResult {
     /// Port maps (only meaningful when this result comes from a template body).
     ports: TemplatePorts,
     /// Songs defined inside the body (collected from templates).
-    songs: Vec<SongDef>,
+    songs: Vec<FlatSongDef>,
     /// Patterns defined inside the body (collected from templates).
     patterns: Vec<FlatPatternDef>,
 }
@@ -648,7 +664,7 @@ impl<'a> Expander<'a> {
     fn expand_body(
         &mut self,
         stmts: &[Statement],
-        namespace: Option<&str>,
+        namespace: Option<&QName>,
         param_env: &HashMap<String, Scalar>,
         param_types: &HashMap<String, ParamType>,
         parent_scope: &NameScope<'_>,
@@ -656,7 +672,7 @@ impl<'a> Expander<'a> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
         let mut instance_ports: HashMap<String, TemplatePorts> = HashMap::new();
-        let mut songs: Vec<SongDef> = Vec::new();
+        let mut songs: Vec<FlatSongDef> = Vec::new();
         let mut patterns: Vec<FlatPatternDef> = Vec::new();
 
         // Build a scope for this body's local song/pattern definitions.
@@ -759,9 +775,7 @@ impl<'a> Expander<'a> {
                 Statement::Pattern(pd) => pd,
                 _ => continue,
             };
-            let mut flat = expand_pattern_def(pat_def);
-            flat.name = qualify(namespace, &flat.name);
-            patterns.push(flat);
+            patterns.push(expand_pattern_def(pat_def, namespace));
         }
 
         Ok(BodyResult {
@@ -780,7 +794,7 @@ impl<'a> Expander<'a> {
     fn expand_template_instance(
         &mut self,
         decl: &ModuleDecl,
-        namespace: Option<&str>,
+        namespace: Option<&QName>,
         param_env: &HashMap<String, Scalar>,
         scope: &NameScope<'_>,
     ) -> Result<BodyResult, ExpandError> {
@@ -1067,7 +1081,7 @@ impl<'a> Expander<'a> {
             }
         }
 
-        let child_namespace = child_ns(namespace, &decl.name.name);
+        let child_namespace = qualify(namespace, &decl.name.name);
         self.call_stack.insert(type_name.clone());
         let sub = self.expand_body(
             &template.body,
@@ -1089,7 +1103,7 @@ impl<'a> Expander<'a> {
     fn expand_connection(
         &mut self,
         conn: &Connection,
-        namespace: Option<&str>,
+        namespace: Option<&QName>,
         param_env: &HashMap<String, Scalar>,
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
@@ -1158,7 +1172,7 @@ impl<'a> Expander<'a> {
         to_i: u32,
         to_is_arity: bool,
         arrow_scale: f64,
-        namespace: Option<&str>,
+        namespace: Option<&QName>,
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
@@ -1390,19 +1404,14 @@ fn build_alias_map(shape: &[ShapeArg]) -> HashMap<String, u32> {
     map
 }
 
-/// Build a fully-qualified module ID under `namespace`.
-fn qualify(namespace: Option<&str>, name: &str) -> String {
+/// Build a fully-qualified [`QName`] under the enclosing `namespace`.
+///
+/// Thin adapter around [`QName::bare`] and [`QName::child`] so that call sites
+/// can keep the common `Option<&QName>` namespace pattern without branching.
+fn qualify(namespace: Option<&QName>, name: &str) -> QName {
     match namespace {
-        None => name.to_owned(),
-        Some(ns) => format!("{}/{}", ns, name),
-    }
-}
-
-/// Extend a namespace with a child name.
-fn child_ns(parent: Option<&str>, child: &str) -> String {
-    match parent {
-        None => child.to_owned(),
-        Some(ns) => format!("{}/{}", ns, child),
+        None => QName::bare(name.to_owned()),
+        Some(ns) => ns.child(name.to_owned()),
     }
 }
 
@@ -1510,7 +1519,7 @@ fn resolve_from(
     from_module: &str,
     from_port: &str,
     from_index: u32,
-    namespace: Option<&str>,
+    namespace: Option<&QName>,
     instance_ports: &HashMap<String, TemplatePorts>,
     span: &Span,
 ) -> Result<PortEntry, ExpandError> {
@@ -1542,7 +1551,7 @@ fn resolve_to(
     to_module: &str,
     to_port: &str,
     to_index: u32,
-    namespace: Option<&str>,
+    namespace: Option<&QName>,
     instance_ports: &HashMap<String, TemplatePorts>,
     span: &Span,
 ) -> Result<Vec<PortEntry>, ExpandError> {

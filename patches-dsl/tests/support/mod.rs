@@ -1,6 +1,6 @@
-/// Shared test helpers for patches-dsl integration tests.
-///
-/// Import with `mod support;` at the top of each test file.
+//! Shared test helpers for patches-dsl integration tests.
+//!
+//! Import with `mod support;` at the top of each test file.
 
 use patches_dsl::{expand, parse, FlatConnection, FlatModule, FlatPatch, Value};
 
@@ -22,9 +22,9 @@ pub fn parse_expand_err(src: &str) -> String {
 
 // ── Module queries ───────────────────────────────────────────────────────────
 
-/// Collect all module IDs from a `FlatPatch`.
-pub fn module_ids(flat: &FlatPatch) -> Vec<&str> {
-    flat.modules.iter().map(|m| m.id.as_str()).collect()
+/// Collect all module IDs (rendered as their `Display` string) from a `FlatPatch`.
+pub fn module_ids(flat: &FlatPatch) -> Vec<String> {
+    flat.modules.iter().map(|m| m.id.to_string()).collect()
 }
 
 /// Find a module by ID. Panics with available IDs if not found.
@@ -89,7 +89,7 @@ pub fn assert_modules_exist(flat: &FlatPatch, expected_ids: &[&str]) {
     let ids = module_ids(flat);
     for &expected in expected_ids {
         assert!(
-            ids.contains(&expected),
+            ids.iter().any(|id| id == expected),
             "expected module '{}'; found: {:?}",
             expected,
             ids

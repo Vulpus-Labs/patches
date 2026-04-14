@@ -264,12 +264,19 @@ fn extract_type_refs(body: &[ast::Statement]) -> Vec<String> {
 }
 
 /// Key identifying a module instance within its scope (template name or
-/// empty for the top-level patch body). Replaces the former `"scope::name"`
-/// string concatenation.
-pub(crate) type ScopeKey = (String, String);
+/// empty for the top-level patch body).
+///
+/// For top-level modules, `path` is empty and `name` is the instance name.
+/// For modules declared inside a template `T`, `path == ["T"]` and `name`
+/// is the instance name.
+pub(crate) type ScopeKey = patches_core::QName;
 
 fn make_key(scope: &str, name: &str) -> ScopeKey {
-    (scope.to_string(), name.to_string())
+    if scope.is_empty() {
+        patches_core::QName::bare(name)
+    } else {
+        patches_core::QName::bare(scope).child(name)
+    }
 }
 
 // ─── Dependency resolution (phase 2) ────────────────────────────────────────
@@ -842,7 +849,7 @@ impl SemanticModel {
     /// First tries the top-level scope (`scope == ""`); on miss, falls back
     /// through the unscoped secondary index.
     pub fn get_descriptor(&self, name: &str) -> Option<&ResolvedDescriptor> {
-        let top_key = (String::new(), name.to_string());
+        let top_key = patches_core::QName::bare(name);
         self.descriptors
             .get(&top_key)
             .or_else(|| self.descriptors.get(self.unscoped_index.get(name)?))
@@ -881,8 +888,8 @@ pub(crate) fn analyse(file: &ast::File, registry: &Registry) -> SemanticModel {
     // lookups hit the primary map directly.
     let mut unscoped_index: HashMap<String, ScopeKey> = HashMap::new();
     for key in descriptors.keys() {
-        if !key.0.is_empty() {
-            unscoped_index.insert(key.1.clone(), key.clone());
+        if !key.is_bare() {
+            unscoped_index.insert(key.name.clone(), key.clone());
         }
     }
 
