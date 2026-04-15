@@ -38,7 +38,6 @@ use patches_core::source_map::SourceMap;
 use patches_core::{
     AudioEnvironment, MidiEvent, ModuleGraph, Registry, BASE_PERIODIC_UPDATE_INTERVAL,
 };
-use patches_diagnostics::{RenderedDiagnostic, Severity, Snippet, SnippetKind};
 use patches_engine::builder::ExecutionPlan;
 use patches_engine::{CleanupAction, PatchProcessor, Planner};
 
@@ -143,7 +142,7 @@ impl PatchesClapPlugin {
     /// converted into structured [`RenderedDiagnostic`]s for GUI rendering.
     pub(crate) fn take_diagnostic_view(&mut self, err: &CompileError) -> DiagnosticView {
         let source_map = self.last_source_map.clone().unwrap_or_default();
-        let diagnostics = compile_error_to_diagnostics(err, &source_map);
+        let diagnostics = err.to_rendered_diagnostics(&source_map);
         DiagnosticView { diagnostics, source_map: Some(source_map) }
     }
 
@@ -187,113 +186,6 @@ impl PatchesClapPlugin {
                 f(self.host);
             }
         }
-    }
-}
-
-// ── Diagnostic construction ─────────────────────────────────────────
-
-fn compile_error_to_diagnostics(err: &CompileError, source_map: &SourceMap) -> Vec<RenderedDiagnostic> {
-    match err {
-        CompileError::NotActivated => vec![synthetic_diagnostic("not activated", "not-activated")],
-        CompileError::Load(e) => vec![synthetic_diagnostic(&e.to_string(), "load")],
-        CompileError::Parse(e) => vec![span_diagnostic(e.span, &e.message, "parse")],
-        CompileError::Expand(e) => vec![RenderedDiagnostic::from_expand_error(e, source_map)],
-        CompileError::Bind(errs) => errs
-            .iter()
-            .map(|e| RenderedDiagnostic::from_bind_error(e, source_map))
-            .collect(),
-        CompileError::Interpret(e) => vec![interpret_diagnostic(e)],
-        CompileError::Plan(e) => vec![plan_diagnostic(e)],
-    }
-}
-
-fn synthetic_diagnostic(message: &str, code: &str) -> RenderedDiagnostic {
-    use patches_core::source_span::SourceId;
-    RenderedDiagnostic {
-        severity: Severity::Error,
-        code: Some(code.to_string()),
-        message: message.to_string(),
-        primary: Snippet {
-            source: SourceId::SYNTHETIC,
-            range: 0..0,
-            label: "here".to_string(),
-            kind: SnippetKind::Primary,
-        },
-        related: Vec::new(),
-    }
-}
-
-fn span_diagnostic(span: patches_dsl::ast::Span, message: &str, code: &str) -> RenderedDiagnostic {
-    RenderedDiagnostic {
-        severity: Severity::Error,
-        code: Some(code.to_string()),
-        message: message.to_string(),
-        primary: Snippet {
-            source: span.source,
-            range: span.start..span.end,
-            label: "here".to_string(),
-            kind: SnippetKind::Primary,
-        },
-        related: Vec::new(),
-    }
-}
-
-fn interpret_diagnostic(err: &patches_interpreter::InterpretError) -> RenderedDiagnostic {
-    let primary = Snippet {
-        source: err.provenance.site.source,
-        range: err.provenance.site.start..err.provenance.site.end,
-        label: "here".to_string(),
-        kind: SnippetKind::Primary,
-    };
-    let related = err
-        .provenance
-        .expansion
-        .iter()
-        .map(|s| Snippet {
-            source: s.source,
-            range: s.start..s.end,
-            label: "expanded from here".to_string(),
-            kind: SnippetKind::Expansion,
-        })
-        .collect();
-    RenderedDiagnostic {
-        severity: Severity::Error,
-        code: Some("interpret".to_string()),
-        message: err.message.clone(),
-        primary,
-        related,
-    }
-}
-
-fn plan_diagnostic(err: &patches_engine::builder::BuildError) -> RenderedDiagnostic {
-    let message = err.to_string();
-    match &err.origin {
-        Some(prov) => {
-            let primary = Snippet {
-                source: prov.site.source,
-                range: prov.site.start..prov.site.end,
-                label: "here".to_string(),
-                kind: SnippetKind::Primary,
-            };
-            let related = prov
-                .expansion
-                .iter()
-                .map(|s| Snippet {
-                    source: s.source,
-                    range: s.start..s.end,
-                    label: "expanded from here".to_string(),
-                    kind: SnippetKind::Expansion,
-                })
-                .collect();
-            RenderedDiagnostic {
-                severity: Severity::Error,
-                code: Some("plan".to_string()),
-                message,
-                primary,
-                related,
-            }
-        }
-        None => synthetic_diagnostic(&message, "plan"),
     }
 }
 

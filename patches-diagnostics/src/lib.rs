@@ -34,7 +34,7 @@ use patches_core::provenance::Provenance;
 use patches_core::source_map::{line_col, SourceMap};
 use patches_core::source_span::{SourceId, Span};
 use patches_dsl::loader::{LoadError, LoadErrorKind};
-use patches_dsl::ExpandError;
+use patches_dsl::{ExpandError, ParseError, Warning as ExpandWarning};
 use patches_interpreter::{BindError, BindErrorCode, InterpretError};
 
 /// Stable code for a [`LoadError`] family. Mirrors the
@@ -111,18 +111,7 @@ impl RenderedDiagnostic {
     /// used when the patch was loaded.
     pub fn from_build_error(err: &BuildError, _source_map: &SourceMap) -> Self {
         let (code, primary_label) = build_error_code_and_label(err);
-        let message = err.to_string();
-        let (primary, related) = match err.origin() {
-            Some(prov) => provenance_to_snippets(prov, primary_label),
-            None => (synthetic_primary(primary_label), Vec::new()),
-        };
-        Self {
-            severity: Severity::Error,
-            code: Some(code.to_string()),
-            message,
-            primary,
-            related,
-        }
+        render_provenance_error(code, err.to_string(), err.origin(), primary_label)
     }
 
     /// Build a rendered diagnostic from an [`ExpandError`]. Expand errors
@@ -142,12 +131,44 @@ impl RenderedDiagnostic {
             severity: Severity::Error,
             code: Some(err.code.as_str().to_string()),
             message: err.message.clone(),
-            primary: Snippet {
-                source: err.span.source,
-                range: err.span.start..err.span.end,
-                label: err.code.label().to_string(),
-                kind: SnippetKind::Primary,
-            },
+            primary: span_to_snippet(err.span, err.code.label(), SnippetKind::Primary),
+            related: Vec::new(),
+        }
+    }
+
+    /// Build a rendered diagnostic from a DSL [`ParseError`] (stage 2).
+    pub fn from_parse_error(err: &ParseError) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: Some("LD0002".to_string()),
+            message: err.message.clone(),
+            primary: span_to_snippet(err.span, "parse error", SnippetKind::Primary),
+            related: Vec::new(),
+        }
+    }
+
+    /// Build a rendered *warning* from an expander [`ExpandWarning`]
+    /// (non-fatal diagnostic produced during stage 3a expansion).
+    pub fn from_expand_warning(w: &ExpandWarning) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: None,
+            message: w.message.clone(),
+            primary: span_to_snippet(w.span, "warning", SnippetKind::Primary),
+            related: Vec::new(),
+        }
+    }
+
+    /// Build a synthetic-span diagnostic for an error with no source
+    /// location (e.g. "not activated", engine builder errors without
+    /// provenance). `code` becomes the stable slug; `message` is the
+    /// user-facing text; `label` annotates the synthetic primary.
+    pub fn synthetic(code: &str, message: impl Into<String>, label: &str) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: Some(code.to_string()),
+            message: message.into(),
+            primary: synthetic_primary(label),
             related: Vec::new(),
         }
     }
@@ -168,23 +189,15 @@ impl RenderedDiagnostic {
         };
         let primary_label = code.label();
         let primary = match &err.kind {
-            LoadErrorKind::Parse { error, .. } => Snippet {
-                source: error.span.source,
-                range: error.span.start..error.span.end,
-                label: primary_label.to_string(),
-                kind: SnippetKind::Primary,
-            },
+            LoadErrorKind::Parse { error, .. } => {
+                span_to_snippet(error.span, primary_label, SnippetKind::Primary)
+            }
             _ => synthetic_primary(primary_label),
         };
         let related = err
             .include_chain
             .iter()
-            .map(|(_, span)| Snippet {
-                source: span.source,
-                range: span.start..span.end,
-                label: "included from here".to_string(),
-                kind: SnippetKind::Expansion,
-            })
+            .map(|(_, span)| span_to_snippet(*span, "included from here", SnippetKind::Expansion))
             .collect();
         Self {
             severity: Severity::Error,
@@ -199,14 +212,12 @@ impl RenderedDiagnostic {
     /// descriptor-level binding). Provenance expansion chain is rendered as
     /// related snippets.
     pub fn from_bind_error(err: &BindError, _source_map: &SourceMap) -> Self {
-        let (primary, related) = provenance_to_snippets(&err.provenance, err.code.label());
-        Self {
-            severity: Severity::Error,
-            code: Some(err.code.as_str().to_string()),
-            message: err.message.clone(),
-            primary,
-            related,
-        }
+        render_provenance_error(
+            err.code.as_str(),
+            err.message.clone(),
+            Some(&err.provenance),
+            err.code.label(),
+        )
     }
 
     /// Build a rendered diagnostic for a pipeline-layering warning — a
@@ -278,15 +289,53 @@ impl RenderedDiagnostic {
     /// [`Self::from_bind_error`]. The provenance expansion chain is
     /// rendered as related snippets.
     pub fn from_interpret_error(err: &InterpretError, _source_map: &SourceMap) -> Self {
-        let (primary, related) =
-            provenance_to_snippets(&err.provenance, err.code.label());
-        Self {
-            severity: Severity::Error,
-            code: Some(err.code.as_str().to_string()),
-            message: err.message.clone(),
-            primary,
-            related,
-        }
+        render_provenance_error(
+            err.code.as_str(),
+            err.message.clone(),
+            Some(&err.provenance),
+            err.code.label(),
+        )
+    }
+
+    /// Build a rendered diagnostic from an engine-stage build error with
+    /// an optional provenance. Use for `patches_engine::builder::BuildError`
+    /// and other plan-stage failures whose type lives outside this crate's
+    /// dependency graph.
+    ///
+    /// `message` should be the rendered error text (typically
+    /// `err.to_string()`); `provenance` is the optional DSL origin, and
+    /// `code` / `label` are stable presentation strings.
+    pub fn from_plan_error(
+        code: &str,
+        message: impl Into<String>,
+        provenance: Option<&Provenance>,
+        label: &str,
+    ) -> Self {
+        render_provenance_error(code, message.into(), provenance, label)
+    }
+}
+
+/// Shared builder collapsing the "code + message + optional provenance +
+/// primary label" shape used by every provenance-bearing converter. If
+/// `provenance` is `None`, the primary snippet is synthetic and `related`
+/// is empty; otherwise the expansion chain is rendered as related
+/// snippets.
+pub fn render_provenance_error(
+    code: &str,
+    message: impl Into<String>,
+    provenance: Option<&Provenance>,
+    primary_label: &str,
+) -> RenderedDiagnostic {
+    let (primary, related) = match provenance {
+        Some(prov) => provenance_to_snippets(prov, primary_label),
+        None => (synthetic_primary(primary_label), Vec::new()),
+    };
+    RenderedDiagnostic {
+        severity: Severity::Error,
+        code: Some(code.to_string()),
+        message: message.into(),
+        primary,
+        related,
     }
 }
 
@@ -552,6 +601,78 @@ mod tests {
             "no such port",
         );
         assert!(RenderedDiagnostic::pipeline_layering_warnings(&[err]).is_empty());
+    }
+
+    #[test]
+    fn render_provenance_error_none_matches_synthetic_shape() {
+        // Direct-builder call with `None` provenance must match the
+        // synthetic-primary shape produced by `Self::synthetic` so CLAP's
+        // `Plan` variant (routed through `from_plan_error` with a
+        // provenance-less BuildError) and `NotActivated` (routed through
+        // `synthetic`) agree on the output shape.
+        let a = render_provenance_error("plan", "boom", None, "here");
+        let b = RenderedDiagnostic::synthetic("plan", "boom", "here");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn render_provenance_error_some_matches_bind_converter() {
+        // A `BindError` routed through `from_bind_error` must equal the
+        // same code/message/provenance/label routed through the shared
+        // builder. This is the round-trip guarantee that all three
+        // consumers produce identical diagnostics.
+        use patches_core::Provenance;
+        use patches_interpreter::{BindError, BindErrorCode};
+        let (map, id) = map_with("x.patches", "patch { }\n");
+        let prov = Provenance {
+            site: Span::new(id, 0, 5),
+            expansion: vec![],
+        };
+        let err = BindError::new(BindErrorCode::UnknownPort, prov.clone(), "no port");
+        let via_converter = RenderedDiagnostic::from_bind_error(&err, &map);
+        let via_builder = render_provenance_error(
+            BindErrorCode::UnknownPort.as_str(),
+            "no port",
+            Some(&prov),
+            BindErrorCode::UnknownPort.label(),
+        );
+        assert_eq!(via_converter, via_builder);
+    }
+
+    #[test]
+    fn parse_error_renders_with_ld0002_code() {
+        let (_, id) = map_with("x.patches", "bad\n");
+        let err = patches_dsl::ParseError {
+            span: Span::new(id, 0, 3),
+            message: "syntax".to_string(),
+        };
+        let d = RenderedDiagnostic::from_parse_error(&err);
+        assert_eq!(d.code.as_deref(), Some("LD0002"));
+        assert_eq!(d.primary.source, id);
+        assert_eq!(d.primary.range, 0..3);
+        assert_eq!(d.message, "syntax");
+    }
+
+    #[test]
+    fn expand_warning_renders_as_warning_severity() {
+        let (_, id) = map_with("x.patches", "foo\n");
+        let w = patches_dsl::Warning {
+            span: Span::new(id, 0, 3),
+            message: "careful".to_string(),
+        };
+        let d = RenderedDiagnostic::from_expand_warning(&w);
+        assert_eq!(d.severity, Severity::Warning);
+        assert_eq!(d.primary.source, id);
+        assert_eq!(d.message, "careful");
+        assert!(d.code.is_none());
+    }
+
+    #[test]
+    fn synthetic_uses_synthetic_primary_source() {
+        let d = RenderedDiagnostic::synthetic("not-activated", "not activated", "here");
+        assert_eq!(d.primary.source, SourceId::SYNTHETIC);
+        assert_eq!(d.code.as_deref(), Some("not-activated"));
+        assert_eq!(d.message, "not activated");
     }
 
     #[test]

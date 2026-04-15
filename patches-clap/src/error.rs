@@ -5,8 +5,13 @@
 
 use std::fmt;
 
+use patches_core::source_map::SourceMap;
+use patches_diagnostics::RenderedDiagnostic;
+
 /// Pipeline-stage-aligned compile error (ADR 0038). Each variant names the
-/// first failing stage; rendering lives in `plugin::compile_error_to_diagnostics`.
+/// first failing stage; conversion to [`RenderedDiagnostic`] delegates to
+/// the shared converters in `patches-diagnostics` so every consumer
+/// (player, CLAP, LSP) produces identical diagnostics for identical input.
 #[derive(Debug)]
 pub enum CompileError {
     NotActivated,
@@ -16,6 +21,36 @@ pub enum CompileError {
     Bind(Vec<patches_interpreter::BindError>),
     Interpret(patches_interpreter::InterpretError),
     Plan(patches_engine::builder::BuildError),
+}
+
+impl CompileError {
+    /// Render every underlying pipeline error as structured diagnostics,
+    /// delegating to the shared converters in `patches-diagnostics`. The
+    /// `source_map` is used to resolve spans; pass the map retained from
+    /// the most recent `load_or_parse`.
+    pub fn to_rendered_diagnostics(&self, source_map: &SourceMap) -> Vec<RenderedDiagnostic> {
+        match self {
+            CompileError::NotActivated => {
+                vec![RenderedDiagnostic::synthetic("not-activated", "not activated", "here")]
+            }
+            CompileError::Load(e) => vec![RenderedDiagnostic::from_load_error(e, source_map)],
+            CompileError::Parse(e) => vec![RenderedDiagnostic::from_parse_error(e)],
+            CompileError::Expand(e) => vec![RenderedDiagnostic::from_expand_error(e, source_map)],
+            CompileError::Bind(errs) => errs
+                .iter()
+                .map(|e| RenderedDiagnostic::from_bind_error(e, source_map))
+                .collect(),
+            CompileError::Interpret(e) => {
+                vec![RenderedDiagnostic::from_interpret_error(e, source_map)]
+            }
+            CompileError::Plan(e) => vec![RenderedDiagnostic::from_plan_error(
+                "plan",
+                e.to_string(),
+                e.origin.as_ref(),
+                "here",
+            )],
+        }
+    }
 }
 
 impl fmt::Display for CompileError {
