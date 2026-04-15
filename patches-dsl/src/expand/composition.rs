@@ -21,6 +21,7 @@ use crate::ast::{
 };
 use crate::flat::{FlatPatternChannel, FlatPatternDef, FlatSongDef, FlatSongRow, PatternIdx};
 use crate::provenance::Provenance;
+use crate::structural::StructuralCode as Code;
 
 /// A song whose rows still carry [`SongCell`] values; resolved to
 /// [`FlatSongDef`] once all patterns are known (see [`index_songs`]).
@@ -61,7 +62,7 @@ pub(super) fn index_songs(
                         Some(&idx) => cells.push(Some(idx)),
                         None => {
                             return Err(ExpandError::new(
-                                crate::structural::StructuralCode::PatternNotFound,
+                                Code::PatternNotFound,
                                 ident.span,
                                 format!(
                                     "song '{}': pattern '{}' not found",
@@ -72,7 +73,7 @@ pub(super) fn index_songs(
                     },
                     SongCell::ParamRef { name, span } => {
                         return Err(ExpandError::new(
-                            crate::structural::StructuralCode::UnresolvedParamRef,
+                            Code::UnresolvedParamRef,
                             span,
                             format!(
                                 "song '{}': unresolved `<{}>` param reference after expansion",
@@ -183,7 +184,7 @@ fn subst_song_cell(
             if let Some(ty) = param_types.get(name.as_str()) {
                 if *ty != ParamType::Pattern {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::ParamTypeMismatch,
+                        Code::ParamTypeMismatch,
                         *span,
                         format!(
                             "song cell '<{}>': param is {}-typed, expected pattern",
@@ -205,7 +206,7 @@ fn subst_song_cell(
                     }))
                 }
                 Some(other) => Err(ExpandError::new(
-                    crate::structural::StructuralCode::ParamTypeMismatch,
+                    Code::ParamTypeMismatch,
                     *span,
                     format!(
                         "song cell param '<{}>': expected a pattern name, got {:?}",
@@ -213,7 +214,7 @@ fn subst_song_cell(
                     ),
                 )),
                 None => Err(ExpandError::new(
-                    crate::structural::StructuralCode::UnresolvedParamRef,
+                    Code::UnresolvedParamRef,
                     *span,
                     format!("unresolved param '<{}>' in song cell", name),
                 )),
@@ -237,7 +238,7 @@ fn flatten_row_groups(
             RowGroup::Row(row) => {
                 if row.cells.len() != lanes.len() {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::RowLaneMismatch,
+                        Code::RowLaneMismatch,
                         row.span,
                         format!(
                             "row has {} cells but song declares {} lane(s)",
@@ -285,7 +286,7 @@ fn eval_play_expr(
                 Some(rows) => buf.extend(rows.iter().cloned()),
                 None => {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::UnknownSection,
+                        Code::UnknownSection,
                         ident.span,
                         format!("unknown section '{}' in play expression", ident.name),
                     ));
@@ -320,7 +321,7 @@ pub(super) fn flatten_song(
             SongItem::Section(sd) => {
                 if local_sections.insert(sd.name.name.clone(), sd).is_some() {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::DuplicateSection,
+                        Code::DuplicateSection,
                         sd.span,
                         format!("duplicate section '{}' in song", sd.name.name),
                     ));
@@ -329,7 +330,7 @@ pub(super) fn flatten_song(
             SongItem::Pattern(pd) => {
                 if local_patterns.iter().any(|p| p.name.name == pd.name.name) {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::DuplicateInlinePattern,
+                        Code::DuplicateInlinePattern,
                         pd.span,
                         format!("duplicate inline pattern '{}' in song", pd.name.name),
                     ));
@@ -374,7 +375,7 @@ pub(super) fn flatten_song(
             SongItem::LoopMarker(span) => {
                 if loop_point.is_some() {
                     return Err(ExpandError::new(
-                        crate::structural::StructuralCode::MultipleLoopMarkers,
+                        Code::MultipleLoopMarkers,
                         *span,
                         "multiple @loop markers in song".to_owned(),
                     ));
@@ -388,7 +389,7 @@ pub(super) fn flatten_song(
                 PlayBody::NamedInline { name, body, span } => {
                     if section_rows.contains_key(&name.name) {
                         return Err(ExpandError::new(
-                            crate::structural::StructuralCode::SectionAlreadyDefined,
+                            Code::SectionAlreadyDefined,
                             *span,
                             format!("section '{}' already defined in song", name.name),
                         ));

@@ -15,6 +15,7 @@ use patches_core::QName;
 use super::{list_keys, qualify, scalar_to_u32, ExpandError};
 use crate::ast::{PortIndex, PortLabel, PortRef, Scalar, Span};
 use crate::flat::PortDirection;
+use crate::structural::StructuralCode as Code;
 
 /// A resolved port endpoint: (module_id, port_name, index, scale).
 pub(super) type PortEntry = (QName, String, u32, f64);
@@ -60,7 +61,7 @@ pub(super) fn deref_index_alias(
 ) -> Result<u32, ExpandError> {
     alias_map.get(alias).copied().ok_or_else(|| {
         ExpandError::new(
-            crate::structural::StructuralCode::UnknownAlias,
+            Code::UnknownAlias,
             *span,
             format!("alias '{}' not found in alias map{}", alias, context),
         )
@@ -92,7 +93,7 @@ pub(super) fn deref_port_index(
             }
             let scalar = param_env.get(name.as_str()).ok_or_else(|| {
                 ExpandError::new(
-                    crate::structural::StructuralCode::UnknownAlias,
+                    Code::UnknownAlias,
                     *span,
                     format!(
                         "unknown alias or param '{}' in port index; known aliases: {}; known params: {}",
@@ -107,7 +108,7 @@ pub(super) fn deref_port_index(
         Some(PortIndex::Arity(name)) => {
             let scalar = param_env.get(name.as_str()).ok_or_else(|| {
                 ExpandError::new(
-                    crate::structural::StructuralCode::UnknownParam,
+                    Code::UnknownParam,
                     *span,
                     format!(
                         "unknown arity param '{}' in port index [*{}]; known params: {}",
@@ -145,7 +146,7 @@ pub(super) fn combine_index_resolutions(
         (Arity(n), Arity(m)) => {
             if n != m {
                 return Err(ExpandError::new(
-                    crate::structural::StructuralCode::ArityMismatch,
+                    Code::ArityMismatch,
                     *span,
                     format!(
                         "arity mismatch on both sides of connection: [*{}] vs [*{}]",
@@ -179,7 +180,7 @@ pub(super) fn subst_port_label(
         PortLabel::Param(name) => match param_env.get(name.as_str()) {
             Some(Scalar::Str(s)) => Ok(s.clone()),
             Some(other) => Err(ExpandError::new(
-                crate::structural::StructuralCode::ParamTypeMismatch,
+                Code::ParamTypeMismatch,
                 *span,
                 format!(
                     "param '{}' used as port label must resolve to a string, got {:?}",
@@ -187,7 +188,7 @@ pub(super) fn subst_port_label(
                 ),
             )),
             None => Err(ExpandError::new(
-                crate::structural::StructuralCode::UnknownParam,
+                Code::UnknownParam,
                 *span,
                 format!("unknown param '{}' referenced in port label", name),
             )),
@@ -217,7 +218,7 @@ pub(super) fn eval_scale(
                 Scalar::Float(f) => Ok(*f),
                 Scalar::Int(i) => Ok(*i as f64),
                 other => Err(ExpandError::new(
-                    crate::structural::StructuralCode::InvalidCableScale,
+                    Code::InvalidCableScale,
                     *span,
                     format!("arrow scale must resolve to a number, got {:?}", other),
                 )),
@@ -269,7 +270,7 @@ pub(super) fn check_template_port(
             names.join(", ")
         };
         Err(ExpandError::new(
-            crate::structural::StructuralCode::UnknownPortOnModule,
+            Code::UnknownPortOnModule,
             pr.span,
             format!(
                 "template instance '{}' has no {} '{}'; known {}s: {}",
@@ -300,7 +301,7 @@ pub(super) fn resolve_from(
         }
         ports.out_ports.get(from_port).cloned().ok_or_else(|| {
             ExpandError::new(
-                crate::structural::StructuralCode::UnknownPortOnModule,
+                Code::UnknownPortOnModule,
                 *span,
                 format!(
                     "template instance '{}' has no out-port '{}'",
@@ -340,7 +341,7 @@ pub(super) fn resolve_to(
         }
         ports.in_ports.get(to_port).cloned().ok_or_else(|| {
             ExpandError::new(
-                crate::structural::StructuralCode::UnknownPortOnModule,
+                Code::UnknownPortOnModule,
                 *span,
                 format!(
                     "template instance '{}' has no in-port '{}'",

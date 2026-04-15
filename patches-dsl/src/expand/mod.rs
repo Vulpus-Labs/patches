@@ -29,6 +29,7 @@ use crate::flat::{
     FlatConnection, FlatModule, FlatPatch, FlatPatternDef, FlatPortRef, PortDirection,
 };
 use crate::provenance::Provenance;
+use crate::structural::StructuralCode as Code;
 
 use composition::{expand_pattern_def, flatten_song, index_songs, AssembledSong};
 use connection::{
@@ -65,7 +66,7 @@ impl ExpandError {
     /// Shortcut for [`StructuralCode::Other`] — used while classification
     /// is incrementally refined. Prefer a specific code where possible.
     pub fn other(span: Span, message: impl Into<String>) -> Self {
-        Self::new(crate::structural::StructuralCode::Other, span, message)
+        Self::new(Code::Other, span, message)
     }
 }
 
@@ -330,8 +331,8 @@ fn list_keys<'a, I: Iterator<Item = &'a str>>(iter: Option<I>) -> String {
 fn scalar_to_u32(scalar: &Scalar, span: &Span) -> Result<u32, ExpandError> {
     match scalar {
         Scalar::Int(i) if *i >= 0 => Ok(*i as u32),
-        Scalar::Int(i) => Err(ExpandError::new(crate::structural::StructuralCode::PortIndexInvalid, *span, format!("port index / arity must be non-negative, got {}", i))),
-        other => Err(ExpandError::new(crate::structural::StructuralCode::PortIndexInvalid, *span, format!("port index / arity must be an integer, got {:?}", other))),
+        Scalar::Int(i) => Err(ExpandError::new(Code::PortIndexInvalid, *span, format!("port index / arity must be non-negative, got {}", i))),
+        other => Err(ExpandError::new(Code::PortIndexInvalid, *span, format!("port index / arity must be an integer, got {:?}", other))),
     }
 }
 
@@ -518,7 +519,7 @@ impl<'a> Expander<'a> {
                         }
                         Some(ParamIndex::Arity(param)) => {
                             let n_scalar =
-                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!(
+                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(Code::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
                                         param, param
                                     )))?;
@@ -792,7 +793,7 @@ impl<'a> Expander<'a> {
         let template = self.templates[type_name.as_str()];
 
         if self.call_stack.contains(type_name.as_str()) {
-            return Err(ExpandError::new(crate::structural::StructuralCode::RecursiveTemplate, decl.span, format!("recursive template instantiation: '{}'", type_name)));
+            return Err(ExpandError::new(Code::RecursiveTemplate, decl.span, format!("recursive template instantiation: '{}'", type_name)));
         }
 
         // Identify which declared params are group params (have arity).
@@ -825,7 +826,7 @@ impl<'a> Expander<'a> {
             if !declared_names.contains(name.as_str()) {
                 let mut known: Vec<&str> = declared_names.iter().copied().collect();
                 known.sort();
-                return Err(ExpandError::new(crate::structural::StructuralCode::UnknownTemplateParam, arg.span, format!(
+                return Err(ExpandError::new(Code::UnknownTemplateParam, arg.span, format!(
                         "unknown parameter '{}' for template '{}'; known parameters: {}",
                         name,
                         type_name,
@@ -870,7 +871,7 @@ impl<'a> Expander<'a> {
                         }
                         Some(ParamIndex::Arity(param)) => {
                             let n_scalar =
-                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!(
+                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(Code::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
                                         param, param
                                     )))?;
@@ -884,7 +885,7 @@ impl<'a> Expander<'a> {
                         Some(ParamIndex::Alias(alias)) => {
                             let i =
                                 instance_alias_map.get(alias.as_str()).ok_or_else(|| {
-                                    ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
+                                    ExpandError::new(Code::UnknownAlias, *span, format!(
                                             "alias '{}' not found in alias map",
                                             alias
                                         ))
@@ -918,7 +919,7 @@ impl<'a> Expander<'a> {
                         AtBlockIndex::Literal(n) => *n as usize,
                         AtBlockIndex::Alias(alias) => {
                             *instance_alias_map.get(alias.as_str()).ok_or_else(|| {
-                                ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
+                                ExpandError::new(Code::UnknownAlias, *span, format!(
                                         "alias '{}' not found in alias map for @-block",
                                         alias
                                     ))
@@ -957,7 +958,7 @@ impl<'a> Expander<'a> {
             } else if let Some(default) = &param_decl.default {
                 sub_param_env.insert(name.clone(), default.clone());
             } else {
-                return Err(ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, decl.span, format!(
+                return Err(ExpandError::new(Code::MissingDefaultParam, decl.span, format!(
                         "missing required parameter '{}' for template '{}'",
                         name, type_name
                     )));
@@ -1013,7 +1014,7 @@ impl<'a> Expander<'a> {
                 match param_decl.ty {
                     ParamType::Pattern => {
                         if scope.resolve_pattern(val).is_none() {
-                            return Err(ExpandError::new(crate::structural::StructuralCode::PatternNotFound, decl.span, format!(
+                            return Err(ExpandError::new(Code::PatternNotFound, decl.span, format!(
                                     "template '{}' param '{}': '{}' is not a known pattern",
                                     type_name, name, val,
                                 )));
@@ -1021,7 +1022,7 @@ impl<'a> Expander<'a> {
                     }
                     ParamType::Song => {
                         if scope.resolve_song(val).is_none() {
-                            return Err(ExpandError::new(crate::structural::StructuralCode::SongNotFound, decl.span, format!(
+                            return Err(ExpandError::new(Code::SongNotFound, decl.span, format!(
                                     "template '{}' param '{}': '{}' is not a known song",
                                     type_name, name, val,
                                 )));
@@ -1091,7 +1092,7 @@ impl<'a> Expander<'a> {
                 } else {
                     known.join(", ")
                 };
-                Err(ExpandError::new(crate::structural::StructuralCode::UnknownModuleRef, pr.span, format!(
+                Err(ExpandError::new(Code::UnknownModuleRef, pr.span, format!(
                         "unknown module '{}'; known modules: {}",
                         pr.module, list
                     )))
@@ -1289,7 +1290,7 @@ fn expand_group_param_value(
 ) -> Result<Scalar, ExpandError> {
     let calls = match calls {
         None => {
-            return default.cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, *span, format!(
+            return default.cloned().ok_or_else(|| ExpandError::new(Code::MissingDefaultParam, *span, format!(
                     "group param '{}' has no default and no call-site value",
                     param_name
                 )))
@@ -1329,7 +1330,7 @@ fn expand_group_param_value(
         for (idx, _) in calls {
             if let Some(i) = idx {
                 if *i >= total {
-                    return Err(ExpandError::new(crate::structural::StructuralCode::ArityMismatch, *span, format!(
+                    return Err(ExpandError::new(Code::ArityMismatch, *span, format!(
                             "group param '{}[{}]' index out of range (arity = {})",
                             param_name, i, total
                         )));
@@ -1345,7 +1346,7 @@ fn expand_group_param_value(
                     ))),
             }
         } else {
-            default.cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, *span, format!(
+            default.cloned().ok_or_else(|| ExpandError::new(Code::MissingDefaultParam, *span, format!(
                     "group param '{}[{}]' not supplied and has no default",
                     param_name, index
                 )))
@@ -1401,7 +1402,7 @@ fn check_param_type(
         Ok(())
     } else {
         let expected = param_type_name(ty);
-        Err(ExpandError::new(crate::structural::StructuralCode::ParamTypeMismatch, *span, format!(
+        Err(ExpandError::new(Code::ParamTypeMismatch, *span, format!(
                 "parameter '{}' declared as {} but got {:?}",
                 param_name, expected, scalar
             )))
