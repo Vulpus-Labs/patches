@@ -464,8 +464,8 @@ fn build_param_entry(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {
             let idx = match inner.as_rule() {
                 Rule::param_index_arity => {
                     // param_index_arity = ${ "*" ~ ident }; inner child is ident
-                    let param = inner.into_inner().next().unwrap().as_str().to_owned();
-                    ParamIndex::Arity(param)
+                    let name = inner.into_inner().next().unwrap().as_str().to_owned();
+                    ParamIndex::Name { name, arity_marker: true }
                 }
                 Rule::nat => {
                     let nat_span = span_of(&inner);
@@ -475,7 +475,7 @@ fn build_param_entry(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {
                     })?;
                     ParamIndex::Literal(n)
                 }
-                Rule::ident => ParamIndex::Alias(inner.as_str().to_owned()),
+                Rule::ident => ParamIndex::Name { name: inner.as_str().to_owned(), arity_marker: false },
                 _ => unreachable!("unexpected rule in param_index: {:?}", inner.as_rule()),
             };
             let val = build_value(it.next().unwrap())?;
@@ -558,7 +558,7 @@ fn build_port_ref(pair: Pair<'_, Rule>) -> Result<PortRef, ParseError> {
                     // port_index_arity = ${ "*" ~ ident }
                     // inner of port_index_arity is the ident
                     let name = inner.into_inner().next().unwrap().as_str().to_owned();
-                    Ok(PortIndex::Arity(name))
+                    Ok(PortIndex::Name { name, arity_marker: true })
                 }
                 Rule::nat => {
                     inner.as_str().parse::<u32>().map(PortIndex::Literal).map_err(|_| {
@@ -568,8 +568,8 @@ fn build_port_ref(pair: Pair<'_, Rule>) -> Result<PortRef, ParseError> {
                         }
                     })
                 }
-                Rule::ident => Ok(PortIndex::Alias(inner.as_str().to_owned())),
-                Rule::param_ref => Ok(PortIndex::Alias(build_param_ref_name(inner))),
+                Rule::ident => Ok(PortIndex::Name { name: inner.as_str().to_owned(), arity_marker: false }),
+                Rule::param_ref => Ok(PortIndex::Name { name: build_param_ref_name(inner), arity_marker: false }),
                 _ => unreachable!("unexpected rule in port_index: {:?}", inner.as_rule()),
             }
         })

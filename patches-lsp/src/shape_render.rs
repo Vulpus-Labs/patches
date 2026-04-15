@@ -20,8 +20,12 @@ pub(crate) fn format_port_ref(pr: &dsl_ast::PortRef) -> String {
     match &pr.index {
         None => format!("{}.{}", pr.module, port_str),
         Some(dsl_ast::PortIndex::Literal(n)) => format!("{}.{}/{}", pr.module, port_str, n),
-        Some(dsl_ast::PortIndex::Alias(a)) => format!("{}.{}[{}]", pr.module, port_str, a),
-        Some(dsl_ast::PortIndex::Arity(a)) => format!("{}.{}[*{}]", pr.module, port_str, a),
+        Some(dsl_ast::PortIndex::Name { name, arity_marker: false }) => {
+            format!("{}.{}[{}]", pr.module, port_str, name)
+        }
+        Some(dsl_ast::PortIndex::Name { name, arity_marker: true }) => {
+            format!("{}.{}[*{}]", pr.module, port_str, name)
+        }
     }
 }
 

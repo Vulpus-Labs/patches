@@ -340,7 +340,10 @@ fn build_param_index(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> P
 
     if let Some(arity) = first_named_child_of_kind(node, "param_index_arity") {
         if let Some(id) = first_named_child_of_kind(arity, "ident") {
-            return ParamIndex::Arity(node_text(id, source).to_string());
+            return ParamIndex::Name {
+                name: node_text(id, source).to_string(),
+                arity_marker: true,
+            };
         }
     }
     if let Some(nat) = first_named_child_of_kind(node, "nat") {
@@ -349,7 +352,10 @@ fn build_param_index(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> P
         }
     }
     if let Some(id) = first_named_child_of_kind(node, "ident") {
-        return ParamIndex::Alias(node_text(id, source).to_string());
+        return ParamIndex::Name {
+            name: node_text(id, source).to_string(),
+            arity_marker: false,
+        };
     }
 
     // Fallback — shouldn't normally happen
@@ -680,7 +686,10 @@ fn build_port_index(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Po
 
     if let Some(arity) = first_named_child_of_kind(node, "port_index_arity") {
         if let Some(id) = first_named_child_of_kind(arity, "ident") {
-            return PortIndex::Arity(node_text(id, source).to_string());
+            return PortIndex::Name {
+                name: node_text(id, source).to_string(),
+                arity_marker: true,
+            };
         }
     }
     if let Some(nat) = first_named_child_of_kind(node, "nat") {
@@ -690,11 +699,17 @@ fn build_port_index(node: Node, source: &str, diags: &mut Vec<Diagnostic>) -> Po
     }
     if let Some(pr) = first_named_child_of_kind(node, "param_ref") {
         if let Some(pri) = first_named_child_of_kind(pr, "param_ref_ident") {
-            return PortIndex::Alias(node_text(pri, source).to_string());
+            return PortIndex::Name {
+                name: node_text(pri, source).to_string(),
+                arity_marker: false,
+            };
         }
     }
     if let Some(id) = first_named_child_of_kind(node, "ident") {
-        return PortIndex::Alias(node_text(id, source).to_string());
+        return PortIndex::Name {
+            name: node_text(id, source).to_string(),
+            arity_marker: false,
+        };
     }
 
     PortIndex::Literal(0)

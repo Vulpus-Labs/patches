@@ -84,7 +84,7 @@ pub(super) fn deref_port_index(
     match index {
         None => Ok(IndexResolution::Single(0)),
         Some(PortIndex::Literal(k)) => Ok(IndexResolution::Single(*k)),
-        Some(PortIndex::Alias(name)) => {
+        Some(PortIndex::Name { name, arity_marker: false }) => {
             // Try alias map first, then fall back to param_env.
             if let Some(map) = alias_map {
                 if let Some(&idx) = map.get(name.as_str()) {
@@ -105,7 +105,7 @@ pub(super) fn deref_port_index(
             })?;
             Ok(IndexResolution::Keyed(scalar_to_u32(scalar, span)?))
         }
-        Some(PortIndex::Arity(name)) => {
+        Some(PortIndex::Name { name, arity_marker: true }) => {
             let scalar = param_env.get(name.as_str()).ok_or_else(|| {
                 ExpandError::new(
                     Code::UnknownParam,

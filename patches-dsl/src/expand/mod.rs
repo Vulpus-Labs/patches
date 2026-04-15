@@ -517,7 +517,7 @@ impl<'a> Expander<'a> {
                         Some(ParamIndex::Literal(i)) => {
                             result.push((format!("{}/{}", name.name, i), val));
                         }
-                        Some(ParamIndex::Arity(param)) => {
+                        Some(ParamIndex::Name { name: param, arity_marker: true }) => {
                             let n_scalar =
                                 param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(Code::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
@@ -532,7 +532,7 @@ impl<'a> Expander<'a> {
                                 ));
                             }
                         }
-                        Some(ParamIndex::Alias(alias)) => {
+                        Some(ParamIndex::Name { name: alias, arity_marker: false }) => {
                             let i = deref_index_alias(alias, alias_map, span, "")?;
                             result.push((format!("{}/{}", name.name, i), val));
                         }
@@ -869,7 +869,7 @@ impl<'a> Expander<'a> {
                                 .or_default()
                                 .push((Some(*i as usize), val));
                         }
-                        Some(ParamIndex::Arity(param)) => {
+                        Some(ParamIndex::Name { name: param, arity_marker: true }) => {
                             let n_scalar =
                                 param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(Code::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
@@ -882,7 +882,7 @@ impl<'a> Expander<'a> {
                                 calls.push((Some(i), resolved.clone()));
                             }
                         }
-                        Some(ParamIndex::Alias(alias)) => {
+                        Some(ParamIndex::Name { name: alias, arity_marker: false }) => {
                             let i =
                                 instance_alias_map.get(alias.as_str()).ok_or_else(|| {
                                     ExpandError::new(Code::UnknownAlias, *span, format!(
@@ -1052,7 +1052,7 @@ impl<'a> Expander<'a> {
 
     /// Expand a single connection statement in the current scope.
     ///
-    /// Handles arity expansion: if either port index carries `PortIndex::Arity`,
+    /// Handles arity expansion: if either port index carries an arity-marker name,
     /// the connection is emitted N times with concrete indices.
     #[allow(clippy::too_many_arguments)]
     fn expand_connection(

@@ -60,15 +60,19 @@ pub struct ShapeArg {
     pub span: Span,
 }
 
-/// Index on a param entry: literal `[N]`, arity wildcard `[*name]`, or alias `[name]`.
+/// Index on a param entry: literal `[N]` or named `[name]`/`[*name]`.
+///
+/// `Name { arity_marker: true }` records the `*` syntax (arity wildcard);
+/// `false` is a plain alias/param ref. Classification of the name as
+/// alias-vs-arity vs param ref is the expander's job — see
+/// [`crate::expand`]. The parser only records what was syntactically
+/// written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParamIndex {
     /// `[N]` — set a single named index.
     Literal(u32),
-    /// `[*name]` — expand over `0..param_env[name]`.
-    Arity(String),
-    /// `[name]` — look up the alias name in the module's alias map.
-    Alias(String),
+    /// `[name]` or `[*name]` — interpretation deferred to expansion.
+    Name { name: String, arity_marker: bool },
 }
 
 /// The index in an `@`-block header: either a literal integer or an alias name.
@@ -116,19 +120,23 @@ pub enum PortLabel {
 
 /// A port index in a connection reference.
 ///
-/// Replaces the former `Option<u32>` to support three distinct forms:
-/// - `port[0]`    → `Literal(0)` — concrete index
-/// - `port[k]`    → `Alias("k")` — single port at computed index; resolved against alias map (or template env for legacy use)
-/// - `port[<k>]`  → `Alias("k")` — same resolution via explicit param-ref syntax
-/// - `port[*n]`   → `Arity("n")` — expand over `0..n`
+/// Two-variant: literal ints, or named indices distinguished by the
+/// `arity_marker` flag (`*` syntax). The expander classifies named
+/// indices as alias / arity / param ref at use sites against the
+/// surrounding alias map and param environment.
+///
+/// Syntactic forms:
+/// - `port[0]`    → `Literal(0)`
+/// - `port[k]`    → `Name { name: "k", arity_marker: false }`
+/// - `port[<k>]`  → `Name { name: "k", arity_marker: false }`
+/// - `port[*n]`   → `Name { name: "n", arity_marker: true }`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortIndex {
     /// `port[N]` — a concrete, literal index.
     Literal(u32),
-    /// `port[k]` or `port[<k>]` — index resolved against alias map (or template env for legacy use).
-    Alias(String),
-    /// `port[*n]` — expand over `0..n`; only valid in connection use sites.
-    Arity(String),
+    /// `port[name]`, `port[<name>]`, or `port[*name]` — interpretation
+    /// deferred to expansion.
+    Name { name: String, arity_marker: bool },
 }
 
 /// A port reference: `<module>.<port>[<index>]`.

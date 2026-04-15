@@ -862,8 +862,14 @@ patch {
         }).is_some()
     };
     assert!(find_conn(&PortIndex::Literal(0)), "expected Literal(0) index");
-    assert!(find_conn(&PortIndex::Alias("k".to_owned())), "expected Alias(k) index");
-    assert!(find_conn(&PortIndex::Arity("n".to_owned())), "expected Arity(n) index");
+    assert!(
+        find_conn(&PortIndex::Name { name: "k".to_owned(), arity_marker: false }),
+        "expected Name(k, alias) index"
+    );
+    assert!(
+        find_conn(&PortIndex::Name { name: "n".to_owned(), arity_marker: true }),
+        "expected Name(n, arity) index"
+    );
 }
 
 // ── AST: PortGroupDecl with arity ─────────────────────────────────────────────

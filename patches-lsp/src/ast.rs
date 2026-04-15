@@ -79,8 +79,7 @@ pub(crate) struct ShapeArg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ParamIndex {
     Literal(u32),
-    Arity(String),
-    Alias(String),
+    Name { name: String, arity_marker: bool },
 }
 
 /// Index in an `@`-block header.
@@ -133,8 +132,7 @@ pub(crate) enum PortLabel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PortIndex {
     Literal(u32),
-    Alias(String),
-    Arity(String),
+    Name { name: String, arity_marker: bool },
 }
 
 /// A port reference: `module.port[index]`.
@@ -347,8 +345,7 @@ mod drift {
     fn param_index_map(p: &dsl::ParamIndex) -> &'static str {
         match p {
             dsl::ParamIndex::Literal(_) => "LSP: ParamIndex::Literal",
-            dsl::ParamIndex::Arity(_) => "LSP: ParamIndex::Arity",
-            dsl::ParamIndex::Alias(_) => "LSP: ParamIndex::Alias",
+            dsl::ParamIndex::Name { .. } => "LSP: ParamIndex::Name",
         }
     }
 
@@ -377,8 +374,7 @@ mod drift {
     fn port_index_map(p: &dsl::PortIndex) -> &'static str {
         match p {
             dsl::PortIndex::Literal(_) => "LSP: PortIndex::Literal",
-            dsl::PortIndex::Alias(_) => "LSP: PortIndex::Alias",
-            dsl::PortIndex::Arity(_) => "LSP: PortIndex::Arity",
+            dsl::PortIndex::Name { .. } => "LSP: PortIndex::Name",
         }
     }
 
