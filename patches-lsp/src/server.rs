@@ -200,25 +200,7 @@ impl LanguageServer for PatchesLanguageServer {
         if let Some((range, markdown)) =
             self.workspace.peek_expansion(uri, params.range.start)
         {
-            let command = Command {
-                title: "Peek expansion".to_string(),
-                command: "patches.peekExpansion".to_string(),
-                arguments: Some(vec![
-                    serde_json::Value::String(uri.to_string()),
-                    serde_json::to_value(range).unwrap_or(serde_json::Value::Null),
-                    serde_json::Value::String(markdown),
-                ]),
-            };
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Peek expansion".to_string(),
-                kind: Some(CodeActionKind::new("source.peekExpansion")),
-                diagnostics: None,
-                edit: None,
-                command: Some(command),
-                is_preferred: None,
-                disabled: None,
-                data: None,
-            }));
+            actions.push(crate::peek::peek_code_action(uri, range, markdown));
         }
 
         if actions.is_empty() {

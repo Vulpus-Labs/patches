@@ -1,7 +1,16 @@
-//! Tree-sitter CST to tolerant AST builder.
+//! Pest parse tree → tolerant AST lowering.
 //!
-//! Walks the tree-sitter CST and produces the tolerant AST, accumulating
-//! diagnostics for ERROR and MISSING nodes encountered during the walk.
+//! Despite the file name, this is a *lowering* pass, not an AST constructor:
+//! it walks a pest (and, for the incremental path, tree-sitter) parse tree
+//! and produces the LSP-side tolerant AST defined in [`crate::ast`]. The
+//! walk is tolerant — ERROR and MISSING nodes are surfaced as diagnostics
+//! rather than aborting — so downstream analysis can still run on a
+//! partially-broken document.
+//!
+//! The LSP tolerant AST deliberately mirrors (but does not reuse)
+//! `patches_dsl::ast` so the LSP can report positions for every token; the
+//! compile-time drift guard in [`crate::ast::drift`](crate::ast) keeps the
+//! two shapes in sync.
 
 use tree_sitter::{Node, Tree};
 

@@ -304,6 +304,15 @@ pub(crate) struct File {
 // The assertions are purely compile-time (patterns, not values); the tests
 // themselves just call the inner `_name` helpers to keep them exercised.
 
+/// Compile-time drift guard between the LSP tolerant AST and
+/// `patches_dsl::ast`.
+///
+/// Each helper below holds an exhaustive `match` over a DSL enum and names
+/// the corresponding LSP variant (or records deliberate non-mirrors). The
+/// module only has to compile — if someone adds a variant to the DSL AST
+/// without updating the LSP mirror, the match becomes non-exhaustive and
+/// this module fails to build. `drift_maps_compile` exists solely to keep
+/// the helpers live so the compiler actually type-checks them.
 #[cfg(test)]
 #[allow(dead_code)]
 mod drift {
@@ -460,11 +469,12 @@ mod drift {
         }
     }
 
+    /// This test asserts nothing at runtime. Its purpose is to keep the
+    /// drift helpers alive so the compiler type-checks the exhaustive
+    /// matches they contain. If a DSL enum gains a variant and the LSP
+    /// mirror is not updated, the build fails here.
     #[test]
     fn drift_maps_compile() {
-        // The real test is the exhaustive `match` in each helper — if a DSL
-        // variant is added, this module fails to compile.  The body here
-        // only has to reference the helpers so they aren't dead-code-pruned.
         let _ = [
             scalar_map as fn(&_) -> _ as usize,
             value_map as fn(&_) -> _ as usize,

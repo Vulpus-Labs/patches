@@ -22,7 +22,7 @@ use crate::flat::{
 use crate::provenance::Provenance;
 
 /// A song whose rows still carry [`SongCell`] values; resolved to
-/// [`FlatSongDef`] once all patterns are known (see [`resolve_songs`]).
+/// [`FlatSongDef`] once all patterns are known (see [`index_songs`]).
 #[derive(Debug)]
 struct AssembledSong {
     name: QName,
@@ -145,11 +145,11 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
 
     // Canonicalise: sort patterns alphabetically by qualified name so that
     // `FlatPatch::patterns` has a stable, deterministic order irrespective of
-    // template expansion order. `resolve_songs` emits indices into this
+    // template expansion order. `index_songs` emits indices into this
     // sorted list.
     patterns.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let resolved_songs = resolve_songs(&patterns, songs)?;
+    let resolved_songs = index_songs(&patterns, songs)?;
 
     Ok(ExpandResult {
         patch: FlatPatch {
@@ -167,7 +167,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
 /// with pattern indices into `patterns`. Errors if a cell references an
 /// unknown pattern, or if a `ParamRef` survived expansion (which would
 /// indicate an expansion bug).
-fn resolve_songs(
+fn index_songs(
     patterns: &[FlatPatternDef],
     songs: Vec<AssembledSong>,
 ) -> Result<Vec<FlatSongDef>, ExpandError> {
@@ -278,7 +278,7 @@ fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
 
 /// Resolve one cell: pattern references are looked up through `scope`; param
 /// refs are substituted from `param_env` (and checked against `param_types`).
-fn resolve_song_cell(
+fn subst_song_cell(
     cell: &SongCell,
     param_env: &HashMap<String, Scalar>,
     param_types: &HashMap<String, ParamType>,
@@ -350,7 +350,7 @@ fn flatten_row_groups(
                 let cells = row
                     .cells
                     .iter()
-                    .map(|c| resolve_song_cell(c, param_env, param_types, scope))
+                    .map(|c| subst_song_cell(c, param_env, param_types, scope))
                     .collect::<Result<Vec<_>, _>>()?;
                 out.push(SongRow { cells, span: row.span });
             }
@@ -708,6 +708,25 @@ enum IndexResolution {
     Arity(u32),
 }
 
+/// Look up a module-level index alias (`[name]`) in `alias_map`, returning
+/// the concrete port-group slot index. Used by both `ParamEntry::KeyValue`
+/// and `ParamEntry::AtBlock` param-expansion arms. `context` is appended to
+/// the error message suffix (e.g. `" for @-block"`).
+fn deref_index_alias(
+    alias: &str,
+    alias_map: &HashMap<String, u32>,
+    span: &Span,
+    context: &str,
+) -> Result<u32, ExpandError> {
+    alias_map.get(alias).copied().ok_or_else(|| {
+        ExpandError::new(
+            crate::structural::StructuralCode::UnknownAlias,
+            *span,
+            format!("alias '{}' not found in alias map{}", alias, context),
+        )
+    })
+}
+
 /// Resolve `Option<PortIndex>` to an [`IndexResolution`].
 ///
 /// - `None`          → `Single(0)` (implicit default, plain boundary key).
@@ -715,7 +734,7 @@ enum IndexResolution {
 /// - `Alias(name)`   → `Keyed(k)`  (indexed boundary key; see [`IndexResolution::Keyed`]).
 ///   Looks up in `alias_map` first (module-level aliases), then falls back to `param_env`.
 /// - `Arity(name)`   → `Arity(n)`  (fan-out over `0..n`, indexed boundary key).
-fn resolve_port_index(
+fn deref_port_index(
     index: &Option<PortIndex>,
     param_env: &HashMap<String, Scalar>,
     span: &Span,
@@ -911,7 +930,7 @@ impl<'a> Expander<'a> {
     ///
     /// - `Scalar(s)` → substitute param refs / enum refs, return resulting scalar.
     /// - `AliasList(names)` → return `Scalar::Int(names.len())` (count).
-    fn resolve_shape_arg_value(
+    fn eval_shape_arg_value(
         &self,
         value: &ShapeArgValue,
         param_env: &HashMap<String, Scalar>,
@@ -959,7 +978,7 @@ impl<'a> Expander<'a> {
                             }
                         }
                         Some(ParamIndex::Alias(alias)) => {
-                            let i = alias_map.get(alias.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!("alias '{}' not found in alias map", alias)))?;
+                            let i = deref_index_alias(alias, alias_map, span, "")?;
                             result.push((format!("{}/{}", name.name, i), val));
                         }
                     }
@@ -976,10 +995,7 @@ impl<'a> Expander<'a> {
                     let idx = match index {
                         AtBlockIndex::Literal(n) => *n,
                         AtBlockIndex::Alias(alias) => {
-                            *alias_map.get(alias.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
-                                    "alias '{}' not found in alias map for @-block",
-                                    alias
-                                )))?
+                            deref_index_alias(alias, alias_map, span, " for @-block")?
                         }
                     };
                     for (key, val) in entries {
@@ -1065,7 +1081,7 @@ impl<'a> Expander<'a> {
                     .shape
                     .iter()
                     .map(|a| {
-                        self.resolve_shape_arg_value(&a.value, ctx.param_env, &a.span)
+                        self.eval_shape_arg_value(&a.value, ctx.param_env, &a.span)
                             .map(|s| (a.name.name.clone(), s))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1226,7 +1242,7 @@ impl<'a> Expander<'a> {
             }
             scalar_call_params.insert(
                 name.clone(),
-                self.resolve_shape_arg_value(&arg.value, param_env, &arg.span)?,
+                self.eval_shape_arg_value(&arg.value, param_env, &arg.span)?,
             );
         }
 
@@ -1371,7 +1387,7 @@ impl<'a> Expander<'a> {
 
             for i in 0..n {
                 let key = format!("{}/{}", name, i);
-                let val = resolve_group_param_value(
+                let val = expand_group_param_value(
                     name,
                     i,
                     n,
@@ -1454,7 +1470,7 @@ impl<'a> Expander<'a> {
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
         let arrow_scale =
-            resolve_scale(conn.arrow.scale.as_ref(), param_env, &conn.arrow.span)?;
+            eval_scale(conn.arrow.scale.as_ref(), param_env, &conn.arrow.span)?;
 
         // Normalise direction so signal always flows from → to.
         let (from_ref, to_ref) = match conn.arrow.direction {
@@ -1486,8 +1502,8 @@ impl<'a> Expander<'a> {
         check_module(from_ref)?;
         check_module(to_ref)?;
 
-        let from_port = resolve_port_label(&from_ref.port, param_env, &from_ref.span)?;
-        let to_port = resolve_port_label(&to_ref.port, param_env, &to_ref.span)?;
+        let from_port = subst_port_label(&from_ref.port, param_env, &from_ref.span)?;
+        let to_port = subst_port_label(&to_ref.port, param_env, &to_ref.span)?;
 
         // Fail-fast: for template-instance refs, validate the port name exists
         // on the boundary map before resolving any port-index alias on it.
@@ -1499,9 +1515,9 @@ impl<'a> Expander<'a> {
         let from_alias_map = self.alias_maps.get(from_ref.module.as_str());
         let to_alias_map = self.alias_maps.get(to_ref.module.as_str());
         let from_res =
-            resolve_port_index(&from_ref.index, param_env, &from_ref.span, from_alias_map)?;
+            deref_port_index(&from_ref.index, param_env, &from_ref.span, from_alias_map)?;
         let to_res =
-            resolve_port_index(&to_ref.index, param_env, &to_ref.span, to_alias_map)?;
+            deref_port_index(&to_ref.index, param_env, &to_ref.span, to_alias_map)?;
 
         let pairs = combine_index_resolutions(from_res, to_res, &conn.span)?;
 
@@ -1665,7 +1681,7 @@ impl<'a> Expander<'a> {
 ///
 /// An absent call-site value falls back to `default`; if that is also absent,
 /// an error is returned.
-fn resolve_group_param_value(
+fn expand_group_param_value(
     param_name: &str,
     index: usize,
     total: usize,
@@ -1799,7 +1815,7 @@ fn check_param_type(
 /// `PortLabel::Literal` is returned as-is.
 /// `PortLabel::Param(name)` is looked up in `param_env`; the resolved scalar
 /// must be string-compatible (`Scalar::Str`).
-fn resolve_port_label(
+fn subst_port_label(
     label: &PortLabel,
     param_env: &HashMap<String, Scalar>,
     span: &Span,
@@ -1823,7 +1839,7 @@ fn resolve_port_label(
 /// `None` → 1.0 (implicit default).
 /// `Some(scalar)` is substituted via `param_env` then coerced to `f64`.
 /// Returns an error if the resolved scalar is not numeric.
-fn resolve_scale(
+fn eval_scale(
     scale: Option<&Scalar>,
     param_env: &HashMap<String, Scalar>,
     span: &Span,

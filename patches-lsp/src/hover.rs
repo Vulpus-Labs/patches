@@ -490,55 +490,34 @@ fn try_hover_port(
     }
 
     let desc = model.get_descriptor(module_name)?;
-    match desc {
-        ResolvedDescriptor::Module { desc: md, .. } => {
-            for port in md.outputs.iter().chain(md.inputs.iter()) {
-                if port.name == port_name {
-                    let direction = if md.outputs.iter().any(|p| p.name == port_name) {
-                        "output"
-                    } else {
-                        "input"
-                    };
-                    let kind = cable_kind_str(&port.kind);
-                    let md_text = format!(
-                        "**{direction}** `{port_name}` — {kind}{}",
-                        if port.index > 0 {
-                            format!(" [{}]", port.index)
-                        } else {
-                            String::new()
-                        }
-                    );
-                    return Some(Hover {
-                        contents: HoverContents::Markup(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: md_text,
-                        }),
-                        range: Some(node_to_range(port_label_node, line_starts)),
-                    });
+    let m = analysis::find_port(desc, port_name)?;
+    let direction_str = match m.direction() {
+        analysis::PortDirection::Output => "output",
+        analysis::PortDirection::Input => "input",
+    };
+    let value = match m {
+        analysis::PortMatch::Module { port, .. } => {
+            let kind = cable_kind_str(&port.kind);
+            format!(
+                "**{direction_str}** `{port_name}` — {kind}{}",
+                if port.index > 0 {
+                    format!(" [{}]", port.index)
+                } else {
+                    String::new()
                 }
-            }
-            None
+            )
         }
-        ResolvedDescriptor::Template {
-            in_ports,
-            out_ports,
-        } => {
-            let direction = if out_ports.iter().any(|p| p == port_name) {
-                "output"
-            } else if in_ports.iter().any(|p| p == port_name) {
-                "input"
-            } else {
-                return None;
-            };
-            Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!("**{direction}** `{port_name}` (template)"),
-                }),
-                range: Some(node_to_range(port_label_node, line_starts)),
-            })
+        analysis::PortMatch::Template { .. } => {
+            format!("**{direction_str}** `{port_name}` (template)")
         }
-    }
+    };
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: Some(node_to_range(port_label_node, line_starts)),
+    })
 }
 
 /// Hover over a module instance name (e.g. `osc` in `module osc : Osc`).

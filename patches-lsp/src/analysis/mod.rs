@@ -24,7 +24,7 @@ mod symbols;
 mod types;
 mod validate;
 
-pub(crate) use descriptor::ResolvedDescriptor;
+pub(crate) use descriptor::{find_port, PortDirection, PortMatch, ResolvedDescriptor};
 pub(crate) use scan::ScopeKey;
 pub(crate) use types::{ShapeValue, TemplateInfo};
 

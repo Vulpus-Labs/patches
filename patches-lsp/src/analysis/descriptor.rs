@@ -25,19 +25,85 @@ pub(crate) enum ResolvedDescriptor {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PortDirection {
+    Input,
+    Output,
+}
+
+/// A port found on a resolved descriptor by name. For module descriptors the
+/// full `PortDescriptor` (kind, index) is attached; for template descriptors
+/// only the direction is known.
+pub(crate) enum PortMatch<'a> {
+    Module {
+        direction: PortDirection,
+        port: &'a patches_core::PortDescriptor,
+    },
+    Template {
+        direction: PortDirection,
+    },
+}
+
+impl PortMatch<'_> {
+    pub fn direction(&self) -> PortDirection {
+        match self {
+            PortMatch::Module { direction, .. } | PortMatch::Template { direction } => *direction,
+        }
+    }
+}
+
+/// Shared port lookup used by validate (existence check) and hover
+/// (port-detail rendering). Walks outputs first, then inputs; returns the
+/// first match.
+pub(crate) fn find_port<'a>(desc: &'a ResolvedDescriptor, name: &str) -> Option<PortMatch<'a>> {
+    match desc {
+        ResolvedDescriptor::Module { desc, .. } => {
+            if let Some(port) = desc.outputs.iter().find(|p| p.name == name) {
+                return Some(PortMatch::Module {
+                    direction: PortDirection::Output,
+                    port,
+                });
+            }
+            if let Some(port) = desc.inputs.iter().find(|p| p.name == name) {
+                return Some(PortMatch::Module {
+                    direction: PortDirection::Input,
+                    port,
+                });
+            }
+            None
+        }
+        ResolvedDescriptor::Template {
+            in_ports,
+            out_ports,
+        } => {
+            if out_ports.iter().any(|p| p == name) {
+                Some(PortMatch::Template {
+                    direction: PortDirection::Output,
+                })
+            } else if in_ports.iter().any(|p| p == name) {
+                Some(PortMatch::Template {
+                    direction: PortDirection::Input,
+                })
+            } else {
+                None
+            }
+        }
+    }
+}
+
 impl ResolvedDescriptor {
     pub fn has_input(&self, name: &str) -> bool {
-        match self {
-            ResolvedDescriptor::Module { desc, .. } => desc.inputs.iter().any(|p| p.name == name),
-            ResolvedDescriptor::Template { in_ports, .. } => in_ports.iter().any(|p| p == name),
-        }
+        matches!(
+            find_port(self, name).map(|m| m.direction()),
+            Some(PortDirection::Input)
+        )
     }
 
     pub fn has_output(&self, name: &str) -> bool {
-        match self {
-            ResolvedDescriptor::Module { desc, .. } => desc.outputs.iter().any(|p| p.name == name),
-            ResolvedDescriptor::Template { out_ports, .. } => out_ports.iter().any(|p| p == name),
-        }
+        matches!(
+            find_port(self, name).map(|m| m.direction()),
+            Some(PortDirection::Output)
+        )
     }
 
     pub fn has_parameter(&self, name: &str) -> bool {

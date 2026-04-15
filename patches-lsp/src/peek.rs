@@ -9,7 +9,9 @@
 use patches_core::{SourceId, Span as CoreSpan};
 use patches_dsl::flat::FlatPatch;
 use patches_dsl::SourceMap;
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{
+    CodeAction, CodeActionKind, CodeActionOrCommand, Command, Range, Url,
+};
 
 use crate::expansion::{FlatNodeRef, PatchReferences};
 use crate::lsp_util::source_id_for_uri;
@@ -109,5 +111,30 @@ pub(crate) struct PeekResult {
     #[allow(dead_code)]
     pub template_name: String,
     pub markdown: String,
+}
+
+/// Build the `patches.peekExpansion` code action for a (range, markdown) pair
+/// produced by the workspace's peek query. Returns `None` when no expansion
+/// covers the cursor.
+pub(crate) fn peek_code_action(uri: &Url, range: Range, markdown: String) -> CodeActionOrCommand {
+    let command = Command {
+        title: "Peek expansion".to_string(),
+        command: "patches.peekExpansion".to_string(),
+        arguments: Some(vec![
+            serde_json::Value::String(uri.to_string()),
+            serde_json::to_value(range).unwrap_or(serde_json::Value::Null),
+            serde_json::Value::String(markdown),
+        ]),
+    };
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title: "Peek expansion".to_string(),
+        kind: Some(CodeActionKind::new("source.peekExpansion")),
+        diagnostics: None,
+        edit: None,
+        command: Some(command),
+        is_preferred: None,
+        disabled: None,
+        data: None,
+    })
 }
 

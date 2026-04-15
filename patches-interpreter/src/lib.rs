@@ -1322,7 +1322,7 @@ mod tests {
     // Note: "unknown pattern" is enforced at expansion time now (every
     // `FlatSongRow` cell is `Option<PatternIdx>` indexing into
     // `FlatPatch::patterns`), so the check no longer lives in the interpreter.
-    // See `patches_dsl::expand::resolve_songs`.
+    // See `patches_dsl::expand::index_songs`.
 
     #[test]
     fn song_step_count_mismatch_is_error() {
