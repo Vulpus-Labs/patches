@@ -2,12 +2,13 @@
 //!
 //! The pipeline runs in discrete phases, split across submodules so that
 //! pure AST→model translation (`scan`, `deps`, `descriptor`, `symbols`) is
-//! separated from diagnostic emission (`validate`):
+//! separated from diagnostic emission (`validate`, `tracker`):
 //!
 //! 1. [`scan`] — shallow scan extracts declaration names and kinds
 //! 2. [`deps`] — template dependency resolution, cycle detection
 //! 3. [`descriptor`] — resolve module descriptors via the registry
-//! 4. [`validate`] — validate connections, parameters, tracker references
+//! 4. [`validate`] — connection and parameter diagnostics (phase 4a) and
+//!    [`tracker`] — pattern/song reference diagnostics (phase 4b)
 //! 5. [`symbols`] — collect navigable definitions and references
 
 use std::collections::HashMap;
@@ -21,6 +22,7 @@ mod deps;
 mod descriptor;
 mod scan;
 mod symbols;
+mod tracker;
 mod types;
 mod validate;
 
@@ -70,14 +72,18 @@ pub(crate) fn analyse_with_env(
     registry: &Registry,
     external_templates: &HashMap<String, TemplateInfo>,
 ) -> SemanticModel {
-    // Phase 1: shallow scan
+    // ── Phase 1: shallow scan ────────────────────────────────────────────
+    // Walk the AST top-level only and produce a DeclarationMap of templates,
+    // patterns, songs, and module instances by name.
     let mut decl_map = scan::shallow_scan(file);
 
-    // Merge external templates (from includes) into the local decl_map.
-    // Local templates win on name collision so local spans/diagnostics stay
-    // authoritative. External entries carry empty `body_type_refs` so they
-    // act as leaves in the dependency graph and never trigger cycle
-    // diagnostics from this file.
+    // Orchestrator splice: merge external templates (from include resolution)
+    // into the scanned decl_map before downstream phases see it. Done here
+    // rather than inside `scan` because includes are a workspace concern, not
+    // a per-file syntactic one. Local templates win on name collision so
+    // local spans/diagnostics stay authoritative; external entries carry
+    // empty `body_type_refs` so they act as leaves in the dependency graph
+    // and never trigger cycle diagnostics from this file.
     for (name, info) in external_templates {
         decl_map
             .templates
@@ -92,25 +98,38 @@ pub(crate) fn analyse_with_env(
             });
     }
 
-    // Phase 2: dependency resolution
+    // ── Phase 2: template dependency resolution ──────────────────────────
+    // Build the template-instantiation graph and detect cycles. Output:
+    // dependency diagnostics, no model mutation.
     let dep_result = deps::resolve_dependencies(&decl_map);
     let mut diagnostics = dep_result.diagnostics;
 
-    // Phase 3: descriptor instantiation
+    // ── Phase 3: descriptor instantiation ────────────────────────────────
+    // Resolve each module instance to either a concrete `ModuleDescriptor`
+    // (via the registry) or a `Template` descriptor stand-in. Output:
+    // `descriptors` keyed by `ScopeKey`, plus unknown-type diagnostics.
     let (descriptors, desc_diags) = descriptor::instantiate_descriptors(&decl_map, registry);
     diagnostics.extend(desc_diags);
 
-    // Phase 4: body analysis
+    // ── Phase 4a: connection and parameter validation ────────────────────
+    // Diagnostic-only pass over the resolved descriptors; reports unknown
+    // ports, unknown module-instance refs, and unknown parameter names.
     let body_diags = validate::analyse_body(file, &descriptors, &decl_map);
     diagnostics.extend(body_diags);
 
-    // Phase 4b: tracker validation
-    let tracker_diags = validate::analyse_tracker(&decl_map);
+    // ── Phase 4b: tracker reference validation ───────────────────────────
+    // Pattern names in song rows, song names in MasterSequencer params, and
+    // channel-count alignment across song columns. Split from 4a because it
+    // needs the full AST (to read MasterSequencer params) and operates on
+    // the tracker subdomain rather than the connection graph.
+    let tracker_diags = tracker::analyse_tracker(&decl_map);
     diagnostics.extend(tracker_diags);
-    let tracker_module_diags = validate::analyse_tracker_modules(file, &decl_map);
+    let tracker_module_diags = tracker::analyse_tracker_modules(file, &decl_map);
     diagnostics.extend(tracker_module_diags);
 
-    // Phase 5: navigation index
+    // ── Phase 5: navigation index ────────────────────────────────────────
+    // Collect definitions and references for goto-definition / find-refs.
+    // Pure AST walk; emits no diagnostics.
     let defs = symbols::collect_definitions(file);
     let refs = symbols::collect_references(file, &decl_map);
 
