@@ -10,6 +10,8 @@ path = "src/main.rs"
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }
+patches-diagnostics = { path = "../patches-diagnostics" }
+patches-interpreter = { path = "../patches-interpreter" }
 patches-modules = { path = "../patches-modules" }
 patches-svg = { path = "../patches-svg" }
 tower-lsp = "0.20"

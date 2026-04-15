@@ -22,6 +22,7 @@ pub mod ast;
 mod expand;
 pub mod flat;
 mod parser;
+pub mod structural;
 
 // Provenance, SourceId, Span, and SourceMap are owned by `patches-core` so
 // they can appear in core types like `BuildError`. Re-exported here for the
@@ -31,6 +32,7 @@ pub use patches_core::source_map;
 
 pub mod include_frontier;
 pub mod loader;
+pub mod pipeline;
 
 pub use ast::{
     Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
@@ -40,6 +42,7 @@ pub use ast::{
     SourceId, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
+pub use structural::{StructuralCode, StructuralError};
 pub use flat::{
     FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
     FlatSongRow, PatternIdx,

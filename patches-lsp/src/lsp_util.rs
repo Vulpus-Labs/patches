@@ -1,6 +1,8 @@
 //! Shared LSP utilities: coordinate conversion, diagnostic mapping,
 //! and tree-sitter node helpers.
 
+use patches_core::source_map::SourceMap;
+use patches_diagnostics::{RenderedDiagnostic, Severity, Snippet};
 use tower_lsp::lsp_types::*;
 
 use crate::ast_builder::Diagnostic;
@@ -45,13 +47,23 @@ pub(crate) fn position_to_byte_offset(line_index: &[usize], position: Position) 
 // ─── Diagnostic conversion ───────────────────────────────────────────────
 
 /// Convert internal diagnostics to LSP diagnostics.
+#[cfg(test)]
 pub(crate) fn to_lsp_diagnostics(
     line_index: &[usize],
     syntax_diags: &[Diagnostic],
     semantic_diags: &[Diagnostic],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let mut out = Vec::new();
+    let mut out = syntax_to_lsp_diagnostics(line_index, syntax_diags);
+    out.extend(semantic_to_lsp_diagnostics(line_index, semantic_diags));
+    out
+}
 
+/// Convert syntax (tree-sitter) diagnostics only — always published.
+pub(crate) fn syntax_to_lsp_diagnostics(
+    line_index: &[usize],
+    syntax_diags: &[Diagnostic],
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let mut out = Vec::new();
     for diag in syntax_diags {
         let start = byte_offset_to_position(line_index, diag.span.start);
         let end = byte_offset_to_position(line_index, diag.span.end);
@@ -63,7 +75,16 @@ pub(crate) fn to_lsp_diagnostics(
             ..Default::default()
         });
     }
+    out
+}
 
+/// Convert tolerant-AST semantic diagnostics to LSP form. Published only
+/// on the tree-sitter fallback path (pest stage 2 failed) — ADR 0038.
+pub(crate) fn semantic_to_lsp_diagnostics(
+    line_index: &[usize],
+    semantic_diags: &[Diagnostic],
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let mut out = Vec::new();
     for diag in semantic_diags {
         let start = byte_offset_to_position(line_index, diag.span.start);
         let end = byte_offset_to_position(line_index, diag.span.end);
@@ -85,8 +106,95 @@ pub(crate) fn to_lsp_diagnostics(
             ..Default::default()
         });
     }
-
     out
+}
+
+// ─── Pipeline diagnostic mapping ─────────────────────────────────────────
+
+/// Convert a pipeline [`RenderedDiagnostic`] to an LSP
+/// [`tower_lsp::lsp_types::Diagnostic`] whose `range` is positioned
+/// against `target_line_index`. The caller is responsible for bucketing
+/// `rendered` to the URI whose line index they pass in — this function
+/// assumes `rendered.primary` lives in that URI.
+///
+/// `relatedInformation` still links sibling snippets (expansion chain,
+/// include chain) using their own source text; it no longer doubles as a
+/// primary-location stand-in for cross-file diagnostics.
+pub(crate) fn rendered_to_lsp_diagnostic(
+    rendered: &RenderedDiagnostic,
+    source_map: &SourceMap,
+    target_line_index: &[usize],
+) -> tower_lsp::lsp_types::Diagnostic {
+    let severity = match rendered.severity {
+        Severity::Error => DiagnosticSeverity::ERROR,
+        Severity::Warning => DiagnosticSeverity::WARNING,
+        Severity::Note => DiagnosticSeverity::INFORMATION,
+    };
+
+    let range = snippet_to_range(&rendered.primary, target_line_index);
+    let related = build_related_information(rendered, source_map);
+
+    tower_lsp::lsp_types::Diagnostic {
+        range,
+        severity: Some(severity),
+        code: rendered.code.as_ref().map(|c| NumberOrString::String(c.clone())),
+        source: Some("patches".to_string()),
+        message: rendered.message.clone(),
+        related_information: if related.is_empty() { None } else { Some(related) },
+        ..Default::default()
+    }
+}
+
+fn snippet_to_range(snippet: &Snippet, line_index: &[usize]) -> Range {
+    let start = byte_offset_to_position(line_index, snippet.range.start);
+    let end = byte_offset_to_position(line_index, snippet.range.end);
+    Range::new(start, end)
+}
+
+fn build_related_information(
+    rendered: &RenderedDiagnostic,
+    source_map: &SourceMap,
+) -> Vec<DiagnosticRelatedInformation> {
+    let mut out = Vec::new();
+    // Include the primary span as related info when it's in a different
+    // file from where the diagnostic is anchored — gives the user a
+    // clickable link to the actual site.
+    let all: Vec<&Snippet> = std::iter::once(&rendered.primary)
+        .chain(rendered.related.iter())
+        .collect();
+    for snippet in all {
+        let Some(path) = source_map.path(snippet.source) else { continue };
+        let Ok(uri) = Url::from_file_path(path) else { continue };
+        let Some(text) = source_map.source_text(snippet.source) else { continue };
+        let start = byte_offset_to_lsp_pos_in(text, snippet.range.start);
+        let end = byte_offset_to_lsp_pos_in(text, snippet.range.end);
+        out.push(DiagnosticRelatedInformation {
+            location: Location { uri, range: Range::new(start, end) },
+            message: snippet.label.clone(),
+        });
+    }
+    out
+}
+
+/// Byte-offset → LSP Position within a one-off source text. Used for
+/// cross-file related-info snippets where we don't have a precomputed
+/// line index.
+fn byte_offset_to_lsp_pos_in(text: &str, offset: usize) -> Position {
+    let bounded = offset.min(text.len());
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for (i, ch) in text.char_indices() {
+        if i >= bounded {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    Position::new(line, col)
 }
 
 // ─── Suggestion ranking ──────────────────────────────────────────────────

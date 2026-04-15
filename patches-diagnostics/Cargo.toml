@@ -8,3 +8,4 @@ publish = false
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }
+patches-interpreter = { path = "../patches-interpreter" }

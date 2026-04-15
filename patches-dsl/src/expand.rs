@@ -36,11 +36,35 @@ struct AssembledSong {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/// An error produced by the template expander.
-#[derive(Debug)]
+/// An error produced by the template expander (ADR 0038 stage 3/3a).
+///
+/// Also re-exported as `patches_dsl::StructuralError`: every expansion
+/// error is a structural error, classified by [`StructuralCode`]. The
+/// `ExpandError` alias is kept for backwards-compat with existing
+/// consumers; new code should prefer the `StructuralError` name and
+/// match on `code` for dispatch.
+#[derive(Debug, Clone)]
 pub struct ExpandError {
+    pub code: crate::structural::StructuralCode,
     pub span: Span,
     pub message: String,
+}
+
+impl ExpandError {
+    /// Construct an error with an explicit [`StructuralCode`].
+    pub fn new(
+        code: crate::structural::StructuralCode,
+        span: Span,
+        message: impl Into<String>,
+    ) -> Self {
+        Self { code, span, message: message.into() }
+    }
+
+    /// Shortcut for [`StructuralCode::Other`] — used while classification
+    /// is incrementally refined. Prefer a specific code where possible.
+    pub fn other(span: Span, message: impl Into<String>) -> Self {
+        Self::new(crate::structural::StructuralCode::Other, span, message)
+    }
 }
 
 impl std::fmt::Display for ExpandError {
@@ -162,23 +186,17 @@ fn resolve_songs(
                     SongCell::Pattern(ident) => match name_to_idx.get(&ident.name) {
                         Some(&idx) => cells.push(Some(idx)),
                         None => {
-                            return Err(ExpandError {
-                                span: ident.span,
-                                message: format!(
+                            return Err(ExpandError::new(crate::structural::StructuralCode::PatternNotFound, ident.span, format!(
                                     "song '{}': pattern '{}' not found",
                                     song.name, ident.name,
-                                ),
-                            });
+                                )));
                         }
                     },
                     SongCell::ParamRef { name, span } => {
-                        return Err(ExpandError {
-                            span,
-                            message: format!(
+                        return Err(ExpandError::new(crate::structural::StructuralCode::UnresolvedParamRef, span, format!(
                                 "song '{}': unresolved `<{}>` param reference after expansion",
                                 song.name, name,
-                            ),
-                        });
+                            )));
                     }
                 }
             }
@@ -279,14 +297,11 @@ fn resolve_song_cell(
         SongCell::ParamRef { name, span } => {
             if let Some(ty) = param_types.get(name.as_str()) {
                 if *ty != ParamType::Pattern {
-                    return Err(ExpandError {
-                        span: *span,
-                        message: format!(
+                    return Err(ExpandError::new(crate::structural::StructuralCode::ParamTypeMismatch, *span, format!(
                             "song cell '<{}>': param is {}-typed, expected pattern",
                             name,
                             param_type_name(ty),
-                        ),
-                    });
+                        )));
                 }
             }
             match param_env.get(name.as_str()) {
@@ -300,17 +315,11 @@ fn resolve_song_cell(
                         span: *span,
                     }))
                 }
-                Some(other) => Err(ExpandError {
-                    span: *span,
-                    message: format!(
+                Some(other) => Err(ExpandError::new(crate::structural::StructuralCode::ParamTypeMismatch, *span, format!(
                         "song cell param '<{}>': expected a pattern name, got {:?}",
                         name, other,
-                    ),
-                }),
-                None => Err(ExpandError {
-                    span: *span,
-                    message: format!("unresolved param '<{}>' in song cell", name),
-                }),
+                    ))),
+                None => Err(ExpandError::new(crate::structural::StructuralCode::UnresolvedParamRef, *span, format!("unresolved param '<{}>' in song cell", name))),
             }
         }
     }
@@ -330,14 +339,11 @@ fn flatten_row_groups(
         match g {
             RowGroup::Row(row) => {
                 if row.cells.len() != lanes.len() {
-                    return Err(ExpandError {
-                        span: row.span,
-                        message: format!(
+                    return Err(ExpandError::new(crate::structural::StructuralCode::RowLaneMismatch, row.span, format!(
                             "row has {} cells but song declares {} lane(s)",
                             row.cells.len(),
                             lanes.len(),
-                        ),
-                    });
+                        )));
                 }
                 let cells = row
                     .cells
@@ -374,10 +380,7 @@ fn eval_play_expr(
             PlayAtom::Ref(ident) => match section_rows.get(&ident.name) {
                 Some(rows) => buf.extend(rows.iter().cloned()),
                 None => {
-                    return Err(ExpandError {
-                        span: ident.span,
-                        message: format!("unknown section '{}' in play expression", ident.name),
-                    });
+                    return Err(ExpandError::new(crate::structural::StructuralCode::UnknownSection, ident.span, format!("unknown section '{}' in play expression", ident.name)));
                 }
             },
             PlayAtom::Group(inner) => eval_play_expr(inner, section_rows, &mut buf)?,
@@ -408,18 +411,12 @@ fn flatten_song(
         match item {
             SongItem::Section(sd) => {
                 if local_sections.insert(sd.name.name.clone(), sd).is_some() {
-                    return Err(ExpandError {
-                        span: sd.span,
-                        message: format!("duplicate section '{}' in song", sd.name.name),
-                    });
+                    return Err(ExpandError::new(crate::structural::StructuralCode::DuplicateSection, sd.span, format!("duplicate section '{}' in song", sd.name.name)));
                 }
             }
             SongItem::Pattern(pd) => {
                 if local_patterns.iter().any(|p| p.name.name == pd.name.name) {
-                    return Err(ExpandError {
-                        span: pd.span,
-                        message: format!("duplicate inline pattern '{}' in song", pd.name.name),
-                    });
+                    return Err(ExpandError::new(crate::structural::StructuralCode::DuplicateInlinePattern, pd.span, format!("duplicate inline pattern '{}' in song", pd.name.name)));
                 }
                 local_patterns.push(pd);
             }
@@ -460,10 +457,7 @@ fn flatten_song(
             SongItem::Section(_) | SongItem::Pattern(_) => {}
             SongItem::LoopMarker(span) => {
                 if loop_point.is_some() {
-                    return Err(ExpandError {
-                        span: *span,
-                        message: "multiple @loop markers in song".to_owned(),
-                    });
+                    return Err(ExpandError::new(crate::structural::StructuralCode::MultipleLoopMarkers, *span, "multiple @loop markers in song".to_owned()));
                 }
                 loop_point = Some(rows.len());
             }
@@ -473,13 +467,10 @@ fn flatten_song(
                 }
                 PlayBody::NamedInline { name, body, span } => {
                     if section_rows.contains_key(&name.name) {
-                        return Err(ExpandError {
-                            span: *span,
-                            message: format!(
+                        return Err(ExpandError::new(crate::structural::StructuralCode::SectionAlreadyDefined, *span, format!(
                                 "section '{}' already defined in song",
                                 name.name,
-                            ),
-                        });
+                            )));
                     }
                     let mut section_only = Vec::new();
                     flatten_row_groups(
@@ -738,26 +729,20 @@ fn resolve_port_index(
                     return Ok(IndexResolution::Keyed(idx));
                 }
             }
-            let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError {
-                span: *span,
-                message: format!(
+            let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
                     "unknown alias or param '{}' in port index; known aliases: {}; known params: {}",
                     name,
                     list_keys(alias_map.map(|m| m.keys().map(|s| s.as_str()))),
                     list_keys(Some(param_env.keys().map(|s| s.as_str()))),
-                ),
-            })?;
+                )))?;
             Ok(IndexResolution::Keyed(scalar_to_u32(scalar, span)?))
         }
         Some(PortIndex::Arity(name)) => {
-            let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError {
-                span: *span,
-                message: format!(
+            let scalar = param_env.get(name.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!(
                     "unknown arity param '{}' in port index [*{}]; known params: {}",
                     name, name,
                     list_keys(Some(param_env.keys().map(|s| s.as_str()))),
-                ),
-            })?;
+                )))?;
             Ok(IndexResolution::Arity(scalar_to_u32(scalar, span)?))
         }
     }
@@ -785,13 +770,10 @@ fn combine_index_resolutions(
         (Keyed(f),  Keyed(t))  => Ok(vec![(f, t, true,  true)]),
         (Arity(n), Arity(m)) => {
             if n != m {
-                return Err(ExpandError {
-                    span: *span,
-                    message: format!(
+                return Err(ExpandError::new(crate::structural::StructuralCode::ArityMismatch, *span, format!(
                         "arity mismatch on both sides of connection: [*{}] vs [*{}]",
                         n, m
-                    ),
-                });
+                    )));
             }
             Ok((0..n).map(|i| (i, i, true, true)).collect())
         }
@@ -809,14 +791,8 @@ fn combine_index_resolutions(
 fn scalar_to_u32(scalar: &Scalar, span: &Span) -> Result<u32, ExpandError> {
     match scalar {
         Scalar::Int(i) if *i >= 0 => Ok(*i as u32),
-        Scalar::Int(i) => Err(ExpandError {
-            span: *span,
-            message: format!("port index / arity must be non-negative, got {}", i),
-        }),
-        other => Err(ExpandError {
-            span: *span,
-            message: format!("port index / arity must be an integer, got {:?}", other),
-        }),
+        Scalar::Int(i) => Err(ExpandError::new(crate::structural::StructuralCode::PortIndexInvalid, *span, format!("port index / arity must be non-negative, got {}", i))),
+        other => Err(ExpandError::new(crate::structural::StructuralCode::PortIndexInvalid, *span, format!("port index / arity must be an integer, got {:?}", other))),
     }
 }
 
@@ -921,13 +897,10 @@ impl<'a> Expander<'a> {
                         }
                         Some(ParamIndex::Arity(param)) => {
                             let n_scalar =
-                                param_env.get(param.as_str()).ok_or_else(|| ExpandError {
-                                    span: *span,
-                                    message: format!(
+                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
                                         param, param
-                                    ),
-                                })?;
+                                    )))?;
                             let n = scalar_to_usize(n_scalar, span)?;
                             let resolved = self.subst_value(value, param_env, span)?;
                             for i in 0..n {
@@ -938,10 +911,7 @@ impl<'a> Expander<'a> {
                             }
                         }
                         Some(ParamIndex::Alias(alias)) => {
-                            let i = alias_map.get(alias.as_str()).ok_or_else(|| ExpandError {
-                                span: *span,
-                                message: format!("alias '{}' not found in alias map", alias),
-                            })?;
+                            let i = alias_map.get(alias.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!("alias '{}' not found in alias map", alias)))?;
                             result.push((format!("{}/{}", name.name, i), val));
                         }
                     }
@@ -958,13 +928,10 @@ impl<'a> Expander<'a> {
                     let idx = match index {
                         AtBlockIndex::Literal(n) => *n,
                         AtBlockIndex::Alias(alias) => {
-                            *alias_map.get(alias.as_str()).ok_or_else(|| ExpandError {
-                                span: *span,
-                                message: format!(
+                            *alias_map.get(alias.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
                                     "alias '{}' not found in alias map for @-block",
                                     alias
-                                ),
-                            })?
+                                )))?
                         }
                     };
                     for (key, val) in entries {
@@ -1142,10 +1109,7 @@ impl<'a> Expander<'a> {
         let template = self.templates[type_name.as_str()];
 
         if self.call_stack.contains(type_name.as_str()) {
-            return Err(ExpandError {
-                span: decl.span,
-                message: format!("recursive template instantiation: '{}'", type_name),
-            });
+            return Err(ExpandError::new(crate::structural::StructuralCode::RecursiveTemplate, decl.span, format!("recursive template instantiation: '{}'", type_name)));
         }
 
         // Identify which declared params are group params (have arity).
@@ -1178,24 +1142,18 @@ impl<'a> Expander<'a> {
             if !declared_names.contains(name.as_str()) {
                 let mut known: Vec<&str> = declared_names.iter().copied().collect();
                 known.sort();
-                return Err(ExpandError {
-                    span: arg.span,
-                    message: format!(
+                return Err(ExpandError::new(crate::structural::StructuralCode::UnknownTemplateParam, arg.span, format!(
                         "unknown parameter '{}' for template '{}'; known parameters: {}",
                         name,
                         type_name,
                         known.join(", ")
-                    ),
-                });
+                    )));
             }
             if group_param_names.contains(name.as_str()) {
-                return Err(ExpandError {
-                    span: arg.span,
-                    message: format!(
+                return Err(ExpandError::other(arg.span, format!(
                         "group param '{}' must be supplied in the param block {{...}}, not the shape block (...)",
                         name
-                    ),
-                });
+                    )));
             }
             scalar_call_params.insert(
                 name.clone(),
@@ -1211,13 +1169,10 @@ impl<'a> Expander<'a> {
                 ParamEntry::KeyValue { name, index, value, span } => {
                     let name_str = &name.name;
                     if !group_param_names.contains(name_str.as_str()) {
-                        return Err(ExpandError {
-                            span: *span,
-                            message: format!(
+                        return Err(ExpandError::other(*span, format!(
                                 "'{}' is not a group param of template '{}'; scalar params belong in the shape block (...)",
                                 name_str, type_name
-                            ),
-                        });
+                            )));
                     }
                     let val = self.subst_value(value, param_env, span)?;
                     match index {
@@ -1232,13 +1187,10 @@ impl<'a> Expander<'a> {
                         }
                         Some(ParamIndex::Arity(param)) => {
                             let n_scalar =
-                                param_env.get(param.as_str()).ok_or_else(|| ExpandError {
-                                    span: *span,
-                                    message: format!(
+                                param_env.get(param.as_str()).ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!(
                                         "unknown param '{}' in arity expansion '[*{}]'",
                                         param, param
-                                    ),
-                                })?;
+                                    )))?;
                             let n = scalar_to_usize(n_scalar, span)?;
                             let resolved = self.subst_value(value, param_env, span)?;
                             let calls = group_calls.entry(name_str.clone()).or_default();
@@ -1249,13 +1201,10 @@ impl<'a> Expander<'a> {
                         Some(ParamIndex::Alias(alias)) => {
                             let i =
                                 instance_alias_map.get(alias.as_str()).ok_or_else(|| {
-                                    ExpandError {
-                                        span: *span,
-                                        message: format!(
+                                    ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
                                             "alias '{}' not found in alias map",
                                             alias
-                                        ),
-                                    }
+                                        ))
                                 })?;
                             group_calls
                                 .entry(name_str.clone())
@@ -1266,13 +1215,10 @@ impl<'a> Expander<'a> {
                 }
                 ParamEntry::Shorthand(param_name) => {
                     if !group_param_names.contains(param_name.as_str()) {
-                        return Err(ExpandError {
-                            span: decl.span,
-                            message: format!(
+                        return Err(ExpandError::other(decl.span, format!(
                                 "'{}' is not a group param of template '{}'",
                                 param_name, type_name
-                            ),
-                        });
+                            )));
                     }
                     let substituted = self.subst_scalar(
                         &Scalar::ParamRef(param_name.clone()),
@@ -1289,26 +1235,20 @@ impl<'a> Expander<'a> {
                         AtBlockIndex::Literal(n) => *n as usize,
                         AtBlockIndex::Alias(alias) => {
                             *instance_alias_map.get(alias.as_str()).ok_or_else(|| {
-                                ExpandError {
-                                    span: *span,
-                                    message: format!(
+                                ExpandError::new(crate::structural::StructuralCode::UnknownAlias, *span, format!(
                                         "alias '{}' not found in alias map for @-block",
                                         alias
-                                    ),
-                                }
+                                    ))
                             })? as usize
                         }
                     };
                     for (key, val) in entries {
                         let name_str = &key.name;
                         if !group_param_names.contains(name_str.as_str()) {
-                            return Err(ExpandError {
-                                span: *span,
-                                message: format!(
+                            return Err(ExpandError::other(*span, format!(
                                     "'{}' is not a group param of template '{}'",
                                     name_str, type_name
-                                ),
-                            });
+                                )));
                         }
                         let resolved_val = self.subst_value(val, param_env, span)?;
                         group_calls
@@ -1334,13 +1274,10 @@ impl<'a> Expander<'a> {
             } else if let Some(default) = &param_decl.default {
                 sub_param_env.insert(name.clone(), default.clone());
             } else {
-                return Err(ExpandError {
-                    span: decl.span,
-                    message: format!(
+                return Err(ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, decl.span, format!(
                         "missing required parameter '{}' for template '{}'",
                         name, type_name
-                    ),
-                });
+                    )));
             }
         }
 
@@ -1354,14 +1291,11 @@ impl<'a> Expander<'a> {
             let name = &param_decl.name.name;
 
             // Resolve arity N — must already be in sub_param_env (step 1).
-            let n_scalar = sub_param_env.get(arity_name.as_str()).ok_or_else(|| ExpandError {
-                span: decl.span,
-                message: format!(
+            let n_scalar = sub_param_env.get(arity_name.as_str()).ok_or_else(|| ExpandError::other(decl.span, format!(
                     "group param '{}' references arity param '{}' which is not in scope \
                      (declare scalar params before group params)",
                     name, arity_name
-                ),
-            })?;
+                )))?;
             let n = scalar_to_usize(n_scalar, &decl.span)?;
 
             let calls = group_calls.get(name.as_str());
@@ -1396,24 +1330,18 @@ impl<'a> Expander<'a> {
                 match param_decl.ty {
                     ParamType::Pattern => {
                         if scope.resolve_pattern(val).is_none() {
-                            return Err(ExpandError {
-                                span: decl.span,
-                                message: format!(
+                            return Err(ExpandError::new(crate::structural::StructuralCode::PatternNotFound, decl.span, format!(
                                     "template '{}' param '{}': '{}' is not a known pattern",
                                     type_name, name, val,
-                                ),
-                            });
+                                )));
                         }
                     }
                     ParamType::Song => {
                         if scope.resolve_song(val).is_none() {
-                            return Err(ExpandError {
-                                span: decl.span,
-                                message: format!(
+                            return Err(ExpandError::new(crate::structural::StructuralCode::SongNotFound, decl.span, format!(
                                     "template '{}' param '{}': '{}' is not a known song",
                                     type_name, name, val,
-                                ),
-                            });
+                                )));
                         }
                     }
                     _ => {}
@@ -1481,13 +1409,10 @@ impl<'a> Expander<'a> {
                 } else {
                     known.join(", ")
                 };
-                Err(ExpandError {
-                    span: pr.span,
-                    message: format!(
+                Err(ExpandError::new(crate::structural::StructuralCode::UnknownModuleRef, pr.span, format!(
                         "unknown module '{}'; known modules: {}",
                         pr.module, list
-                    ),
-                })
+                    )))
             }
         };
         check_module(from_ref)?;
@@ -1612,10 +1537,7 @@ impl<'a> Expander<'a> {
 
             // Both sides are boundary markers — this is never valid.
             (true, true) => {
-                return Err(ExpandError {
-                    span: *span,
-                    message: "connection has '$' on both sides".to_owned(),
-                });
+                return Err(ExpandError::other(*span, "connection has '$' on both sides".to_owned()));
             }
 
             // Regular connection (from and to are both concrete or instances).
@@ -1680,13 +1602,10 @@ fn resolve_group_param_value(
 ) -> Result<Scalar, ExpandError> {
     let calls = match calls {
         None => {
-            return default.cloned().ok_or_else(|| ExpandError {
-                span: *span,
-                message: format!(
+            return default.cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, *span, format!(
                     "group param '{}' has no default and no call-site value",
                     param_name
-                ),
-            })
+                )))
         }
         Some(c) => c,
     };
@@ -1697,70 +1616,52 @@ fn resolve_group_param_value(
     let all_indexed = calls.iter().all(|(idx, _)| idx.is_some());
 
     if !all_unindexed && !all_indexed {
-        return Err(ExpandError {
-            span: *span,
-            message: format!(
+        return Err(ExpandError::other(*span, format!(
                 "group param '{}' mixes indexed and non-indexed assignments",
                 param_name
-            ),
-        });
+            )));
     }
 
     if all_unindexed {
         // Broadcast or array form — there should be exactly one call-site entry.
         if calls.len() != 1 {
-            return Err(ExpandError {
-                span: *span,
-                message: format!(
+            return Err(ExpandError::other(*span, format!(
                     "group param '{}' has multiple non-indexed assignments",
                     param_name
-                ),
-            });
+                )));
         }
         match &calls[0].1 {
             Value::Scalar(s) => Ok(s.clone()),
-            _ => Err(ExpandError {
-                span: *span,
-                message: format!(
+            _ => Err(ExpandError::other(*span, format!(
                     "group param '{}' call-site value must be a scalar",
                     param_name
-                ),
-            }),
+                ))),
         }
     } else {
         // Per-index form.
         for (idx, _) in calls {
             if let Some(i) = idx {
                 if *i >= total {
-                    return Err(ExpandError {
-                        span: *span,
-                        message: format!(
+                    return Err(ExpandError::new(crate::structural::StructuralCode::ArityMismatch, *span, format!(
                             "group param '{}[{}]' index out of range (arity = {})",
                             param_name, i, total
-                        ),
-                    });
+                        )));
                 }
             }
         }
         if let Some((_, val)) = calls.iter().find(|(idx, _)| *idx == Some(index)) {
             match val {
                 Value::Scalar(s) => Ok(s.clone()),
-                _ => Err(ExpandError {
-                    span: *span,
-                    message: format!(
+                _ => Err(ExpandError::other(*span, format!(
                         "group param '{}[{}]' value must be a scalar",
                         param_name, index
-                    ),
-                }),
+                    ))),
             }
         } else {
-            default.cloned().ok_or_else(|| ExpandError {
-                span: *span,
-                message: format!(
+            default.cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::MissingDefaultParam, *span, format!(
                     "group param '{}[{}]' not supplied and has no default",
                     param_name, index
-                ),
-            })
+                )))
         }
     }
 }
@@ -1813,13 +1714,10 @@ fn check_param_type(
         Ok(())
     } else {
         let expected = param_type_name(ty);
-        Err(ExpandError {
-            span: *span,
-            message: format!(
+        Err(ExpandError::new(crate::structural::StructuralCode::ParamTypeMismatch, *span, format!(
                 "parameter '{}' declared as {} but got {:?}",
                 param_name, expected, scalar
-            ),
-        })
+            )))
     }
 }
 
@@ -1837,17 +1735,11 @@ fn resolve_port_label(
         PortLabel::Literal(s) => Ok(s.clone()),
         PortLabel::Param(name) => match param_env.get(name.as_str()) {
             Some(Scalar::Str(s)) => Ok(s.clone()),
-            Some(other) => Err(ExpandError {
-                span: *span,
-                message: format!(
+            Some(other) => Err(ExpandError::new(crate::structural::StructuralCode::ParamTypeMismatch, *span, format!(
                     "param '{}' used as port label must resolve to a string, got {:?}",
                     name, other
-                ),
-            }),
-            None => Err(ExpandError {
-                span: *span,
-                message: format!("unknown param '{}' referenced in port label", name),
-            }),
+                ))),
+            None => Err(ExpandError::new(crate::structural::StructuralCode::UnknownParam, *span, format!("unknown param '{}' referenced in port label", name))),
         },
     }
 }
@@ -1874,13 +1766,10 @@ fn resolve_scale(
             match resolved {
                 Scalar::Float(f) => Ok(*f),
                 Scalar::Int(i) => Ok(*i as f64),
-                other => Err(ExpandError {
-                    span: *span,
-                    message: format!(
+                other => Err(ExpandError::new(crate::structural::StructuralCode::InvalidCableScale, *span, format!(
                         "arrow scale must resolve to a number, got {:?}",
                         other
-                    ),
-                }),
+                    ))),
             }
         }
     }
@@ -1928,13 +1817,10 @@ fn check_template_port(
         } else {
             names.join(", ")
         };
-        Err(ExpandError {
-            span: pr.span,
-            message: format!(
+        Err(ExpandError::new(crate::structural::StructuralCode::UnknownPortOnModule, pr.span, format!(
                 "template instance '{}' has no {} '{}'; known {}s: {}",
                 pr.module, kind, port, kind, known
-            ),
-        })
+            )))
     }
 }
 
@@ -1957,13 +1843,10 @@ fn resolve_from(
         if let Some(entry) = ports.out_ports.get(&indexed_key) {
             return Ok(entry.clone());
         }
-        ports.out_ports.get(from_port).cloned().ok_or_else(|| ExpandError {
-            span: *span,
-            message: format!(
+        ports.out_ports.get(from_port).cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownPortOnModule, *span, format!(
                 "template instance '{}' has no out-port '{}'",
                 from_module, from_port
-            ),
-        })
+            )))
     } else {
         Ok((qualify(namespace, from_module), from_port.to_owned(), from_index, 1.0))
     }
@@ -1989,13 +1872,10 @@ fn resolve_to(
         if let Some(entries) = ports.in_ports.get(&indexed_key) {
             return Ok(entries.clone());
         }
-        ports.in_ports.get(to_port).cloned().ok_or_else(|| ExpandError {
-            span: *span,
-            message: format!(
+        ports.in_ports.get(to_port).cloned().ok_or_else(|| ExpandError::new(crate::structural::StructuralCode::UnknownPortOnModule, *span, format!(
                 "template instance '{}' has no in-port '{}'",
                 to_module, to_port
-            ),
-        })
+            )))
     } else {
         Ok(vec![(qualify(namespace, to_module), to_port.to_owned(), to_index, 1.0)])
     }

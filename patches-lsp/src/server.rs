@@ -53,9 +53,13 @@ impl LanguageServer for PatchesLanguageServer {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
-                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::new("source.peekExpansion"),
+                        ]),
                         work_done_progress_options: Default::default(),
                         resolve_provider: None,
                     },
@@ -115,20 +119,22 @@ impl LanguageServer for PatchesLanguageServer {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let diags = self.workspace.analyse(&uri, params.text_document.text);
-        self.client.publish_diagnostics(uri.clone(), diags, None).await;
-        for (anc_uri, anc_diags) in self.workspace.reanalyse_ancestors(&uri) {
-            self.client.publish_diagnostics(anc_uri, anc_diags, None).await;
+        for (u, d) in self.workspace.analyse(&uri, params.text_document.text) {
+            self.client.publish_diagnostics(u, d, None).await;
+        }
+        for (u, d) in self.workspace.reanalyse_ancestors(&uri) {
+            self.client.publish_diagnostics(u, d, None).await;
         }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.into_iter().last() {
-            let diags = self.workspace.analyse(&uri, change.text);
-            self.client.publish_diagnostics(uri.clone(), diags, None).await;
-            for (anc_uri, anc_diags) in self.workspace.reanalyse_ancestors(&uri) {
-                self.client.publish_diagnostics(anc_uri, anc_diags, None).await;
+            for (u, d) in self.workspace.analyse(&uri, change.text) {
+                self.client.publish_diagnostics(u, d, None).await;
+            }
+            for (u, d) in self.workspace.reanalyse_ancestors(&uri) {
+                self.client.publish_diagnostics(u, d, None).await;
             }
         }
     }
@@ -191,10 +197,47 @@ impl LanguageServer for PatchesLanguageServer {
                 }));
             }
         }
+        if let Some((range, markdown)) =
+            self.workspace.peek_expansion(uri, params.range.start)
+        {
+            let command = Command {
+                title: "Peek expansion".to_string(),
+                command: "patches.peekExpansion".to_string(),
+                arguments: Some(vec![
+                    serde_json::Value::String(uri.to_string()),
+                    serde_json::to_value(range).unwrap_or(serde_json::Value::Null),
+                    serde_json::Value::String(markdown),
+                ]),
+            };
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: "Peek expansion".to_string(),
+                kind: Some(CodeActionKind::new("source.peekExpansion")),
+                diagnostics: None,
+                edit: None,
+                command: Some(command),
+                is_preferred: None,
+                disabled: None,
+                data: None,
+            }));
+        }
+
         if actions.is_empty() {
             Ok(None)
         } else {
             Ok(Some(actions))
+        }
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        let hints = self.workspace.inlay_hints(&uri, params.range);
+        if hints.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(hints))
         }
     }
 

@@ -134,6 +134,130 @@ fn unknown_type_returns_error() {
     assert!(!err.message.is_empty());
 }
 
+// ── Staged pipeline fail-fast tests (ADR 0038 / E080) ─────────────────────────
+
+/// Stage 1: a missing master file surfaces as `PipelineError::Load` before any
+/// later stage runs.
+#[test]
+fn pipeline_fail_fast_load_missing_file() {
+    use patches_dsl::pipeline::{self, PipelineError};
+    let bind =
+        |_loaded: &patches_dsl::LoadResult, patch: &FlatPatch| -> Result<(), patches_interpreter::BuildError> {
+            patches_interpreter::build(patch, &registry(), &env()).map(|_| ())
+        };
+    let result = pipeline::run_all(
+        std::path::Path::new("/nonexistent/does-not-exist.patches"),
+        |p| std::fs::read_to_string(p),
+        bind,
+    );
+    match result {
+        Err(PipelineError::Load(_)) => {}
+        Err(other) => panic!("expected Load error, got {other}"),
+        Ok(_) => panic!("expected failure"),
+    }
+}
+
+/// Stage 2: a master file that fails to pest-parse surfaces as
+/// `PipelineError::Load` (include loader folds pest errors in).
+#[test]
+fn pipeline_fail_fast_parse_error() {
+    use patches_dsl::pipeline::{self, PipelineError};
+    let bad = "this is not valid patches syntax (;;;";
+    let root = std::path::PathBuf::from("/virtual/bad.patches");
+    let read = |_: &std::path::Path| -> std::io::Result<String> { Ok(bad.to_string()) };
+    let bind =
+        |_loaded: &patches_dsl::LoadResult, patch: &FlatPatch| -> Result<(), patches_interpreter::BuildError> {
+            patches_interpreter::build(patch, &registry(), &env()).map(|_| ())
+        };
+    let result = pipeline::run_all(&root, read, bind);
+    match result {
+        // Pest errors are carried inside LoadError::Parse.
+        Err(PipelineError::Load(e)) => assert!(matches!(
+            e.kind,
+            patches_dsl::LoadErrorKind::Parse { .. }
+        )),
+        Err(other) => panic!("expected Load(Parse) error, got {other}"),
+        Ok(_) => panic!("expected failure"),
+    }
+}
+
+/// Stage 3 (expansion structural): an unknown alias inside a template body
+/// surfaces as `PipelineError::Expand` with a `StructuralCode`.
+#[test]
+fn pipeline_fail_fast_expand_unknown_alias() {
+    use patches_dsl::pipeline::{self, PipelineError};
+    let src = r#"
+template t() {
+    in: gate
+    out: audio
+    $.audio <- nonexistent.sig
+}
+patch {
+    module x : t
+    module out : AudioOut
+    out.in_left <- x.audio
+}
+"#;
+    let root = std::path::PathBuf::from("/virtual/x.patches");
+    let read = |_: &std::path::Path| -> std::io::Result<String> { Ok(src.to_string()) };
+    let bind =
+        |_loaded: &patches_dsl::LoadResult, patch: &FlatPatch| -> Result<(), patches_interpreter::BuildError> {
+            patches_interpreter::build(patch, &registry(), &env()).map(|_| ())
+        };
+    let result = pipeline::run_all(&root, read, bind);
+    match result {
+        Err(PipelineError::Expand(_)) => {}
+        Err(other) => panic!("expected Expand error, got {other}"),
+        Ok(_) => panic!("expected failure"),
+    }
+}
+
+/// Stage 3b (binding): an unknown module type surfaces as
+/// `PipelineError::Bind(InterpretError)`.
+#[test]
+fn pipeline_fail_fast_bind_unknown_module() {
+    use patches_dsl::pipeline::{self, PipelineError};
+    let src = r#"
+patch {
+    module nope : NoSuchModule
+}
+"#;
+    let root = std::path::PathBuf::from("/virtual/x.patches");
+    let read = |_: &std::path::Path| -> std::io::Result<String> { Ok(src.to_string()) };
+    let bind =
+        |_loaded: &patches_dsl::LoadResult, patch: &FlatPatch| -> Result<(), patches_interpreter::BuildError> {
+            patches_interpreter::build(patch, &registry(), &env()).map(|_| ())
+        };
+    let result = pipeline::run_all(&root, read, bind);
+    match result {
+        Err(PipelineError::Bind(e)) => assert!(!e.message.is_empty()),
+        Err(other) => panic!("expected Bind error, got {other}"),
+        Ok(_) => panic!("expected failure"),
+    }
+}
+
+/// Success path: the staged orchestrator matches the direct `parse → expand →
+/// build` composition on a known-good fixture.
+#[test]
+fn pipeline_success_matches_direct_path() {
+    use patches_dsl::pipeline::{self};
+    let src = load_fixture("simple.patches");
+    let fixtures_root = format!(
+        "{}/../patches-dsl/tests/fixtures/simple.patches",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let root = std::path::PathBuf::from(&fixtures_root);
+    let src_clone = src.clone();
+    let read = move |_: &std::path::Path| -> std::io::Result<String> { Ok(src_clone.clone()) };
+    let bind =
+        |_loaded: &patches_dsl::LoadResult, patch: &FlatPatch| -> Result<patches_interpreter::BuildResult, patches_interpreter::BuildError> {
+            patches_interpreter::build(patch, &registry(), &env())
+        };
+    let staged = pipeline::run_all(&root, read, bind)
+        .expect("pipeline should succeed on simple.patches");
+    assert_eq!(staged.bound.graph.node_ids().len(), 2);
+}
+
 /// A FlatPatch referencing a non-existent output port should return
 /// `Err(InterpretError)` with a non-empty message.
 #[test]

@@ -3,14 +3,24 @@
 //! Provides context-sensitive hover information for module types, ports,
 //! and module instance names.
 
-use patches_core::{ModuleDescriptor, ModuleShape, Registry};
+use patches_core::{
+    CableKind, ModuleDescriptor, ModuleShape, PortDescriptor, Registry, SourceId, Span as CoreSpan,
+};
+use patches_dsl::ast::{self as dsl_ast, PortLabel as DslPortLabel, Scalar, Value};
+use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPortRef};
+use patches_dsl::SourceMap;
+use patches_interpreter::{BoundModule, BoundPatch};
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 
 use crate::analysis::{self, ResolvedDescriptor, SemanticModel};
 use crate::ast;
 use crate::completions::{cable_kind_str, format_parameter_kind};
-use crate::lsp_util::{byte_offset_to_position, find_ancestor, first_named_child_of_kind, node_text};
+use crate::expansion::{FlatNodeRef, PatchReferences, WiredPort};
+use crate::shape_render::module_shape_from_args;
+use crate::lsp_util::{
+    byte_offset_to_position, find_ancestor, first_named_child_of_kind, node_text,
+};
 
 // ─── Public entry point ──────────────────────────────────────────────────
 
@@ -42,6 +52,373 @@ pub(crate) fn compute_hover(
     }
 
     None
+}
+
+// ─── Expansion-aware hover ───────────────────────────────────────────────
+
+/// Compute hover using the cached flattened patch.
+///
+/// Returns `None` when no flat node covers the cursor, when the master URL
+/// does not appear in the expander's source map, or when the cursor sits on
+/// an authored region whose expansion produced no nodes (empty template body,
+/// etc.). The caller falls back to the tolerant tree-sitter hover in those
+/// cases.
+pub(crate) fn compute_expansion_hover(
+    uri: &Url,
+    byte_offset: usize,
+    flat: &FlatPatch,
+    bound: &BoundPatch,
+    references: &PatchReferences,
+    source_map: &SourceMap,
+    line_index: &[usize],
+) -> Option<Hover> {
+    let source_id = source_id_for_uri(source_map, uri)?;
+
+    // A call-site hit beats a definition-site hit: hovering on `module v :
+    // voice` (the call site) should show the expansion, not the template
+    // signature — the tolerant hover already covers the signature.
+    if let Some(h) = hover_at_call_site(source_id, byte_offset, flat, references, line_index) {
+        return Some(h);
+    }
+
+    let node = references.span_index.find_at(source_id, byte_offset)?;
+    match node {
+        FlatNodeRef::Module(i) => {
+            let m = flat.modules.get(i)?;
+            Some(hover_for_module(m, bound, line_index))
+        }
+        FlatNodeRef::Connection(i) => {
+            let anchor = flat.connections.get(i)?;
+            Some(hover_for_connection_group(
+                flat,
+                references,
+                anchor,
+                line_index,
+            ))
+        }
+        FlatNodeRef::PortRef(i) => {
+            let p = flat.port_refs.get(i)?;
+            Some(hover_for_port_ref(p, line_index))
+        }
+        FlatNodeRef::Pattern(_) | FlatNodeRef::Song(_) => None,
+    }
+}
+
+/// Map `uri` (editor-side URL) to the `SourceId` the expander used when it
+/// loaded this file. Matches on `normalize_path`-style equality.
+fn source_id_for_uri(sm: &SourceMap, uri: &Url) -> Option<SourceId> {
+    let path = uri.to_file_path().ok()?;
+    let target = patches_dsl::normalize_path(&path);
+    for (id, entry) in sm.iter() {
+        if patches_dsl::normalize_path(&entry.path) == target {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn span_len(s: &CoreSpan) -> usize {
+    s.end.saturating_sub(s.start)
+}
+
+/// Find the smallest call-site span in [`PatchReferences::call_sites`] that
+/// encloses `(source, offset)`, then summarise every module expanded under it.
+fn hover_at_call_site(
+    source: SourceId,
+    offset: usize,
+    flat: &FlatPatch,
+    references: &PatchReferences,
+    line_starts: &[usize],
+) -> Option<Hover> {
+    let (call_site, refs) = references
+        .call_sites
+        .iter()
+        .filter(|(s, _)| {
+            s.source == source
+                && s.source != SourceId::SYNTHETIC
+                && s.start <= offset
+                && offset < s.end
+        })
+        .min_by_key(|(s, _)| span_len(s))?;
+
+    let mut grouped: Vec<&FlatModule> = refs
+        .iter()
+        .filter_map(|r| match r {
+            FlatNodeRef::Module(i) => flat.modules.get(*i),
+            _ => None,
+        })
+        .collect();
+    if grouped.is_empty() {
+        return None;
+    }
+    grouped.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
+
+    let mut lines = Vec::new();
+    lines.push(format!("**expansion** — {} modules", grouped.len()));
+
+    if let Some(tref) = references.template_by_call_site.get(call_site) {
+        if let Some(wires) = references.wires_by_template.get(&tref.name) {
+            append_template_port_wiring(&mut lines, wires);
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("**Modules:**".to_string());
+    for m in &grouped {
+        let mut shape_bits = Vec::new();
+        for (name, scalar) in &m.shape {
+            shape_bits.push(format!("{}: {}", name, format_scalar(scalar)));
+        }
+        let shape_str = if shape_bits.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", shape_bits.join(", "))
+        };
+        lines.push(format!(
+            "- `{}` : `{}`{}",
+            m.id, m.type_name, shape_str
+        ));
+    }
+
+    // Type counts summary.
+    let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+    for m in &grouped {
+        *counts.entry(m.type_name.as_str()).or_insert(0) += 1;
+    }
+    if counts.len() > 1 {
+        lines.push(String::new());
+        lines.push("**Types:**".to_string());
+        for (ty, n) in &counts {
+            lines.push(format!("- `{ty}` × {n}"));
+        }
+    }
+
+    let range = span_to_range(call_site, line_starts);
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: lines.join("\n"),
+        }),
+        range: Some(range),
+    })
+}
+
+/// Render the `**In:** / **Out:**` sections from a precomputed
+/// [`crate::expansion::TemplateWires`] table.
+fn append_template_port_wiring(
+    lines: &mut Vec<String>,
+    wires: &crate::expansion::TemplateWires,
+) {
+    if !wires.ins.is_empty() {
+        lines.push(String::new());
+        lines.push("**In:**".to_string());
+        for w in &wires.ins {
+            lines.push(format_wire_line(w, /* input= */ true));
+        }
+    }
+    if !wires.outs.is_empty() {
+        lines.push(String::new());
+        lines.push("**Out:**".to_string());
+        for w in &wires.outs {
+            lines.push(format_wire_line(w, /* input= */ false));
+        }
+    }
+}
+
+fn format_port_ref(pr: &dsl_ast::PortRef) -> String {
+    let port_str = match &pr.port {
+        DslPortLabel::Literal(name) => name.clone(),
+        DslPortLabel::Param(name) => format!("<{name}>"),
+    };
+    match &pr.index {
+        None => format!("{}.{}", pr.module, port_str),
+        Some(dsl_ast::PortIndex::Literal(n)) => format!("{}.{}/{}", pr.module, port_str, n),
+        Some(dsl_ast::PortIndex::Alias(a)) => format!("{}.{}[{}]", pr.module, port_str, a),
+        Some(dsl_ast::PortIndex::Arity(a)) => format!("{}.{}[*{}]", pr.module, port_str, a),
+    }
+}
+
+fn format_wire_line(wired: &WiredPort, input: bool) -> String {
+    let port = &wired.port;
+    if wired.wires.is_empty() {
+        format!("- `{port}` (unwired)")
+    } else {
+        let arrow = if input { '→' } else { '←' };
+        let rendered = wired
+            .wires
+            .iter()
+            .map(|w| format!("`{}`", format_port_ref(w)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("- `{port}` {arrow} {rendered}")
+    }
+}
+
+fn hover_for_module(m: &FlatModule, bound: &BoundPatch, line_starts: &[usize]) -> Hover {
+    let shape = module_shape_from_args(&m.shape);
+    let desc: Option<&ModuleDescriptor> = bound
+        .find_module(&m.id)
+        .and_then(BoundModule::as_resolved)
+        .map(|r| &r.descriptor);
+
+    let mut lines = Vec::new();
+    lines.push(format!("**{}** : `{}`", m.id, m.type_name));
+    if shape.channels > 0 || shape.length > 0 {
+        let mut parts = Vec::new();
+        if shape.channels > 0 {
+            parts.push(format!("channels = {}", shape.channels));
+        }
+        if shape.length > 0 {
+            parts.push(format!("length = {}", shape.length));
+        }
+        lines.push(String::new());
+        lines.push(format!("_shape:_ {}", parts.join(", ")));
+    }
+
+    if !m.params.is_empty() {
+        lines.push(String::new());
+        lines.push("**Parameters (resolved):**".to_string());
+        for (name, value) in &m.params {
+            lines.push(format!("- `{name}` = {}", format_value(value)));
+        }
+    }
+
+    if let Some(d) = desc {
+        push_expanded_ports(&mut lines, "Inputs", &d.inputs);
+        push_expanded_ports(&mut lines, "Outputs", &d.outputs);
+    }
+
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: lines.join("\n"),
+        }),
+        range: Some(span_to_range(&m.provenance.site, line_starts)),
+    }
+}
+
+/// Render every connection that shares `anchor`'s authored span. Top-level
+/// fan-out (`a.out -> b.in, c.in`) desugars to N connections with identical
+/// spans at parse time; the hover surfaces all of them.
+fn hover_for_connection_group(
+    flat: &FlatPatch,
+    references: &PatchReferences,
+    anchor: &FlatConnection,
+    line_starts: &[usize],
+) -> Hover {
+    let span = anchor.provenance.site;
+    let group: Vec<&FlatConnection> = references
+        .connection_groups
+        .get(&span)
+        .map(|idxs| idxs.iter().filter_map(|i| flat.connections.get(*i)).collect())
+        .unwrap_or_else(|| vec![anchor]);
+
+    let mut lines = Vec::new();
+    if group.len() <= 1 {
+        lines.push("**connection**".to_string());
+    } else {
+        lines.push(format!("**connection** — fan-out × {}", group.len()));
+    }
+    lines.push(String::new());
+    for c in &group {
+        let scale = if (c.scale - 1.0).abs() > f64::EPSILON {
+            format!(" ×{}", c.scale)
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "- `{}.{}` →{} `{}.{}`",
+            c.from_module,
+            format_port(&c.from_port, c.from_index),
+            scale,
+            c.to_module,
+            format_port(&c.to_port, c.to_index),
+        ));
+    }
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: lines.join("\n"),
+        }),
+        range: Some(span_to_range(&span, line_starts)),
+    }
+}
+
+fn hover_for_port_ref(p: &FlatPortRef, line_starts: &[usize]) -> Hover {
+    let dir = match p.direction {
+        patches_dsl::flat::PortDirection::Input => "input",
+        patches_dsl::flat::PortDirection::Output => "output",
+    };
+    let value = format!(
+        "**{dir} port** `{}.{}`",
+        p.module,
+        format_port(&p.port, p.index)
+    );
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: Some(span_to_range(&p.provenance.site, line_starts)),
+    }
+}
+
+fn push_expanded_ports(lines: &mut Vec<String>, heading: &str, ports: &[PortDescriptor]) {
+    if ports.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push(format!("**{heading}:**"));
+    // Group by name so indexed ports collapse into `name[0..N-1]` and single
+    // ports render as a plain name.
+    let mut groups: Vec<(&str, Vec<usize>, &CableKind)> = Vec::new();
+    for p in ports {
+        if let Some(g) = groups.iter_mut().find(|g| g.0 == p.name) {
+            g.1.push(p.index);
+        } else {
+            groups.push((p.name, vec![p.index], &p.kind));
+        }
+    }
+    for (name, indices, kind) in groups {
+        let kind_str = cable_kind_str(kind);
+        if indices.len() == 1 && indices[0] == 0 {
+            lines.push(format!("- `{name}` ({kind_str})"));
+        } else {
+            let max = indices.iter().copied().max().unwrap_or(0);
+            lines.push(format!("- `{name}[0..{max}]` ({kind_str})"));
+        }
+    }
+}
+
+fn format_scalar(s: &Scalar) -> String {
+    match s {
+        Scalar::Int(n) => n.to_string(),
+        Scalar::Float(f) => format!("{f}"),
+        Scalar::Bool(b) => b.to_string(),
+        Scalar::Str(s) => format!("\"{s}\""),
+        Scalar::ParamRef(p) => format!("<{p}>"),
+    }
+}
+
+fn format_value(v: &Value) -> String {
+    match v {
+        Value::Scalar(s) => format_scalar(s),
+        Value::File(p) => format!("file(\"{p}\")"),
+    }
+}
+
+fn format_port(name: &str, index: u32) -> String {
+    if index == 0 {
+        name.to_string()
+    } else {
+        format!("{name}/{index}")
+    }
+}
+
+fn span_to_range(span: &CoreSpan, line_starts: &[usize]) -> Range {
+    let start = byte_offset_to_position(line_starts, span.start);
+    let end = byte_offset_to_position(line_starts, span.end);
+    Range::new(start, end)
 }
 
 // ─── Hover helpers ───────────────────────────────────────────────────────
@@ -139,7 +516,7 @@ fn try_hover_port(
 
     let desc = model.get_descriptor(module_name)?;
     match desc {
-        ResolvedDescriptor::Module(md) => {
+        ResolvedDescriptor::Module { desc: md, .. } => {
             for port in md.outputs.iter().chain(md.inputs.iter()) {
                 if port.name == port_name {
                     let direction = if md.outputs.iter().any(|p| p.name == port_name) {
@@ -211,7 +588,7 @@ fn try_hover_module_name(
 
     let desc = model.get_descriptor(instance_name)?;
     let summary = match desc {
-        ResolvedDescriptor::Module(md) => format!(
+        ResolvedDescriptor::Module { desc: md, .. } => format!(
             "**{}** : `{}`\n\n{} inputs, {} outputs, {} parameters",
             instance_name,
             type_name,

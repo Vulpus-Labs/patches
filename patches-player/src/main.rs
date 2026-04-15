@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 
 use patches_core::{AudioEnvironment, SourceMap};
 use patches_diagnostics::RenderedDiagnostic;
+use patches_dsl::pipeline;
 use patches_engine::{new_event_queue, DeviceConfig, EventScheduler, MidiConnector, OversamplingFactor, PatchEngine, PatchEngineError, enumerate_devices};
 
 mod diagnostic_render;
@@ -27,13 +28,18 @@ struct LoadedPatch {
     dependencies: Vec<PathBuf>,
 }
 
-/// Errors surfaced by `load_patch`. Carries a `SourceMap` for path/line
-/// resolution when the failure has a [`patches_core::Provenance`].
+/// Errors surfaced by `load_patch`. Each variant names a pipeline stage
+/// (ADR 0038). Carries a `SourceMap` for path/line resolution when the
+/// failure has a [`patches_core::Provenance`].
 #[derive(Debug)]
 enum LoadPatchError {
     Load(patches_dsl::LoadError),
     Expand {
         err: patches_dsl::ExpandError,
+        source_map: SourceMap,
+    },
+    Bind {
+        errs: Vec<patches_interpreter::BindError>,
         source_map: SourceMap,
     },
     Interpret {
@@ -47,6 +53,9 @@ impl std::fmt::Display for LoadPatchError {
         match self {
             LoadPatchError::Load(e) => write!(f, "{e}"),
             LoadPatchError::Expand { err, .. } => write!(f, "expand error: {}", err.message),
+            LoadPatchError::Bind { errs, .. } => {
+                write!(f, "bind error: {} error(s)", errs.len())
+            }
             LoadPatchError::Interpret { err, .. } => write!(f, "build error: {}", err.message),
         }
     }
@@ -65,42 +74,17 @@ impl LoadPatchError {
                 let d = RenderedDiagnostic::from_expand_error(err, source_map);
                 diagnostic_render::render_to_stderr(&d, source_map);
             }
+            LoadPatchError::Bind { errs, source_map } => {
+                for err in errs {
+                    let d = RenderedDiagnostic::from_bind_error(err, source_map);
+                    diagnostic_render::render_to_stderr(&d, source_map);
+                }
+            }
             LoadPatchError::Interpret { err, source_map } => {
-                let d = interpret_diagnostic(err);
+                let d = RenderedDiagnostic::from_interpret_error(err, source_map);
                 diagnostic_render::render_to_stderr(&d, source_map);
             }
         }
-    }
-}
-
-/// Build a structured diagnostic from an [`patches_interpreter::InterpretError`].
-/// Interpret errors carry a full [`patches_core::Provenance`] chain but no
-/// [`patches_core::build_error::BuildError`] code — synthesise a minimal one.
-fn interpret_diagnostic(err: &patches_interpreter::InterpretError) -> RenderedDiagnostic {
-    use patches_diagnostics::{Severity, Snippet, SnippetKind};
-    let primary = Snippet {
-        source: err.provenance.site.source,
-        range: err.provenance.site.start..err.provenance.site.end,
-        label: "here".to_string(),
-        kind: SnippetKind::Primary,
-    };
-    let related = err
-        .provenance
-        .expansion
-        .iter()
-        .map(|s| Snippet {
-            source: s.source,
-            range: s.start..s.end,
-            label: "expanded from here".to_string(),
-            kind: SnippetKind::Expansion,
-        })
-        .collect();
-    RenderedDiagnostic {
-        severity: Severity::Error,
-        code: Some("interpret".to_string()),
-        message: err.message.clone(),
-        primary,
-        related,
     }
 }
 
@@ -110,22 +94,38 @@ fn load_patch(
     sample_rate: f32,
 ) -> Result<LoadedPatch, LoadPatchError> {
     let master_path = Path::new(path);
-    let load_result = patches_dsl::load_with(master_path, |p| fs::read_to_string(p))
+    // Stage 1/2: load + pest parse.
+    let load_result = pipeline::load(master_path, |p| fs::read_to_string(p))
         .map_err(LoadPatchError::Load)?;
-    let source_map = load_result.source_map;
-    let result = patches_dsl::expand(&load_result.file).map_err(|err| {
+    let source_map = load_result.source_map.clone();
+    let dependencies = load_result.dependencies.clone();
+    // Stage 3: expansion.
+    let expanded = pipeline::expand(&load_result).map_err(|err| {
         LoadPatchError::Expand { err, source_map: source_map.clone() }
     })?;
-    for w in &result.warnings {
+    for w in &expanded.warnings {
         eprintln!("dsl warning: {w}");
     }
+    let flat = expanded.patch;
+    // Stage 3b: descriptor-level binding. Fail-fast on any bind error
+    // before runtime graph construction — consumers render them via
+    // `RenderedDiagnostic::from_bind_error` so users see every problem
+    // the binder caught, not just the first to fail `build_from_bound`.
     let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let base_dir = master_path.parent();
-    let build_result = patches_interpreter::build_with_base_dir(&result.patch, registry, &env, base_dir)
+    let bound = patches_interpreter::bind_with_base_dir(&flat, registry, base_dir);
+    if !bound.errors.is_empty() {
+        return Err(LoadPatchError::Bind {
+            errs: bound.errors,
+            source_map,
+        });
+    }
+    // Stage 5: runtime graph construction.
+    let build_result = patches_interpreter::build_from_bound(&flat, &bound, &env)
         .map_err(|err| LoadPatchError::Interpret { err, source_map })?;
     Ok(LoadedPatch {
         build_result,
-        dependencies: load_result.dependencies,
+        dependencies,
     })
 }
 

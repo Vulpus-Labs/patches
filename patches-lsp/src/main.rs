@@ -2,11 +2,16 @@ mod analysis;
 mod ast;
 mod ast_builder;
 mod completions;
+mod expansion;
 mod hover;
+mod inlay;
 mod lsp_util;
+mod peek;
 mod navigation;
 mod parser;
 mod server;
+mod shape_render;
+mod signal_graph;
 mod workspace;
 
 use server::PatchesLanguageServer;

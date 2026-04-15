@@ -20,7 +20,7 @@ impl SourceId {
 }
 
 /// Byte-offset range into a specific source file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub source: SourceId,
     pub start: usize,

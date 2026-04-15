@@ -106,17 +106,29 @@ impl PatchesClapPlugin {
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
         let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
+        // Stages 1–2: load + pest parse (or inline parse fallback when no file path).
         let (file, source_map) = self.load_or_parse()?;
         self.last_source_map = Some(source_map);
-        let result = patches_dsl::expand(&file)?;
-        let build_result = patches_interpreter::build_with_base_dir(
-            &result.patch,
+        // Stage 3: expansion.
+        let expanded = patches_dsl::pipeline::expand_file(&file)?;
+        let flat = expanded.patch;
+        // Stage 3b: descriptor-level binding (fail-fast on any error;
+        // every bind error is surfaced to the host via the CompileError
+        // diagnostic path).
+        let bound = patches_interpreter::bind_with_base_dir(
+            &flat,
             &self.registry,
-            env,
             self.base_dir.as_deref(),
-        )?;
+        );
+        if !bound.errors.is_empty() {
+            return Err(CompileError::Bind(bound.errors));
+        }
+        // Stage 5: runtime graph construction from the validated bound
+        // graph.
+        let build_result = patches_interpreter::build_from_bound(&flat, &bound, env)?;
         let graph = build_result.graph;
         let tracker_data = build_result.tracker_data;
+        // Stage 4: engine plan.
         let plan = self
             .planner
             .build_with_tracker_data(&graph, &self.registry, env, tracker_data)?;
@@ -147,7 +159,8 @@ impl PatchesClapPlugin {
             if path.exists() {
                 let master_source = self.dsl_source.clone();
                 let master_canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-                let load_result = patches_dsl::load_with(&path, |p| {
+                // Pipeline stage 1 (+ 2): resolve includes and pest-parse each file.
+                let load_result = patches_dsl::pipeline::load(&path, |p| {
                     // For the master file, return the already-read source;
                     // for included files, read from disk.
                     let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
@@ -163,7 +176,7 @@ impl PatchesClapPlugin {
         // Fallback: parse the in-memory source (no include resolution) — emit
         // an empty SourceMap; diagnostics from this path have no resolvable
         // paths but still render with line/column derived from the span text.
-        Ok((patches_dsl::parse(&self.dsl_source)?, SourceMap::new()))
+        Ok((patches_dsl::pipeline::parse_source(&self.dsl_source)?, SourceMap::new()))
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.
@@ -180,15 +193,18 @@ impl PatchesClapPlugin {
 // ── Diagnostic construction ─────────────────────────────────────────
 
 fn compile_error_to_diagnostics(err: &CompileError, source_map: &SourceMap) -> Vec<RenderedDiagnostic> {
-    let d = match err {
-        CompileError::NotActivated => synthetic_diagnostic("not activated", "not-activated"),
-        CompileError::Load(e) => synthetic_diagnostic(&e.to_string(), "load"),
-        CompileError::Parse(e) => span_diagnostic(e.span, &e.message, "parse"),
-        CompileError::Expand(e) => RenderedDiagnostic::from_expand_error(e, source_map),
-        CompileError::Interpret(e) => interpret_diagnostic(e),
-        CompileError::Plan(e) => plan_diagnostic(e),
-    };
-    vec![d]
+    match err {
+        CompileError::NotActivated => vec![synthetic_diagnostic("not activated", "not-activated")],
+        CompileError::Load(e) => vec![synthetic_diagnostic(&e.to_string(), "load")],
+        CompileError::Parse(e) => vec![span_diagnostic(e.span, &e.message, "parse")],
+        CompileError::Expand(e) => vec![RenderedDiagnostic::from_expand_error(e, source_map)],
+        CompileError::Bind(errs) => errs
+            .iter()
+            .map(|e| RenderedDiagnostic::from_bind_error(e, source_map))
+            .collect(),
+        CompileError::Interpret(e) => vec![interpret_diagnostic(e)],
+        CompileError::Plan(e) => vec![plan_diagnostic(e)],
+    }
 }
 
 fn synthetic_diagnostic(message: &str, code: &str) -> RenderedDiagnostic {

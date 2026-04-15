@@ -306,7 +306,7 @@ fn complete_parameters(
         None => return vec![],
     };
     match desc {
-        ResolvedDescriptor::Module(md) => {
+        ResolvedDescriptor::Module { desc: md, .. } => {
             let mut seen = std::collections::HashSet::new();
             md.parameters
                 .iter()
@@ -374,7 +374,7 @@ fn complete_ports(
     let side = determine_connection_side(tree, source, byte_offset);
 
     match desc {
-        ResolvedDescriptor::Module(md) => {
+        ResolvedDescriptor::Module { desc: md, .. } => {
             let ports = match side {
                 ConnectionSide::Source => &md.outputs,
                 ConnectionSide::Destination => &md.inputs,

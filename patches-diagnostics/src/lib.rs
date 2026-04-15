@@ -10,7 +10,9 @@ use patches_core::build_error::BuildError;
 use patches_core::provenance::Provenance;
 use patches_core::source_map::{line_col, SourceMap};
 use patches_core::source_span::{SourceId, Span};
+use patches_dsl::loader::{LoadError, LoadErrorKind};
 use patches_dsl::ExpandError;
+use patches_interpreter::{BindError, BindErrorCode, InterpretError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -67,18 +69,163 @@ impl RenderedDiagnostic {
     /// Build a rendered diagnostic from an [`ExpandError`]. Expand errors
     /// don't carry an expansion chain (they're reported at the offending
     /// call site itself), so `related` is always empty.
+    ///
+    /// The `ExpandError` / `StructuralError` alias carries a
+    /// [`StructuralCode`] which is rendered as a stable `ST####` code so
+    /// frontends can link to documentation or disable-by-code.
     pub fn from_expand_error(err: &ExpandError, _source_map: &SourceMap) -> Self {
+        Self::from_structural_error(err, _source_map)
+    }
+
+    /// Build a rendered diagnostic from a structural (stage 3a) error.
+    pub fn from_structural_error(err: &ExpandError, _source_map: &SourceMap) -> Self {
         Self {
             severity: Severity::Error,
-            code: Some("expand".to_string()),
+            code: Some(err.code.as_str().to_string()),
             message: err.message.clone(),
             primary: Snippet {
                 source: err.span.source,
                 range: err.span.start..err.span.end,
-                label: "here".to_string(),
+                label: err.code.label().to_string(),
                 kind: SnippetKind::Primary,
             },
             related: Vec::new(),
+        }
+    }
+
+    /// Build a rendered diagnostic from a [`LoadError`] (include
+    /// resolution: IO, parse, cycle, name collision).
+    ///
+    /// `LoadError` doesn't carry a single primary span — include cycles
+    /// and IO failures happen before any source is assigned an id. The
+    /// primary snippet is synthetic; the include chain is rendered as
+    /// related notes so the user sees how the bad file was reached.
+    pub fn from_load_error(err: &LoadError, _source_map: &SourceMap) -> Self {
+        let (code, primary_label) = match &err.kind {
+            LoadErrorKind::Io { .. } => ("LD0001", "cannot read file"),
+            LoadErrorKind::Parse { .. } => ("LD0002", "parse error"),
+            LoadErrorKind::Cycle { .. } => ("LD0003", "include cycle"),
+            LoadErrorKind::NameCollision { .. } => ("LD0004", "name collision"),
+        };
+        let primary = match &err.kind {
+            LoadErrorKind::Parse { error, .. } => Snippet {
+                source: error.span.source,
+                range: error.span.start..error.span.end,
+                label: primary_label.to_string(),
+                kind: SnippetKind::Primary,
+            },
+            _ => synthetic_primary(primary_label),
+        };
+        let related = err
+            .include_chain
+            .iter()
+            .map(|(_, span)| Snippet {
+                source: span.source,
+                range: span.start..span.end,
+                label: "included from here".to_string(),
+                kind: SnippetKind::Expansion,
+            })
+            .collect();
+        Self {
+            severity: Severity::Error,
+            code: Some(code.to_string()),
+            message: err.kind.to_string(),
+            primary,
+            related,
+        }
+    }
+
+    /// Build a rendered diagnostic from a [`BindError`] (stage 3b
+    /// descriptor-level binding). Provenance expansion chain is rendered as
+    /// related snippets.
+    pub fn from_bind_error(err: &BindError, _source_map: &SourceMap) -> Self {
+        let (primary, related) = provenance_to_snippets(&err.provenance, err.code.label());
+        Self {
+            severity: Severity::Error,
+            code: Some(err.code.as_str().to_string()),
+            message: err.message.clone(),
+            primary,
+            related,
+        }
+    }
+
+    /// Build a rendered diagnostic for a pipeline-layering warning — a
+    /// later stage firing on input an earlier stage accepted. Indicates
+    /// a bug in the validation pipeline, not the user's patch.
+    ///
+    /// `code` is a `PV####` slug; `message` describes which invariant was
+    /// violated and between which stages.
+    ///
+    /// Active emission sites:
+    ///
+    /// - [`pipeline_layering_warnings`] emits `PV0001` when
+    ///   `descriptor_bind` (stage 3b) reports an
+    ///   [`BindErrorCode::UnknownModule`] on a connection or port-ref.
+    ///   Every such reference names a module that expansion (stage 3a)
+    ///   validates against the flattened patch's `modules` set, so a
+    ///   stage-3b hit means the expander let through a reference its
+    ///   own check missed.
+    pub fn pipeline_violation(
+        code: &str,
+        message: impl Into<String>,
+        span: Span,
+    ) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: Some(code.to_string()),
+            message: message.into(),
+            primary: Snippet {
+                source: span.source,
+                range: span.start..span.end,
+                label: "pipeline invariant violated".to_string(),
+                kind: SnippetKind::Primary,
+            },
+            related: Vec::new(),
+        }
+    }
+
+    /// Audit stage-3b [`BindError`]s for layering violations and emit
+    /// `PV####` warnings alongside the original errors. Callers render
+    /// the returned warnings with the normal bind diagnostics so
+    /// pipeline maintainers notice when a later stage catches something
+    /// an earlier stage should have.
+    ///
+    /// Currently flags [`BindErrorCode::UnknownModule`] — any unknown
+    /// module reference on a connection or orphan port-ref that reaches
+    /// stage 3b means expansion (stage 3a) let a reference slip past
+    /// its own unknown-module check.
+    pub fn pipeline_layering_warnings(bind_errors: &[BindError]) -> Vec<Self> {
+        bind_errors
+            .iter()
+            .filter_map(|e| match e.code {
+                BindErrorCode::UnknownModule => Some(Self::pipeline_violation(
+                    "PV0001",
+                    format!(
+                        "stage 3b descriptor_bind reported '{}'; stage 3a expansion should have \
+                         rejected this reference",
+                        e.message
+                    ),
+                    e.span(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Build a rendered diagnostic from an [`InterpretError`] (stage 3b
+    /// runtime graph construction — connect failures, tracker shape,
+    /// sequencer/song mismatch). Descriptor-level concerns live in
+    /// [`Self::from_bind_error`]. The provenance expansion chain is
+    /// rendered as related snippets.
+    pub fn from_interpret_error(err: &InterpretError, _source_map: &SourceMap) -> Self {
+        let (primary, related) =
+            provenance_to_snippets(&err.provenance, err.code.label());
+        Self {
+            severity: Severity::Error,
+            code: Some(err.code.as_str().to_string()),
+            message: err.message.clone(),
+            primary,
+            related,
         }
     }
 }
@@ -208,18 +355,143 @@ mod tests {
     #[test]
     fn expand_error_maps_to_primary_only() {
         let (map, id) = map_with("x.patches", "module x : Y\n");
-        let err = ExpandError { span: Span::new(id, 7, 8), message: "bad".into() };
+        let err = ExpandError {
+            code: patches_dsl::StructuralCode::UnknownModuleRef,
+            span: Span::new(id, 7, 8),
+            message: "bad".into(),
+        };
         let d = RenderedDiagnostic::from_expand_error(&err, &map);
         assert_eq!(d.primary.source, id);
         assert_eq!(d.primary.range, 7..8);
         assert!(d.related.is_empty());
         assert_eq!(d.message, "bad");
+        assert_eq!(d.code.as_deref(), Some("ST0007"));
+    }
+
+    #[test]
+    fn structural_error_code_picks_named_variant() {
+        let (map, id) = map_with("x.patches", "module x : Y\n");
+        let err = ExpandError {
+            code: patches_dsl::StructuralCode::RecursiveTemplate,
+            span: Span::new(id, 0, 1),
+            message: "recursion".into(),
+        };
+        let d = RenderedDiagnostic::from_structural_error(&err, &map);
+        assert_eq!(d.code.as_deref(), Some("ST0010"));
+        assert_eq!(d.primary.label, "recursive template");
+    }
+
+    #[test]
+    fn load_error_io_uses_synthetic_primary() {
+        use patches_dsl::loader::{LoadError, LoadErrorKind};
+        let err = LoadError {
+            kind: LoadErrorKind::Io {
+                path: PathBuf::from("missing.patches"),
+                error: std::io::Error::other("no such file"),
+            },
+            include_chain: vec![],
+        };
+        let map = SourceMap::new();
+        let d = RenderedDiagnostic::from_load_error(&err, &map);
+        assert_eq!(d.primary.source, SourceId::SYNTHETIC);
+        assert_eq!(d.code.as_deref(), Some("LD0001"));
+        assert!(d.related.is_empty());
+    }
+
+    #[test]
+    fn load_error_cycle_renders_include_chain() {
+        use patches_dsl::loader::{LoadError, LoadErrorKind};
+        let (mut map, root) = map_with("root.patches", "include \"sub\"\n");
+        let sub = map.add(PathBuf::from("sub.patches"), "include \"root\"\n".into());
+        let err = LoadError {
+            kind: LoadErrorKind::Cycle {
+                parent: PathBuf::from("sub.patches"),
+                target: PathBuf::from("root.patches"),
+            },
+            include_chain: vec![
+                (PathBuf::from("root.patches"), Span::new(root, 8, 13)),
+                (PathBuf::from("sub.patches"), Span::new(sub, 8, 14)),
+            ],
+        };
+        let d = RenderedDiagnostic::from_load_error(&err, &map);
+        assert_eq!(d.code.as_deref(), Some("LD0003"));
+        assert_eq!(d.related.len(), 2);
+    }
+
+    #[test]
+    fn interpret_error_renders_expansion_chain() {
+        use patches_core::Provenance;
+        use patches_interpreter::{InterpretError, InterpretErrorCode};
+        let (mut map, inner) = map_with("inner.patches", "x\n");
+        let outer = map.add(PathBuf::from("outer.patches"), "y\n".into());
+        let err = InterpretError {
+            code: InterpretErrorCode::ConnectFailed,
+            provenance: Provenance {
+                site: Span::new(inner, 0, 1),
+                expansion: vec![Span::new(outer, 0, 1)],
+            },
+            message: "nope".into(),
+        };
+        let d = RenderedDiagnostic::from_interpret_error(&err, &map);
+        assert_eq!(d.code.as_deref(), Some("RT0001"));
+        assert_eq!(d.primary.label, "connect failed");
+        assert_eq!(d.related.len(), 1);
     }
 
     #[test]
     fn source_line_col_resolves_offset() {
         let (map, id) = map_with("x.patches", "abc\ndef\nghi");
         assert_eq!(source_line_col(&map, id, 5), (2, 2));
+    }
+
+    #[test]
+    fn layering_audit_flags_unknown_module_bind_error() {
+        use patches_core::Provenance;
+        use patches_interpreter::{BindError, BindErrorCode};
+        let (map, id) = map_with("x.patches", "patch { }\n");
+        // Craft a BindError as if stage 3b caught an unknown-module
+        // reference — something stage 3a expansion validates against
+        // the flattened patch's module set. When descriptor_bind reports
+        // BN0006, the pipeline layering audit must surface a PV0001
+        // warning alongside.
+        let err = BindError::new(
+            BindErrorCode::UnknownModule,
+            Provenance {
+                site: Span::new(id, 0, 5),
+                expansion: vec![],
+            },
+            "module 'ghost' not found",
+        );
+        let warnings = RenderedDiagnostic::pipeline_layering_warnings(&[err]);
+        let _ = &map; // map kept alive for the span's source_id
+        assert_eq!(warnings.len(), 1);
+        let w = &warnings[0];
+        assert_eq!(w.severity, Severity::Warning);
+        assert_eq!(w.code.as_deref(), Some("PV0001"));
+        assert!(
+            w.message.contains("descriptor_bind") && w.message.contains("expansion"),
+            "message should name the stages: {}",
+            w.message
+        );
+        assert_eq!(w.primary.source, id);
+    }
+
+    #[test]
+    fn layering_audit_ignores_non_layering_bind_errors() {
+        use patches_core::Provenance;
+        use patches_interpreter::{BindError, BindErrorCode};
+        // UnknownPort is a legitimate stage-3b concern (plain modules'
+        // port sets are unknown to the DSL expander) — it must not
+        // trigger a PV warning.
+        let err = BindError::new(
+            BindErrorCode::UnknownPort,
+            Provenance {
+                site: Span::new(SourceId::SYNTHETIC, 0, 0),
+                expansion: vec![],
+            },
+            "no such port",
+        );
+        assert!(RenderedDiagnostic::pipeline_layering_warnings(&[err]).is_empty());
     }
 
     #[test]

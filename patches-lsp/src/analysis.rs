@@ -370,7 +370,13 @@ pub(crate) fn resolve_dependencies(decl_map: &DeclarationMap) -> DependencyResul
 /// stand-in descriptor for template instances.
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedDescriptor {
-    Module(ModuleDescriptor),
+    Module {
+        desc: ModuleDescriptor,
+        /// Per-channel alias names from a `(channels: [a, b, c])` shape arg,
+        /// empty if the shape used a numeric channel count or omitted it.
+        /// Used to label indexed ports in diagnostics (`clock[bass]`).
+        channel_aliases: Vec<String>,
+    },
     Template {
         in_ports: Vec<String>,
         out_ports: Vec<String>,
@@ -380,37 +386,43 @@ pub(crate) enum ResolvedDescriptor {
 impl ResolvedDescriptor {
     pub fn has_input(&self, name: &str) -> bool {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.inputs.iter().any(|p| p.name == name),
+            ResolvedDescriptor::Module { desc, .. } => desc.inputs.iter().any(|p| p.name == name),
             ResolvedDescriptor::Template { in_ports, .. } => in_ports.iter().any(|p| p == name),
         }
     }
 
     pub fn has_output(&self, name: &str) -> bool {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.outputs.iter().any(|p| p.name == name),
+            ResolvedDescriptor::Module { desc, .. } => desc.outputs.iter().any(|p| p.name == name),
             ResolvedDescriptor::Template { out_ports, .. } => out_ports.iter().any(|p| p == name),
         }
     }
 
     pub fn has_parameter(&self, name: &str) -> bool {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.parameters.iter().any(|p| p.name == name),
+            ResolvedDescriptor::Module { desc, .. } => {
+                desc.parameters.iter().any(|p| p.name == name)
+            }
             ResolvedDescriptor::Template { .. } => false,
         }
     }
 
+    /// Distinct port-name set for inputs. Indexed ports collapse to their
+    /// shared name. Used for typo suggestions where `clock[bass]` and
+    /// `clock[drums]` should rank as one candidate `clock`.
     pub fn input_names(&self) -> Vec<&str> {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.inputs.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Module { desc, .. } => dedup_port_names(&desc.inputs),
             ResolvedDescriptor::Template { in_ports, .. } => {
                 in_ports.iter().map(|s| s.as_str()).collect()
             }
         }
     }
 
+    /// Distinct port-name set for outputs. See [`Self::input_names`].
     pub fn output_names(&self) -> Vec<&str> {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.outputs.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Module { desc, .. } => dedup_port_names(&desc.outputs),
             ResolvedDescriptor::Template { out_ports, .. } => {
                 out_ports.iter().map(|s| s.as_str()).collect()
             }
@@ -419,10 +431,75 @@ impl ResolvedDescriptor {
 
     pub fn parameter_names(&self) -> Vec<&str> {
         match self {
-            ResolvedDescriptor::Module(desc) => desc.parameters.iter().map(|p| p.name).collect(),
+            ResolvedDescriptor::Module { desc, .. } => {
+                desc.parameters.iter().map(|p| p.name).collect()
+            }
             ResolvedDescriptor::Template { .. } => Vec::new(),
         }
     }
+
+    /// Display-form labels for inputs: `name`, `name[alias]`, or `name[idx]`.
+    /// Suitable for the `Known inputs:` diagnostic suffix.
+    pub fn input_labels(&self) -> Vec<String> {
+        match self {
+            ResolvedDescriptor::Module { desc, channel_aliases } => {
+                format_port_labels(&desc.inputs, channel_aliases)
+            }
+            ResolvedDescriptor::Template { in_ports, .. } => in_ports.clone(),
+        }
+    }
+
+    /// Display-form labels for outputs. See [`Self::input_labels`].
+    pub fn output_labels(&self) -> Vec<String> {
+        match self {
+            ResolvedDescriptor::Module { desc, channel_aliases } => {
+                format_port_labels(&desc.outputs, channel_aliases)
+            }
+            ResolvedDescriptor::Template { out_ports, .. } => out_ports.clone(),
+        }
+    }
+}
+
+fn dedup_port_names(ports: &[patches_core::PortDescriptor]) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for p in ports {
+        if !out.contains(&p.name) {
+            out.push(p.name);
+        }
+    }
+    out
+}
+
+/// Format each port as `name`, `name[alias]`, or `name[idx]`. A port name
+/// that appears once with index 0 renders bare; otherwise every entry is
+/// indexed. Aliases apply when the port's index is in range of
+/// `channel_aliases` *and* the port group's count matches the alias count
+/// (heuristic for "this indexed port was driven by `channels`").
+fn format_port_labels(
+    ports: &[patches_core::PortDescriptor],
+    channel_aliases: &[String],
+) -> Vec<String> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for p in ports {
+        *counts.entry(p.name).or_insert(0) += 1;
+    }
+    ports
+        .iter()
+        .map(|p| {
+            let count = counts.get(p.name).copied().unwrap_or(1);
+            if count == 1 && p.index == 0 {
+                p.name.to_string()
+            } else if !channel_aliases.is_empty()
+                && count == channel_aliases.len()
+                && p.index < channel_aliases.len()
+            {
+                format!("{}[{}]", p.name, channel_aliases[p.index])
+            } else {
+                format!("{}[{}]", p.name, p.index)
+            }
+        })
+        .collect()
 }
 
 /// Phase 3: resolve module descriptors via the registry.
@@ -450,15 +527,28 @@ pub(crate) fn instantiate_descriptors(
         }
 
         let shape = build_module_shape(&module.shape_args);
+        let channel_aliases = extract_channel_aliases(&module.shape_args);
         match registry.describe(&module.type_name, &shape) {
             Ok(desc) => {
-                descriptors.insert(key, ResolvedDescriptor::Module(desc));
+                descriptors.insert(
+                    key,
+                    ResolvedDescriptor::Module {
+                        desc,
+                        channel_aliases,
+                    },
+                );
             }
             Err(_) => {
                 // Try default shape as fallback
                 if shape != ModuleShape::default() {
                     if let Ok(desc) = registry.describe(&module.type_name, &ModuleShape::default()) {
-                        descriptors.insert(key, ResolvedDescriptor::Module(desc));
+                        descriptors.insert(
+                            key,
+                            ResolvedDescriptor::Module {
+                                desc,
+                                channel_aliases,
+                            },
+                        );
                         continue;
                     }
                 }
@@ -488,6 +578,17 @@ pub(crate) fn instantiate_descriptors(
     }
 
     (descriptors, diagnostics)
+}
+
+fn extract_channel_aliases(shape_args: &[(String, ShapeValue)]) -> Vec<String> {
+    for (name, value) in shape_args {
+        if name == "channels" {
+            if let ShapeValue::AliasList(list) = value {
+                return list.clone();
+            }
+        }
+    }
+    Vec::new()
 }
 
 fn build_module_shape(shape_args: &[(String, ShapeValue)]) -> ModuleShape {
@@ -673,7 +774,7 @@ fn validate_port_ref_as_output(
         if !desc.has_output(port_name) {
             let replacements =
                 crate::lsp_util::rank_suggestions(port_name, desc.output_names(), 3);
-            let known = desc.output_names().join(", ");
+            let known = desc.output_labels().join(", ");
             let message = match replacements.first() {
                 Some(first) => format!(
                     "unknown output port '{}' on module '{}'. Did you mean '{}'? Known outputs: {}",
@@ -723,7 +824,7 @@ fn validate_port_ref_as_input(
         if !desc.has_input(port_name) {
             let replacements =
                 crate::lsp_util::rank_suggestions(port_name, desc.input_names(), 3);
-            let known = desc.input_names().join(", ");
+            let known = desc.input_labels().join(", ");
             let message = match replacements.first() {
                 Some(first) => format!(
                     "unknown input port '{}' on module '{}'. Did you mean '{}'? Known inputs: {}",
@@ -869,46 +970,11 @@ fn analyse_tracker_modules(
                                 kind: crate::ast_builder::DiagnosticKind::UndefinedSong,
                                 replacements: Vec::new(),
                             });
-                        } else {
-                            // Check channel alignment: song channels vs module shape channels
-                            let song_info = &decl_map.songs[song_name];
-                            let module_info = decl_map.modules.iter().find(|mi| {
-                                mi.name == m.name.as_ref().map_or("", |id| id.name.as_str())
-                            });
-                            if let Some(mi) = module_info {
-                                for (arg_name, arg_val) in &mi.shape_args {
-                                    if arg_name == "channels" {
-                                        if let ShapeValue::AliasList(aliases) = arg_val {
-                                            if aliases.len() != song_info.channel_names.len() {
-                                                diagnostics.push(Diagnostic {
-                                                    span: *span,
-                                                    message: format!(
-                                                        "song '{}' has {} channels but MasterSequencer declares {}",
-                                                        song_name,
-                                                        song_info.channel_names.len(),
-                                                        aliases.len()
-                                                    ),
-                                                    kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
-                                                    replacements: Vec::new(),
-                                                });
-                                            } else if *aliases != song_info.channel_names {
-                                                diagnostics.push(Diagnostic {
-                                                    span: *span,
-                                                    message: format!(
-                                                        "song '{}' channel names [{}] don't match MasterSequencer channels [{}]",
-                                                        song_name,
-                                                        song_info.channel_names.join(", "),
-                                                        aliases.join(", ")
-                                                    ),
-                                                    kind: crate::ast_builder::DiagnosticKind::ChannelCountMismatch,
-                                                    replacements: Vec::new(),
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
+                        // Channel-alignment between `song` and the MasterSequencer
+                        // `channels` shape arg depends on resolved shape; the pest
+                        // pipeline reports it post-expansion. Tree-sitter fallback
+                        // stays name-level only per ADR 0038 stage 4c.
                     }
                 }
             }
@@ -1708,6 +1774,35 @@ patch {
             .collect();
         assert_eq!(port_diags.len(), 1);
         assert!(port_diags[0].message.contains("nonexistent_port"));
+    }
+
+    #[test]
+    fn unknown_output_port_lists_channel_aliases() {
+        // Diagnostic for an unknown output on a channel-aliased module
+        // should label indexed ports by their alias rather than repeating
+        // the bare name.
+        let model = analyse_source(
+            r#"
+patch {
+    module seq : MasterSequencer(channels: [bass, drums]) {
+        bass: x...x...x...x...
+        drums: x.x.x.x.x.x.x.x.
+    }
+    module out : AudioOut
+    seq.cock -> out.in_left
+}
+"#,
+        );
+        let diag = model
+            .diagnostics
+            .iter()
+            .find(|d| d.message.contains("unknown output port"))
+            .expect("expected unknown-output diag");
+        assert!(
+            diag.message.contains("clock[bass]") && diag.message.contains("clock[drums]"),
+            "expected aliased clock outputs in: {}",
+            diag.message
+        );
     }
 
     #[test]
