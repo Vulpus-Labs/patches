@@ -115,14 +115,16 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         file.templates.iter().map(|t| (t.name.name.as_str(), t)).collect();
 
     let root_scope = NameScope::root(&file.songs, &file.patterns, &file.sections);
-    let result = Expander::new(&templates).expand_body(
-        &file.patch.body,
+    let empty_env: HashMap<String, Scalar> = HashMap::new();
+    let empty_types: HashMap<String, ParamType> = HashMap::new();
+    let root_ctx = ExpansionCtx::for_template(
         None,
-        &HashMap::new(),
-        &HashMap::new(),
+        &empty_env,
+        &empty_types,
         &root_scope,
         &[],
-    )?;
+    );
+    let result = Expander::new(&templates).expand_body(&file.patch.body, &root_ctx)?;
 
     // Expand patterns: merge top-level with template-local, resolve generators.
     let mut patterns: Vec<FlatPatternDef> =
@@ -803,6 +805,52 @@ fn scalar_to_usize(scalar: &Scalar, span: &Span) -> Result<usize, ExpandError> {
 
 // ─── Expansion context ────────────────────────────────────────────────────────
 
+/// Per-frame expansion context threaded through `expand_body` and its callees.
+///
+/// All fields are borrows — the expander itself holds no copy, so adding
+/// another field here has no clone cost. Lifetime `'ctx` bounds the scope
+/// containers; `'a` matches the file AST held by the enclosing [`Expander`].
+struct ExpansionCtx<'ctx, 'a: 'ctx> {
+    /// Namespace (qualified prefix) for modules declared in this body.
+    namespace: Option<&'ctx QName>,
+    /// Param → concrete value bindings visible in this body.
+    param_env: &'ctx HashMap<String, Scalar>,
+    /// Param → declared type. Used to validate pattern/song references.
+    param_types: &'ctx HashMap<String, ParamType>,
+    /// Lexical scope chain for resolving song/pattern names.
+    parent_scope: &'ctx NameScope<'a>,
+    /// Innermost-first chain of template-call spans for provenance.
+    call_chain: &'ctx [Span],
+}
+
+impl<'ctx, 'a: 'ctx> ExpansionCtx<'ctx, 'a> {
+    /// Build a ctx with a different `namespace`/`parent_scope`/`call_chain`
+    /// for recursing into a template body. `param_env` / `param_types` are
+    /// typically replaced wholesale by the caller, so those are taken by
+    /// fresh borrows too.
+    fn for_template(
+        namespace: Option<&'ctx QName>,
+        param_env: &'ctx HashMap<String, Scalar>,
+        param_types: &'ctx HashMap<String, ParamType>,
+        parent_scope: &'ctx NameScope<'a>,
+        call_chain: &'ctx [Span],
+    ) -> Self {
+        Self { namespace, param_env, param_types, parent_scope, call_chain }
+    }
+}
+
+/// One endpoint of a connection after port-index resolution.
+///
+/// `index` is the concrete integer index. `is_arity` records that the index
+/// came from an arity expansion (`[*n]`), which affects the template
+/// boundary-map key ("port/i" vs. plain "port").
+#[derive(Debug)]
+struct PortBinding {
+    port: String,
+    index: u32,
+    is_arity: bool,
+}
+
 /// Carries the immutable template table, the mutable recursion guard, and the
 /// warning accumulator across the recursive descent.
 struct Expander<'a> {
@@ -948,15 +996,10 @@ impl<'a> Expander<'a> {
     ///
     /// Two-pass: modules first (so `instance_ports` is populated before
     /// connections are processed), then connections.
-    #[allow(clippy::too_many_arguments)]
     fn expand_body(
         &mut self,
         stmts: &[Statement],
-        namespace: Option<&QName>,
-        param_env: &HashMap<String, Scalar>,
-        param_types: &HashMap<String, ParamType>,
-        parent_scope: &NameScope<'_>,
-        call_chain: &[Span],
+        ctx: &ExpansionCtx<'_, '_>,
     ) -> Result<BodyResult, ExpandError> {
         // Ticket 0444: alias-map scope isolation.
         //
@@ -968,24 +1011,17 @@ impl<'a> Expander<'a> {
         // name). We swap in a fresh map for this frame and restore it after
         // the body is expanded — regardless of success or error.
         let saved_alias_maps = std::mem::take(&mut self.alias_maps);
-        let result = self.expand_body_scoped(
-            stmts, namespace, param_env, param_types, parent_scope, call_chain,
-        );
+        let result = self.expand_body_scoped(stmts, ctx);
         self.alias_maps = saved_alias_maps;
         result
     }
 
     /// Body of [`expand_body`] after the alias-map scope has been swapped in.
     /// Extracted so the caller can unconditionally restore `alias_maps`.
-    #[allow(clippy::too_many_arguments)]
     fn expand_body_scoped(
         &mut self,
         stmts: &[Statement],
-        namespace: Option<&QName>,
-        param_env: &HashMap<String, Scalar>,
-        param_types: &HashMap<String, ParamType>,
-        parent_scope: &NameScope<'_>,
-        call_chain: &[Span],
+        ctx: &ExpansionCtx<'_, '_>,
     ) -> Result<BodyResult, ExpandError> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
@@ -996,7 +1032,7 @@ impl<'a> Expander<'a> {
         let mut module_names: HashSet<String> = HashSet::new();
 
         // Build a scope for this body's local song/pattern definitions.
-        let scope = NameScope::child(parent_scope, stmts, namespace);
+        let scope = NameScope::child(ctx.parent_scope, stmts, ctx.namespace);
 
         // ── Pass 1: module declarations ──────────────────────────────────────
 
@@ -1009,8 +1045,7 @@ impl<'a> Expander<'a> {
             let type_name = &decl.type_name.name;
 
             if self.templates.contains_key(type_name.as_str()) {
-                let sub =
-                    self.expand_template_instance(decl, namespace, param_env, &scope, call_chain)?;
+                let sub = self.expand_template_instance(decl, &scope, ctx)?;
                 flat_modules.extend(sub.modules);
                 flat_connections.extend(sub.connections);
                 songs.extend(sub.songs);
@@ -1019,7 +1054,7 @@ impl<'a> Expander<'a> {
                 instance_ports.insert(decl.name.name.clone(), sub.ports);
                 module_names.insert(decl.name.name.clone());
             } else {
-                let inst_id = qualify(namespace, &decl.name.name);
+                let inst_id = qualify(ctx.namespace, &decl.name.name);
                 let instance_alias_map = build_alias_map(&decl.shape);
                 let has_aliases = !instance_alias_map.is_empty();
                 if has_aliases {
@@ -1030,7 +1065,7 @@ impl<'a> Expander<'a> {
                     .shape
                     .iter()
                     .map(|a| {
-                        self.resolve_shape_arg_value(&a.value, param_env, &a.span)
+                        self.resolve_shape_arg_value(&a.value, ctx.param_env, &a.span)
                             .map(|s| (a.name.name.clone(), s))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1042,7 +1077,7 @@ impl<'a> Expander<'a> {
                 };
                 let mut params = self.expand_param_entries_with_enum(
                     &decl.params,
-                    param_env,
+                    ctx.param_env,
                     &decl.span,
                     alias_map_ref,
                 )?;
@@ -1058,7 +1093,7 @@ impl<'a> Expander<'a> {
                     shape,
                     params,
                     port_aliases,
-                    provenance: Provenance::with_chain(decl.span, call_chain),
+                    provenance: Provenance::with_chain(decl.span, ctx.call_chain),
                 });
                 module_names.insert(decl.name.name.clone());
             }
@@ -1078,14 +1113,12 @@ impl<'a> Expander<'a> {
             };
             self.expand_connection(
                 conn,
-                namespace,
-                param_env,
+                ctx,
                 &instance_ports,
                 &module_names,
                 &mut flat_connections,
                 &mut boundary,
                 &mut port_refs,
-                call_chain,
             )?;
         }
 
@@ -1096,8 +1129,14 @@ impl<'a> Expander<'a> {
                 Statement::Song(sd) => sd,
                 _ => continue,
             };
-            let (flat, inline_patterns) =
-                flatten_song(song_def, namespace, param_env, param_types, &scope, call_chain)?;
+            let (flat, inline_patterns) = flatten_song(
+                song_def,
+                ctx.namespace,
+                ctx.param_env,
+                ctx.param_types,
+                &scope,
+                ctx.call_chain,
+            )?;
             songs.push(flat);
             patterns.extend(inline_patterns);
         }
@@ -1109,7 +1148,7 @@ impl<'a> Expander<'a> {
                 Statement::Pattern(pd) => pd,
                 _ => continue,
             };
-            patterns.push(expand_pattern_def(pat_def, namespace, call_chain));
+            patterns.push(expand_pattern_def(pat_def, ctx.namespace, ctx.call_chain));
         }
 
         Ok(BodyResult {
@@ -1129,11 +1168,12 @@ impl<'a> Expander<'a> {
     fn expand_template_instance(
         &mut self,
         decl: &ModuleDecl,
-        namespace: Option<&QName>,
-        param_env: &HashMap<String, Scalar>,
         scope: &NameScope<'_>,
-        call_chain: &[Span],
+        parent_ctx: &ExpansionCtx<'_, '_>,
     ) -> Result<BodyResult, ExpandError> {
+        let param_env = parent_ctx.param_env;
+        let namespace = parent_ctx.namespace;
+        let call_chain = parent_ctx.call_chain;
         let type_name = &decl.type_name.name;
         let template = self.templates[type_name.as_str()];
 
@@ -1381,14 +1421,14 @@ impl<'a> Expander<'a> {
         let child_namespace = qualify(namespace, &decl.name.name);
         self.call_stack.insert(type_name.clone());
         let child_chain = Provenance::extend(call_chain, decl.span);
-        let sub = self.expand_body(
-            &template.body,
+        let child_ctx = ExpansionCtx::for_template(
             Some(&child_namespace),
             &sub_param_env,
             &sub_param_types,
             scope,
             &child_chain,
         );
+        let sub = self.expand_body(&template.body, &child_ctx);
         self.call_stack.remove(type_name.as_str());
         let sub = sub?;
 
@@ -1403,15 +1443,14 @@ impl<'a> Expander<'a> {
     fn expand_connection(
         &mut self,
         conn: &Connection,
-        namespace: Option<&QName>,
-        param_env: &HashMap<String, Scalar>,
+        ctx: &ExpansionCtx<'_, '_>,
         instance_ports: &HashMap<String, TemplatePorts>,
         module_names: &HashSet<String>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
-        call_chain: &[Span],
     ) -> Result<(), ExpandError> {
+        let param_env = ctx.param_env;
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
         let arrow_scale =
@@ -1467,23 +1506,28 @@ impl<'a> Expander<'a> {
         let pairs = combine_index_resolutions(from_res, to_res, &conn.span)?;
 
         for (from_i, to_i, from_is_arity, to_is_arity) in pairs {
+            let from_bind = PortBinding {
+                port: from_port.clone(),
+                index: from_i,
+                is_arity: from_is_arity,
+            };
+            let to_bind = PortBinding {
+                port: to_port.clone(),
+                index: to_i,
+                is_arity: to_is_arity,
+            };
             self.emit_single_connection(
                 &from_ref.module,
-                &from_port,
-                from_i,
-                from_is_arity,
+                &from_bind,
                 &to_ref.module,
-                &to_port,
-                to_i,
-                to_is_arity,
+                &to_bind,
                 arrow_scale,
-                namespace,
+                ctx,
                 instance_ports,
                 flat_connections,
                 boundary,
                 port_refs,
                 &conn.span,
-                call_chain,
             )?;
         }
 
@@ -1492,46 +1536,46 @@ impl<'a> Expander<'a> {
 
     /// Emit one concrete connection (after arity has been resolved to a single i).
     ///
-    /// `from_is_arity` / `to_is_arity` indicate that the index comes from an
-    /// arity expansion; when `true` and the side is `$`, the boundary-map key
-    /// uses `"port/i"` format instead of plain `"port"`.
+    /// Each side of the connection is a [`PortBinding`] holding the resolved
+    /// port name, concrete index, and whether the index came from an arity
+    /// expansion (`[*n]`). The arity flag affects the template boundary-map
+    /// key: arity-sourced indices use `"port/i"`, everything else uses plain
+    /// `"port"`.
     #[allow(clippy::too_many_arguments)]
     fn emit_single_connection(
         &mut self,
         from_module: &str,
-        from_port: &str,
-        from_i: u32,
-        from_is_arity: bool,
+        from: &PortBinding,
         to_module: &str,
-        to_port: &str,
-        to_i: u32,
-        to_is_arity: bool,
+        to: &PortBinding,
         arrow_scale: f64,
-        namespace: Option<&QName>,
+        ctx: &ExpansionCtx<'_, '_>,
         instance_ports: &HashMap<String, TemplatePorts>,
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
         span: &Span,
-        call_chain: &[Span],
     ) -> Result<(), ExpandError> {
+        let namespace = ctx.namespace;
+        let call_chain = ctx.call_chain;
+
         // Boundary key: "port/i" for arity-expanded ports, plain "port" otherwise.
-        let from_bkey = if from_is_arity {
-            format!("{}/{}", from_port, from_i)
+        let from_bkey = if from.is_arity {
+            format!("{}/{}", from.port, from.index)
         } else {
-            from_port.to_owned()
+            from.port.clone()
         };
-        let to_bkey = if to_is_arity {
-            format!("{}/{}", to_port, to_i)
+        let to_bkey = if to.is_arity {
+            format!("{}/{}", to.port, to.index)
         } else {
-            to_port.to_owned()
+            to.port.clone()
         };
 
         match (from_module == "$", to_module == "$") {
             // $.in_port ─→ inner  (template in-port boundary)
             (true, false) => {
                 let dsts = resolve_to(
-                    to_module, to_port, to_i, namespace, instance_ports, span,
+                    to_module, &to.port, to.index, namespace, instance_ports, span,
                 )?;
                 for (m, p, i, _) in &dsts {
                     port_refs.push(FlatPortRef {
@@ -1550,7 +1594,7 @@ impl<'a> Expander<'a> {
             // inner ─→ $.out_port  (template out-port boundary)
             (false, true) => {
                 let (src_m, src_p, src_i, inner_scale) = resolve_from(
-                    from_module, from_port, from_i, namespace, instance_ports, span,
+                    from_module, &from.port, from.index, namespace, instance_ports, span,
                 )?;
                 port_refs.push(FlatPortRef {
                     module: src_m.clone(),
@@ -1572,11 +1616,11 @@ impl<'a> Expander<'a> {
             // Regular connection (from and to are both concrete or instances).
             (false, false) => {
                 let (src_m, src_p, src_i, from_inner) = resolve_from(
-                    from_module, from_port, from_i, namespace, instance_ports, span,
+                    from_module, &from.port, from.index, namespace, instance_ports, span,
                 )?;
                 let composed = from_inner * arrow_scale;
                 let mut dsts = resolve_to(
-                    to_module, to_port, to_i, namespace, instance_ports, span,
+                    to_module, &to.port, to.index, namespace, instance_ports, span,
                 )?;
                 if let Some((last_dst_m, last_dst_p, last_dst_i, last_to_inner)) = dsts.pop() {
                     for (dst_m, dst_p, dst_i, to_inner) in dsts {
