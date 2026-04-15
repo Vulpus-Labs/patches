@@ -958,6 +958,35 @@ impl<'a> Expander<'a> {
         parent_scope: &NameScope<'_>,
         call_chain: &[Span],
     ) -> Result<BodyResult, ExpandError> {
+        // Ticket 0444: alias-map scope isolation.
+        //
+        // `alias_maps` is keyed by unqualified module name and installed during
+        // pass 1 for consumption during pass 2 of the SAME body. Aliases
+        // declared in sibling or nested template bodies must not leak into the
+        // enclosing body (otherwise a later sibling's inner module could pick
+        // up a leaked entry from an earlier sibling's inner module of the same
+        // name). We swap in a fresh map for this frame and restore it after
+        // the body is expanded — regardless of success or error.
+        let saved_alias_maps = std::mem::take(&mut self.alias_maps);
+        let result = self.expand_body_scoped(
+            stmts, namespace, param_env, param_types, parent_scope, call_chain,
+        );
+        self.alias_maps = saved_alias_maps;
+        result
+    }
+
+    /// Body of [`expand_body`] after the alias-map scope has been swapped in.
+    /// Extracted so the caller can unconditionally restore `alias_maps`.
+    #[allow(clippy::too_many_arguments)]
+    fn expand_body_scoped(
+        &mut self,
+        stmts: &[Statement],
+        namespace: Option<&QName>,
+        param_env: &HashMap<String, Scalar>,
+        param_types: &HashMap<String, ParamType>,
+        parent_scope: &NameScope<'_>,
+        call_chain: &[Span],
+    ) -> Result<BodyResult, ExpandError> {
         let mut flat_modules: Vec<FlatModule> = Vec::new();
         let mut flat_connections: Vec<FlatConnection> = Vec::new();
         let mut instance_ports: HashMap<String, TemplatePorts> = HashMap::new();

@@ -1687,3 +1687,149 @@ fn provenance_sibling_template_calls_do_not_share_chain() {
         "sibling expansions must record distinct call sites"
     );
 }
+
+// ─── Alias-map scope isolation (ticket 0444) ─────────────────────────────────
+//
+// `Expander::alias_maps` is keyed by unqualified module name and was
+// previously never cleared, so port-index aliases declared inside one
+// template body could leak into sibling or enclosing bodies that happened
+// to use the same unqualified module name. The expander now swaps in a
+// fresh alias map per template-body frame and restores the caller's map on
+// exit, so aliases only live as long as the template body that declared
+// them.
+
+#[test]
+fn alias_scope_sibling_templates_do_not_share_inner_aliases() {
+    // Two sibling template calls whose bodies each declare a module with
+    // the SAME unqualified name (`m`) but different alias lists. Each
+    // inner connection `m.in[kick]` / `m.in[snare]` must resolve against
+    // its own template body's alias map — never the sibling's.
+    let src = r#"
+        template UsesKick() {
+            in:  x
+            out: y
+            module m : Mixer(channels: [kick])
+            m.in[kick] <- $.x
+            $.y <- m.out
+        }
+        template UsesSnare() {
+            in:  x
+            out: y
+            module m : Mixer(channels: [snare])
+            m.in[snare] <- $.x
+            $.y <- m.out
+        }
+        patch {
+            module a : UsesKick
+            module b : UsesSnare
+            module osc : Osc
+            module out : AudioOut
+            osc.sine -> a.x
+            osc.sine -> b.x
+            a.y -> out.in_left
+            b.y -> out.in_right
+        }
+    "#;
+    // Both sibling expansions must succeed: neither alias leaks to the
+    // other, and each resolves cleanly to its own (port_aliases)
+    // declaration.
+    let flat = parse_expand(src);
+    let a_m = find_module(&flat, "a/m");
+    let b_m = find_module(&flat, "b/m");
+    assert!(
+        a_m.port_aliases.iter().any(|(_, name)| name == "kick"),
+        "a/m should have kick alias; got {:?}", a_m.port_aliases
+    );
+    assert!(
+        b_m.port_aliases.iter().any(|(_, name)| name == "snare"),
+        "b/m should have snare alias; got {:?}", b_m.port_aliases
+    );
+    assert!(
+        !a_m.port_aliases.iter().any(|(_, name)| name == "snare"),
+        "a/m must not carry leaked snare alias"
+    );
+    assert!(
+        !b_m.port_aliases.iter().any(|(_, name)| name == "kick"),
+        "b/m must not carry leaked kick alias"
+    );
+}
+
+#[test]
+fn alias_scope_leak_into_outer_body_is_not_observable() {
+    // A template body declares an inner module `m` with alias `kick`.
+    // After the template expansion returns, the outer body also declares
+    // a module named `m` (no aliases) and references an alias `kick` in
+    // a connection. Before ticket 0444 this would silently succeed
+    // because the inner alias map leaked into the outer `alias_maps`;
+    // with the fix it must fail fast with an unknown-alias error.
+    let src = r#"
+        template Inner() {
+            in:  x
+            out: y
+            module m : Mixer(channels: [kick])
+            m.in[kick] <- $.x
+            $.y <- m.out
+        }
+        patch {
+            module sub : Inner
+            module m : Gain
+            module osc : Osc
+            module out : AudioOut
+            osc.sine -> sub.x
+            osc.sine -> m.in[kick]
+            sub.y -> out.in_left
+            m.out -> out.in_right
+        }
+    "#;
+    let file = parse(src).expect("parse ok");
+    let err = expand(&file).expect_err(
+        "expected unknown-alias error: inner's `kick` alias must not leak to outer's `m`",
+    );
+    assert!(
+        err.message.contains("unknown alias") || err.message.contains("kick"),
+        "unexpected error message: {}",
+        err.message
+    );
+}
+
+#[test]
+fn alias_scope_nested_template_alias_does_not_leak_to_outer_template() {
+    // A nested template `Inner` declares alias `snare` on an inner module
+    // `n`. After `Inner` returns, the enclosing `Outer` body itself
+    // declares a module named `n` (no aliases) and references `n.in[snare]`.
+    // With the fix, this must fail — the nested alias does not leak.
+    let src = r#"
+        template Inner() {
+            in:  x
+            out: y
+            module n : Mixer(channels: [snare])
+            n.in[snare] <- $.x
+            $.y <- n.out
+        }
+        template Outer() {
+            in:  p
+            out: q
+            module child : Inner
+            module n : Gain
+            $.p -> child.x
+            child.y -> n.in[snare]
+            n.out -> $.q
+        }
+        patch {
+            module o : Outer
+            module osc : Osc
+            module out : AudioOut
+            osc.sine -> o.p
+            o.q -> out.in_left
+        }
+    "#;
+    let file = parse(src).expect("parse ok");
+    let err = expand(&file).expect_err(
+        "expected unknown-alias error: nested Inner's alias must not leak to Outer",
+    );
+    assert!(
+        err.message.contains("unknown alias") || err.message.contains("snare"),
+        "unexpected error message: {}",
+        err.message
+    );
+}
