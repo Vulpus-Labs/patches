@@ -36,15 +36,45 @@ pub(super) struct AssembledSong {
     pub(super) call_chain: Vec<Span>,
 }
 
+/// A `Vec<FlatPatternDef>` that is guaranteed to be sorted by qualified
+/// name. The expand pipeline canonicalises pattern order before resolving
+/// song cells; carrying that invariant in a type stops [`index_songs`] (the
+/// only consumer that depends on the order) from being handed an unsorted
+/// slice by accident.
+pub(super) struct SortedPatterns(Vec<FlatPatternDef>);
+
+impl SortedPatterns {
+    /// Sort the patterns by qualified name and wrap them. The sort is the
+    /// only way to construct a `SortedPatterns`, so the invariant is
+    /// established at the type boundary.
+    pub(super) fn sort(mut patterns: Vec<FlatPatternDef>) -> Self {
+        patterns.sort_by(|a, b| a.name.cmp(&b.name));
+        Self(patterns)
+    }
+
+    fn as_slice(&self) -> &[FlatPatternDef] {
+        &self.0
+    }
+
+    pub(super) fn into_inner(self) -> Vec<FlatPatternDef> {
+        self.0
+    }
+}
+
 /// Final post-pass: convert each [`AssembledSong`] row to a [`FlatSongRow`]
 /// with pattern indices into `patterns`. Errors if a cell references an
 /// unknown pattern, or if a `ParamRef` survived expansion (which would
 /// indicate an expansion bug).
+///
+/// Takes [`SortedPatterns`] rather than a bare slice: the emitted
+/// `PatternIdx` values index into the supplied vector, so canonical
+/// ordering must be in place before this call.
 pub(super) fn index_songs(
-    patterns: &[FlatPatternDef],
+    patterns: &SortedPatterns,
     songs: Vec<AssembledSong>,
 ) -> Result<Vec<FlatSongDef>, ExpandError> {
     let name_to_idx: HashMap<String, PatternIdx> = patterns
+        .as_slice()
         .iter()
         .enumerate()
         .map(|(i, p)| (p.name.to_string(), i))

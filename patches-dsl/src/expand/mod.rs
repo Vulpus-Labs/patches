@@ -148,17 +148,17 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
 
     // Canonicalise: sort patterns alphabetically by qualified name so that
     // `FlatPatch::patterns` has a stable, deterministic order irrespective of
-    // template expansion order. `index_songs` emits indices into this
-    // sorted list.
-    patterns.sort_by(|a, b| a.name.cmp(&b.name));
-
+    // template expansion order. `index_songs` requires sorted patterns —
+    // [`composition::SortedPatterns`] makes that precondition a type, so the
+    // call site can't accidentally feed in unsorted input.
+    let patterns = composition::SortedPatterns::sort(patterns);
     let resolved_songs = index_songs(&patterns, songs)?;
 
     Ok(ExpandResult {
         patch: FlatPatch {
             modules: result.modules,
             connections: result.connections,
-            patterns,
+            patterns: patterns.into_inner(),
             songs: resolved_songs,
             port_refs: result.port_refs,
         },
