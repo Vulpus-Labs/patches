@@ -183,18 +183,21 @@ fn param_type_name(ty: &ParamType) -> &'static str {
 ///
 /// Songs and patterns occupy separate namespaces so that a pattern named `foo`
 /// cannot accidentally resolve as a song (or vice versa).
-struct NameScope<'a> {
+/// Lexical name resolver for songs and patterns.
+///
+/// Each frame holds the song/pattern name → qualified-name map for one
+/// scope; nested scopes walk the parent chain. Sections are deliberately
+/// not here — they live in [`SectionTable`], which is keyed by visibility
+/// rather than lexical scope.
+struct NameResolver<'a> {
     songs: HashMap<String, QName>,
     patterns: HashMap<String, QName>,
-    /// Section definitions visible in this scope by name.
-    sections: HashMap<String, &'a SectionDef>,
-    parent: Option<&'a NameScope<'a>>,
+    parent: Option<&'a NameResolver<'a>>,
 }
 
-impl<'a> NameScope<'a> {
-    /// Build a root scope from file-level song, pattern, and section names.
-    fn root(songs: &[SongDef], patterns: &[PatternDef], sections: &'a [SectionDef]) -> Self {
-        NameScope {
+impl<'a> NameResolver<'a> {
+    fn root(songs: &[SongDef], patterns: &[PatternDef]) -> Self {
+        NameResolver {
             songs: songs
                 .iter()
                 .map(|s| (s.name.name.clone(), QName::bare(s.name.name.clone())))
@@ -203,18 +206,11 @@ impl<'a> NameScope<'a> {
                 .iter()
                 .map(|p| (p.name.name.clone(), QName::bare(p.name.name.clone())))
                 .collect(),
-            sections: sections.iter().map(|s| (s.name.name.clone(), s)).collect(),
             parent: None,
         }
     }
 
-    /// Build a child scope from the songs and patterns defined in a template
-    /// body, qualified under `namespace`.
-    fn child(
-        parent: &'a NameScope<'a>,
-        stmts: &[Statement],
-        namespace: Option<&QName>,
-    ) -> Self {
+    fn child(parent: &'a NameResolver<'a>, stmts: &[Statement], namespace: Option<&QName>) -> Self {
         let mut songs = HashMap::new();
         let mut patterns = HashMap::new();
         for stmt in stmts {
@@ -228,37 +224,18 @@ impl<'a> NameScope<'a> {
                 _ => {}
             }
         }
-        NameScope {
-            songs,
-            patterns,
-            sections: HashMap::new(),
-            parent: Some(parent),
-        }
+        NameResolver { songs, patterns, parent: Some(parent) }
     }
 
-    /// Build a song-local scope: patterns in `patterns` qualify under `song_ns`.
-    fn song_scope(
-        parent: &'a NameScope<'a>,
-        patterns: &[&PatternDef],
-        song_ns: &QName,
-    ) -> Self {
+    fn song_scope(parent: &'a NameResolver<'a>, patterns: &[&PatternDef], song_ns: &QName) -> Self {
         let patterns = patterns
             .iter()
             .map(|p| (p.name.name.clone(), song_ns.child(p.name.name.clone())))
             .collect();
-        NameScope {
+        NameResolver {
             songs: HashMap::new(),
             patterns,
-            sections: HashMap::new(),
             parent: Some(parent),
-        }
-    }
-
-    /// Walk up to the root scope and collect its section table.
-    fn top_level_sections(&self) -> HashMap<String, &'a SectionDef> {
-        match self.parent {
-            Some(p) => p.top_level_sections(),
-            None => self.sections.clone(),
         }
     }
 
@@ -281,6 +258,92 @@ impl<'a> NameScope<'a> {
     /// Songs are checked first, then patterns.
     fn resolve_any(&self, name: &str) -> Option<QName> {
         self.resolve_song(name).or_else(|| self.resolve_pattern(name))
+    }
+}
+
+/// File-level section visibility table.
+///
+/// Sections are top-level only (they don't nest inside template bodies), so
+/// this struct does not carry a parent chain — it's owned by the root scope
+/// and looked up flat.
+#[derive(Clone)]
+struct SectionTable<'a> {
+    sections: HashMap<String, &'a SectionDef>,
+}
+
+impl<'a> SectionTable<'a> {
+    fn from_defs(sections: &'a [SectionDef]) -> Self {
+        Self {
+            sections: sections.iter().map(|s| (s.name.name.clone(), s)).collect(),
+        }
+    }
+
+    fn empty() -> Self {
+        Self { sections: HashMap::new() }
+    }
+
+    fn as_map(&self) -> HashMap<String, &'a SectionDef> {
+        self.sections.clone()
+    }
+}
+
+/// A combined name resolver and section table threaded through expansion.
+///
+/// Each scope frame owns a [`NameResolver`] (songs/patterns, parent-chained)
+/// and a [`SectionTable`] (only the root frame holds entries; child frames
+/// hold an empty table and walk to the root for `top_level_sections`).
+/// The two halves are independent — splitting them lets future work touch
+/// scope rules (alias isolation, private sections) without entangling name
+/// lookup with section visibility.
+struct NameScope<'a> {
+    resolver: NameResolver<'a>,
+    sections: SectionTable<'a>,
+    parent: Option<&'a NameScope<'a>>,
+}
+
+impl<'a> NameScope<'a> {
+    fn root(songs: &[SongDef], patterns: &[PatternDef], sections: &'a [SectionDef]) -> Self {
+        NameScope {
+            resolver: NameResolver::root(songs, patterns),
+            sections: SectionTable::from_defs(sections),
+            parent: None,
+        }
+    }
+
+    fn child(parent: &'a NameScope<'a>, stmts: &[Statement], namespace: Option<&QName>) -> Self {
+        NameScope {
+            resolver: NameResolver::child(&parent.resolver, stmts, namespace),
+            sections: SectionTable::empty(),
+            parent: Some(parent),
+        }
+    }
+
+    fn song_scope(parent: &'a NameScope<'a>, patterns: &[&PatternDef], song_ns: &QName) -> Self {
+        NameScope {
+            resolver: NameResolver::song_scope(&parent.resolver, patterns, song_ns),
+            sections: SectionTable::empty(),
+            parent: Some(parent),
+        }
+    }
+
+    /// Walk up to the root scope and clone its section table.
+    fn top_level_sections(&self) -> HashMap<String, &'a SectionDef> {
+        match self.parent {
+            Some(p) => p.top_level_sections(),
+            None => self.sections.as_map(),
+        }
+    }
+
+    fn resolve_pattern(&self, name: &str) -> Option<QName> {
+        self.resolver.resolve_pattern(name)
+    }
+
+    fn resolve_song(&self, name: &str) -> Option<QName> {
+        self.resolver.resolve_song(name)
+    }
+
+    fn resolve_any(&self, name: &str) -> Option<QName> {
+        self.resolver.resolve_any(name)
     }
 
     /// Resolve song/pattern references in module params in-place.
