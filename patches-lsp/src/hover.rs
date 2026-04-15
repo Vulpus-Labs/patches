@@ -34,25 +34,23 @@ pub(crate) fn compute_hover(
     registry: &Registry,
     line_index: &[usize],
 ) -> Option<Hover> {
-    let root = tree.root_node();
-    let node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
-
-    // 1. Module type name (the type field in a module_decl)
-    if let Some(hover) = try_hover_module_type(node, source, model, registry, line_index) {
-        return Some(hover);
+    // Classify once, then dispatch on the context instead of probing with
+    // three independent `try_hover_*` predicates.
+    match crate::tree_nav::classify_cursor(tree, byte_offset) {
+        crate::tree_nav::CursorContext::ModuleType { node, .. } => {
+            try_hover_module_type(node, source, model, registry, line_index)
+        }
+        crate::tree_nav::CursorContext::PortRef { .. } => {
+            // try_hover_port expects the cursor node; refetch it.
+            let root = tree.root_node();
+            let node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
+            try_hover_port(node, source, model, line_index)
+        }
+        crate::tree_nav::CursorContext::ModuleName { node, .. } => {
+            try_hover_module_name(node, source, model, line_index)
+        }
+        _ => None,
     }
-
-    // 2. Port name in a connection
-    if let Some(hover) = try_hover_port(node, source, model, line_index) {
-        return Some(hover);
-    }
-
-    // 3. Module instance name
-    if let Some(hover) = try_hover_module_name(node, source, model, line_index) {
-        return Some(hover);
-    }
-
-    None
 }
 
 // ─── Expansion-aware hover ───────────────────────────────────────────────

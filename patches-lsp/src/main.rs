@@ -12,6 +12,7 @@ mod parser;
 mod server;
 mod shape_render;
 mod signal_graph;
+mod tree_nav;
 mod workspace;
 
 use server::PatchesLanguageServer;

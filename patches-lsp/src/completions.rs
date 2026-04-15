@@ -20,6 +20,18 @@ pub(crate) fn compute_completions(
     model: &SemanticModel,
     registry: &Registry,
 ) -> Vec<CompletionItem> {
+    // Fast path: if the shared classifier recognises a module-type slot
+    // (`module v : ^`), emit module-type completions without walking the
+    // tree twice. Other contexts fall through to the existing cursor loop
+    // and backward-scan fallback; they are still too bespoke for the
+    // classifier to dispatch fully, but this path exercises the shared
+    // helper and documents the intended direction of travel.
+    if let crate::tree_nav::CursorContext::ModuleType { .. } =
+        crate::tree_nav::classify_cursor(tree, byte_offset)
+    {
+        return complete_module_types(model, registry);
+    }
+
     // Try the node at the cursor, and also one byte back (the cursor often sits
     // just past the last character of a token).
     let root = tree.root_node();
