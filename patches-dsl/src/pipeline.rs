@@ -7,16 +7,28 @@
 //! The stages owned by this module are:
 //!
 //! 1. [`load`] — resolve includes from a root path to a merged
-//!    [`LoadResult`].
-//! 2. [`parse`] — pest is already driven inside [`load`]; exposed here
-//!    as a pass-through for symmetry (the load step consumes pest
-//!    errors into [`LoadError`]).
-//! 3. [`expand`] — mechanical template expansion, emits a
-//!    [`FlatPatch`]. Every structural error is classified inline and
-//!    returned as an [`ExpandError`] with a [`crate::structural::StructuralCode`].
+//!    [`LoadResult`] (consumes a root path + `read_file` closure,
+//!    produces [`LoadResult`] which wraps the parsed [`crate::File`]).
+//!    Pest parsing is driven inside this step; parse failures surface
+//!    as [`LoadError`] with [`crate::loader::LoadErrorKind::Parse`].
+//! 2. [`parse_source`] — inline-source form for consumers that carry
+//!    DSL text in memory without filesystem backing (consumes `&str`,
+//!    produces [`crate::File`]).
+//! 3. [`expand`] / [`expand_file`] — mechanical template expansion
+//!    (consumes [`LoadResult`] or [`crate::File`], produces
+//!    [`ExpandResult`] wrapping a [`FlatPatch`]). Every structural
+//!    error is classified inline and returned as an [`ExpandError`]
+//!    with a [`crate::structural::StructuralCode`].
 //! 4. [`bind`] lives in `patches-interpreter` because it requires the
 //!    module registry and audio environment — callers compose it
 //!    themselves or use [`run_all`] with a supplied closure.
+//!
+//! Stage boundaries are already type-distinct: [`crate::File`] (pre-
+//! expansion) and [`FlatPatch`] (post-expansion) are different types,
+//! so accidentally handing a pre-expansion value to a post-expansion
+//! consumer is already a compile error. Adding `ParsedFile(File)` /
+//! `ExpandedPatch(FlatPatch)` newtypes would not gate any additional
+//! check (see ticket 0447).
 //!
 //! Tree-sitter fallback (stage 4 of ADR 0038) is **not** part of this
 //! orchestrator; LSP invokes it directly when [`load`] or [`expand`]
@@ -71,13 +83,6 @@ where
     F: Fn(&Path) -> std::io::Result<String>,
 {
     load_with(master_path, read_file)
-}
-
-/// Stage 2: pest parse is executed inside [`load`]. This helper exists
-/// so callers can name the stage — it simply returns the already-merged
-/// [`LoadResult`].
-pub fn parse(load_result: LoadResult) -> LoadResult {
-    load_result
 }
 
 /// Stage 2, inline-source form. Used by consumers that carry DSL text in
