@@ -3,6 +3,29 @@
 //! Consumed by `patches-player` (terminal) and `patches-clap` (GUI). This
 //! crate does *no* rendering — it only constructs [`RenderedDiagnostic`]
 //! values from error types. Rendering lives in each frontend.
+//!
+//! # Diagnostic code registry
+//!
+//! Stable slugs frontends can use to link to documentation or
+//! disable-by-code. Each family owns a prefix; new codes should be added
+//! to the corresponding typed enum (never as a bare string).
+//!
+//! - `LD####` — load-stage errors. See [`LoadErrorCode`].
+//!   - `LD0001` — IO failure reading an included file.
+//!   - `LD0002` — parse error in a source file.
+//!   - `LD0003` — include cycle.
+//!   - `LD0004` — name collision between includes.
+//! - `ST####` — structural (stage 3a) errors. Owned by
+//!   `patches_dsl::StructuralCode`.
+//! - `BN####` — descriptor-binding (stage 3b) errors. Owned by
+//!   `patches_interpreter::BindErrorCode`.
+//! - `RT####` — runtime graph-construction errors. Owned by
+//!   `patches_interpreter::InterpretErrorCode`.
+//! - `PV####` — pipeline-layering warnings (later stage firing on input
+//!   an earlier stage accepted). Emitted locally by
+//!   [`RenderedDiagnostic::pipeline_layering_warnings`].
+//!   - `PV0001` — stage 3b caught an unknown-module reference that
+//!     stage 3a expansion should have rejected.
 
 use std::ops::Range;
 
@@ -13,6 +36,42 @@ use patches_core::source_span::{SourceId, Span};
 use patches_dsl::loader::{LoadError, LoadErrorKind};
 use patches_dsl::ExpandError;
 use patches_interpreter::{BindError, BindErrorCode, InterpretError};
+
+/// Stable code for a [`LoadError`] family. Mirrors the
+/// [`BindErrorCode`](patches_interpreter::BindErrorCode) pattern: each
+/// variant maps to a `LD####` slug (`as_str`) and a short human label
+/// (`label`) used as the primary-snippet caption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadErrorCode {
+    /// IO failure reading an included file.
+    Io,
+    /// Parse error in a loaded source file.
+    Parse,
+    /// Include cycle detected while resolving includes.
+    Cycle,
+    /// Two included files exported the same top-level name.
+    NameCollision,
+}
+
+impl LoadErrorCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Io => "LD0001",
+            Self::Parse => "LD0002",
+            Self::Cycle => "LD0003",
+            Self::NameCollision => "LD0004",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Io => "cannot read file",
+            Self::Parse => "parse error",
+            Self::Cycle => "include cycle",
+            Self::NameCollision => "name collision",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -101,12 +160,13 @@ impl RenderedDiagnostic {
     /// primary snippet is synthetic; the include chain is rendered as
     /// related notes so the user sees how the bad file was reached.
     pub fn from_load_error(err: &LoadError, _source_map: &SourceMap) -> Self {
-        let (code, primary_label) = match &err.kind {
-            LoadErrorKind::Io { .. } => ("LD0001", "cannot read file"),
-            LoadErrorKind::Parse { .. } => ("LD0002", "parse error"),
-            LoadErrorKind::Cycle { .. } => ("LD0003", "include cycle"),
-            LoadErrorKind::NameCollision { .. } => ("LD0004", "name collision"),
+        let code = match &err.kind {
+            LoadErrorKind::Io { .. } => LoadErrorCode::Io,
+            LoadErrorKind::Parse { .. } => LoadErrorCode::Parse,
+            LoadErrorKind::Cycle { .. } => LoadErrorCode::Cycle,
+            LoadErrorKind::NameCollision { .. } => LoadErrorCode::NameCollision,
         };
+        let primary_label = code.label();
         let primary = match &err.kind {
             LoadErrorKind::Parse { error, .. } => Snippet {
                 source: error.span.source,
@@ -128,7 +188,7 @@ impl RenderedDiagnostic {
             .collect();
         Self {
             severity: Severity::Error,
-            code: Some(code.to_string()),
+            code: Some(code.as_str().to_string()),
             message: err.kind.to_string(),
             primary,
             related,
