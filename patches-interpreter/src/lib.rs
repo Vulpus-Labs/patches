@@ -20,8 +20,8 @@ pub mod descriptor_bind;
 
 pub use descriptor_bind::{
     bind, bind_with_base_dir, BindError, BindErrorCode, BoundConnection, BoundModule, BoundPatch,
-    BoundPortRef, ResolvedConnection, ResolvedModule, ResolvedPortRef, UnresolvedConnection,
-    UnresolvedModule, UnresolvedPortRef,
+    BoundPortRef, ParamConversionError, ResolvedConnection, ResolvedModule, ResolvedPortRef,
+    UnresolvedConnection, UnresolvedModule, UnresolvedPortRef,
 };
 
 use std::collections::HashMap;
@@ -252,6 +252,73 @@ pub fn build_with_base_dir(
 /// rather than swallowing the violation. `flat` is still consulted for
 /// pattern and song definitions, which live outside the bound-graph
 /// artifact.
+/// Defensive guard used by [`build_from_bound`] to pattern-match a bound
+/// item's `Resolved` variant.
+///
+/// **Invariant — callers must have checked [`BoundPatch::errors`] before
+/// invoking [`build_from_bound`].** If this guard fires in production the
+/// pipeline layering has been violated (the short-circuit above
+/// `build_from_bound` was skipped): the error here is deliberately
+/// [`InterpretErrorCode::Other`] rather than a user-facing code.
+fn require_resolved<'a, I: BoundItem<'a>>(
+    item: &'a I,
+    stage: &str,
+) -> Result<&'a I::ResolvedTy, InterpretError> {
+    item.resolved().ok_or_else(|| {
+        InterpretError::new(
+            InterpretErrorCode::Other,
+            item.provenance().clone(),
+            format!(
+                "unresolved {stage} reached build; bind errors must be handled before build"
+            ),
+        )
+    })
+}
+
+/// Minimal accessor trait for bound items so [`require_resolved`] can
+/// discharge the three defensive checks uniformly.
+trait BoundItem<'a> {
+    type ResolvedTy;
+    fn resolved(&'a self) -> Option<&'a Self::ResolvedTy>;
+    fn provenance(&self) -> &Provenance;
+}
+
+impl<'a> BoundItem<'a> for BoundModule {
+    type ResolvedTy = ResolvedModule;
+    fn resolved(&'a self) -> Option<&'a Self::ResolvedTy> {
+        self.as_resolved()
+    }
+    fn provenance(&self) -> &Provenance {
+        BoundModule::provenance(self)
+    }
+}
+
+impl<'a> BoundItem<'a> for BoundConnection {
+    type ResolvedTy = ResolvedConnection;
+    fn resolved(&'a self) -> Option<&'a Self::ResolvedTy> {
+        match self {
+            BoundConnection::Resolved(r) => Some(r),
+            BoundConnection::Unresolved(_) => None,
+        }
+    }
+    fn provenance(&self) -> &Provenance {
+        BoundConnection::provenance(self)
+    }
+}
+
+impl<'a> BoundItem<'a> for BoundPortRef {
+    type ResolvedTy = ResolvedPortRef;
+    fn resolved(&'a self) -> Option<&'a Self::ResolvedTy> {
+        match self {
+            BoundPortRef::Resolved(r) => Some(r),
+            BoundPortRef::Unresolved(_) => None,
+        }
+    }
+    fn provenance(&self) -> &Provenance {
+        BoundPortRef::provenance(self)
+    }
+}
+
 pub fn build_from_bound(
     flat: &FlatPatch,
     bound: &BoundPatch,
@@ -268,22 +335,10 @@ pub fn build_from_bound(
     };
 
     // Stage 1 — add module nodes directly from the bound graph's
-    // resolved descriptors + parameter maps.
+    // resolved descriptors + parameter maps. `require_resolved` is
+    // defensive: the caller must have short-circuited on bound.errors.
     for bm in &bound.modules {
-        let Some(resolved) = bm.as_resolved() else {
-            // The caller should have short-circuited on bound.errors.
-            // If they didn't, refuse to silently skip: the runtime graph
-            // would be incomplete.
-            return Err(InterpretError::new(
-                InterpretErrorCode::Other,
-                bm.provenance().clone(),
-                format!(
-                    "module '{}' is unresolved in the bound graph; bind errors must be \
-                     handled before build",
-                    bm.id()
-                ),
-            ));
-        };
+        let resolved = require_resolved(bm, "module")?;
         graph
             .add_module(
                 resolved.id.clone(),
@@ -300,15 +355,10 @@ pub fn build_from_bound(
     }
 
     // Stage 2 — connect from the bound graph's resolved connections.
+    // `require_resolved` is defensive: the caller must have short-circuited
+    // on bound.errors.
     for bc in &bound.connections {
-        let BoundConnection::Resolved(resolved) = bc else {
-            return Err(InterpretError::new(
-                InterpretErrorCode::Other,
-                bc.provenance().clone(),
-                "unresolved connection reached build; bind errors must be handled before build"
-                    .to_string(),
-            ));
-        };
+        let resolved = require_resolved(bc, "connection")?;
         let from_id = patches_core::NodeId::from(resolved.from_module.clone());
         let to_id = patches_core::NodeId::from(resolved.to_module.clone());
         graph
@@ -333,15 +383,10 @@ pub fn build_from_bound(
     // made it into the runtime graph; a missing node here is a
     // pipeline-layering failure, not a user error, but we still surface
     // it so the caller notices.
+    // `require_resolved` is defensive: the caller must have short-circuited
+    // on bound.errors.
     for pr in &bound.port_refs {
-        let BoundPortRef::Resolved(resolved) = pr else {
-            return Err(InterpretError::new(
-                InterpretErrorCode::Other,
-                pr.provenance().clone(),
-                "unresolved port_ref reached build; bind errors must be handled before build"
-                    .to_string(),
-            ));
-        };
+        let resolved = require_resolved(pr, "port_ref")?;
         let id = patches_core::NodeId::from(resolved.module.clone());
         if graph.get_node(&id).is_none() {
             return Err(InterpretError::new(
@@ -633,7 +678,7 @@ pub(crate) fn convert_params(
     descriptor: &patches_core::ModuleDescriptor,
     base_dir: Option<&Path>,
     song_name_to_index: &HashMap<String, usize>,
-) -> Result<patches_core::ParameterMap, String> {
+) -> Result<patches_core::ParameterMap, ParamConversionError> {
     use patches_core::{ParameterKind, ParameterMap, ParameterValue};
     let mut map = ParameterMap::new();
     for (raw_name, value) in params {
@@ -657,14 +702,14 @@ pub(crate) fn convert_params(
                     .collect();
                 known.sort();
                 known.dedup();
-                format!(
+                ParamConversionError::Unknown(format!(
                     "unknown parameter '{raw_name}'; known parameters: {}",
                     known.join(", ")
-                )
+                ))
             })?;
 
         let mut pv = convert_value(value, &param_desc.parameter_type, song_name_to_index)
-            .map_err(|e| format!("parameter '{raw_name}': {e}"))?;
+            .map_err(|e| e.prefix_with_param(raw_name))?;
 
         // Resolve relative file paths against the patch file's directory.
         if let Some(dir) = base_dir {
@@ -695,7 +740,7 @@ fn convert_value(
     value: &Value,
     kind: &patches_core::ParameterKind,
     song_name_to_index: &HashMap<String, usize>,
-) -> Result<patches_core::ParameterValue, String> {
+) -> Result<patches_core::ParameterValue, ParamConversionError> {
     use patches_core::{ParameterKind, ParameterValue};
     match (value, kind) {
         (Value::Scalar(Scalar::Float(f)), ParameterKind::Float { .. }) => {
@@ -714,7 +759,9 @@ fn convert_value(
             .iter()
             .find(|&&v| v == s.as_str())
             .map(|&v| ParameterValue::Enum(v))
-            .ok_or_else(|| format!("invalid enum variant '{s}'")),
+            .ok_or_else(|| {
+                ParamConversionError::OutOfRange(format!("invalid enum variant '{s}'"))
+            }),
         (Value::Scalar(Scalar::Str(s)), ParameterKind::String { .. }) => {
             Ok(ParameterValue::String(s.clone()))
         }
@@ -725,10 +772,10 @@ fn convert_value(
                     .and_then(|e| e.to_str())
                     .unwrap_or("");
                 if !extensions.is_empty() && !extensions.iter().any(|&e| e.eq_ignore_ascii_case(ext)) {
-                    return Err(format!(
+                    return Err(ParamConversionError::OutOfRange(format!(
                         "unsupported file extension '.{ext}'; expected one of: {}",
                         extensions.join(", ")
-                    ));
+                    )));
                 }
             }
             Ok(ParameterValue::File(path.clone()))
@@ -740,10 +787,16 @@ fn convert_value(
                 song_name_to_index
                     .get(s.as_str())
                     .map(|&idx| ParameterValue::Int(idx as i64))
-                    .ok_or_else(|| format!("song '{s}' not found"))
+                    .ok_or_else(|| {
+                        ParamConversionError::OutOfRange(format!("song '{s}' not found"))
+                    })
             }
         }
-        _ => Err(format!("expected {}, found {}", kind.kind_name(), value_kind_name(value))),
+        _ => Err(ParamConversionError::TypeMismatch(format!(
+            "expected {}, found {}",
+            kind.kind_name(),
+            value_kind_name(value)
+        ))),
     }
 }
 

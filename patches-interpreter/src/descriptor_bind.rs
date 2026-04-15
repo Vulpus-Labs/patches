@@ -133,6 +133,65 @@ impl std::fmt::Display for BindError {
 
 impl std::error::Error for BindError {}
 
+/// Typed failure mode from [`crate::convert_params`].
+///
+/// Replaces the previous string-substring classification so
+/// [`BindErrorCode`] selection is a straight `match` on the variant.
+/// Each variant carries the rendered message — kept byte-identical to
+/// the previous `String` error so tests and diagnostics consumers are
+/// unaffected.
+#[derive(Debug, Clone)]
+pub enum ParamConversionError {
+    /// Parameter name is not defined on the descriptor.
+    Unknown(String),
+    /// Value kind disagrees with the descriptor's expected
+    /// [`patches_core::ParameterKind`] (e.g. `int` where `float` was expected).
+    TypeMismatch(String),
+    /// Value is well-typed but outside the accepted range — invalid enum
+    /// variant, unknown song reference, or unsupported file extension.
+    OutOfRange(String),
+}
+
+impl ParamConversionError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Unknown(m) | Self::TypeMismatch(m) | Self::OutOfRange(m) => m.as_str(),
+        }
+    }
+
+    pub fn into_message(self) -> String {
+        match self {
+            Self::Unknown(m) | Self::TypeMismatch(m) | Self::OutOfRange(m) => m,
+        }
+    }
+
+    /// Wrap the inner message with a `"parameter '{name}': "` prefix,
+    /// preserving the variant so `BindErrorCode` classification is
+    /// unaffected.
+    pub fn prefix_with_param(self, name: &str) -> Self {
+        match self {
+            Self::Unknown(m) => Self::Unknown(format!("parameter '{name}': {m}")),
+            Self::TypeMismatch(m) => Self::TypeMismatch(format!("parameter '{name}': {m}")),
+            Self::OutOfRange(m) => Self::OutOfRange(format!("parameter '{name}': {m}")),
+        }
+    }
+
+    /// Map a typed conversion error to its descriptor-level [`BindErrorCode`].
+    pub fn bind_code(&self) -> BindErrorCode {
+        match self {
+            Self::Unknown(_) => BindErrorCode::UnknownParameter,
+            Self::TypeMismatch(_) => BindErrorCode::InvalidParameterType,
+            Self::OutOfRange(_) => BindErrorCode::ParameterConversion,
+        }
+    }
+}
+
+impl std::fmt::Display for ParamConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
 /// A [`FlatModule`] paired with its resolved [`ModuleDescriptor`] and
 /// validated parameter map.
 #[derive(Debug, Clone)]
@@ -380,32 +439,16 @@ fn bind_module(
                 BindErrorCode::UnknownModuleType
             };
             errors.push(BindError::new(code, fm.provenance.clone(), e.to_string()));
-            return BoundModule::Unresolved(UnresolvedModule {
-                id: fm.id.clone(),
-                type_name: fm.type_name.clone(),
-                shape: fm.shape.clone(),
-                params: fm.params.clone(),
-                port_aliases: fm.port_aliases.clone(),
-                provenance: fm.provenance.clone(),
-                reason: code,
-            });
+            return mark_unresolved(fm, code);
         }
     };
 
     let params = match crate::convert_params(&fm.params, &descriptor, base_dir, song_name_to_index) {
         Ok(p) => p,
-        Err(msg) => {
-            let code = classify_param_error(&msg);
-            errors.push(BindError::new(code, fm.provenance.clone(), msg));
-            return BoundModule::Unresolved(UnresolvedModule {
-                id: fm.id.clone(),
-                type_name: fm.type_name.clone(),
-                shape: fm.shape.clone(),
-                params: fm.params.clone(),
-                port_aliases: fm.port_aliases.clone(),
-                provenance: fm.provenance.clone(),
-                reason: code,
-            });
+        Err(err) => {
+            let code = err.bind_code();
+            errors.push(BindError::new(code, fm.provenance.clone(), err.into_message()));
+            return mark_unresolved(fm, code);
         }
     };
 
@@ -415,15 +458,7 @@ fn bind_module(
             fm.provenance.clone(),
             e.to_string(),
         ));
-        return BoundModule::Unresolved(UnresolvedModule {
-            id: fm.id.clone(),
-            type_name: fm.type_name.clone(),
-            shape: fm.shape.clone(),
-            params: fm.params.clone(),
-            port_aliases: fm.port_aliases.clone(),
-            provenance: fm.provenance.clone(),
-            reason: BindErrorCode::ParameterConversion,
-        });
+        return mark_unresolved(fm, BindErrorCode::ParameterConversion);
     }
 
     BoundModule::Resolved(ResolvedModule {
@@ -436,17 +471,20 @@ fn bind_module(
     })
 }
 
-fn classify_param_error(msg: &str) -> BindErrorCode {
-    // `convert_params` returns a single string for every failure mode; the
-    // prefix is stable enough to classify without changing the helper's
-    // signature.
-    if msg.starts_with("unknown parameter") {
-        BindErrorCode::UnknownParameter
-    } else if msg.contains("expected ") && msg.contains(", found ") {
-        BindErrorCode::InvalidParameterType
-    } else {
-        BindErrorCode::ParameterConversion
-    }
+/// Build an `Unresolved` [`BoundModule`] tagged with `code`, preserving the
+/// raw flat fields so downstream consumers (hover, completions) can still
+/// surface partial information. Extracted from three identical inline
+/// blocks in [`bind_module`] — ticket 0445.
+fn mark_unresolved(fm: &FlatModule, code: BindErrorCode) -> BoundModule {
+    BoundModule::Unresolved(UnresolvedModule {
+        id: fm.id.clone(),
+        type_name: fm.type_name.clone(),
+        shape: fm.shape.clone(),
+        params: fm.params.clone(),
+        port_aliases: fm.port_aliases.clone(),
+        provenance: fm.provenance.clone(),
+        reason: code,
+    })
 }
 
 fn bind_connection(
@@ -780,5 +818,46 @@ mod tests {
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
         assert_eq!(bound.errors[0].code, BindErrorCode::UnknownParameter);
+    }
+
+    // ── Typed parameter error classification (ticket 0441) ──────────────
+
+    #[test]
+    fn param_conversion_unknown_maps_to_unknown_parameter() {
+        let err = ParamConversionError::Unknown("unknown parameter 'x'".into());
+        assert_eq!(err.bind_code(), BindErrorCode::UnknownParameter);
+    }
+
+    #[test]
+    fn param_conversion_type_mismatch_maps_to_invalid_parameter_type() {
+        let err = ParamConversionError::TypeMismatch("expected float, found string".into());
+        assert_eq!(err.bind_code(), BindErrorCode::InvalidParameterType);
+    }
+
+    #[test]
+    fn param_conversion_out_of_range_maps_to_parameter_conversion() {
+        let err = ParamConversionError::OutOfRange("invalid enum variant 'foo'".into());
+        assert_eq!(err.bind_code(), BindErrorCode::ParameterConversion);
+    }
+
+    #[test]
+    fn bind_classifies_type_mismatch_without_substring_matching() {
+        // Osc's `frequency` is a float; passing a bool triggers the
+        // `expected …, found …` branch of convert_value.
+        let mut flat = empty_flat();
+        flat.modules = vec![FlatModule {
+            id: "o1".into(),
+            type_name: "Osc".into(),
+            shape: vec![],
+            params: vec![(
+                "frequency".into(),
+                patches_dsl::ast::Value::Scalar(patches_dsl::ast::Scalar::Bool(true)),
+            )],
+            port_aliases: vec![],
+            provenance: CoreProv::root(syn()),
+        }];
+        let bound = bind(&flat, &registry());
+        assert_eq!(bound.errors.len(), 1);
+        assert_eq!(bound.errors[0].code, BindErrorCode::InvalidParameterType);
     }
 }
