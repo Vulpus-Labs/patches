@@ -14,7 +14,7 @@ use patches_dsl::SourceMap;
 use tower_lsp::lsp_types::*;
 
 use crate::expansion::{FlatNodeRef, PatchReferences};
-use crate::lsp_util::byte_offset_to_position;
+use crate::lsp_util::{byte_offset_to_position, source_id_for_uri};
 use crate::shape_render::{module_shape_from_args, render_indexed_ports, render_shape_inline};
 
 /// Build inlay hints for every template call site whose authored span
@@ -133,17 +133,6 @@ fn build_hint_label(
     } else {
         Some(out)
     }
-}
-
-fn source_id_for_uri(sm: &SourceMap, uri: &Url) -> Option<SourceId> {
-    let path = uri.to_file_path().ok()?;
-    let target = patches_dsl::normalize_path(&path);
-    for (id, entry) in sm.iter() {
-        if patches_dsl::normalize_path(&entry.path) == target {
-            return Some(id);
-        }
-    }
-    None
 }
 
 fn position_to_byte_offset(line_index: &[usize], pos: Position) -> usize {

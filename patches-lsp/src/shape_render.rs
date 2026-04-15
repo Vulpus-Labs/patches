@@ -6,7 +6,35 @@
 //! human-readable summaries for UI surfaces.
 
 use patches_core::{ModuleShape, PortDescriptor};
-use patches_dsl::ast::Scalar;
+use patches_dsl::ast::{self as dsl_ast, PortLabel as DslPortLabel, Scalar};
+
+/// Render a [`patches_dsl::ast::PortRef`] to the compact
+/// `module.port[index]` notation used by hover and peek. `Literal` indices
+/// render as `/{n}` for backwards compatibility with authored hover output;
+/// alias / arity forms render as `[k]` / `[*n]`.
+pub(crate) fn format_port_ref(pr: &dsl_ast::PortRef) -> String {
+    let port_str = match &pr.port {
+        DslPortLabel::Literal(name) => name.clone(),
+        DslPortLabel::Param(name) => format!("<{name}>"),
+    };
+    match &pr.index {
+        None => format!("{}.{}", pr.module, port_str),
+        Some(dsl_ast::PortIndex::Literal(n)) => format!("{}.{}/{}", pr.module, port_str, n),
+        Some(dsl_ast::PortIndex::Alias(a)) => format!("{}.{}[{}]", pr.module, port_str, a),
+        Some(dsl_ast::PortIndex::Arity(a)) => format!("{}.{}[*{}]", pr.module, port_str, a),
+    }
+}
+
+/// Render a post-expansion `FlatConnection`-style port reference: returns
+/// `name` for index 0 and `name[index]` otherwise. Shared by peek's
+/// connection rendering so the formatting lives in one place.
+pub(crate) fn format_flat_port(name: &str, index: u32) -> String {
+    if index == 0 {
+        name.to_string()
+    } else {
+        format!("{name}[{index}]")
+    }
+}
 
 /// Build a [`ModuleShape`] from a [`patches_dsl::flat::FlatModule::shape`]
 /// argument list. Unknown keys are ignored; known keys follow the same

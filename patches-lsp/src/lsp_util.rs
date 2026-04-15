@@ -2,10 +2,28 @@
 //! and tree-sitter node helpers.
 
 use patches_core::source_map::SourceMap;
+use patches_core::SourceId;
 use patches_diagnostics::{RenderedDiagnostic, Severity, Snippet};
 use tower_lsp::lsp_types::*;
 
 use crate::ast_builder::Diagnostic;
+
+// ─── URI → SourceId lookup ───────────────────────────────────────────────
+
+/// Map `uri` (editor-side URL) to the `SourceId` the expander used when it
+/// loaded this file. Matches on `patches_dsl::normalize_path`-style equality.
+/// Returns `None` when the URI is not a file URL or the expander never saw
+/// the corresponding path.
+pub(crate) fn source_id_for_uri(sm: &SourceMap, uri: &Url) -> Option<SourceId> {
+    let path = uri.to_file_path().ok()?;
+    let target = patches_dsl::normalize_path(&path);
+    for (id, entry) in sm.iter() {
+        if patches_dsl::normalize_path(&entry.path) == target {
+            return Some(id);
+        }
+    }
+    None
+}
 
 // ─── Line index and coordinate conversion ────────────────────────────────
 

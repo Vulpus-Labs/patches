@@ -6,7 +6,7 @@
 use patches_core::{
     CableKind, ModuleDescriptor, ModuleShape, PortDescriptor, Registry, SourceId, Span as CoreSpan,
 };
-use patches_dsl::ast::{self as dsl_ast, PortLabel as DslPortLabel, Scalar, Value};
+use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::{FlatConnection, FlatModule, FlatPatch, FlatPortRef};
 use patches_dsl::SourceMap;
 use patches_interpreter::{BoundModule, BoundPatch};
@@ -17,10 +17,11 @@ use crate::analysis::{self, ResolvedDescriptor, SemanticModel};
 use crate::ast;
 use crate::completions::{cable_kind_str, format_parameter_kind};
 use crate::expansion::{FlatNodeRef, PatchReferences, WiredPort};
-use crate::shape_render::module_shape_from_args;
 use crate::lsp_util::{
     byte_offset_to_position, find_ancestor, first_named_child_of_kind, node_text,
+    source_id_for_uri,
 };
+use crate::shape_render::{format_port_ref, module_shape_from_args};
 
 // ─── Public entry point ──────────────────────────────────────────────────
 
@@ -102,19 +103,6 @@ pub(crate) fn compute_expansion_hover(
         }
         FlatNodeRef::Pattern(_) | FlatNodeRef::Song(_) => None,
     }
-}
-
-/// Map `uri` (editor-side URL) to the `SourceId` the expander used when it
-/// loaded this file. Matches on `normalize_path`-style equality.
-fn source_id_for_uri(sm: &SourceMap, uri: &Url) -> Option<SourceId> {
-    let path = uri.to_file_path().ok()?;
-    let target = patches_dsl::normalize_path(&path);
-    for (id, entry) in sm.iter() {
-        if patches_dsl::normalize_path(&entry.path) == target {
-            return Some(id);
-        }
-    }
-    None
 }
 
 fn span_len(s: &CoreSpan) -> usize {
@@ -222,19 +210,6 @@ fn append_template_port_wiring(
         for w in &wires.outs {
             lines.push(format_wire_line(w, /* input= */ false));
         }
-    }
-}
-
-fn format_port_ref(pr: &dsl_ast::PortRef) -> String {
-    let port_str = match &pr.port {
-        DslPortLabel::Literal(name) => name.clone(),
-        DslPortLabel::Param(name) => format!("<{name}>"),
-    };
-    match &pr.index {
-        None => format!("{}.{}", pr.module, port_str),
-        Some(dsl_ast::PortIndex::Literal(n)) => format!("{}.{}/{}", pr.module, port_str, n),
-        Some(dsl_ast::PortIndex::Alias(a)) => format!("{}.{}[{}]", pr.module, port_str, a),
-        Some(dsl_ast::PortIndex::Arity(a)) => format!("{}.{}[*{}]", pr.module, port_str, a),
     }
 }
 

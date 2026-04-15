@@ -94,6 +94,18 @@ impl StagedArtifact {
     }
 }
 
+/// Ready-to-use bundle of expansion-aware pipeline artifacts passed to
+/// feature handlers via [`DocumentWorkspace::with_expansion_context`].
+/// `bound` is optional because peek and inlay don't need descriptor
+/// binding; hover pulls it out with `?` on the callback side.
+struct ExpansionCtx<'a> {
+    flat: &'a FlatPatch,
+    references: &'a PatchReferences,
+    source_map: &'a SourceMap,
+    bound: Option<&'a BoundPatch>,
+    doc: &'a DocumentState,
+}
+
 /// State tracked for each open document.
 pub(crate) struct DocumentState {
     pub source: String,
@@ -553,27 +565,19 @@ impl DocumentWorkspace {
             lsp_util::position_to_byte_offset(&doc.line_index, position)
         };
 
-        self.run_pipeline_locked(&mut state, uri);
-        if let Some(artifact) = state.artifacts.get(uri) {
-            if let (Some(flat), Some(bound), Some(refs), Some(sm), Some(doc)) = (
-                artifact.flat.as_ref(),
-                artifact.bound.as_ref(),
-                artifact.references.as_ref(),
-                artifact.source_map.as_ref(),
-                state.documents.get(uri),
-            ) {
-                if let Some(h) = hover::compute_expansion_hover(
-                    uri,
-                    byte_offset,
-                    flat,
-                    bound,
-                    refs,
-                    sm,
-                    &doc.line_index,
-                ) {
-                    return Some(h);
-                }
-            }
+        if let Some(h) = self.with_expansion_context(&mut state, uri, |ctx| {
+            let bound = ctx.bound?;
+            hover::compute_expansion_hover(
+                uri,
+                byte_offset,
+                ctx.flat,
+                bound,
+                ctx.references,
+                ctx.source_map,
+                &ctx.doc.line_index,
+            )
+        }) {
+            return Some(h);
         }
 
         let doc = state.documents.get(uri)?;
@@ -596,18 +600,15 @@ impl DocumentWorkspace {
             let doc = state.documents.get(uri)?;
             lsp_util::position_to_byte_offset(&doc.line_index, position)
         };
-        self.run_pipeline_locked(&mut state, uri);
-        let artifact = state.artifacts.get(uri)?;
-        let flat = artifact.flat.as_ref()?;
-        let refs = artifact.references.as_ref()?;
-        let sm = artifact.source_map.as_ref()?;
-        let doc = state.documents.get(uri)?;
-        let result = crate::peek::render_peek(uri, byte_offset, flat, refs, sm)?;
-        let range = Range::new(
-            lsp_util::byte_offset_to_position(&doc.line_index, result.call_site.start),
-            lsp_util::byte_offset_to_position(&doc.line_index, result.call_site.end),
-        );
-        Some((range, result.markdown))
+        self.with_expansion_context(&mut state, uri, |ctx| {
+            let result =
+                crate::peek::render_peek(uri, byte_offset, ctx.flat, ctx.references, ctx.source_map)?;
+            let range = Range::new(
+                lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.start),
+                lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.end),
+            );
+            Some((range, result.markdown))
+        })
     }
 
     /// Compute inlay hints intersecting `range` in `uri`. Returns an empty
@@ -615,27 +616,42 @@ impl DocumentWorkspace {
     /// (stage 1–3 failed) — there's nothing to hint against.
     pub fn inlay_hints(&self, uri: &Url, range: Range) -> Vec<InlayHint> {
         let mut state = self.state.lock().expect("lock workspace state");
-        self.run_pipeline_locked(&mut state, uri);
-        let Some(artifact) = state.artifacts.get(uri) else {
-            return Vec::new();
-        };
-        let (Some(flat), Some(refs), Some(sm), Some(doc)) = (
-            artifact.flat.as_ref(),
-            artifact.references.as_ref(),
-            artifact.source_map.as_ref(),
-            state.documents.get(uri),
-        ) else {
-            return Vec::new();
-        };
-        crate::inlay::compute_inlay_hints(
-            uri,
-            range,
-            flat,
-            refs,
-            sm,
-            &doc.line_index,
-            &self.registry,
-        )
+        self.with_expansion_context(&mut state, uri, |ctx| {
+            Some(crate::inlay::compute_inlay_hints(
+                uri,
+                range,
+                ctx.flat,
+                ctx.references,
+                ctx.source_map,
+                &ctx.doc.line_index,
+                &self.registry,
+            ))
+        })
+        .unwrap_or_default()
+    }
+
+    /// Run the staged pipeline for `uri` and, if the resulting artifact
+    /// has a flat patch + references + source map bundled with the open
+    /// document, invoke `f` on the ready-to-use bundle. Returns whatever
+    /// `f` returns, or `None` when any required component is missing.
+    ///
+    /// `ExpansionCtx::bound` is optional because peek and inlay don't
+    /// consume it; hover's callback pulls it out with `?` and returns
+    /// `None` when stage 3b failed but earlier stages succeeded.
+    fn with_expansion_context<R>(
+        &self,
+        state: &mut WorkspaceState,
+        uri: &Url,
+        f: impl FnOnce(ExpansionCtx<'_>) -> Option<R>,
+    ) -> Option<R> {
+        self.run_pipeline_locked(state, uri);
+        let artifact = state.artifacts.get(uri)?;
+        let flat = artifact.flat.as_ref()?;
+        let references = artifact.references.as_ref()?;
+        let source_map = artifact.source_map.as_ref()?;
+        let bound = artifact.bound.as_ref();
+        let doc = state.documents.get(uri)?;
+        f(ExpansionCtx { flat, references, source_map, bound, doc })
     }
 
     /// Resolve goto-definition at `position` in `uri` to an LSP

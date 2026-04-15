@@ -12,7 +12,8 @@ use patches_dsl::SourceMap;
 use tower_lsp::lsp_types::Url;
 
 use crate::expansion::{FlatNodeRef, PatchReferences};
-use crate::shape_render::{module_shape_from_args, render_shape_inline};
+use crate::lsp_util::source_id_for_uri;
+use crate::shape_render::{format_flat_port, module_shape_from_args, render_shape_inline};
 
 /// Find the smallest template call site enclosing `(uri, byte_offset)`
 /// and render the emitted modules + connections as markdown. Returns
@@ -80,13 +81,11 @@ pub(crate) fn render_peek(
             continue;
         }
         let line = format!(
-            "- `{}.{}{}` → `{}.{}{}`",
+            "- `{}.{}` → `{}.{}`",
             c.from_module,
-            c.from_port,
-            if c.from_index == 0 { String::new() } else { format!("[{}]", c.from_index) },
+            format_flat_port(&c.from_port, c.from_index),
             c.to_module,
-            c.to_port,
-            if c.to_index == 0 { String::new() } else { format!("[{}]", c.to_index) },
+            format_flat_port(&c.to_port, c.to_index),
         );
         if seen.insert(line.clone()) {
             conns.push(line);
@@ -112,13 +111,3 @@ pub(crate) struct PeekResult {
     pub markdown: String,
 }
 
-fn source_id_for_uri(sm: &SourceMap, uri: &Url) -> Option<SourceId> {
-    let path = uri.to_file_path().ok()?;
-    let target = patches_dsl::normalize_path(&path);
-    for (id, entry) in sm.iter() {
-        if patches_dsl::normalize_path(&entry.path) == target {
-            return Some(id);
-        }
-    }
-    None
-}
