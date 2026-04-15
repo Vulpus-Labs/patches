@@ -2,7 +2,7 @@
 id: "E083"
 title: DSL and LSP intelligibility cleanup
 created: 2026-04-15
-status: open
+status: closed
 depends_on: ["E082"]
 tickets: ["0450", "0451", "0452", "0453", "0454", "0455", "0456", "0457", "0458", "0459", "0460", "0461"]
 ---
