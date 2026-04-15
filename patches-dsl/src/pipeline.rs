@@ -25,9 +25,45 @@
 
 use std::path::Path;
 
+use patches_core::source_span::Span;
+
 use crate::expand::{expand as expand_fn, ExpandError, ExpandResult};
 use crate::flat::FlatPatch;
 use crate::loader::{load_with, LoadError, LoadResult};
+
+/// A pipeline-layering warning: a later stage fired on input an earlier
+/// stage should have rejected. The `code` slug (e.g. `PV0001`) identifies
+/// which invariant was violated; the `message` names the stages and the
+/// offending reference; the `span` points at the authored source.
+///
+/// Emitted by the pipeline orchestrator (see [`run_all`],
+/// [`run_accumulate`]) once per run, for every consumer, so pipeline
+/// maintainers notice regressions regardless of frontend.
+///
+/// Converted to a [`patches_diagnostics::RenderedDiagnostic`] by
+/// `patches-diagnostics::layering_warning_to_rendered` (which lives in
+/// that crate to avoid a dependency cycle — `patches-diagnostics`
+/// already depends on `patches-dsl`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayeringWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
+}
+
+/// Implemented by pipeline stage-3b bind-result types so the orchestrator
+/// can run a layering audit on them without depending on the crate where
+/// [`BindError`](patches_interpreter::BindError) lives.
+///
+/// Default impl returns no warnings — types that don't carry bind errors
+/// (e.g. `()`, build results) silently opt out.
+pub trait PipelineAudit {
+    fn layering_warnings(&self) -> Vec<LayeringWarning> {
+        Vec::new()
+    }
+}
+
+impl PipelineAudit for () {}
 
 /// Stage 1: load the root file and resolve includes.
 pub fn load<F>(master_path: &Path, read_file: F) -> Result<LoadResult, LoadError>
@@ -78,15 +114,18 @@ pub fn run_all<F, T, E>(
 ) -> Result<Staged<T>, PipelineError<E>>
 where
     F: FnOnce(&LoadResult, &FlatPatch) -> Result<T, E>,
+    T: PipelineAudit,
 {
     let loaded = load(master_path, read_file).map_err(PipelineError::Load)?;
     let expanded = expand(&loaded).map_err(PipelineError::Expand)?;
     let bound = bind(&loaded, &expanded.patch).map_err(PipelineError::Bind)?;
+    let layering_warnings = bound.layering_warnings();
     Ok(Staged {
         loaded,
         patch: expanded.patch,
         bound,
         warnings: expanded.warnings,
+        layering_warnings,
     })
 }
 
@@ -106,6 +145,7 @@ pub fn run_accumulate<F, T>(
 ) -> AccumulatedRun<T>
 where
     F: FnOnce(&FlatPatch) -> T,
+    T: PipelineAudit,
 {
     let mut run = AccumulatedRun {
         loaded: None,
@@ -114,6 +154,7 @@ where
         load_errors: Vec::new(),
         expand_errors: Vec::new(),
         warnings: Vec::new(),
+        layering_warnings: Vec::new(),
     };
 
     let loaded = match load(master_path, read_file) {
@@ -137,7 +178,9 @@ where
     run.patch = Some(expanded.patch);
 
     let patch_ref = run.patch.as_ref().expect("just assigned");
-    run.bound = Some(bind(patch_ref));
+    let bound = bind(patch_ref);
+    run.layering_warnings = bound.layering_warnings();
+    run.bound = Some(bound);
 
     run
 }
@@ -172,6 +215,11 @@ pub struct AccumulatedRun<T> {
     pub load_errors: Vec<LoadError>,
     pub expand_errors: Vec<ExpandError>,
     pub warnings: Vec<crate::expand::Warning>,
+    /// Pipeline-layering warnings (`PV####`) produced by the stage-3b
+    /// audit — see [`PipelineAudit`]. Always present (possibly empty)
+    /// so consumers can read layering warnings from every pipeline run
+    /// without opting in.
+    pub layering_warnings: Vec<LayeringWarning>,
 }
 
 /// The set of artifacts produced by a successful end-to-end pipeline run.
@@ -181,6 +229,9 @@ pub struct Staged<T> {
     pub patch: FlatPatch,
     pub bound: T,
     pub warnings: Vec<crate::expand::Warning>,
+    /// Pipeline-layering warnings (`PV####`). Always present (possibly
+    /// empty) — see [`PipelineAudit`].
+    pub layering_warnings: Vec<LayeringWarning>,
 }
 
 /// Aggregated pipeline error. The variant identifies which stage

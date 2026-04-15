@@ -358,6 +358,38 @@ impl BoundPatch {
     }
 }
 
+impl patches_dsl::pipeline::PipelineAudit for BoundPatch {
+    /// Audit stage-3b [`BindError`]s for layering violations and return
+    /// one [`LayeringWarning`](patches_dsl::pipeline::LayeringWarning)
+    /// per violation. Called automatically by the pipeline orchestrator
+    /// (`run_all` / `run_accumulate`) after bind so every consumer sees
+    /// the same warnings without explicit opt-in.
+    ///
+    /// Currently flags [`BindErrorCode::UnknownModule`] — an unknown
+    /// module reference reaching stage 3b means expansion (stage 3a)
+    /// let a reference slip past its own unknown-module check. Future
+    /// `PV####` codes land here without a signature change.
+    fn layering_warnings(&self) -> Vec<patches_dsl::pipeline::LayeringWarning> {
+        self.errors
+            .iter()
+            .filter_map(|e| match e.code {
+                BindErrorCode::UnknownModule => {
+                    Some(patches_dsl::pipeline::LayeringWarning {
+                        code: "PV0001",
+                        message: format!(
+                            "stage 3b descriptor_bind reported '{}'; stage 3a expansion should have \
+                             rejected this reference",
+                            e.message
+                        ),
+                        span: e.span(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 /// Bind a [`FlatPatch`] against `registry`, producing a [`BoundPatch`].
 ///
 /// Never returns `Err`: all failures are folded into

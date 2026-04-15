@@ -94,37 +94,69 @@ fn load_patch(
     sample_rate: f32,
 ) -> Result<LoadedPatch, LoadPatchError> {
     let master_path = Path::new(path);
-    // Stage 1/2: load + pest parse.
-    let load_result = pipeline::load(master_path, |p| fs::read_to_string(p))
-        .map_err(LoadPatchError::Load)?;
-    let source_map = load_result.source_map.clone();
-    let dependencies = load_result.dependencies.clone();
-    // Stage 3: expansion.
-    let expanded = pipeline::expand(&load_result).map_err(|err| {
-        LoadPatchError::Expand { err, source_map: source_map.clone() }
+    let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
+    let base_dir = master_path.parent().map(|p| p.to_path_buf());
+
+    // Wraps the post-bind artifact so the pipeline orchestrator can run
+    // the layering audit (ticket 0440) without player needing to call
+    // `pipeline_layering_warnings` directly.
+    struct PlayerBound {
+        bound: patches_interpreter::BoundPatch,
+        build: patches_interpreter::BuildResult,
+    }
+
+    impl patches_dsl::pipeline::PipelineAudit for PlayerBound {
+        fn layering_warnings(&self) -> Vec<patches_dsl::pipeline::LayeringWarning> {
+            self.bound.layering_warnings()
+        }
+    }
+
+    // `BindError` carries no `SourceMap` by itself, so the bind closure
+    // clones the merged map off the `LoadResult` and stashes it in each
+    // error variant. This preserves the existing `LoadPatchError` shape
+    // (which owns its `SourceMap`) while routing through `run_all`.
+    let bind = |loaded: &patches_dsl::LoadResult, flat: &patches_dsl::FlatPatch| -> Result<PlayerBound, LoadPatchError> {
+        let sm = loaded.source_map.clone();
+        let bound = patches_interpreter::bind_with_base_dir(flat, registry, base_dir.as_deref());
+        if !bound.errors.is_empty() {
+            return Err(LoadPatchError::Bind { errs: bound.errors, source_map: sm });
+        }
+        let build = patches_interpreter::build_from_bound(flat, &bound, &env)
+            .map_err(|err| LoadPatchError::Interpret { err, source_map: sm.clone() })?;
+        Ok(PlayerBound { bound, build })
+    };
+
+    let staged = pipeline::run_all(master_path, |p| fs::read_to_string(p), bind).map_err(|e| {
+        match e {
+            pipeline::PipelineError::Load(err) => LoadPatchError::Load(err),
+            // Expansion errors don't have a pre-captured source_map — rebuild it by
+            // re-running stage 1 cheaply. On the error path performance is fine.
+            pipeline::PipelineError::Expand(err) => LoadPatchError::Expand {
+                err,
+                source_map: pipeline::load(master_path, |p| fs::read_to_string(p))
+                    .map(|l| l.source_map)
+                    .unwrap_or_default(),
+            },
+            pipeline::PipelineError::Bind(e) => e,
+        }
     })?;
-    for w in &expanded.warnings {
+
+    let source_map = staged.loaded.source_map.clone();
+    let dependencies = staged.loaded.dependencies.clone();
+
+    for w in &staged.warnings {
         eprintln!("dsl warning: {w}");
     }
-    let flat = expanded.patch;
-    // Stage 3b: descriptor-level binding. Fail-fast on any bind error
-    // before runtime graph construction — consumers render them via
-    // `RenderedDiagnostic::from_bind_error` so users see every problem
-    // the binder caught, not just the first to fail `build_from_bound`.
-    let env = AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false };
-    let base_dir = master_path.parent();
-    let bound = patches_interpreter::bind_with_base_dir(&flat, registry, base_dir);
-    if !bound.errors.is_empty() {
-        return Err(LoadPatchError::Bind {
-            errs: bound.errors,
-            source_map,
-        });
+    // Pipeline-layering (PV####) warnings surface on every consumer —
+    // see ticket 0440. Render them structurally so they point at the
+    // offending authored span.
+    for w in &staged.layering_warnings {
+        let d = RenderedDiagnostic::from_layering_warning(w);
+        diagnostic_render::render_to_stderr(&d, &source_map);
     }
-    // Stage 5: runtime graph construction.
-    let build_result = patches_interpreter::build_from_bound(&flat, &bound, &env)
-        .map_err(|err| LoadPatchError::Interpret { err, source_map })?;
+
     Ok(LoadedPatch {
-        build_result,
+        build_result: staged.bound.build,
         dependencies,
     })
 }

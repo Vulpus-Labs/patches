@@ -193,6 +193,8 @@ pub struct BuildResult {
     pub tracker_data: Option<TrackerData>,
 }
 
+impl patches_dsl::pipeline::PipelineAudit for BuildResult {}
+
 impl std::fmt::Debug for BuildResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BuildResult")

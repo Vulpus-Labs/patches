@@ -873,7 +873,9 @@ where
         for err in errors.iter() {
             rendered.push(RenderedDiagnostic::from_bind_error(err, sm));
         }
-        rendered.extend(RenderedDiagnostic::pipeline_layering_warnings(errors));
+    }
+    for w in &run.layering_warnings {
+        rendered.push(RenderedDiagnostic::from_layering_warning(w));
     }
 
     // Per-URI line indexes, lazily built so we don't rescan unchanged

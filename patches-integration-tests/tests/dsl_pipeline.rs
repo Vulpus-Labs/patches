@@ -300,3 +300,98 @@ fn unknown_port_returns_error() {
     let err = result.expect_err("expected build to fail for unknown port");
     assert!(!err.message.is_empty());
 }
+
+/// Ticket 0440: the pipeline orchestrator runs the stage-3b layering
+/// audit after bind so every consumer (player, CLAP, LSP) receives
+/// PV#### warnings on the `Staged` / `AccumulatedRun` result without
+/// calling `pipeline_layering_warnings` directly.
+///
+/// We can't coax stage 3a into letting an unknown module slip through
+/// in real DSL (it's exactly what the expander validates), so this test
+/// crafts the smoking-gun symptom: a `BoundPatch` whose `errors` list
+/// contains a [`BindErrorCode::UnknownModule`]. The orchestrator must
+/// surface that on the returned run as a `PV0001` [`LayeringWarning`]
+/// without the caller opting in.
+#[test]
+fn pipeline_run_accumulate_emits_pv0001_on_unknown_module_bind_error() {
+    use patches_dsl::pipeline;
+    use patches_interpreter::{BindError, BindErrorCode, BoundPatch};
+
+    let src = r#"
+patch {
+    module out : AudioOut
+}
+"#;
+    let root = std::path::PathBuf::from("/virtual/x.patches");
+    let read = |_: &std::path::Path| -> std::io::Result<String> { Ok(src.to_string()) };
+
+    // Inject a synthetic UnknownModule BindError on the bound patch, as
+    // if stage 3b caught an unknown-module reference stage 3a had let
+    // through. This is the scenario PV0001 exists to flag.
+    let bind = |flat: &FlatPatch| -> BoundPatch {
+        let mut bound = patches_interpreter::bind(flat, &registry());
+        bound.errors.push(BindError::new(
+            BindErrorCode::UnknownModule,
+            Provenance::root(zero_span()),
+            "module 'ghost' not found",
+        ));
+        bound
+    };
+
+    let run = pipeline::run_accumulate(&root, read, bind);
+    assert_eq!(
+        run.layering_warnings.len(),
+        1,
+        "expected one PV0001 layering warning, got {:?}",
+        run.layering_warnings,
+    );
+    assert_eq!(run.layering_warnings[0].code, "PV0001");
+    assert!(
+        run.layering_warnings[0].message.contains("descriptor_bind"),
+        "layering warning message should name the stages: {}",
+        run.layering_warnings[0].message,
+    );
+}
+
+/// Ticket 0440: `run_all` also surfaces layering warnings on the
+/// returned `Staged` when the bind closure returns a `BoundPatch`-like
+/// value whose `PipelineAudit` impl reports them. The LSP, player, and
+/// CLAP consumers all read from this field, so a single assertion here
+/// covers every code path.
+#[test]
+fn pipeline_run_all_staged_exposes_layering_warnings_field() {
+    use patches_dsl::pipeline::{self, PipelineAudit};
+    use patches_interpreter::{BindError, BindErrorCode, BoundPatch};
+
+    // Wrapper whose layering audit simply forwards to BoundPatch's, so
+    // we can verify `Staged<T>` gets populated the same way LSP does.
+    struct Bound(BoundPatch);
+    impl PipelineAudit for Bound {
+        fn layering_warnings(&self) -> Vec<pipeline::LayeringWarning> {
+            self.0.layering_warnings()
+        }
+    }
+
+    let src = r#"
+patch {
+    module out : AudioOut
+}
+"#;
+    let root = std::path::PathBuf::from("/virtual/x.patches");
+    let read = |_: &std::path::Path| -> std::io::Result<String> { Ok(src.to_string()) };
+
+    let bind = |_loaded: &patches_dsl::LoadResult, flat: &FlatPatch|
+        -> Result<Bound, patches_interpreter::BuildError> {
+            let mut bound = patches_interpreter::bind(flat, &registry());
+            bound.errors.push(BindError::new(
+                BindErrorCode::UnknownModule,
+                Provenance::root(zero_span()),
+                "module 'ghost' not found",
+            ));
+            Ok(Bound(bound))
+        };
+
+    let staged = pipeline::run_all(&root, read, bind).expect("pipeline should not hard-fail");
+    assert_eq!(staged.layering_warnings.len(), 1);
+    assert_eq!(staged.layering_warnings[0].code, "PV0001");
+}

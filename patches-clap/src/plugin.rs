@@ -104,6 +104,8 @@ impl PatchesClapPlugin {
     /// Called from `activate` (if source non-empty), `state_load`, and
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
+        use patches_dsl::pipeline::PipelineAudit;
+
         let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
         // Stages 1–2: load + pest parse (or inline parse fallback when no file path).
         let (file, source_map) = self.load_or_parse()?;
@@ -119,6 +121,19 @@ impl PatchesClapPlugin {
             &self.registry,
             self.base_dir.as_deref(),
         );
+        // Pipeline-layering (PV####) audit — see ticket 0440. Runs before
+        // the fail-fast bind check so warnings surface even when bind
+        // succeeds cleanly. The `PipelineAudit` trait method is the
+        // orchestrator-level hook; patches-clap does not call
+        // `pipeline_layering_warnings` directly.
+        let layering = bound.layering_warnings();
+        if !layering.is_empty() {
+            let rendered: Vec<_> = layering
+                .iter()
+                .map(patches_diagnostics::RenderedDiagnostic::from_layering_warning)
+                .collect();
+            lock_gui_mut(&self.gui_state, |g| g.diagnostic_view.diagnostics.extend(rendered));
+        }
         if !bound.errors.is_empty() {
             return Err(CompileError::Bind(bound.errors));
         }

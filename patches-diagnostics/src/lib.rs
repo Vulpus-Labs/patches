@@ -34,6 +34,7 @@ use patches_core::provenance::Provenance;
 use patches_core::source_map::{line_col, SourceMap};
 use patches_core::source_span::{SourceId, Span};
 use patches_dsl::loader::{LoadError, LoadErrorKind};
+use patches_dsl::pipeline::LayeringWarning;
 use patches_dsl::{ExpandError, ParseError, Warning as ExpandWarning};
 use patches_interpreter::{BindError, BindErrorCode, InterpretError};
 
@@ -255,16 +256,23 @@ impl RenderedDiagnostic {
         }
     }
 
+    /// Render a [`LayeringWarning`] emitted by the pipeline orchestrator
+    /// (see [`patches_dsl::pipeline::run_all`] /
+    /// [`patches_dsl::pipeline::run_accumulate`]). The orchestrator runs
+    /// the audit once per pipeline invocation so every consumer renders
+    /// the same warnings — see ticket 0440.
+    pub fn from_layering_warning(w: &LayeringWarning) -> Self {
+        Self::pipeline_violation(w.code, w.message.clone(), w.span)
+    }
+
     /// Audit stage-3b [`BindError`]s for layering violations and emit
-    /// `PV####` warnings alongside the original errors. Callers render
-    /// the returned warnings with the normal bind diagnostics so
-    /// pipeline maintainers notice when a later stage catches something
-    /// an earlier stage should have.
+    /// `PV####` warnings alongside the original errors.
     ///
-    /// Currently flags [`BindErrorCode::UnknownModule`] — any unknown
-    /// module reference on a connection or orphan port-ref that reaches
-    /// stage 3b means expansion (stage 3a) let a reference slip past
-    /// its own unknown-module check.
+    /// Kept as a thin wrapper over the [`LayeringWarning`] pipeline for
+    /// callers that have a raw `&[BindError]` in hand (notably test
+    /// fixtures). Production consumers should read
+    /// `layering_warnings` off the pipeline result rather than calling
+    /// this directly.
     pub fn pipeline_layering_warnings(bind_errors: &[BindError]) -> Vec<Self> {
         bind_errors
             .iter()
