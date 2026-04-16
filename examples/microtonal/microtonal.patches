@@ -38,7 +38,7 @@ template voice {
     adsr.out -> vca.cv
     osc.sawtooth -> vca.in
 
-    module filter : Svf { cutoff: 400hz, q: 0.4 }
+    module filter : Svf { cutoff: 400hz, q: 0.5 }
     module filter_adsr : Adsr
     player.trigger -> filter_adsr.trigger
     player.gate -> filter_adsr.gate
