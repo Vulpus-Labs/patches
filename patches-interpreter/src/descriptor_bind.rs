@@ -26,9 +26,12 @@
 //! Concerns that stay in [`crate::build`]:
 //!
 //! - Module instantiation (needs [`AudioEnvironment`](patches_core::AudioEnvironment)).
-//! - Duplicate-input detection, scale-range validation (graph state).
+//! - Scale-range validation (graph state).
 //! - Song/pattern shape checks, MasterSequencer song references.
 //! - Relative file-path resolution against the patch's base dir.
+//!
+//! Duplicate-input detection runs here too so the LSP (which stops at
+//! bind) flags `a.out -> c.in; b.out -> c.in` before the engine would.
 
 use std::collections::HashMap;
 
@@ -64,6 +67,8 @@ pub enum BindErrorCode {
     UnknownPort,
     /// Cable kind mismatch (mono ↔ poly) between connection endpoints.
     CableKindMismatch,
+    /// Two connections drive the same input port — only one source is allowed.
+    DuplicateInputConnection,
     /// Poly layout mismatch between connection endpoints (ADR 0033).
     PolyLayoutMismatch,
 }
@@ -79,6 +84,7 @@ impl BindErrorCode {
             Self::UnknownModule => "BN0006",
             Self::UnknownPort => "BN0007",
             Self::CableKindMismatch => "BN0008",
+            Self::DuplicateInputConnection => "BN0009",
             Self::PolyLayoutMismatch => "BN0012",
         }
     }
@@ -93,6 +99,7 @@ impl BindErrorCode {
             Self::UnknownModule => "unknown module",
             Self::UnknownPort => "unknown port",
             Self::CableKindMismatch => "cable kind mismatch",
+            Self::DuplicateInputConnection => "duplicate input connection",
             Self::PolyLayoutMismatch => "poly layout mismatch",
         }
     }
@@ -439,6 +446,26 @@ pub fn bind_with_base_dir(
     let mut connections: Vec<BoundConnection> = Vec::with_capacity(flat.connections.len());
     for conn in &flat.connections {
         connections.push(bind_connection(conn, &by_id, &port_aliases, &mut errors));
+    }
+
+    // Each input port may be driven by at most one source. Detect duplicates
+    // here so the LSP flags them; the engine's graph builder enforces the
+    // same invariant at runtime (RT0001). Key on (module, port-name, index)
+    // and report the *second* occurrence, leaving the first as authoritative.
+    let mut seen_inputs: HashMap<(QName, &'static str, usize), &Provenance> = HashMap::new();
+    for (bc, raw) in connections.iter().zip(flat.connections.iter()) {
+        let BoundConnection::Resolved(rc) = bc else { continue };
+        let key = (rc.to_module.clone(), rc.to_port.name, rc.to_port.index);
+        if seen_inputs.insert(key, &raw.to_provenance).is_some() {
+            errors.push(BindError::new(
+                BindErrorCode::DuplicateInputConnection,
+                raw.to_provenance.clone(),
+                format!(
+                    "input port '{}/{}' on module '{}' already has a connection",
+                    rc.to_port.name, rc.to_port.index, rc.to_module
+                ),
+            ));
+        }
     }
 
     let mut port_refs: Vec<BoundPortRef> = Vec::with_capacity(flat.port_refs.len());

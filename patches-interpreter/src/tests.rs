@@ -653,11 +653,10 @@ fn unknown_port_surfaces_as_bind_error() {
 }
 
 #[test]
-fn connect_duplicate_still_runtime_interpret_error() {
-    // Duplicate input (`mix.in/0` fed from two outputs) is a
-    // [`ModuleGraph::connect`] runtime failure, not a descriptor
-    // concern — it must surface as an `InterpretError` from
-    // `build_from_bound`.
+fn connect_duplicate_surfaces_as_bind_error() {
+    // Duplicate input (`mix.in/0` fed from two outputs) is caught at
+    // descriptor bind so the LSP (which stops at bind) flags it before
+    // the engine would at `ModuleGraph::connect`.
     let osc2 = FlatModule {
         id: "osc2".into(),
         type_name: "Osc".to_string(),
@@ -677,7 +676,7 @@ fn connect_duplicate_still_runtime_interpret_error() {
         scale: 1.0,
         provenance: dup_prov.clone(),
         from_provenance: dup_prov.clone(),
-        to_provenance: dup_prov,
+        to_provenance: dup_prov.clone(),
     };
     let mut flat = empty_flat();
     flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];
@@ -686,9 +685,10 @@ fn connect_duplicate_still_runtime_interpret_error() {
         dup_conn,
     ];
     let bound = bind(&flat, &registry());
-    assert!(bound.errors.is_empty(), "bind should be clean: {:?}", bound.errors);
-    let err = build_from_bound(&flat, &bound, &env()).unwrap_err();
-    assert_eq!(err.code, InterpretErrorCode::ConnectFailed);
+    assert_eq!(bound.errors.len(), 1);
+    assert_eq!(bound.errors[0].code, BindErrorCode::DuplicateInputConnection);
+    // Diagnostic points at the duplicate's destination, not the first hit.
+    assert_eq!(bound.errors[0].provenance.site, dup_prov.site);
 }
 
 #[test]

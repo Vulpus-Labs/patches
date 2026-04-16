@@ -1193,3 +1193,29 @@ patch {
     );
 }
 
+#[test]
+fn duplicate_input_connection_surfaces_as_bn0009() {
+    // Two outputs driving the same input port on `mix` should be caught
+    // at descriptor bind and published as BN0009 so the LSP flags it
+    // before the engine would at runtime.
+    let src = "\
+patch {
+    module a : Osc
+    module b : Osc
+    module mix : Sum(channels: 1)
+    a.sine -> mix.in
+    b.sine -> mix.in
+}
+";
+    let tmp = TempDir::new("bn0009");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let diags = ws.analyse_flat(&uri, src.to_string());
+    assert!(
+        diags.iter().any(|d| matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "BN0009")),
+        "expected BN0009 for duplicate input, got: {diags:?}"
+    );
+}
+
