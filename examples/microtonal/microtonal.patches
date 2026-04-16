@@ -133,8 +133,8 @@ patch {
     module mix : StereoMixer(channels: [drums_l, drums_r, left, right]) {
         @drums_l { pan: -1.0 }
         @drums_r { pan: 1.0 }
-        @left { pan: -0.6, level: 0.5 }
-        @right { pan: 0.6, level: 0.5 }
+        @left { pan: -0.9, level: 0.5 }
+        @right { pan: 0.9, level: 0.5 }
     }
 
     drumkit.out_left -> mix.in[drums_l]
