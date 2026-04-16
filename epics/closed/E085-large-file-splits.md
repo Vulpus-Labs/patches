@@ -2,7 +2,7 @@
 id: "E085"
 title: Break up files over 600 lines
 created: 2026-04-16
-status: open
+status: closed
 tickets: ["0474", "0475", "0476", "0477", "0478", "0479", "0480", "0481", "0482", "0483", "0484", "0485", "0486", "0487", "0488", "0489", "0490", "0491"]
 ---
 
@@ -35,15 +35,15 @@ the public surface of the crate untouched.
 
 ## Acceptance criteria
 
-- [ ] All 18 tickets (0472–0489) closed.
-- [ ] Every source file listed below has its inline `mod tests` moved
-      to a sibling `tests.rs` under a newly created `foo/` directory
-      (or equivalent `#[path]` layout if preferred per-ticket).
-- [ ] `cargo build`, `cargo test`, `cargo clippy` clean at each
-      ticket boundary.
-- [ ] No public API changes.
-- [ ] A second histogram pass (`wc -l` over `**/*.rs`) shows no source
-      file over ~600 lines purely due to inline tests.
+- [x] All 18 tickets (0474–0491) closed.
+- [x] Every source file listed had its inline `mod tests` moved to a
+      sibling `tests.rs`, either via a new `foo/` directory (standard
+      shape) or next to `mod.rs`/`lib.rs` when already inside one.
+- [x] `cargo build`, `cargo test`, `cargo clippy` clean at each ticket
+      boundary and across the workspace at epic close.
+- [x] No public API changes.
+- [x] Histogram rebaselined — no source file sits over ~600 lines
+      purely due to inline tests after this epic.
 
 ## Notes
 
