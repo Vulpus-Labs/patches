@@ -56,8 +56,12 @@ template drumz {
     ch.out -> mixer.in[ch]
     oh.out -> mixer.in[oh]
     
-    mixer.out_left -> $.out_left
-    mixer.out_right -> $.out_right
+    module drive_l : Drive { mode: clip, drive: 8.0 }
+    module drive_r : Drive { mode: clip, drive: 8.0 }
+    mixer.out_left -> drive_l.in
+    drive_l.out ->  $.out_left
+    mixer.out_right -> drive_r.in
+    drive_r.out -> $.out_right
 }
 
 template voice {
@@ -89,11 +93,11 @@ template voice {
     adsr.out -> vca.cv
     osc_sum.out -> vca.in
 
-    module filter : Svf { cutoff: 400hz, q: 0.5 }
+    module filter : Svf { cutoff: 800hz, q: 0.5 }
     module filter_adsr : Adsr { attack: 0.15, release: 0.1, sustain: 0.6 }
     player.trigger -> filter_adsr.trigger
     player.gate -> filter_adsr.gate
-    filter_adsr.out -> filter.fm
+    filter_adsr.out -[0.6]-> filter.fm
 
     vca.out -> filter.in
     filter.lowpass -> $.signal
