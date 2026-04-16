@@ -64,6 +64,18 @@ template drumz {
     drive_r.out -> $.out_right
 }
 
+template digital_delay(time: int) {
+    in: in_left, in_right
+    out: out_left, out_right
+    
+    module delay : StereoDelay(channels: 1) {
+        pingpong: true
+        delay_ms: <time>
+        feedback: 0.8
+        tone: 0.7
+    }
+}
+
 template voice {
     in: clock
     out: signal
@@ -137,12 +149,7 @@ patch {
         @right { pan: 0.9, level: 0.5, send_a: 0.8 }
     }
 
-    module delay : StereoDelay(channels: 1) {
-        pingpong: true
-        delay_ms: 400
-        feedback: 0.8
-        tone: 0.7
-    }
+
 
     mix.send_a_left -> delay.in_left
     mix.send_a_right -> delay.in_right
