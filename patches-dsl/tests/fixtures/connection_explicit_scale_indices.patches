@@ -1,0 +1,5 @@
+patch {
+    module osc : Osc
+    module out : AudioOut
+    osc.sine[0] -[1.0]-> out.in_left[0]
+}

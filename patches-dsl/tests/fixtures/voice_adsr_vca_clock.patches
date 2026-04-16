@@ -1,0 +1,18 @@
+template Voice(freq: float = 440.0) {
+    in:  gate
+    out: audio
+    module osc : Osc { frequency: <freq> }
+    module env : Adsr { attack: 0.01, sustain: 0.7 }
+    module vca : Vca
+    osc.sine -> vca.in
+    env.out  -> vca.cv
+    env.gate <- $.gate
+    $.audio  <- vca.out
+}
+patch {
+    module src : Clock { bpm: 120.0 }
+    module v   : Voice(freq: 880.0)
+    module out : AudioOut
+    src.semiquaver -> v.gate
+    out.in_left    <- v.audio
+}

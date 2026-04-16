@@ -1,0 +1,12 @@
+template check(x: float = 0.0) {
+    in:  inp
+    out: out
+    module osc : Osc
+    $.out <- osc.sine
+    osc.x <- $.inp
+}
+patch {
+    module t : check
+    module out : AudioOut
+    out.in_left <- t.out
+}

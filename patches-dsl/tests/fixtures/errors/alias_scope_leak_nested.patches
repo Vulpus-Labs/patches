@@ -1,0 +1,23 @@
+template Inner() {
+    in:  x
+    out: y
+    module n : Mixer(channels: [snare])
+    n.in[snare] <- $.x
+    $.y <- n.out
+}
+template Outer() {
+    in:  p
+    out: q
+    module child : Inner
+    module n : Gain
+    $.p -> child.x
+    child.y -> n.in[snare]
+    n.out -> $.q
+}
+patch {
+    module o : Outer
+    module osc : Osc
+    module out : AudioOut
+    osc.sine -> o.p
+    o.q -> out.in_left
+}

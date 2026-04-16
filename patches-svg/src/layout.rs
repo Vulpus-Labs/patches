@@ -25,6 +25,8 @@ pub struct LayoutNode {
     pub input_ports: Vec<String>,
     /// Port names drawn on the right side, in the order they should appear.
     pub output_ports: Vec<String>,
+    /// Optional rendering metadata carried opaquely through layout.
+    pub hint: NodeHint,
 }
 
 /// A directed edge between two nodes' ports.
@@ -34,6 +36,29 @@ pub struct LayoutEdge {
     pub from_port: String,
     pub to_node: String,
     pub to_port: String,
+    /// Optional rendering metadata carried opaquely through layout.
+    pub hint: EdgeHint,
+}
+
+/// Renderer-directed metadata for a node. Layout does not interpret these
+/// fields; they pass through to the emitted SVG element.
+#[derive(Debug, Clone, Default)]
+pub struct NodeHint {
+    /// Multi-line tooltip text for a `<title>` child element.
+    pub tooltip: Option<String>,
+    /// `(name, value)` pairs emitted as attributes on the node `<g>`.
+    pub data_attrs: Vec<(&'static str, String)>,
+}
+
+/// Renderer-directed metadata for a cable edge.
+#[derive(Debug, Clone, Default)]
+pub struct EdgeHint {
+    /// CSS class added to the cable path (e.g. `"cable-mono"`).
+    pub cable_class: Option<&'static str>,
+    /// Multi-line tooltip text for a `<title>` child element.
+    pub tooltip: Option<String>,
+    /// `(name, value)` pairs emitted as attributes on the cable `<path>`.
+    pub data_attrs: Vec<(&'static str, String)>,
 }
 
 /// Tunable constants. Defaults match the clap GUI's previous hard-coded values.
@@ -80,6 +105,7 @@ pub struct PositionedNode {
     pub label: String,
     pub input_ports: Vec<String>,
     pub output_ports: Vec<String>,
+    pub hint: NodeHint,
 }
 
 impl PositionedNode {
@@ -113,7 +139,7 @@ impl PositionedNode {
 
 /// A routed cable: cubic Bézier from `(x0, y0)` through two control points
 /// to `(x1, y1)`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RoutedEdge {
     pub x0: f32,
     pub y0: f32,
@@ -123,6 +149,7 @@ pub struct RoutedEdge {
     pub c2y: f32,
     pub x1: f32,
     pub y1: f32,
+    pub hint: EdgeHint,
 }
 
 /// Axis-aligned bounding rectangle.
@@ -221,6 +248,7 @@ pub fn layout_graph(
                 label: src.label.clone(),
                 input_ports: src.input_ports.clone(),
                 output_ports: src.output_ports.clone(),
+                hint: src.hint.clone(),
             });
         }
         if comp_max_y > max_y {
@@ -263,6 +291,7 @@ pub fn layout_graph(
             c2y: y1,
             x1,
             y1,
+            hint: e.hint.clone(),
         });
     }
 
@@ -295,6 +324,17 @@ mod tests {
             label: id.into(),
             input_ports: inputs.iter().map(|s| (*s).to_string()).collect(),
             output_ports: outputs.iter().map(|s| (*s).to_string()).collect(),
+            hint: NodeHint::default(),
+        }
+    }
+
+    fn edge(from: &str, fp: &str, to: &str, tp: &str) -> LayoutEdge {
+        LayoutEdge {
+            from_node: from.into(),
+            from_port: fp.into(),
+            to_node: to.into(),
+            to_port: tp.into(),
+            hint: EdgeHint::default(),
         }
     }
 
@@ -312,12 +352,7 @@ mod tests {
             node("a", &[], &["out"], &cfg),
             node("b", &["in"], &[], &cfg),
         ];
-        let edges = vec![LayoutEdge {
-            from_node: "a".into(),
-            from_port: "out".into(),
-            to_node: "b".into(),
-            to_port: "in".into(),
-        }];
+        let edges = vec![edge("a", "out", "b", "in")];
         let layout = layout_graph(&nodes, &edges, &cfg);
         assert_eq!(layout.nodes.len(), 2);
         assert_eq!(layout.edges.len(), 1);
@@ -333,12 +368,7 @@ mod tests {
     fn unknown_edge_endpoints_are_skipped() {
         let cfg = LayoutConfig::default();
         let nodes = vec![node("a", &[], &["out"], &cfg)];
-        let edges = vec![LayoutEdge {
-            from_node: "a".into(),
-            from_port: "out".into(),
-            to_node: "ghost".into(),
-            to_port: "in".into(),
-        }];
+        let edges = vec![edge("a", "out", "ghost", "in")];
         let layout = layout_graph(&nodes, &edges, &cfg);
         assert_eq!(layout.nodes.len(), 1);
         assert!(layout.edges.is_empty());
@@ -351,12 +381,7 @@ mod tests {
             node("a", &[], &["out"], &cfg),
             node("b", &["in"], &[], &cfg),
         ];
-        let edges = vec![LayoutEdge {
-            from_node: "a".into(),
-            from_port: "nonexistent".into(),
-            to_node: "b".into(),
-            to_port: "in".into(),
-        }];
+        let edges = vec![edge("a", "nonexistent", "b", "in")];
         let layout = layout_graph(&nodes, &edges, &cfg);
         assert!(layout.edges.is_empty());
     }
@@ -371,18 +396,8 @@ mod tests {
             node("d", &["in"], &[], &cfg),
         ];
         let edges = vec![
-            LayoutEdge {
-                from_node: "a".into(),
-                from_port: "out".into(),
-                to_node: "b".into(),
-                to_port: "in".into(),
-            },
-            LayoutEdge {
-                from_node: "c".into(),
-                from_port: "out".into(),
-                to_node: "d".into(),
-                to_port: "in".into(),
-            },
+            edge("a", "out", "b", "in"),
+            edge("c", "out", "d", "in"),
         ];
         let layout = layout_graph(&nodes, &edges, &cfg);
         let a = layout.nodes.iter().find(|n| n.id == "a").unwrap();

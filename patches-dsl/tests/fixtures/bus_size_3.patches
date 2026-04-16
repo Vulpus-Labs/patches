@@ -1,0 +1,16 @@
+template Bus(size: int) {
+    in:  in[size]
+    out: out
+    module mixer : Sum(channels: <size>)
+    mixer.in[*size] <- $.in[*size]
+    $.out <- mixer.out
+}
+patch {
+    module osc : Osc
+    module b   : Bus(size: 3)
+    module out : AudioOut
+    osc.sine[0] -[1.0]-> b.in[0]
+    osc.sine[0] -[1.0]-> b.in[1]
+    osc.sine[0] -[1.0]-> b.in[2]
+    out.in_left[0] <-[1.0]- b.out
+}

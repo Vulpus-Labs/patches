@@ -1,0 +1,10 @@
+template t(s: song) {
+    in: d out: d
+    module seq : MasterSequencer(channels: [ch]) { song: <s> }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module t : t(s: nonexistent)
+}

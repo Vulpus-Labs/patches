@@ -283,15 +283,20 @@ fn unknown_port_returns_error() {
                 provenance: Provenance::root(zero_span()),
             },
         ],
-        connections: vec![FlatConnection {
-            from_module: "osc".into(),
-            from_port: "no_such_port".to_string(),
-            from_index: 0,
-            to_module: "out".into(),
-            to_port: "in_left".to_string(),
-            to_index: 0,
-            scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 5)),
+        connections: vec![{
+            let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 5));
+            FlatConnection {
+                from_module: "osc".into(),
+                from_port: "no_such_port".to_string(),
+                from_index: 0,
+                to_module: "out".into(),
+                to_port: "in_left".to_string(),
+                to_index: 0,
+                scale: 1.0,
+                provenance: prov.clone(),
+                from_provenance: prov.clone(),
+                to_provenance: prov,
+            }
         }],
         port_refs: vec![],
     };

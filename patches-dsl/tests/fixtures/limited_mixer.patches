@@ -1,0 +1,16 @@
+template LimitedMixer(size: int, level[size]: float = 1.0) {
+    in:  in[size]
+    out: mix
+    module m : Sum(channels: <size>)
+    m.in[*size] <- $.in[*size]
+    $.mix       <- m.out
+}
+patch {
+    module src : Osc
+    module lm  : LimitedMixer(size: 3) { level[0]: 0.8, level[1]: 0.9, level[2]: 0.7 }
+    module out : AudioOut
+    src.sine[0] -[1.0]-> lm.in[0]
+    src.sine[0] -[1.0]-> lm.in[1]
+    src.sine[0] -[1.0]-> lm.in[2]
+    out.in_left[0] <-[1.0]- lm.mix
+}

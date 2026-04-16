@@ -1,0 +1,12 @@
+template ParamCheck(size: int, level[size]: float = 1.0) {
+    in:  x
+    out: y
+    module m : Gain
+    $.y <- m.out[0]
+    m.in[0] <- $.x
+}
+patch {
+    module p   : ParamCheck(size: 2)
+    module out : AudioOut
+    out.in_left[0] <-[1.0]- p.y
+}

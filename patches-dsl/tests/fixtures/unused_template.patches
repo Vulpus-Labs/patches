@@ -1,0 +1,10 @@
+template Unused {
+    in:  x
+    out: y
+    module osc : Osc
+    $.y <- osc.sine
+    osc.voct <- $.x
+}
+patch {
+    module out : AudioOut
+}

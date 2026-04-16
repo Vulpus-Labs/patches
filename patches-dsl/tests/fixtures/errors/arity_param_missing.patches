@@ -1,0 +1,12 @@
+template Bad(size: int) {
+    in:  x
+    out: y
+    module m : Sum(channels: <size>)
+    $.x <- m.in[*nonexistent]
+    $.y <- m.out
+}
+patch {
+    module b   : Bad(size: 2)
+    module out : AudioOut
+    out.in_left[0] <-[1.0]- b.y
+}

@@ -1,0 +1,14 @@
+template Channel(channel: int) {
+    in:  x
+    out: y
+    module m : Sum(channels: 4)
+    m.in[channel] <- $.x
+    $.y <- m.out
+}
+patch {
+    module osc : Osc
+    module ch  : Channel(channel: 2)
+    module out : AudioOut
+    osc.sine[0] -[1.0]-> ch.x
+    out.in_left[0] <-[1.0]- ch.y
+}

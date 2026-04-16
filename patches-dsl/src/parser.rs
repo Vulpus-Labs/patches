@@ -231,7 +231,54 @@ pub fn parse_include_file_with_source(
 
 fn span_of(pair: &Pair<'_, Rule>) -> Span {
     let s = pair.as_span();
-    Span::new(current_source(), s.start(), s.end())
+    // pest's `{}` compound rules whose grammar ends in `?` or `*` (e.g.
+    // `connection`, `module_decl`) capture implicit WHITESPACE and COMMENT
+    // consumed while attempting the trailing optional/repetition, even when
+    // that attempt ultimately failed. Diagnostic spans derived from these
+    // rules would then bleed into the next line. Trim trailing whitespace
+    // and comment characters so spans stay tight to the last meaningful
+    // token.
+    let trimmed = trim_trailing_insignificant(s.as_str());
+    Span::new(current_source(), s.start(), s.start() + trimmed.len())
+}
+
+/// Trim trailing ASCII whitespace and line comments (`# ...` to end of line)
+/// from `s`, matching the grammar's WHITESPACE/COMMENT rules. Returns the
+/// prefix of `s` that ends at the last non-insignificant byte.
+fn trim_trailing_insignificant(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut end = bytes.len();
+    loop {
+        // Strip trailing whitespace.
+        while end > 0 {
+            let b = bytes[end - 1];
+            if b == b' ' || b == b'\t' || b == b'\r' || b == b'\n' {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        // Strip a trailing `# ... ` line comment, if present. Comments end
+        // at a newline, which we've already consumed above, so look for
+        // the nearest `#` on a line whose remaining chars are all
+        // non-newline after it.
+        let before = &bytes[..end];
+        if let Some(hash) = memchr_rev(b'#', before) {
+            // Ensure everything from hash..end is on one line (no newline
+            // in the original source between `#` and the position we're
+            // trimming down to).
+            if bytes[hash..end].iter().all(|&b| b != b'\n' && b != b'\r') {
+                end = hash;
+                continue;
+            }
+        }
+        break;
+    }
+    &s[..end]
+}
+
+fn memchr_rev(needle: u8, haystack: &[u8]) -> Option<usize> {
+    haystack.iter().rposition(|&b| b == needle)
 }
 
 fn build_include_directive(pair: Pair<'_, Rule>) -> IncludeDirective {
@@ -627,6 +674,12 @@ fn build_arrow(pair: Pair<'_, Rule>) -> Result<Arrow, ParseError> {
 fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, ParseError> {
     // pair.as_rule() == Rule::connection
     // Grammar: port_ref ~ arrow ~ port_ref ~ ("," ~ port_ref)*
+    // Fan-out (`a -> b, c, d`) desugars to one Connection per rhs,
+    // sharing the rule's span — `PatchReferences::connection_groups`
+    // keys on that shared span to reunite the fan-out targets. `span_of`
+    // already trims trailing whitespace/comments consumed by pest while
+    // attempting the optional repetition, so the shared span stays tight
+    // to `a.port -> b.port, c.port, d.port`.
     let span = span_of(&pair);
     let mut it = pair.into_inner();
     let lhs = build_port_ref(it.next().unwrap())?;

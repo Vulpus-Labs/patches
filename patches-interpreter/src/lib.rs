@@ -863,6 +863,7 @@ mod tests {
         from_module: &str, from_port: &str, from_index: u32,
         to_module: &str, to_port: &str, to_index: u32,
     ) -> FlatConnection {
+        let prov = Provenance::root(span());
         FlatConnection {
             from_module: from_module.into(),
             from_port: from_port.to_string(),
@@ -871,7 +872,9 @@ mod tests {
             to_port: to_port.to_string(),
             to_index,
             scale: 1.0,
-            provenance: Provenance::root(span()),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }
     }
 
@@ -945,6 +948,7 @@ mod tests {
     fn unknown_output_port_returns_interpret_error() {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), sum_module("mix", 1)];
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 5, 15));
         flat.connections = vec![FlatConnection {
             from_module: "osc1".into(),
             from_port: "no_such_out".to_string(),
@@ -953,7 +957,9 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 5, 15)),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("no_such_out"));
@@ -964,6 +970,7 @@ mod tests {
     fn unknown_input_port_returns_interpret_error() {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), sum_module("mix", 1)];
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 3, 9));
         flat.connections = vec![FlatConnection {
             from_module: "osc1".into(),
             from_port: "sine".to_string(),
@@ -972,7 +979,9 @@ mod tests {
             to_port: "no_such_in".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 3, 9)),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(err.message.contains("no_such_in"));
@@ -989,6 +998,7 @@ mod tests {
             port_aliases: vec![],
             provenance: Provenance::root(span()),
         };
+        let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
         let dup_conn = FlatConnection {
             from_module: "osc2".into(),
             from_port: "sine".to_string(),
@@ -997,7 +1007,9 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60)),
+            provenance: dup_prov.clone(),
+            from_provenance: dup_prov.clone(),
+            to_provenance: dup_prov,
         };
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];
@@ -1101,6 +1113,7 @@ mod tests {
         // Two outputs feeding the same input port: second connect must fail.
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("a"), osc_module("b"), sum_module("mix", 1)];
+        let b_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 77, 88));
         flat.connections = vec![
             connection("a", "sine", 0, "mix", "in", 0),
             FlatConnection {
@@ -1111,7 +1124,9 @@ mod tests {
                 to_port: "in".to_string(),
                 to_index: 0,
                 scale: 1.0,
-                provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 77, 88)),
+                provenance: b_prov.clone(),
+                from_provenance: b_prov.clone(),
+                to_provenance: b_prov,
             },
         ];
         let err = build(&flat, &registry(), &env()).unwrap_err();
@@ -1126,6 +1141,7 @@ mod tests {
     fn scale_out_of_range_is_error() {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc"), sum_module("mix", 1)];
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 11, 19));
         flat.connections = vec![FlatConnection {
             from_module: "osc".into(),
             from_port: "sine".to_string(),
@@ -1134,7 +1150,9 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 2.5,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 11, 19)),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(
@@ -1159,6 +1177,7 @@ mod tests {
                 provenance: Provenance::root(span()),
             },
         ];
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 100, 120));
         flat.connections = vec![FlatConnection {
             from_module: "mono_src".into(),
             from_port: "sine".to_string(),
@@ -1167,7 +1186,9 @@ mod tests {
             to_port: "voct".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 100, 120)),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }];
         let err = build(&flat, &registry(), &env()).unwrap_err();
         assert!(
@@ -1424,6 +1445,7 @@ mod tests {
     fn unknown_port_surfaces_as_bind_error() {
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), sum_module("mix", 1)];
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 5, 15));
         flat.connections = vec![FlatConnection {
             from_module: "osc1".into(),
             from_port: "no_such_out".to_string(),
@@ -1432,7 +1454,9 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 5, 15)),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }];
         let bound = bind(&flat, &registry());
         assert!(bound
@@ -1461,6 +1485,7 @@ mod tests {
             port_aliases: vec![],
             provenance: Provenance::root(span()),
         };
+        let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
         let dup_conn = FlatConnection {
             from_module: "osc2".into(),
             from_port: "sine".to_string(),
@@ -1469,7 +1494,9 @@ mod tests {
             to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60)),
+            provenance: dup_prov.clone(),
+            from_provenance: dup_prov.clone(),
+            to_provenance: dup_prov,
         };
         let mut flat = empty_flat();
         flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];

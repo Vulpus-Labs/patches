@@ -1,0 +1,12 @@
+template simple_tpl(gain: float = 1.0) {
+    in:  x
+    out: y
+    module vca : Vca
+    vca.x <- $.x
+    $.y   <- vca.out
+}
+patch {
+    module v : simple_tpl(gain: 0.5, unknown_param: 42.0)
+    module out : AudioOut
+    out.in_left <- v.y
+}

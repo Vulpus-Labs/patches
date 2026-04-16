@@ -1206,6 +1206,8 @@ impl<'a> Expander<'a> {
                 boundary,
                 port_refs,
                 &conn.span,
+                &from_ref.span,
+                &to_ref.span,
             )?;
         }
 
@@ -1233,6 +1235,8 @@ impl<'a> Expander<'a> {
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
         span: &Span,
+        from_span: &Span,
+        to_span: &Span,
     ) -> Result<(), ExpandError> {
         let namespace = ctx.namespace;
         let call_chain = ctx.call_chain;
@@ -1301,6 +1305,8 @@ impl<'a> Expander<'a> {
                     to_module, &to.port, to.index, namespace, instance_ports, span,
                 )?;
                 if let Some((last_dst_m, last_dst_p, last_dst_i, last_to_inner)) = dsts.pop() {
+                    let from_prov = Provenance::with_chain(*from_span, call_chain);
+                    let to_prov = Provenance::with_chain(*to_span, call_chain);
                     for (dst_m, dst_p, dst_i, to_inner) in dsts {
                         flat_connections.push(FlatConnection {
                             from_module: src_m.clone(),
@@ -1311,6 +1317,8 @@ impl<'a> Expander<'a> {
                             to_index: dst_i,
                             scale: composed * to_inner,
                             provenance: Provenance::with_chain(*span, call_chain),
+                            from_provenance: from_prov.clone(),
+                            to_provenance: to_prov.clone(),
                         });
                     }
                     flat_connections.push(FlatConnection {
@@ -1322,6 +1330,8 @@ impl<'a> Expander<'a> {
                         to_index: last_dst_i,
                         scale: composed * last_to_inner,
                         provenance: Provenance::with_chain(*span, call_chain),
+                        from_provenance: from_prov,
+                        to_provenance: to_prov,
                     });
                 }
             }

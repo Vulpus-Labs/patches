@@ -1,0 +1,12 @@
+template env_tpl(attack: float = 0.01, decay: float = 0.1) {
+    in:  gate
+    out: out
+    module e : Adsr { <attack>, <decay>, release: 0.3 }
+    $.out <- e.out
+    e.gate <- $.gate
+}
+patch {
+    module v : env_tpl(attack: 0.005, decay: 0.2)
+    module out : AudioOut
+    out.in_left <- v.out
+}

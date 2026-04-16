@@ -1,0 +1,17 @@
+template inner() {
+    in: a out: b
+    module gain : Gain
+    $.a -> gain.in
+    gain.out -> $.b
+}
+template outer() {
+    in: a out: b
+    module i : inner
+    $.a -> i.a
+    i.b -> $.b
+}
+patch {
+    module o : outer
+    module out : AudioOut
+    o.b -> out.in_left
+}

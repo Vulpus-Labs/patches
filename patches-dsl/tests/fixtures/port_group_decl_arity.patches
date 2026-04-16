@@ -1,0 +1,12 @@
+template DeclCheck(n: int) {
+    in:  freq, audio[n]
+    out: out
+    module m : Osc
+    $.out <- m.sine
+    m.in[0] <- $.freq
+}
+patch {
+    module d   : DeclCheck(n: 2)
+    module out : AudioOut
+    out.in_left[0] <-[1.0]- d.out
+}

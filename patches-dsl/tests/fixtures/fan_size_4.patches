@@ -1,0 +1,17 @@
+template Fan(size: int) {
+    in:  ch[size]
+    out: mix
+    module m : Sum(channels: <size>)
+    m.in[*size] <- $.ch[*size]
+    $.mix <- m.out
+}
+patch {
+    module src : Osc
+    module fan : Fan(size: 4)
+    module out : AudioOut
+    src.sine[0] -[1.0]-> fan.ch[0]
+    src.sine[0] -[1.0]-> fan.ch[1]
+    src.sine[0] -[1.0]-> fan.ch[2]
+    src.sine[0] -[1.0]-> fan.ch[3]
+    out.in_left[0] <-[1.0]- fan.mix
+}

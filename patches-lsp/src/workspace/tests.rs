@@ -1134,116 +1134,6 @@ fn peek_expansion_returns_none_outside_call_site() {
     assert!(ws.peek_expansion(&uri, Position::new(pos.line, pos.character + 5)).is_none());
 }
 
-// ── Signal graph / unused outputs (ticket 0424) ──────────────────────
-
-fn sg_warnings(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
-    diags
-        .iter()
-        .filter(|d| matches!(&d.code,
-            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "SG0001"))
-        .collect()
-}
-
-#[test]
-fn signal_graph_no_diag_when_outputs_connected() {
-    // Vca has a single output. AudioOut has no outputs. A patch wiring
-    // every Vca output to a downstream port should produce no SG0001.
-    let tmp = TempDir::new("sg_all_wired");
-    let src = "\
-patch {
-module v : Vca
-module out : AudioOut
-v.out -> out.in_left
-v.out -> out.in_right
-}
-";
-    tmp.write("a.patches", src);
-    let ws = DocumentWorkspace::new();
-    let uri = tmp.uri("a.patches");
-    let diags = ws.analyse_flat(&uri, src.to_string());
-    let sg = sg_warnings(&diags);
-    assert!(sg.is_empty(), "no SG0001 expected: {sg:?}");
-}
-
-#[test]
-fn signal_graph_flags_single_unused_output() {
-    let tmp = TempDir::new("sg_unused");
-    let src = "\
-patch {
-module osc : Osc
-module out : AudioOut
-module vca : Vca
-osc.sine -> out.in_left
-osc.sine -> out.in_right
-}
-";
-    tmp.write("a.patches", src);
-    let ws = DocumentWorkspace::new();
-    let uri = tmp.uri("a.patches");
-    let diags = ws.analyse_flat(&uri, src.to_string());
-    let sg = sg_warnings(&diags);
-    assert!(
-        sg.iter().any(|d| d.message.contains("'out'") && d.message.contains("'vca'")),
-        "expected unused-output warning on vca.out: {sg:?}"
-    );
-}
-
-#[test]
-fn signal_graph_does_not_flag_boundary_exported_output() {
-    let tmp = TempDir::new("sg_boundary");
-    let src = "\
-template v() {
-in: g
-out: audio
-module osc : Osc
-osc.sine -> $.audio
-}
-patch {
-module inst : v
-module out : AudioOut
-inst.audio -> out.in_left
-inst.audio -> out.in_right
-}
-";
-    tmp.write("a.patches", src);
-    let ws = DocumentWorkspace::new();
-    let uri = tmp.uri("a.patches");
-    let diags = ws.analyse_flat(&uri, src.to_string());
-    let sg = sg_warnings(&diags);
-    assert!(
-        !sg.iter().any(|d| d.message.contains("osc") && d.message.contains("sine")),
-        "`$.audio`-exported osc.sine must not flag: {sg:?}"
-    );
-}
-
-#[test]
-fn signal_graph_fanout_target_counts() {
-    // sine drives two inputs via fan-out; one unused output (unrelated)
-    // should still surface — fan-out must not confuse the forward-edge
-    // bookkeeping.
-    let tmp = TempDir::new("sg_fanout");
-    let src = "\
-patch {
-module osc : Osc
-module v1 : Vca
-module v2 : Vca
-module out : AudioOut
-osc.sine -> v1.in, v2.in
-v1.out -> out.in_left
-v2.out -> out.in_right
-}
-";
-    tmp.write("a.patches", src);
-    let ws = DocumentWorkspace::new();
-    let uri = tmp.uri("a.patches");
-    let diags = ws.analyse_flat(&uri, src.to_string());
-    let sg = sg_warnings(&diags);
-    assert!(
-        sg.iter().all(|d| !d.message.contains("'sine'")),
-        "fan-out source must count as used: {sg:?}"
-    );
-}
-
 #[test]
 fn expand_error_has_real_span_not_whole_file() {
     let tmp = TempDir::new("expand_span");
@@ -1265,3 +1155,41 @@ fn expand_error_has_real_span_not_whole_file() {
         "recursive-template diagnostic should have a non-placeholder range: {st:?}"
     );
 }
+
+#[test]
+fn unknown_port_bind_error_spans_only_port_name() {
+    // Regression: `osc.crock -> out.in_left` used to produce a squiggle
+    // covering the entire connection and bleeding onto the next line.
+    // `patches_diagnostics::from_bind_error` now narrows the span to the
+    // offending port label by slicing the port-ref's source text.
+    let src = "\
+patch {
+    module osc : Osc
+    module out : AudioOut
+    osc.crock -> out.in_left
+}
+";
+    let tmp = TempDir::new("bn0007_tight");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let diags = ws.analyse_flat(&uri, src.to_string());
+    let d = diags
+        .iter()
+        .find(|d| matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "BN0007"))
+        .expect("BN0007 present");
+    // `    osc.crock -> out.in_left` on line 4 (0-indexed 3): `crock`
+    // spans cols 8..13.
+    assert_eq!(
+        (d.range.start.line, d.range.start.character),
+        (3, 8),
+        "diag range {:?}", d.range
+    );
+    assert_eq!(
+        (d.range.end.line, d.range.end.character),
+        (3, 13),
+        "diag range {:?}", d.range
+    );
+}
+

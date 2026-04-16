@@ -1,0 +1,12 @@
+template tone(freq: float = 440.0) {
+    in:  x
+    out: y
+    module osc : Osc { frequency: <freq> }
+    $.y <- osc.out
+    osc.x <- $.x
+}
+patch {
+    module t : tone(freq: 880.0)
+    module out : AudioOut
+    out.in_left <- t.y
+}

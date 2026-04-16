@@ -1,0 +1,18 @@
+pattern kick { trig: x . }
+song my_song(ch) {
+    play { kick }
+}
+
+template bad(s: song) {
+    in: d out: d
+    song s2(ch) {
+        play { <s> }
+    }
+    module seq : MasterSequencer(channels: [ch]) { song: s2 }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module b : bad(s: my_song)
+}

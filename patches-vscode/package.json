@@ -11,6 +11,9 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:patches"
+  ],
   "contributes": {
     "commands": [
       {

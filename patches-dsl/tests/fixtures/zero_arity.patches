@@ -1,0 +1,12 @@
+template ZeroArity(n: int) {
+    in:  ch[n]
+    out: out
+    module m : Sum(channels: 1)
+    m.in[*n] <- $.ch[*n]
+    $.out    <- m.out
+}
+patch {
+    module t   : ZeroArity(n: 0)
+    module out : AudioOut
+    out.in_left[0] <-[1.0]- t.out
+}

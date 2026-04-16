@@ -1,0 +1,14 @@
+template bad_scale(waveform: float = 0.0) {
+    in:  inp
+    out: out
+    module osc : Osc
+    module sink : Osc
+    osc.sine -[<waveform>]-> sink.voct
+    $.out <- osc.sine
+    osc.x <- $.inp
+}
+patch {
+    module t : bad_scale(waveform: 0.5)
+    module out : AudioOut
+    out.in_left <- t.out
+}

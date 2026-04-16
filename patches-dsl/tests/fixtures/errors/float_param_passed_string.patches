@@ -1,0 +1,12 @@
+template gain(level: float = 1.0) {
+    in:  inp
+    out: out
+    module amp : Gain { level: <level> }
+    $.inp -> amp.in
+    amp.out -> $.out
+}
+patch {
+    module t : gain(level: loud)
+    module out : AudioOut
+    out.in_left <- t.out
+}

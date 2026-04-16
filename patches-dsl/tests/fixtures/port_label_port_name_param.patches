@@ -1,0 +1,12 @@
+template port_pick(port_name: float = 0.0) {
+    in:  x
+    out: y
+    module osc : Osc
+    $.y <- osc.sine
+    osc.x <- $.x
+}
+patch {
+    module t : port_pick
+    module out : AudioOut
+    out.in_left <- t.y
+}

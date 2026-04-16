@@ -1,0 +1,14 @@
+template IndexCheck(k: int, n: int) {
+    in:  x
+    out: y
+    module m : Sum(channels: 4)
+    m.in[0]  <- $.x
+    m.in[k]  <- $.x
+    m.in[*n] <- $.x
+    $.y <- m.out
+}
+patch {
+    module t   : IndexCheck(k: 1, n: 2)
+    module out : AudioOut
+    out.in_left[0] <-[1.0]- t.y
+}

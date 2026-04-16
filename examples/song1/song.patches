@@ -46,7 +46,7 @@ patch {
     module drum_player : PatternPlayer(channels: [kick, snare, hat, ohat, clap, cymbal, tom])
     module bass_player : PatternPlayer(channels: 1)
 
-    seq.cock[bass] -> bass_player.clock
+    seq.crock[bass] -> bass_player.clock
     seq.clock[drums] -> drum_player.clock
 
     module bass_cutoff_lfo : Lfo { rate: 0.01 }

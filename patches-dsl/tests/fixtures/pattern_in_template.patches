@@ -1,0 +1,20 @@
+template drumkit() {
+    in: dummy
+    out: dummy
+
+    pattern local_kick { trig: x . x . }
+
+    song drums(ch) {
+        play {
+            local_kick
+        }
+    }
+
+    module seq : MasterSequencer(channels: [ch]) { song: drums }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module d : drumkit
+}

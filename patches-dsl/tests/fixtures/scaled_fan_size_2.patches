@@ -1,0 +1,15 @@
+template ScaledFan(size: int) {
+    in:  ch[size]
+    out: mix
+    module m : Sum(channels: <size>)
+    m.in[*size] <- $.ch[*size]
+    $.mix <- m.out
+}
+patch {
+    module osc : Osc
+    module fan : ScaledFan(size: 2)
+    module out : AudioOut
+    osc.sine[0] -[0.5]-> fan.ch[0]
+    osc.sine[0] -[0.5]-> fan.ch[1]
+    out.in_left[0] <-[1.0]- fan.mix
+}

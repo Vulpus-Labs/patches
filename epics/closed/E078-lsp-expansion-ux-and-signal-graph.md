@@ -5,20 +5,22 @@ created: 2026-04-15
 closed: 2026-04-15
 status: closed
 depends_on: ["E077", "ADR-0038"]
-tickets: ["0422", "0423", "0424", "0425"]
+tickets: ["0422", "0423", "0425"]
 ---
 
 ## Status
 
 Closed 2026-04-15. ADR 0038 landed (unified patch loading pipeline), which
-unblocked all four tickets. `ExpandError` now surfaces through the staged
+unblocked the tickets. `ExpandError` now surfaces through the staged
 pipeline's diagnostic path (0425). Inlay hints register an
 `inlay_hint_provider` capability and render concrete shapes + indexed-port
-ranges via a shared `shape_render` module consumed by hover too (0422). A
-new `SignalGraph` is built alongside `PatchReferences` and publishes
-`SG0001` unused-output warnings (0424). Template call sites carry a
-`source.peekExpansion` code action whose command payload is the rendered
-expansion body (0423).
+ranges via a shared `shape_render` module consumed by hover too (0422).
+Template call sites carry a `source.peekExpansion` code action whose
+command payload is the rendered expansion body (0423).
+
+Ticket 0424 (signal graph + `SG0001` unused-output warnings) was reverted
+2026-04-16: the warning produced too much noise during live-coding and was
+not worth the upkeep. `SignalGraph` and its diagnostics were deleted.
 
 ## Summary
 
@@ -58,8 +60,6 @@ Out of scope:
       call sites; LSP `inlay_hint_provider` capability registered.
 - [ ] Peek-expansion code action available at template call sites,
       returning the post-substitution flat body for that call.
-- [ ] Unused-output diagnostics published from a new `SignalGraph`
-      structure built alongside `PatchReferences` in `ensure_flat_locked`.
 - [ ] `ExpandError` from the DSL expander surfaces as an LSP diagnostic
       instead of being silently dropped.
 - [ ] Shape evaluation helpers live in one module, consumed by hover
@@ -72,5 +72,4 @@ Out of scope:
 |------|------------------------------------------------------|
 | 0422 | LSP inlay hints for poly widths and indexed ports    |
 | 0423 | LSP peek-expansion code action for template calls    |
-| 0424 | LSP signal graph and unused-output diagnostics       |
 | 0425 | Surface DSL expansion errors as LSP diagnostics      |

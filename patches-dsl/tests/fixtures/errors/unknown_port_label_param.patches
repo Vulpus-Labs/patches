@@ -1,0 +1,12 @@
+template bad_port(x: float = 0.0) {
+    in:  inp
+    out: out
+    module osc : Osc
+    $.out <- osc.<nonexistent>
+    osc.x <- $.inp
+}
+patch {
+    module t : bad_port
+    module out : AudioOut
+    out.in_left <- t.out
+}

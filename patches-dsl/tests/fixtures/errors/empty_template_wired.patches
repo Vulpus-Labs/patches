@@ -1,0 +1,9 @@
+template Empty {
+    in:  x
+    out: y
+}
+patch {
+    module e   : Empty
+    module out : AudioOut
+    out.in_left <- e.y
+}

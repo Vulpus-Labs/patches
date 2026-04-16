@@ -1,0 +1,18 @@
+pattern global_beat { trig: x x x x }
+
+template player() {
+    in: dummy
+    out: dummy
+
+    song my_song(ch) {
+        play { global_beat }
+    }
+
+    module seq : MasterSequencer(channels: [ch]) { song: my_song }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module p : player
+}

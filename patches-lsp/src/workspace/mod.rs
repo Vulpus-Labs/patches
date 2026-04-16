@@ -29,7 +29,6 @@ use crate::analysis::{self, SemanticModel};
 use crate::ast_builder;
 use crate::completions;
 use crate::expansion::PatchReferences;
-use crate::signal_graph::SignalGraph;
 use crate::hover;
 use crate::lsp_util;
 use crate::navigation::{self, NavigationIndex};
@@ -50,8 +49,6 @@ use include_graph::IncludeGraph;
 pub(crate) struct StagedArtifact {
     pub flat: Option<FlatPatch>,
     pub references: Option<PatchReferences>,
-    #[allow(dead_code)]
-    pub signal_graph: Option<SignalGraph>,
     pub source_map: Option<SourceMap>,
     /// Stage 3b descriptor-level binding. Consulted by the expansion-aware
     /// hover path for port-descriptor rendering. Feature handlers that
@@ -72,7 +69,6 @@ impl StagedArtifact {
         Self {
             flat: None,
             references: None,
-            signal_graph: None,
             source_map: None,
             bound: None,
             stage_2_failed: false,
@@ -230,7 +226,6 @@ impl DocumentWorkspace {
             (Some(flat), Some(load)) => Some(PatchReferences::build(flat, &load.file)),
             _ => None,
         };
-        let signal_graph = run.patch.as_ref().map(SignalGraph::build);
         let source_map = run.loaded.as_ref().map(|l| l.source_map.clone());
 
         let root_text = state
@@ -240,25 +235,13 @@ impl DocumentWorkspace {
             .unwrap_or("");
         let root_line_index = lsp_util::build_line_index(root_text);
 
-        let mut diagnostics = render_pipeline_diagnostics(
+        let diagnostics = render_pipeline_diagnostics(
             &run,
             source_map.as_ref(),
             uri,
             &root_line_index,
             &state.documents,
         );
-        if let (Some(flat), Some(graph), Some(sm)) =
-            (run.patch.as_ref(), signal_graph.as_ref(), source_map.as_ref())
-        {
-            merge_signal_graph_warnings(
-                &mut diagnostics,
-                graph.unused_output_diagnostics(flat, registry),
-                sm,
-                uri,
-                &root_line_index,
-                &state.documents,
-            );
-        }
         let stage_2_failed = run.stage_2_failed();
 
         state.artifacts.insert(
@@ -266,7 +249,6 @@ impl DocumentWorkspace {
             StagedArtifact {
                 flat: run.patch,
                 references,
-                signal_graph,
                 source_map,
                 bound: run.bound,
                 stage_2_failed,
@@ -967,56 +949,6 @@ where
     groups
 }
 
-/// Bucket signal-graph `(span, message)` warnings into `groups` alongside
-/// pipeline diagnostics. Each warning is converted to an LSP `Diagnostic`
-/// with `DiagnosticSeverity::WARNING` and attached to the bucket of the
-/// URI its span's source id maps to (root URI if unresolvable).
-fn merge_signal_graph_warnings(
-    groups: &mut Vec<(Url, Vec<Diagnostic>)>,
-    warnings: Vec<(patches_core::Span, String)>,
-    sm: &SourceMap,
-    root_uri: &Url,
-    root_line_index: &[usize],
-    documents: &HashMap<Url, DocumentState>,
-) {
-    if warnings.is_empty() {
-        return;
-    }
-    let mut per_uri_li: HashMap<Url, Vec<usize>> = HashMap::new();
-    for (span, msg) in warnings {
-        let uri = uri_for_source(span.source, sm).unwrap_or_else(|| root_uri.clone());
-        let li_vec;
-        let li: &[usize] = if &uri == root_uri {
-            root_line_index
-        } else {
-            let entry = per_uri_li.entry(uri.clone()).or_insert_with(|| {
-                if let Some(doc) = documents.get(&uri) {
-                    doc.line_index.clone()
-                } else {
-                    let text = sm.source_text(span.source).unwrap_or("");
-                    lsp_util::build_line_index(text)
-                }
-            });
-            li_vec = entry.clone();
-            &li_vec[..]
-        };
-        let start = lsp_util::byte_offset_to_position(li, span.start);
-        let end = lsp_util::byte_offset_to_position(li, span.end);
-        let diag = Diagnostic {
-            range: Range::new(start, end),
-            severity: Some(DiagnosticSeverity::WARNING),
-            code: Some(NumberOrString::String("SG0001".to_string())),
-            source: Some("patches".to_string()),
-            message: msg,
-            ..Default::default()
-        };
-        if let Some(g) = groups.iter_mut().find(|(u, _)| u == &uri) {
-            g.1.push(diag);
-        } else {
-            groups.push((uri, vec![diag]));
-        }
-    }
-}
 
 /// Convert a [`SourceId`] to the editor-visible URI for the file backing
 /// it. Synthetic sources and ids whose path fails to convert to a

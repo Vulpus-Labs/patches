@@ -1,0 +1,14 @@
+template Levelled(size: int, level[size]: float = 1.0) {
+    in:  x
+    out: y
+    module g : Gain { <level/0>, <level/1>, <level/2> }
+    g.in[0] <- $.x
+    $.y <- g.out[0]
+}
+patch {
+    module osc : Osc
+    module lv  : Levelled(size: 3) { level: 0.8 }
+    module out : AudioOut
+    osc.sine[0] -[1.0]-> lv.x
+    out.in_left[0] <-[1.0]- lv.y
+}

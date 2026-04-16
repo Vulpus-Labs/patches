@@ -14,7 +14,9 @@ name = "patches-svg"
 path = "src/bin/patches-svg.rs"
 
 [dependencies]
+patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }
+patches-modules = { path = "../patches-modules" }
 rust-sugiyama = "0.4"
 
 [dev-dependencies]

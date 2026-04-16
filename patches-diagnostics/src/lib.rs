@@ -212,11 +212,19 @@ impl RenderedDiagnostic {
     /// Build a rendered diagnostic from a [`BindError`] (stage 3b
     /// descriptor-level binding). Provenance expansion chain is rendered as
     /// related snippets.
-    pub fn from_bind_error(err: &BindError, _source_map: &SourceMap) -> Self {
+    ///
+    /// For `UnknownPort` and `UnknownModule`, the `BindError`'s provenance
+    /// points at the side-specific port_ref (`module.port[index]`). The
+    /// renderer slices out just the offending token — port-label for
+    /// `UnknownPort`, module-ident for `UnknownModule` — so the editor
+    /// squiggle sits under the specific bad identifier rather than the
+    /// whole `module.port[index]` cluster.
+    pub fn from_bind_error(err: &BindError, source_map: &SourceMap) -> Self {
+        let refined = refine_bind_provenance(&err.code, &err.provenance, source_map);
         render_provenance_error(
             err.code.as_str(),
             err.message.clone(),
-            Some(&err.provenance),
+            Some(refined.as_ref().unwrap_or(&err.provenance)),
             err.code.label(),
         )
     }
@@ -357,6 +365,58 @@ pub fn source_line_col(source_map: &SourceMap, source: SourceId, offset: usize) 
         .get(source)
         .map(|e| line_col(&e.text, offset))
         .unwrap_or((0, 0))
+}
+
+/// Narrow a `BindError`'s provenance from a full `module.port[index]`
+/// port-ref slice down to the specific identifier the error names.
+///
+/// Returns `None` if the error code doesn't carry a refineable span, if
+/// the source text is unavailable, or if the slice doesn't look like a
+/// port-ref (no `.`). The original provenance is the correct fallback
+/// in all of those cases.
+fn refine_bind_provenance(
+    code: &BindErrorCode,
+    prov: &Provenance,
+    source_map: &SourceMap,
+) -> Option<Provenance> {
+    let (offset_start, offset_end) = match code {
+        BindErrorCode::UnknownModule | BindErrorCode::UnknownPort => {
+            port_ref_token_offsets(prov.site, source_map, *code)?
+        }
+        _ => return None,
+    };
+    let site = prov.site;
+    Some(Provenance::with_chain(
+        patches_core::source_span::Span::new(site.source, offset_start, offset_end),
+        &prov.expansion,
+    ))
+}
+
+/// Locate the byte offsets of the offending identifier inside a
+/// port-ref span `module.port[index]`. Returns `(start, end)` in the
+/// source's byte coordinates — `start >= span.start`, `end <= span.end`.
+///
+/// For `UnknownModule` the span covers `module`; for `UnknownPort` it
+/// covers `port` (excluding any `[index]`). Returns `None` if the slice
+/// has no `.` separator.
+fn port_ref_token_offsets(
+    site: patches_core::source_span::Span,
+    source_map: &SourceMap,
+    code: BindErrorCode,
+) -> Option<(usize, usize)> {
+    let text = source_map.source_text(site.source)?;
+    let slice = text.get(site.start..site.end)?;
+    let dot = slice.find('.')?;
+    match code {
+        BindErrorCode::UnknownModule => Some((site.start, site.start + dot)),
+        BindErrorCode::UnknownPort => {
+            let port_start = site.start + dot + 1;
+            let after_dot = &slice[dot + 1..];
+            let port_len = after_dot.find('[').unwrap_or(after_dot.len());
+            Some((port_start, port_start + port_len))
+        }
+        _ => None,
+    }
 }
 
 fn provenance_to_snippets(prov: &Provenance, primary_label: &str) -> (Snippet, Vec<Snippet>) {

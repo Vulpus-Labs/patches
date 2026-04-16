@@ -1,0 +1,17 @@
+template Inner() {
+    in:  x
+    out: y
+    module m : Mixer(channels: [kick])
+    m.in[kick] <- $.x
+    $.y <- m.out
+}
+patch {
+    module sub : Inner
+    module m : Gain
+    module osc : Osc
+    module out : AudioOut
+    osc.sine -> sub.x
+    osc.sine -> m.in[kick]
+    sub.y -> out.in_left
+    m.out -> out.in_right
+}

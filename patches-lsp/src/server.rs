@@ -330,7 +330,13 @@ pub(crate) fn render_svg_pipeline(
         }
     };
 
-    let svg = patches_svg::render_svg(&expanded.patch, &patches_svg::SvgOptions::default());
+    let registry = patches_modules::default_registry();
+    let svg = patches_svg::render_svg(
+        &expanded.patch,
+        &load_result.source_map,
+        &registry,
+        &patches_svg::SvgOptions::default(),
+    );
     RenderSvgResult {
         svg,
         diagnostics: vec![],

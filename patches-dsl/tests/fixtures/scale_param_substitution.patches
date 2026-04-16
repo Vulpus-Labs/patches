@@ -1,0 +1,14 @@
+template scaled_conn(gain: float = 1.0) {
+    in:  x
+    out: y
+    module osc : Osc
+    module out2 : Osc
+    osc.sine -[<gain>]-> out2.voct
+    $.y <- osc.sine
+    osc.x <- $.x
+}
+patch {
+    module t : scaled_conn(gain: 0.5)
+    module out : AudioOut
+    out.in_left <- t.y
+}

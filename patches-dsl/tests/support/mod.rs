@@ -4,6 +4,39 @@
 
 use patches_dsl::{expand, parse, FlatConnection, FlatModule, FlatPatch, Value};
 
+// ── Error / warning assertions ───────────────────────────────────────────────
+
+/// Assert that expansion of `src` fails with an error message containing `needle`.
+#[allow(dead_code)]
+pub fn assert_expand_err_contains(src: &str, needle: &str) {
+    let msg = parse_expand_err(src);
+    assert!(
+        msg.contains(needle),
+        "expected error to contain {:?}, got: {}",
+        needle,
+        msg
+    );
+}
+
+/// Assert that expansion succeeds with no warnings.
+#[allow(dead_code)]
+pub fn assert_no_warnings(src: &str) {
+    let file = parse(src).expect("parse failed");
+    let result = expand(&file).expect("expand failed");
+    assert!(
+        result.warnings.is_empty(),
+        "expected no warnings, got: {:?}",
+        result.warnings
+    );
+}
+
+/// Assert that parse + expand succeed (smoke test, discards result).
+#[allow(dead_code)]
+pub fn assert_expands_ok(src: &str) {
+    let file = parse(src).expect("parse failed");
+    expand(&file).expect("expand failed");
+}
+
 // ── Parse/expand pipeline ────────────────────────────────────────────────────
 
 /// Parse and expand a `.patches` source string, panicking on failure.

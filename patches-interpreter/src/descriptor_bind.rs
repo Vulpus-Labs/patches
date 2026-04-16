@@ -528,7 +528,7 @@ fn bind_connection(
     let Some(from) = by_id.get(&conn.from_module).copied() else {
         errors.push(BindError::new(
             BindErrorCode::UnknownModule,
-            conn.provenance.clone(),
+            conn.from_provenance.clone(),
             format!("module '{}' not found", conn.from_module),
         ));
         return BoundConnection::Unresolved(UnresolvedConnection {
@@ -539,7 +539,7 @@ fn bind_connection(
     let Some(to) = by_id.get(&conn.to_module).copied() else {
         errors.push(BindError::new(
             BindErrorCode::UnknownModule,
-            conn.provenance.clone(),
+            conn.to_provenance.clone(),
             format!("module '{}' not found", conn.to_module),
         ));
         return BoundConnection::Unresolved(UnresolvedConnection {
@@ -557,7 +557,7 @@ fn bind_connection(
             let aliases = port_aliases.get(&conn.from_module);
             errors.push(BindError::new(
                 BindErrorCode::UnknownPort,
-                conn.provenance.clone(),
+                conn.from_provenance.clone(),
                 format!(
                     "module '{}' has no output port '{}'; available outputs: [{}]",
                     conn.from_module,
@@ -577,7 +577,7 @@ fn bind_connection(
             let aliases = port_aliases.get(&conn.to_module);
             errors.push(BindError::new(
                 BindErrorCode::UnknownPort,
-                conn.provenance.clone(),
+                conn.to_provenance.clone(),
                 format!(
                     "module '{}' has no input port '{}'; available inputs: [{}]",
                     conn.to_module,
@@ -750,6 +750,7 @@ mod tests {
     }
 
     fn conn(from: &str, fp: &str, to: &str, tp: &str) -> FlatConnection {
+        let prov = CoreProv::root(syn());
         FlatConnection {
             from_module: from.into(),
             from_port: fp.into(),
@@ -758,7 +759,9 @@ mod tests {
             to_port: tp.into(),
             to_index: 0,
             scale: 1.0,
-            provenance: CoreProv::root(syn()),
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
         }
     }
 

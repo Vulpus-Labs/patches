@@ -1,0 +1,20 @@
+pattern kick { trig: x . x . }
+
+template seq_voice(pat: pattern) {
+    in: dummy
+    out: dummy
+
+    song my_song(ch) {
+        play {
+            <pat>
+        }
+    }
+
+    module seq : MasterSequencer(channels: [ch]) { song: my_song }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module v : seq_voice(pat: kick)
+}

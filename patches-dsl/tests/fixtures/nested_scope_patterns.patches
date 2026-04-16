@@ -1,0 +1,36 @@
+pattern foo { trig: x . }
+
+template inner() {
+    in: dummy
+    out: dummy
+
+    pattern foo { trig: . x . x }
+
+    song inner_song(ch) {
+        play { foo }
+    }
+
+    module seq : MasterSequencer(channels: [ch]) { song: inner_song }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+template outer() {
+    in: dummy
+    out: dummy
+
+    pattern foo { trig: . x }
+
+    song outer_song(ch) {
+        play { foo }
+    }
+
+    module i : inner
+    module seq : MasterSequencer(channels: [ch]) { song: outer_song }
+    module out : AudioOut
+    seq.clock[ch] -> out.in_left
+}
+
+patch {
+    module o : outer
+}

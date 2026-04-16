@@ -1,0 +1,24 @@
+template UsesKick() {
+    in:  x
+    out: y
+    module m : Mixer(channels: [kick])
+    m.in[kick] <- $.x
+    $.y <- m.out
+}
+template UsesSnare() {
+    in:  x
+    out: y
+    module m : Mixer(channels: [snare])
+    m.in[snare] <- $.x
+    $.y <- m.out
+}
+patch {
+    module a : UsesKick
+    module b : UsesSnare
+    module osc : Osc
+    module out : AudioOut
+    osc.sine -> a.x
+    osc.sine -> b.x
+    a.y -> out.in_left
+    b.y -> out.in_right
+}

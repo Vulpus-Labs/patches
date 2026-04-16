@@ -45,8 +45,14 @@ pub struct FlatConnection {
     pub to_index: u32,
     /// Cable scale, composed from all template-boundary scales along the path.
     pub scale: f64,
-    /// Source provenance.
+    /// Source provenance for the whole connection (covers `lhs arrow rhs`).
     pub provenance: Provenance,
+    /// Source provenance for the source side's authored port reference, used
+    /// to tighten port-level diagnostics (e.g. `UnknownPort`) to just the
+    /// offending `module.port` token instead of the whole connection line.
+    pub from_provenance: Provenance,
+    /// Source provenance for the destination side's authored port reference.
+    pub to_provenance: Provenance,
 }
 
 /// Direction of a port reference recorded at a template boundary.

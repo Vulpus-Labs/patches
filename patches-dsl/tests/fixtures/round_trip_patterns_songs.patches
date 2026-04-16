@@ -1,0 +1,25 @@
+template Gain(level: float = 1.0) {
+    in: audio
+    out: audio
+    module amp : Amplifier { gain: <level> }
+    $.audio -> amp.in
+    amp.out -> $.audio
+}
+
+pattern drums {
+    kick:  x . . . x . . .
+    snare: . . x . . . x .
+}
+
+song arrangement(ch1) {
+    play {
+        drums
+        drums
+    }
+}
+
+patch {
+    module g : Gain
+    module out : AudioOut
+    g.audio -> out.in_left
+}

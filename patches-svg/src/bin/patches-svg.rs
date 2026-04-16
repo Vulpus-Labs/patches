@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use patches_modules::default_registry;
 use patches_svg::{render_svg, SvgOptions, Theme};
 
 struct Args {
@@ -133,7 +134,8 @@ fn run() -> Result<(), String> {
         theme: args.theme,
         ..SvgOptions::default()
     };
-    let svg = render_svg(&expanded.patch, &opts);
+    let registry = default_registry();
+    let svg = render_svg(&expanded.patch, &load_result.source_map, &registry, &opts);
 
     match args.output {
         Some(path) => std::fs::write(&path, svg).map_err(|e| e.to_string())?,

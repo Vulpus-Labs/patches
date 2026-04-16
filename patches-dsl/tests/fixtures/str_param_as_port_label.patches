@@ -1,0 +1,12 @@
+template pick(port: str) {
+    in:  inp
+    out: out
+    module osc : Osc
+    osc.<port> -> $.out
+    $.inp -> osc.voct
+}
+patch {
+    module t : pick(port: sine)
+    module out : AudioOut
+    out.in_left <- t.out
+}

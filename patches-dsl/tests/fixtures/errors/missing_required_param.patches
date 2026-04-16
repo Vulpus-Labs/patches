@@ -1,0 +1,12 @@
+template needs_freq(freq: float) {
+    in:  x
+    out: y
+    module osc : Osc { frequency: <freq> }
+    osc.x <- $.x
+    $.y   <- osc.out
+}
+patch {
+    module v : needs_freq
+    module out : AudioOut
+    out.in_left <- v.y
+}
