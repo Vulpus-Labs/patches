@@ -59,9 +59,16 @@ template drumz {
     module drive_l : Drive { mode: clip, drive: 8.0 }
     module drive_r : Drive { mode: clip, drive: 8.0 }
     mixer.out_left -> drive_l.in
-    drive_l.out ->  $.out_left
     mixer.out_right -> drive_r.in
-    drive_r.out -> $.out_right
+
+    module verb : FdnReverb { mix: 0.2 }
+    drive_l.out ->  verb.in_left
+    drive_r.out -> verb.in_right
+
+    module p : MadeUp
+
+    verb.out_left -> $.out_left
+    verb.out_right -> $.out_right
 }
 
 template digital_delay(time: int) {
@@ -71,12 +78,11 @@ template digital_delay(time: int) {
     module delay : StereoDelay(channels: 1) {
         pingpong: true
         delay_ms: <time>
-        feedback: 0.8
-        tone: 0.7
+        feedback: 0.4
     }
 
-    module crusher_l : Bitcrusher
-    module crusher_r : Bitcrusher
+    module crusher_l : Bitcrusher{depth: 15, rate: 1.0}
+    module crusher_r : Bitcrusher{depth: 15, rate: 1.0}
 
     delay.send_left -> crusher_l.in
     delay.send_right -> crusher_r.in
@@ -84,7 +90,7 @@ template digital_delay(time: int) {
     delay.return_right <- crusher_r.out
 
     delay.in_left <- $.in_left
-    delay.in_left <- $.in_right
+    delay.in_right <- $.in_right
 
     delay.out_left -> $.out_left
     delay.out_right -> $.out_right
