@@ -8,12 +8,56 @@ pattern eleven_eight {
            C4 C4:0.5 C4 C#4
 }
 
+pattern beat {
+    drum:  x . . . . . . . x . . . . . . . 
+    snare: . . . . x . . . . . . . x . . .
+    ch:    . x x x . x x x . x x x . x x .
+    oh:    . . . . x . . . . . . . x . . x 
+}
+
 song microtonal_left(left) {
     play { seven_eight }
 }
 
 song microtonal_right(right) {
     play { eleven_eight }
+}
+
+song drums(drums) {
+    play { beat }
+}
+
+template drumz {
+    in: clock
+    out: out_left, out_right
+
+    module player : PatternPlayer(channels: [kick, snare, ch, oh])
+    player.clock <- $.clock
+
+    module kick : Kick
+    module snare : Snare
+    module ch : ClosedHiHat
+    module oh: OpenHiHat
+
+    player.trigger[kick] -> kick.trigger
+    player.trigger[snare] -> snare.trigger
+    player.trigger[ch] -> ch.trigger, oh.choke
+    player.trigger[oh] -> oh.trigger
+
+    module mixer : StereoMixer(channels: [kick, snare, ch, oh]) {
+        @kick { }
+        @snare { pan: -0.2 }
+        @ch { pan: 0.2 }
+        @oh { pan: 0.0 }
+    }
+
+    kick.out -> mixer.in[kick]
+    snare.out -> mixer.in[snare]
+    ch.out -> mixer.in[ch]
+    oh.out -> mixer.in[oh]
+    
+    mixer.out_left -> $.out_left
+    mixer.out_right -> $.out_right
 }
 
 template voice {
@@ -61,17 +105,28 @@ patch {
         swing: 0.55
     }
 
+    module seq_drums: MasterSequencer(channels: [drums]) {
+        bpm: 90
+        song: drums
+    }
+
     module left : voice
     module right : voice
+    module drumkit : drumz
 
     seq_l.clock[left] -> left.clock
     seq_r.clock[right] -> right.clock
+    seq_drums.clock[drums] -> drumkit.clock
     
-    module mix : StereoMixer(channels: [left, right]) {
+    module mix : StereoMixer(channels: [drums_l, drums_r, left, right]) {
+        @drums_l { pan: -1.0 }
+        @drums_r { pan: 1.0 }
         @left { pan: -0.6, level: 0.5 }
         @right { pan: 0.6, level: 0.5 }
     }
 
+    drumkit.out_left -> mix.in[drums_l]
+    drumkit.out_right -> mix.in[drums_r]
     left.signal -> mix.in[left]
     right.signal -> mix.in[right]
 
