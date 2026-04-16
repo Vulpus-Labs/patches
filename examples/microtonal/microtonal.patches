@@ -71,8 +71,15 @@ template voice {
     player.cv1 -> pitch_add.in[base]
     player.cv2 -[0.08333]-> pitch_add.in[adj]
 
-    module osc : Osc
-    pitch_add.out -> osc.voct
+    module osc1 : Osc { frequency: 0.0, drift: 0.5 }
+    module osc2 : Osc { frequency: -0.02, drift: 0.5 }
+    module osc3 : Osc { frequency: 0.02, drift: 0.5 }
+
+    pitch_add.out -> osc1.voct, osc2.voct, osc3.voct
+    module osc_sum : Sum(channels: 3)
+    osc1.square -> osc_sum.in[0]
+    osc2.triangle -[0.5]-> osc_sum.in[1]
+    osc3.sawtooth -[0.5]-> osc_sum.in[2]
 
     module adsr : Adsr { attack: 0.01, decay: 0.01, sustain: 0.7, release: 0.05 }
     module vca: Vca
@@ -80,10 +87,10 @@ template voice {
     player.trigger -> adsr.trigger
     player.gate -> adsr.gate
     adsr.out -> vca.cv
-    osc.sawtooth -> vca.in
+    osc_sum.out -> vca.in
 
     module filter : Svf { cutoff: 400hz, q: 0.5 }
-    module filter_adsr : Adsr
+    module filter_adsr : Adsr { attack: 0.15, release: 0.1, sustain: 0.6 }
     player.trigger -> filter_adsr.trigger
     player.gate -> filter_adsr.gate
     filter_adsr.out -> filter.fm
@@ -102,12 +109,13 @@ patch {
     module seq_r: MasterSequencer(channels: [right]) {
         bpm: 90
         song: microtonal_right
-        swing: 0.55
+        swing: 0.6
     }
 
     module seq_drums: MasterSequencer(channels: [drums]) {
         bpm: 90
         song: drums
+        swing: 0.6
     }
 
     module left : voice
