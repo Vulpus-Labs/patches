@@ -9,7 +9,7 @@ song microtonal(left) {
 
 patch {
     module seq: MasterSequencer(channels: [left]) {
-        bpm: 130
+        bpm: 95
         song: microtonal
         swing: 0.6
     }
@@ -25,6 +25,14 @@ patch {
     module osc : Osc
     pitch_add.out -> osc.voct
 
+    module adsr : Adsr
+    module vca: Vca
+
+    leftpp.trigger -> adsr.trigger
+    leftpp.gate -> adsr.gate
+    adsr.out -> vca.cv
+    osc.square -> vca.in
+
     module out : AudioOut
-    osc.square -> out.in_left
+    vca.out -> out.in_left
 }
