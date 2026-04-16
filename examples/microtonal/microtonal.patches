@@ -4,8 +4,8 @@ pattern seven_eight {
 }
 
 pattern eleven_eight {
-    notes: B4 B4:0.5 C5 C#5 . C#5:0.5 C#5 |
-           C5 C5:0.5 C5 C#5
+    notes: B3 B3:0.5 C4 C#4 . C#4:0.5 C#4 |
+           C4 C4:0.5 C4 C#4
 }
 
 song microtonal_left(left) {
@@ -30,28 +30,35 @@ template voice {
     module osc : Osc
     pitch_add.out -> osc.voct
 
-    module adsr : Adsr
+    module adsr : Adsr { attack: 0.01, decay: 0.01, sustain: 0.7, release: 0.05 }
     module vca: Vca
 
     player.trigger -> adsr.trigger
     player.gate -> adsr.gate
     adsr.out -> vca.cv
-    osc.square -> vca.in
+    osc.sawtooth -> vca.in
 
-    vca.out -> $.signal
+    module filter : Svf { cutoff: 400hz, q: 0.4 }
+    module filter_adsr : Adsr
+    player.trigger -> filter_adsr.trigger
+    player.gate -> filter_adsr.gate
+    filter_adsr.out -> filter.fm
+
+    vca.out -> filter.in
+    filter.lowpass -> $.signal
 }
 
 patch {
     module seq_l: MasterSequencer(channels: [left]) {
-        bpm: 95
+        bpm: 90
         song: microtonal_left
         swing: 0.6
     }
 
     module seq_r: MasterSequencer(channels: [right]) {
-        bpm: 95
+        bpm: 90
         song: microtonal_right
-        swing: 0.6
+        swing: 0.55
     }
 
     module left : voice
