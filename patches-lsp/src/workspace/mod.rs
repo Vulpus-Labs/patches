@@ -35,13 +35,18 @@ use crate::lsp_util;
 use crate::navigation::{self, NavigationIndex};
 use crate::parser::language;
 
-/// Cached result of running the staged patch-loading pipeline (ADR 0038)
-/// for a single root document under the accumulate-and-continue policy.
+mod include_graph;
+use include_graph::IncludeGraph;
+
+/// Cached artifacts of running the staged patch-loading pipeline
+/// (ADR 0038) for a single root document under the
+/// accumulate-and-continue policy.
 ///
 /// Every field is populated best-effort: `flat` / `bound` are `Some`
-/// whenever their stage completed, even if later stages failed.
-/// `diagnostics` is the LSP-ready list for the root URI (cross-file
-/// spans are handled per [`crate::lsp_util::rendered_to_lsp_diagnostic`]).
+/// whenever their stage completed, even if later stages failed. The
+/// artifact holds patch state only — diagnostics are rendered fresh
+/// inside [`DocumentWorkspace::analyse`] /
+/// [`DocumentWorkspace::run_pipeline_locked`] and published once.
 pub(crate) struct StagedArtifact {
     pub flat: Option<FlatPatch>,
     pub references: Option<PatchReferences>,
@@ -49,23 +54,16 @@ pub(crate) struct StagedArtifact {
     pub signal_graph: Option<SignalGraph>,
     pub source_map: Option<SourceMap>,
     /// Stage 3b descriptor-level binding. Consulted by the expansion-aware
-    /// hover path for port-descriptor rendering, and its `errors` feed
-    /// `diagnostics`. Feature handlers that don't already receive a bound
-    /// graph (tolerant-AST fallback handlers, completions) continue to
-    /// resolve through the registry.
+    /// hover path for port-descriptor rendering. Feature handlers that
+    /// don't already receive a bound graph (tolerant-AST fallback
+    /// handlers, completions) continue to resolve through the registry.
     pub bound: Option<BoundPatch>,
-    /// Pipeline-stage diagnostics bucketed by the URI their primary span
-    /// lives in. The root URI is always present (possibly with an empty
-    /// vec) so that a fix on the root's own text reliably clears prior
-    /// diagnostics. Every other URI present had at least one diagnostic
-    /// this run; clearing stale include buckets is handled by
-    /// [`diff_for_clearing`] when an artifact is replaced.
-    pub diagnostics: Vec<(Url, Vec<Diagnostic>)>,
     /// `true` when pest stage 2 failed for the root of this artifact.
     /// Per ADR 0038, the tree-sitter fallback (stage 4a–4c) is the
     /// source of truth for name-agreement diagnostics in that case, so
     /// LSP publishes tolerant-AST semantic diagnostics only on this
-    /// branch.
+    /// branch. This is routing metadata about the pipeline outcome, not
+    /// a rendered diagnostic.
     pub stage_2_failed: bool,
 }
 
@@ -77,20 +75,8 @@ impl StagedArtifact {
             signal_graph: None,
             source_map: None,
             bound: None,
-            diagnostics: Vec::new(),
             stage_2_failed: false,
         }
-    }
-
-    /// URIs (other than `root`) that had non-empty diagnostics last run.
-    /// Used to emit empty publishes when a subsequent run no longer
-    /// produces diagnostics for them.
-    fn non_root_uris(&self, root: &Url) -> Vec<Url> {
-        self.diagnostics
-            .iter()
-            .filter(|(u, d)| u != root && !d.is_empty())
-            .map(|(u, _)| u.clone())
-            .collect()
     }
 }
 
@@ -126,13 +112,9 @@ pub(crate) struct WorkspaceState {
     /// URIs of documents loaded as includes (not opened by the editor).
     /// Managed automatically and removed when no longer referenced.
     include_loaded: HashSet<Url>,
-    /// Reverse-dep graph: child URI -> set of parents that include it.
-    /// Used to cascade re-analysis on disk or editor changes to a child.
-    included_by: HashMap<Url, HashSet<Url>>,
-    /// Forward graph: parent URI -> direct children it includes. Kept in
-    /// sync with `included_by` so a parent's old edges can be removed when
-    /// its set of includes changes.
-    includes_of: HashMap<Url, HashSet<Url>>,
+    /// Parent ↔ child include topology with the cross-map invariants
+    /// documented and enforced. See [`IncludeGraph`].
+    include_graph: IncludeGraph,
     /// Per-root cached staged-pipeline artifact. Keyed by the URL of
     /// the root doc — the master file whose include closure was
     /// flattened. Invalidated as a unit when the root or any transitive
@@ -140,6 +122,13 @@ pub(crate) struct WorkspaceState {
     /// `flat_cache`, `references`, and `source_maps` maps that existed
     /// before ADR 0038.
     artifacts: HashMap<Url, StagedArtifact>,
+    /// For each root URI, the set of non-root URIs that had non-empty
+    /// pipeline diagnostics on the previous publish. On the next publish
+    /// any URI in this set that no longer receives diagnostics gets an
+    /// empty publish so the editor clears its stale entries. Tracked
+    /// here rather than on [`StagedArtifact`] because it describes the
+    /// last *publish*, not the cached pipeline result.
+    last_publish_non_root: HashMap<Url, HashSet<Url>>,
 }
 
 /// Per-workspace analysis state. Holds every piece of mutable state the LSP
@@ -163,9 +152,9 @@ impl DocumentWorkspace {
                 documents: HashMap::new(),
                 nav_index: NavigationIndex::default(),
                 include_loaded: HashSet::new(),
-                included_by: HashMap::new(),
-                includes_of: HashMap::new(),
+                include_graph: IncludeGraph::default(),
                 artifacts: HashMap::new(),
+                last_publish_non_root: HashMap::new(),
             }),
         }
     }
@@ -186,7 +175,7 @@ impl DocumentWorkspace {
     #[allow(dead_code)]
     pub(crate) fn ensure_flat(&self, uri: &Url) -> bool {
         let mut state = self.state.lock().expect("lock workspace state");
-        self.run_pipeline_locked(&mut state, uri);
+        let _ = self.run_pipeline_locked(&mut state, uri);
         state
             .artifacts
             .get(uri)
@@ -195,20 +184,27 @@ impl DocumentWorkspace {
     }
 
     /// Run stages 1–5 of the ADR 0038 pipeline under accumulate-and-continue
-    /// and cache the result on `state.artifacts[uri]`. Idempotent: returns
-    /// immediately when a cached artifact already exists.
+    /// and cache the resulting artifacts on `state.artifacts[uri]`.
+    /// Idempotent: returns an empty diagnostic list when a cached artifact
+    /// already exists (the caller is expected to have already published
+    /// those diagnostics when the cache was populated).
     ///
     /// Produces a [`StagedArtifact`] in every case — stage failures fold
-    /// into the artifact's diagnostics rather than dropping the cache
-    /// entry, so feature handlers see a consistent cache shape regardless
-    /// of pipeline outcome.
-    fn run_pipeline_locked(&self, state: &mut WorkspaceState, uri: &Url) {
+    /// into a best-effort artifact rather than dropping the cache entry, so
+    /// feature handlers see a consistent cache shape regardless of pipeline
+    /// outcome. Pipeline-stage diagnostics are returned to the caller
+    /// rather than cached on the artifact (see ticket 0467).
+    fn run_pipeline_locked(
+        &self,
+        state: &mut WorkspaceState,
+        uri: &Url,
+    ) -> Vec<(Url, Vec<Diagnostic>)> {
         if state.artifacts.contains_key(uri) {
-            return;
+            return Vec::new();
         }
         let Ok(master_path) = uri.to_file_path() else {
             state.artifacts.insert(uri.clone(), StagedArtifact::empty());
-            return;
+            return Vec::new();
         };
         let in_memory: HashMap<PathBuf, String> = state
             .documents
@@ -273,10 +269,11 @@ impl DocumentWorkspace {
                 signal_graph,
                 source_map,
                 bound: run.bound,
-                diagnostics,
                 stage_2_failed,
             },
         );
+
+        diagnostics
     }
 
     /// Test-only: run [`Self::analyse`] and flatten the per-URI buckets
@@ -311,7 +308,7 @@ impl DocumentWorkspace {
 
         // Update forward/reverse include edges for this parent.
         let direct_children = direct_include_uris(uri, &file.includes);
-        self.rewrite_include_edges(&mut state, uri, &direct_children);
+        state.include_graph.rewrite_edges(uri, &direct_children);
 
         // Gather template env from the transitive include closure.
         let env = collect_external_templates(&state, uri);
@@ -342,17 +339,24 @@ impl DocumentWorkspace {
         // Capture URIs the previous run published to so we can clear
         // them with empty publishes when this run leaves them empty.
         let prior_non_root = state
-            .artifacts
+            .last_publish_non_root
             .get(uri)
-            .map(|a| a.non_root_uris(uri))
+            .map(|s| s.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         self.invalidate_artifact_closure(&mut state, uri);
 
         // Stage 1–5 pipeline runs eagerly here so one publishDiagnostics
         // covers every stage (ADR 0038, ticket 0432 AC #4). Debouncing
         // lands in a follow-up.
-        self.run_pipeline_locked(&mut state, uri);
-        let buckets = finalize_buckets(&state, uri, root_diags, prior_non_root);
+        let pipeline_diags = self.run_pipeline_locked(&mut state, uri);
+        let buckets = finalize_buckets(
+            &state,
+            uri,
+            root_diags,
+            prior_non_root,
+            pipeline_diags,
+        );
+        record_publish(&mut state, uri, &buckets);
 
         rebuild_nav(&mut state);
         self.purge_stale_includes(&mut state);
@@ -382,7 +386,7 @@ impl DocumentWorkspace {
         let include_diags = self.resolve_includes(state, uri, &file.includes, &mut frontier);
 
         let direct_children = direct_include_uris(uri, &file.includes);
-        self.rewrite_include_edges(state, uri, &direct_children);
+        state.include_graph.rewrite_edges(uri, &direct_children);
 
         let env = collect_external_templates(state, uri);
         let model = analysis::analyse_with_env(&file, &self.registry, &env);
@@ -404,14 +408,16 @@ impl DocumentWorkspace {
             DocumentState { source, tree, model, line_index },
         );
         let prior_non_root = state
-            .artifacts
+            .last_publish_non_root
             .get(uri)
-            .map(|a| a.non_root_uris(uri))
+            .map(|s| s.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         self.invalidate_artifact_closure(state, uri);
 
-        self.run_pipeline_locked(state, uri);
-        Some(finalize_buckets(state, uri, root_diags, prior_non_root))
+        let pipeline_diags = self.run_pipeline_locked(state, uri);
+        let buckets = finalize_buckets(state, uri, root_diags, prior_non_root, pipeline_diags);
+        record_publish(state, uri, &buckets);
+        Some(buckets)
     }
 
     /// Reload `uri` from disk (replacing any cached source), re-analyse it,
@@ -495,35 +501,6 @@ impl DocumentWorkspace {
         out
     }
 
-    /// Replace `uri`'s stored include edges with `children`, maintaining
-    /// `included_by` in sync with `includes_of`.
-    fn rewrite_include_edges(
-        &self,
-        state: &mut WorkspaceState,
-        uri: &Url,
-        children: &HashSet<Url>,
-    ) {
-        if let Some(old_children) = state.includes_of.remove(uri) {
-            for c in old_children {
-                if let Some(parents) = state.included_by.get_mut(&c) {
-                    parents.remove(uri);
-                    if parents.is_empty() {
-                        state.included_by.remove(&c);
-                    }
-                }
-            }
-        }
-        if !children.is_empty() {
-            state.includes_of.insert(uri.clone(), children.clone());
-            for c in children {
-                state
-                    .included_by
-                    .entry(c.clone())
-                    .or_default()
-                    .insert(uri.clone());
-            }
-        }
-    }
 
     /// Close a document. Include-loaded files stay resident until no longer
     /// referenced; editor-opened files are removed and the nav index
@@ -543,6 +520,7 @@ impl DocumentWorkspace {
     pub fn completions(&self, uri: &Url, position: Position) -> Vec<CompletionItem> {
         let state = self.state.lock().expect("lock workspace state");
         let Some(doc) = state.documents.get(uri) else {
+            tracing::debug!(%uri, "completions: document not open in workspace");
             return Vec::new();
         };
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
@@ -561,12 +539,18 @@ impl DocumentWorkspace {
     pub fn hover(&self, uri: &Url, position: Position) -> Option<Hover> {
         let mut state = self.state.lock().expect("lock workspace state");
         let byte_offset = {
-            let doc = state.documents.get(uri)?;
+            let Some(doc) = state.documents.get(uri) else {
+                tracing::debug!(%uri, "hover: document not open in workspace");
+                return None;
+            };
             lsp_util::position_to_byte_offset(&doc.line_index, position)
         };
 
         if let Some(h) = self.with_expansion_context(&mut state, uri, |ctx| {
-            let bound = ctx.bound?;
+            let Some(bound) = ctx.bound else {
+                tracing::debug!(%uri, "hover: bound patch missing (stage 3b failed)");
+                return None;
+            };
             hover::compute_expansion_hover(
                 uri,
                 byte_offset,
@@ -580,15 +564,22 @@ impl DocumentWorkspace {
             return Some(h);
         }
 
-        let doc = state.documents.get(uri)?;
-        hover::compute_hover(
+        let Some(doc) = state.documents.get(uri) else {
+            tracing::debug!(%uri, "hover: document dropped between expansion and fallback path");
+            return None;
+        };
+        let h = hover::compute_hover(
             &doc.tree,
             &doc.source,
             byte_offset,
             &doc.model,
             &self.registry,
             &doc.line_index,
-        )
+        );
+        if h.is_none() {
+            tracing::debug!(%uri, byte_offset, "hover: tolerant fallback produced no hover");
+        }
+        h
     }
 
     /// Peek the expansion body for the template call at `position`.
@@ -597,12 +588,19 @@ impl DocumentWorkspace {
     pub fn peek_expansion(&self, uri: &Url, position: Position) -> Option<(Range, String)> {
         let mut state = self.state.lock().expect("lock workspace state");
         let byte_offset = {
-            let doc = state.documents.get(uri)?;
+            let Some(doc) = state.documents.get(uri) else {
+                tracing::debug!(%uri, "peek_expansion: document not open in workspace");
+                return None;
+            };
             lsp_util::position_to_byte_offset(&doc.line_index, position)
         };
         self.with_expansion_context(&mut state, uri, |ctx| {
-            let result =
-                crate::peek::render_peek(uri, byte_offset, ctx.flat, ctx.references, ctx.source_map)?;
+            let Some(result) =
+                crate::peek::render_peek(uri, byte_offset, ctx.flat, ctx.references, ctx.source_map)
+            else {
+                tracing::debug!(%uri, byte_offset, "peek_expansion: cursor outside any template call site");
+                return None;
+            };
             let range = Range::new(
                 lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.start),
                 lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.end),
@@ -644,13 +642,28 @@ impl DocumentWorkspace {
         uri: &Url,
         f: impl FnOnce(ExpansionCtx<'_>) -> Option<R>,
     ) -> Option<R> {
-        self.run_pipeline_locked(state, uri);
-        let artifact = state.artifacts.get(uri)?;
-        let flat = artifact.flat.as_ref()?;
-        let references = artifact.references.as_ref()?;
-        let source_map = artifact.source_map.as_ref()?;
+        let _ = self.run_pipeline_locked(state, uri);
+        let Some(artifact) = state.artifacts.get(uri) else {
+            tracing::debug!(%uri, "with_expansion_context: no cached artifact");
+            return None;
+        };
+        let Some(flat) = artifact.flat.as_ref() else {
+            tracing::debug!(%uri, "with_expansion_context: flat patch unavailable (stages 1–3 failed)");
+            return None;
+        };
+        let Some(references) = artifact.references.as_ref() else {
+            tracing::debug!(%uri, "with_expansion_context: patch references missing");
+            return None;
+        };
+        let Some(source_map) = artifact.source_map.as_ref() else {
+            tracing::debug!(%uri, "with_expansion_context: source map missing");
+            return None;
+        };
         let bound = artifact.bound.as_ref();
-        let doc = state.documents.get(uri)?;
+        let Some(doc) = state.documents.get(uri) else {
+            tracing::debug!(%uri, "with_expansion_context: document dropped after pipeline run");
+            return None;
+        };
         f(ExpansionCtx { flat, references, source_map, bound, doc })
     }
 
@@ -658,14 +671,29 @@ impl DocumentWorkspace {
     /// [`Location`].
     pub fn goto_definition(&self, uri: &Url, position: Position) -> Option<Location> {
         let state = self.state.lock().expect("lock workspace state");
-        let doc = state.documents.get(uri)?;
+        let Some(doc) = state.documents.get(uri) else {
+            tracing::debug!(%uri, "goto_definition: document not open in workspace");
+            return None;
+        };
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
-        let (target_uri, target_span) =
-            navigation::goto_definition(&doc.model.navigation, &state.nav_index, byte_offset)?;
+        let Some((target_uri, target_span)) =
+            navigation::goto_definition(&doc.model.navigation, &state.nav_index, byte_offset)
+        else {
+            tracing::debug!(%uri, byte_offset, "goto_definition: no navigation target at cursor");
+            return None;
+        };
         let target_line_index = if &target_uri == uri {
             &doc.line_index
         } else {
-            &state.documents.get(&target_uri)?.line_index
+            let Some(target_doc) = state.documents.get(&target_uri) else {
+                tracing::debug!(
+                    %uri,
+                    %target_uri,
+                    "goto_definition: target document not loaded in workspace"
+                );
+                return None;
+            };
+            &target_doc.line_index
         };
         let start = lsp_util::byte_offset_to_position(target_line_index, target_span.start);
         let end = lsp_util::byte_offset_to_position(target_line_index, target_span.end);
@@ -769,7 +797,7 @@ impl DocumentWorkspace {
             }
 
             let child_children = direct_include_uris(&inc_uri, &file.includes);
-            self.rewrite_include_edges(state, &inc_uri, &child_children);
+            state.include_graph.rewrite_edges(&inc_uri, &child_children);
 
             let child_env = collect_external_templates(state, &inc_uri);
             let model = analysis::analyse_with_env(&file, &self.registry, &child_env);
@@ -829,14 +857,27 @@ impl DocumentWorkspace {
         for uri in stale {
             if state.include_loaded.remove(&uri) {
                 state.documents.remove(&uri);
-                // Remove any edges originating at or pointing to the purged
-                // URI. `rewrite_include_edges(uri, &empty)` clears this
-                // URI's outgoing edges; also drop any stale reverse entries.
-                let empty = HashSet::new();
-                self.rewrite_include_edges(state, &uri, &empty);
-                state.included_by.remove(&uri);
+                // Drop both sides of the include topology for this URI.
+                state.include_graph.remove_edges_from(&uri);
+                state.include_graph.drop_child(&uri);
             }
         }
+    }
+}
+
+/// Record which non-root URIs received non-empty diagnostics on this
+/// publish, so the next publish can send empty payloads to any URI that
+/// drops out of the set and clear the client's stale entries.
+fn record_publish(state: &mut WorkspaceState, root: &Url, buckets: &[(Url, Vec<Diagnostic>)]) {
+    let non_root: HashSet<Url> = buckets
+        .iter()
+        .filter(|(u, d)| u != root && !d.is_empty())
+        .map(|(u, _)| u.clone())
+        .collect();
+    if non_root.is_empty() {
+        state.last_publish_non_root.remove(root);
+    } else {
+        state.last_publish_non_root.insert(root.clone(), non_root);
     }
 }
 
@@ -852,6 +893,7 @@ fn prune_artifacts(state: &mut WorkspaceState) {
         .collect();
     for u in stale {
         state.artifacts.remove(&u);
+        state.last_publish_non_root.remove(&u);
     }
 }
 
@@ -988,7 +1030,7 @@ fn uri_for_source(id: SourceId, sm: &SourceMap) -> Option<Url> {
 }
 
 /// Merge the root-scoped document diagnostics (`root_diags`) with the
-/// pipeline buckets stored on `uri`'s [`StagedArtifact`] and, on the
+/// freshly-rendered pipeline buckets from this run and, on the
 /// tree-sitter fallback path, with tolerant-AST semantic diagnostics.
 ///
 /// Returns one entry per URI that needs a `publishDiagnostics` call:
@@ -1000,12 +1042,8 @@ fn finalize_buckets(
     uri: &Url,
     mut root_diags: Vec<Diagnostic>,
     prior_non_root: Vec<Url>,
+    pipeline_diags: Vec<(Url, Vec<Diagnostic>)>,
 ) -> Vec<(Url, Vec<Diagnostic>)> {
-    let artifact_buckets: Vec<(Url, Vec<Diagnostic>)> = state
-        .artifacts
-        .get(uri)
-        .map(|a| a.diagnostics.clone())
-        .unwrap_or_default();
     let stage_2_failed = state
         .artifacts
         .get(uri)
@@ -1015,7 +1053,7 @@ fn finalize_buckets(
     // Root bucket: syntax/include diagnostics + pipeline diagnostics
     // whose primary span lives in the root + (fallback-only) tolerant
     // semantic diagnostics.
-    if let Some((_, root_pipeline)) = artifact_buckets.iter().find(|(u, _)| u == uri) {
+    if let Some((_, root_pipeline)) = pipeline_diags.iter().find(|(u, _)| u == uri) {
         root_diags.extend(root_pipeline.iter().cloned());
     }
     // ADR 0038 §stage 4: tolerant-AST semantic diagnostics are the
@@ -1033,7 +1071,7 @@ fn finalize_buckets(
     }
 
     let mut out: Vec<(Url, Vec<Diagnostic>)> = vec![(uri.clone(), root_diags)];
-    for (bucket_uri, diags) in artifact_buckets {
+    for (bucket_uri, diags) in pipeline_diags {
         if &bucket_uri == uri {
             continue;
         }
@@ -1093,21 +1131,17 @@ fn direct_include_uris(
     out
 }
 
-/// BFS the transitive include closure of `uri` via the `includes_of` graph
-/// and union every child's local template declarations. Templates defined in
-/// `uri` itself are *not* included — the caller's own `shallow_scan` surfaces
-/// those.
+/// BFS the transitive include closure of `uri` via the include graph and
+/// union every child's local template declarations. Templates defined in
+/// `uri` itself are *not* included — the caller's own `shallow_scan`
+/// surfaces those.
 fn collect_external_templates(
     state: &WorkspaceState,
     uri: &Url,
 ) -> HashMap<String, analysis::TemplateInfo> {
     let mut out: HashMap<String, analysis::TemplateInfo> = HashMap::new();
     let mut visited: HashSet<Url> = HashSet::new();
-    let mut queue: Vec<Url> = state
-        .includes_of
-        .get(uri)
-        .map(|s| s.iter().cloned().collect())
-        .unwrap_or_default();
+    let mut queue: Vec<Url> = state.include_graph.children_of(uri).cloned().collect();
 
     while let Some(child) = queue.pop() {
         if !visited.insert(child.clone()) {
@@ -1118,11 +1152,9 @@ fn collect_external_templates(
                 out.entry(name.clone()).or_insert_with(|| info.clone());
             }
         }
-        if let Some(grand) = state.includes_of.get(&child) {
-            for g in grand {
-                if !visited.contains(g) {
-                    queue.push(g.clone());
-                }
+        for g in state.include_graph.children_of(&child) {
+            if !visited.contains(g) {
+                queue.push(g.clone());
             }
         }
     }
@@ -1130,32 +1162,10 @@ fn collect_external_templates(
     out
 }
 
-/// BFS up `included_by` from `uri` to collect all transitively-including
-/// ancestors. Returned in BFS order (closest ancestors first).
+/// Wrapper around [`IncludeGraph::ancestors_of`] kept for signature parity
+/// with pre-0468 call sites.
 fn collect_ancestors(state: &WorkspaceState, uri: &Url) -> Vec<Url> {
-    let mut out = Vec::new();
-    let mut visited: HashSet<Url> = HashSet::new();
-    let mut queue: std::collections::VecDeque<Url> = state
-        .included_by
-        .get(uri)
-        .map(|s| s.iter().cloned().collect())
-        .unwrap_or_default();
-
-    while let Some(parent) = queue.pop_front() {
-        if !visited.insert(parent.clone()) {
-            continue;
-        }
-        out.push(parent.clone());
-        if let Some(grand) = state.included_by.get(&parent) {
-            for g in grand {
-                if !visited.contains(g) {
-                    queue.push_back(g.clone());
-                }
-            }
-        }
-    }
-
-    out
+    state.include_graph.ancestors_of(uri)
 }
 
 impl Default for DocumentWorkspace {

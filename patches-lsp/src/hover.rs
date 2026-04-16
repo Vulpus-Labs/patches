@@ -404,15 +404,8 @@ fn try_hover_module_type(
     registry: &Registry,
     line_starts: &[usize],
 ) -> Option<Hover> {
-    let parent = node.parent()?;
-    if parent.kind() != "module_decl" {
-        return None;
-    }
-    let type_node = parent.child_by_field_name("type")?;
-    if type_node.id() != node.id() {
-        return None;
-    }
-
+    // `classify_cursor` already established that `node` is the `type` field
+    // of its parent `module_decl`; no re-check needed here.
     let type_name = node_text(node, source);
 
     if let Some(info) = model.declarations.templates.get(type_name) {
@@ -525,18 +518,12 @@ fn try_hover_module_name(
     model: &SemanticModel,
     line_starts: &[usize],
 ) -> Option<Hover> {
-    let parent = node.parent()?;
-    if parent.kind() != "module_decl" {
-        return None;
-    }
-    let name_node = parent.child_by_field_name("name")?;
-    if name_node.id() != node.id() {
-        return None;
-    }
-
+    // `classify_cursor` already established that `node` is the `name` field
+    // of its parent `module_decl`; just pull the sibling type through the
+    // shared helper.
+    let module_decl = node.parent()?;
     let instance_name = node_text(node, source);
-    let type_node = parent.child_by_field_name("type")?;
-    let type_name = node_text(type_node, source);
+    let type_name = crate::tree_nav::module_type_name(module_decl, source)?;
 
     let desc = model.get_descriptor(instance_name)?;
     let summary = match desc {

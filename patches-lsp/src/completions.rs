@@ -2,6 +2,24 @@
 //!
 //! Provides context-sensitive completions for module types, parameters,
 //! ports, shape arguments, and template ports.
+//!
+//! # Two dispatch paths
+//!
+//! Completions flow through two distinct paths:
+//!
+//! 1. **Parsed-input dispatch** — `classify_cursor` returns a
+//!    [`crate::tree_nav::CursorContext`] built from the tree-sitter parse
+//!    tree. [`compute_completions`] matches on the variant and hands off to
+//!    the appropriate completer. This covers every case where tree-sitter
+//!    produced a usable node (including error-recovered nodes that still
+//!    carry structure, like an empty type slot).
+//!
+//! 2. **Incomplete-input fallback** — [`scan_backward_for_context`] inspects
+//!    the source text behind the cursor when tree-sitter has no node (e.g.
+//!    `osc.` with the cursor just past the dot, or `$.` inside a template
+//!    before a port identifier exists). Folding this into the classifier
+//!    would require either ERROR-node text inspection or richer tree-sitter
+//!    error recovery; both are out of scope for E084.
 
 use patches_core::Registry;
 use tower_lsp::lsp_types::*;
@@ -9,6 +27,9 @@ use tree_sitter::Tree;
 
 use crate::analysis::{self, ResolvedDescriptor, SemanticModel};
 use crate::lsp_util::{find_ancestor, first_named_child_of_kind, node_text};
+use crate::tree_nav::{
+    classify_cursor, is_master_sequencer, module_instance_name, template_name, CursorContext,
+};
 
 // ─── Public entry point ──────────────────────────────────────────────────
 
@@ -20,188 +41,63 @@ pub(crate) fn compute_completions(
     model: &SemanticModel,
     registry: &Registry,
 ) -> Vec<CompletionItem> {
-    // Fast path: if the shared classifier recognises a module-type slot
-    // (`module v : ^`), emit module-type completions without walking the
-    // tree twice. Other contexts fall through to the existing cursor loop
-    // and backward-scan fallback; they are still too bespoke for the
-    // classifier to dispatch fully, but this path exercises the shared
-    // helper and documents the intended direction of travel.
-    if let crate::tree_nav::CursorContext::ModuleType { .. } =
-        crate::tree_nav::classify_cursor(tree, byte_offset)
-    {
-        return complete_module_types(model, registry);
-    }
-
-    // Try the node at the cursor, and also one byte back (the cursor often sits
-    // just past the last character of a token).
-    let root = tree.root_node();
-    let offsets: &[usize] = if byte_offset > 0 {
-        &[byte_offset, byte_offset - 1]
-    } else {
-        &[byte_offset]
-    };
-
-    for &off in offsets {
-        let node = match root.descendant_for_byte_range(off, off) {
-            Some(n) => n,
-            None => continue,
-        };
-
-        if let Some(items) =
-            try_completion_from_node(node, source, byte_offset, tree, model, registry)
-        {
-            return items;
+    match classify_cursor(tree, byte_offset) {
+        CursorContext::ModuleType { .. } | CursorContext::ModuleTypeSlot { .. } => {
+            return complete_module_types(model, registry);
         }
+        CursorContext::ParamBlock { module_decl, .. } => {
+            return complete_param_block(module_decl, source, byte_offset, model);
+        }
+        CursorContext::ShapeBlock { .. } => {
+            return complete_shape_args();
+        }
+        CursorContext::PortRef { port_ref_node, .. } => {
+            return complete_port_ref(source, byte_offset, port_ref_node, tree, model);
+        }
+        CursorContext::SongRow { .. } => {
+            return complete_pattern_names(model);
+        }
+        CursorContext::ModuleName { .. } | CursorContext::Unknown => {}
     }
 
-    // Fallback: check if we're in a text context that looks like `module name : |`
-    // or `module name : Partial` by scanning backward from cursor.
+    // Incomplete-input fallback: tree-sitter produced no classifiable node
+    // for this offset. Use the textual backward scanner.
     if let Some(ctx) = scan_backward_for_context(source, byte_offset) {
-        match ctx {
+        return match ctx {
             BackwardContext::ModuleColon | BackwardContext::ModuleTypeName => {
-                return complete_module_types(model, registry);
+                complete_module_types(model, registry)
             }
             BackwardContext::Dot(module_name) => {
-                return complete_ports(&module_name, model, byte_offset, source, tree);
+                complete_ports(&module_name, model, byte_offset, source, tree)
             }
-            BackwardContext::DollarDot => {
-                return complete_template_ports(source, byte_offset, tree, model);
-            }
+            BackwardContext::DollarDot => complete_template_ports(source, byte_offset, tree, model),
             BackwardContext::PortIndex(module_name) => {
-                return complete_port_index_aliases(&module_name, model);
+                complete_port_index_aliases(&module_name, model)
             }
-            BackwardContext::SongRow => {
-                return complete_pattern_names(model);
-            }
-        }
+            BackwardContext::SongRow => complete_pattern_names(model),
+        };
     }
 
     vec![]
 }
 
-// ─── Node-based completion ───────────────────────────────────────────────
-
-/// Try to determine completion context from a given tree-sitter node.
-fn try_completion_from_node(
-    node: tree_sitter::Node,
+/// Dispatch `ParamBlock`-kind completions: shape-alias list (`@`),
+/// MasterSequencer `song:` slot, or general parameter names.
+fn complete_param_block(
+    module_decl: tree_sitter::Node,
     source: &str,
     byte_offset: usize,
-    tree: &Tree,
     model: &SemanticModel,
-    registry: &Registry,
-) -> Option<Vec<CompletionItem>> {
-    let mut cursor = node;
-    loop {
-        match cursor.kind() {
-            "module_decl" => {
-                if is_after_colon_in_module_decl(source, byte_offset, cursor) {
-                    return Some(complete_module_types(model, registry));
-                }
-                if is_inside_child_kind(node, "param_block") {
-                    if is_after_at_sign(source, byte_offset) {
-                        return Some(complete_at_block_aliases(cursor, source));
-                    }
-                    // Check if this is a MasterSequencer song: param
-                    let module_type = cursor
-                        .child_by_field_name("type")
-                        .map(|n| node_text(n, source));
-                    if module_type == Some("MasterSequencer")
-                        && is_after_param_colon(source, byte_offset, "song")
-                    {
-                        return Some(complete_song_names(model));
-                    }
-                    let module_name = cursor
-                        .child_by_field_name("name")
-                        .map(|n| node_text(n, source));
-                    return Some(complete_parameters(module_name, model));
-                }
-                if is_inside_child_kind(node, "shape_block") {
-                    return Some(complete_shape_args());
-                }
-                return None;
-            }
-            "param_block" => {
-                if let Some(module_decl) = find_ancestor(cursor, "module_decl") {
-                    if is_after_at_sign(source, byte_offset) {
-                        return Some(complete_at_block_aliases(module_decl, source));
-                    }
-                    // Check if this is a MasterSequencer song: param
-                    let module_type = module_decl
-                        .child_by_field_name("type")
-                        .map(|n| node_text(n, source));
-                    if module_type == Some("MasterSequencer")
-                        && is_after_param_colon(source, byte_offset, "song")
-                    {
-                        return Some(complete_song_names(model));
-                    }
-                    let module_name = module_decl
-                        .child_by_field_name("name")
-                        .map(|n| node_text(n, source));
-                    return Some(complete_parameters(module_name, model));
-                }
-                return None;
-            }
-            "shape_block" => {
-                return Some(complete_shape_args());
-            }
-            "port_ref" | "connection" => {
-                return Some(complete_port_ref(source, byte_offset, node, tree, model));
-            }
-            "song_row" | "song_cell" | "row_elem" | "inline_block"
-            | "named_inline" | "section_def" => {
-                return Some(complete_pattern_names(model));
-            }
-            _ => {}
-        }
-        cursor = cursor.parent()?;
+) -> Vec<CompletionItem> {
+    if is_after_at_sign(source, byte_offset) {
+        return complete_at_block_aliases(module_decl, source);
     }
-}
-
-// ─── Completion helpers ──────────────────────────────────────────────────
-
-/// Check if the cursor is positioned after the `:` in a module_decl (type position).
-fn is_after_colon_in_module_decl(
-    _source: &str,
-    byte_offset: usize,
-    module_decl: tree_sitter::Node,
-) -> bool {
-    let mut child_cursor = module_decl.walk();
-    let mut found_colon = false;
-    for child in module_decl.children(&mut child_cursor) {
-        if child.kind() == ":" && child.end_byte() <= byte_offset {
-            found_colon = true;
-        }
+    if is_master_sequencer(module_decl, source)
+        && is_after_param_colon(source, byte_offset, "song")
+    {
+        return complete_song_names(model);
     }
-    if !found_colon {
-        return false;
-    }
-
-    let at_type = module_decl
-        .child_by_field_name("type")
-        .is_none_or(|t| byte_offset <= t.end_byte());
-    if at_type {
-        return true;
-    }
-
-    let no_shape = first_named_child_of_kind(module_decl, "shape_block")
-        .is_none_or(|s| byte_offset < s.start_byte());
-    let no_params = first_named_child_of_kind(module_decl, "param_block")
-        .is_none_or(|p| byte_offset < p.start_byte());
-    no_shape && no_params
-}
-
-/// Check if the given node or any of its ancestors is inside a child of the given kind.
-fn is_inside_child_kind(node: tree_sitter::Node, kind: &str) -> bool {
-    let mut cursor = node;
-    loop {
-        if cursor.kind() == kind {
-            return true;
-        }
-        cursor = match cursor.parent() {
-            Some(p) => p,
-            None => return false,
-        };
-    }
+    complete_parameters(module_instance_name(module_decl, source), model)
 }
 
 /// Complete with all registered module type names and template names.
@@ -478,11 +374,7 @@ fn complete_template_ports(
         }
     };
 
-    let tmpl_name = template_node
-        .child_by_field_name("name")
-        .map(|n| node_text(n, source));
-
-    if let Some(name) = tmpl_name {
+    if let Some(name) = template_name(template_node, source) {
         if let Some(info) = model.declarations.templates.get(name) {
             let mut items: Vec<CompletionItem> = info
                 .in_ports
