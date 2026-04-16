@@ -15,6 +15,8 @@
 
 mod composition;
 mod connection;
+mod error;
+mod scope;
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,9 +24,8 @@ use patches_core::QName;
 
 use crate::ast::{
     AtBlockIndex, Connection, Direction, File, ModuleDecl, ParamEntry, ParamIndex, ParamType,
-    PortRef, Scalar, SectionDef, ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
+    PortRef, Scalar, ShapeArg, ShapeArgValue, Span, Statement, Template, Value,
 };
-use crate::ast::{PatternDef, SongDef};
 use crate::flat::{
     FlatConnection, FlatModule, FlatPatch, FlatPatternDef, FlatPortRef, PortDirection,
 };
@@ -36,76 +37,12 @@ use connection::{
     check_template_port, combine_index_resolutions, deref_index_alias, deref_port_index, eval_scale,
     resolve_from, resolve_to, subst_port_label, PortEntry, TemplatePorts,
 };
+use error::param_type_name;
+use scope::{qualify, NameScope};
+
+pub use error::{ExpandError, ExpandResult, Warning};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
-
-/// An error produced by the template expander (ADR 0038 stage 3/3a).
-///
-/// Also re-exported as `patches_dsl::StructuralError`: every expansion
-/// error is a structural error, classified by [`StructuralCode`]. The
-/// `ExpandError` alias is kept for backwards-compat with existing
-/// consumers; new code should prefer the `StructuralError` name and
-/// match on `code` for dispatch.
-#[derive(Debug, Clone)]
-pub struct ExpandError {
-    pub code: crate::structural::StructuralCode,
-    pub span: Span,
-    pub message: String,
-}
-
-impl ExpandError {
-    /// Construct an error with an explicit [`StructuralCode`].
-    pub fn new(
-        code: crate::structural::StructuralCode,
-        span: Span,
-        message: impl Into<String>,
-    ) -> Self {
-        Self { code, span, message: message.into() }
-    }
-
-    /// Shortcut for [`StructuralCode::Other`] — used while classification
-    /// is incrementally refined. Prefer a specific code where possible.
-    pub fn other(span: Span, message: impl Into<String>) -> Self {
-        Self::new(Code::Other, span, message)
-    }
-}
-
-impl std::fmt::Display for ExpandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "expand error at {}..{}: {}",
-            self.span.start, self.span.end, self.message
-        )
-    }
-}
-
-impl std::error::Error for ExpandError {}
-
-/// A non-fatal diagnostic produced by the template expander.
-#[derive(Debug, Clone)]
-pub struct Warning {
-    pub span: Span,
-    pub message: String,
-}
-
-impl std::fmt::Display for Warning {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "warning at {}..{}: {}",
-            self.span.start, self.span.end, self.message
-        )
-    }
-}
-
-/// The result of a successful expansion: the flat patch plus any non-fatal
-/// diagnostics collected during expansion.
-#[derive(Debug)]
-pub struct ExpandResult {
-    pub patch: FlatPatch,
-    pub warnings: Vec<Warning>,
-}
 
 /// Expand a parsed [`File`] into an [`ExpandResult`].
 ///
@@ -164,200 +101,6 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         },
         warnings: vec![],
     })
-}
-
-fn param_type_name(ty: &ParamType) -> &'static str {
-    match ty {
-        ParamType::Float => "float",
-        ParamType::Int => "int",
-        ParamType::Bool => "bool",
-        ParamType::Str => "str",
-        ParamType::Pattern => "pattern",
-        ParamType::Song => "song",
-    }
-}
-
-/// A scope that maps unqualified song/pattern names to their fully-qualified
-/// names. Each template instantiation introduces a new scope; references
-/// resolve by walking from innermost scope to outermost (file level).
-///
-/// Songs and patterns occupy separate namespaces so that a pattern named `foo`
-/// cannot accidentally resolve as a song (or vice versa).
-/// Lexical name resolver for songs and patterns.
-///
-/// Each frame holds the song/pattern name → qualified-name map for one
-/// scope; nested scopes walk the parent chain. Sections are deliberately
-/// not here — they live in [`SectionTable`], which is keyed by visibility
-/// rather than lexical scope.
-struct NameResolver<'a> {
-    songs: HashMap<String, QName>,
-    patterns: HashMap<String, QName>,
-    parent: Option<&'a NameResolver<'a>>,
-}
-
-impl<'a> NameResolver<'a> {
-    fn root(songs: &[SongDef], patterns: &[PatternDef]) -> Self {
-        NameResolver {
-            songs: songs
-                .iter()
-                .map(|s| (s.name.name.clone(), QName::bare(s.name.name.clone())))
-                .collect(),
-            patterns: patterns
-                .iter()
-                .map(|p| (p.name.name.clone(), QName::bare(p.name.name.clone())))
-                .collect(),
-            parent: None,
-        }
-    }
-
-    fn child(parent: &'a NameResolver<'a>, stmts: &[Statement], namespace: Option<&QName>) -> Self {
-        let mut songs = HashMap::new();
-        let mut patterns = HashMap::new();
-        for stmt in stmts {
-            match stmt {
-                Statement::Song(sd) => {
-                    songs.insert(sd.name.name.clone(), qualify(namespace, &sd.name.name));
-                }
-                Statement::Pattern(pd) => {
-                    patterns.insert(pd.name.name.clone(), qualify(namespace, &pd.name.name));
-                }
-                _ => {}
-            }
-        }
-        NameResolver { songs, patterns, parent: Some(parent) }
-    }
-
-    fn song_scope(parent: &'a NameResolver<'a>, patterns: &[&PatternDef], song_ns: &QName) -> Self {
-        let patterns = patterns
-            .iter()
-            .map(|p| (p.name.name.clone(), song_ns.child(p.name.name.clone())))
-            .collect();
-        NameResolver {
-            songs: HashMap::new(),
-            patterns,
-            parent: Some(parent),
-        }
-    }
-
-    fn resolve_pattern(&self, name: &str) -> Option<QName> {
-        if let Some(qualified) = self.patterns.get(name) {
-            return Some(qualified.clone());
-        }
-        self.parent.and_then(|p| p.resolve_pattern(name))
-    }
-
-    fn resolve_song(&self, name: &str) -> Option<QName> {
-        if let Some(qualified) = self.songs.get(name) {
-            return Some(qualified.clone());
-        }
-        self.parent.and_then(|p| p.resolve_song(name))
-    }
-
-    /// Resolve a name that could be either a song or a pattern (for untyped
-    /// contexts like module params where the expander can't know which).
-    /// Songs are checked first, then patterns.
-    fn resolve_any(&self, name: &str) -> Option<QName> {
-        self.resolve_song(name).or_else(|| self.resolve_pattern(name))
-    }
-}
-
-/// File-level section visibility table.
-///
-/// Sections are top-level only (they don't nest inside template bodies), so
-/// this struct does not carry a parent chain — it's owned by the root scope
-/// and looked up flat.
-#[derive(Clone)]
-struct SectionTable<'a> {
-    sections: HashMap<String, &'a SectionDef>,
-}
-
-impl<'a> SectionTable<'a> {
-    fn from_defs(sections: &'a [SectionDef]) -> Self {
-        Self {
-            sections: sections.iter().map(|s| (s.name.name.clone(), s)).collect(),
-        }
-    }
-
-    fn empty() -> Self {
-        Self { sections: HashMap::new() }
-    }
-
-    fn as_map(&self) -> HashMap<String, &'a SectionDef> {
-        self.sections.clone()
-    }
-}
-
-/// A combined name resolver and section table threaded through expansion.
-///
-/// Each scope frame owns a [`NameResolver`] (songs/patterns, parent-chained)
-/// and a [`SectionTable`] (only the root frame holds entries; child frames
-/// hold an empty table and walk to the root for `top_level_sections`).
-/// The two halves are independent — splitting them lets future work touch
-/// scope rules (alias isolation, private sections) without entangling name
-/// lookup with section visibility.
-struct NameScope<'a> {
-    resolver: NameResolver<'a>,
-    sections: SectionTable<'a>,
-    parent: Option<&'a NameScope<'a>>,
-}
-
-impl<'a> NameScope<'a> {
-    fn root(songs: &[SongDef], patterns: &[PatternDef], sections: &'a [SectionDef]) -> Self {
-        NameScope {
-            resolver: NameResolver::root(songs, patterns),
-            sections: SectionTable::from_defs(sections),
-            parent: None,
-        }
-    }
-
-    fn child(parent: &'a NameScope<'a>, stmts: &[Statement], namespace: Option<&QName>) -> Self {
-        NameScope {
-            resolver: NameResolver::child(&parent.resolver, stmts, namespace),
-            sections: SectionTable::empty(),
-            parent: Some(parent),
-        }
-    }
-
-    fn song_scope(parent: &'a NameScope<'a>, patterns: &[&PatternDef], song_ns: &QName) -> Self {
-        NameScope {
-            resolver: NameResolver::song_scope(&parent.resolver, patterns, song_ns),
-            sections: SectionTable::empty(),
-            parent: Some(parent),
-        }
-    }
-
-    /// Walk up to the root scope and clone its section table.
-    fn top_level_sections(&self) -> HashMap<String, &'a SectionDef> {
-        match self.parent {
-            Some(p) => p.top_level_sections(),
-            None => self.sections.as_map(),
-        }
-    }
-
-    fn resolve_pattern(&self, name: &str) -> Option<QName> {
-        self.resolver.resolve_pattern(name)
-    }
-
-    fn resolve_song(&self, name: &str) -> Option<QName> {
-        self.resolver.resolve_song(name)
-    }
-
-    fn resolve_any(&self, name: &str) -> Option<QName> {
-        self.resolver.resolve_any(name)
-    }
-
-    /// Resolve song/pattern references in module params in-place.
-    /// Uses `resolve_any` since the expander doesn't know which params are
-    /// song-typed vs pattern-typed (that's a module descriptor concern).
-    fn resolve_params(&self, params: &mut [(String, Value)]) {
-        for (_key, value) in params.iter_mut() {
-            if let Value::Scalar(Scalar::Str(ref mut s)) = value {
-                if let Some(resolved) = self.resolve_any(s) {
-                    *s = resolved.to_string();
-                }
-            }
-        }
-    }
 }
 
 struct BodyResult {
@@ -1440,17 +1183,6 @@ fn build_alias_map(shape: &[ShapeArg]) -> HashMap<String, u32> {
         }
     }
     map
-}
-
-/// Build a fully-qualified [`QName`] under the enclosing `namespace`.
-///
-/// Thin adapter around [`QName::bare`] and [`QName::child`] so that call sites
-/// can keep the common `Option<&QName>` namespace pattern without branching.
-fn qualify(namespace: Option<&QName>, name: &str) -> QName {
-    match namespace {
-        None => QName::bare(name.to_owned()),
-        Some(ns) => ns.child(name.to_owned()),
-    }
 }
 
 /// Check that a resolved `Scalar` is compatible with the declared `ParamType`.
