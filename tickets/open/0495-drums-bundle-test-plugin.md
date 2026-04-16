@@ -26,7 +26,7 @@ motivated it.
 
 ## Notes
 
-E086. This crate exists alongside `patches-modules` registering the
+E088. This crate exists alongside `patches-modules` registering the
 same drums in `default_registry()` — the bundle is for validating the
 plugin path, not a replacement. Whether to remove drums from
 `default_registry()` and ship them only as a bundle is deferred.

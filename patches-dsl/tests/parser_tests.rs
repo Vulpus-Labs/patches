@@ -443,8 +443,12 @@ fn connection_span_does_not_leak_trailing_whitespace() {
 }
 
 #[test]
-fn module_decl_span_does_not_leak_trailing_whitespace() {
-    let src = "patch {\n    module osc : Oscillator\n    module next : Lfo\n}\n";
+fn module_decl_span_covers_name_and_type_only() {
+    // `module_decl.span` is narrowed to `name : type_name` so that BN0001
+    // UnknownModuleType diagnostics land on the offending tokens rather
+    // than the whole declaration (pest widens the latter across trailing
+    // whitespace when the optional shape/param blocks are absent).
+    let src = "patch {\n    module osc : Oscillator\n\n    module next : Lfo\n}\n";
     let file = parse(src).expect("parse");
     let modules: Vec<&ModuleDecl> = file
         .patch
@@ -453,14 +457,11 @@ fn module_decl_span_does_not_leak_trailing_whitespace() {
         .filter_map(|s| if let Statement::Module(m) = s { Some(m) } else { None })
         .collect();
     assert_eq!(modules.len(), 2);
-    for m in &modules {
-        let text = &src[m.span.start..m.span.end];
-        assert!(
-            !text.ends_with(char::is_whitespace),
-            "module_decl span has trailing whitespace: {text:?}"
-        );
-        assert!(text.starts_with("module "), "module text lost prefix: {text:?}");
-    }
+    let texts: Vec<&str> = modules
+        .iter()
+        .map(|m| &src[m.span.start..m.span.end])
+        .collect();
+    assert_eq!(texts, vec!["osc : Oscillator", "next : Lfo"]);
 }
 
 #[test]

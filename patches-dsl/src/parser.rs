@@ -537,10 +537,14 @@ fn build_param_entry(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {
 
 fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, ParseError> {
     // pair.as_rule() == Rule::module_decl
-    let span = span_of(&pair);
     let mut it = pair.into_inner();
     let name = build_ident(it.next().unwrap());
     let type_name = build_ident(it.next().unwrap());
+    // Narrow span to `name : type_name` — tight enough that diagnostics like
+    // BN0001 UnknownModuleType land on the offending tokens rather than the
+    // whole declaration (which pest widens across trailing whitespace when
+    // optional shape/param blocks are absent).
+    let span = Span::new(current_source(), name.span.start, type_name.span.end);
     let mut shape = Vec::new();
     let mut params = Vec::new();
 

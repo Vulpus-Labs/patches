@@ -24,7 +24,7 @@ that motivated ADR 0039.
 
 ## Notes
 
-E086. If `Arc::strong_count` introspection isn't ergonomically
+E088. If `Arc::strong_count` introspection isn't ergonomically
 exposed by `DylibModuleBuilder`, add a `pub fn library_arc(&self) ->
 Arc<libloading::Library>` accessor (or a `library_strong_count()` ->
 `usize` helper) — minimal API surface, only used in tests.

@@ -172,7 +172,7 @@ with per-module metadata.
 - **One ABI bump.** `ABI_VERSION` goes from 1 to 2; `gain`,
   `conv-reverb`, and `gain-wasm` test plugins recompile against the
   new `patches-ffi`. Their source is unchanged (`export_module!` shim).
-- **Bundle plugins become possible.** A drum bundle (E086) ships
+- **Bundle plugins become possible.** A drum bundle (E088) ships
   eight modules in one `.dylib` with one copy of `patches-dsp`.
 - **`patches-ffi` gains one type and one macro.** `FfiPluginManifest`
   in `patches-ffi-common::types`; `export_modules!` in

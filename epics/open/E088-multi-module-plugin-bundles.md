@@ -1,5 +1,5 @@
 ---
-id: "E086"
+id: "E088"
 title: Multi-module FFI plugin bundles and drum bundle
 created: 2026-04-16
 tickets: ["0492", "0493", "0494", "0495", "0496"]
