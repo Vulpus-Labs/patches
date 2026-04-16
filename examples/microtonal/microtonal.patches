@@ -1,0 +1,30 @@
+pattern seven_eight {
+    notes: G4 G4:0.5 G#4 A4 . A4:0.5 A4 |
+           G#4 G4:0.5 G#4 A4 B4 A4:0.5 A4
+}
+
+song microtonal(left) {
+    play { seven_eight }
+}
+
+patch {
+    module seq: MasterSequencer(channels: [left]) {
+        bpm: 130
+        song: microtonal
+        swing: 0.6
+    }
+
+    module leftpp : PatternPlayer(channels: 1)
+
+    seq.clock[left] -> leftpp.clock
+    
+    module pitch_add : Sum(channels: [base, adj])
+    leftpp.cv1 -> pitch_add.in[base]
+    leftpp.cv2 -[0.08333]-> pitch_add.in[adj]
+
+    module osc : Osc
+    pitch_add.out -> osc.voct
+
+    module out : AudioOut
+    osc.square -> out.in_left
+}
