@@ -131,8 +131,8 @@ patch {
     seq_drums.clock[drums] -> drumkit.clock
     
     module mix : StereoMixer(channels: [drums_l, drums_r, left, right]) {
-        @drums_l { pan: -1.0 }
-        @drums_r { pan: 1.0 }
+        @drums_l { pan: -1.0, send_a: 0.4 }
+        @drums_r { pan: 1.0, send_a: 0.4 }
         @left { pan: -0.9, level: 0.5, send_a: 0.8 }
         @right { pan: 0.9, level: 0.5, send_a: 0.8 }
     }
@@ -141,7 +141,7 @@ patch {
         pingpong: true
         delay_ms: 400
         feedback: 0.8
-        tone: 0.4
+        tone: 0.7
     }
 
     mix.send_a_left -> delay.in_left
