@@ -61,14 +61,15 @@ patch {
     seq_r.clock[right] -> right.clock
     
     module mix : StereoMixer(channels: [left, right]) {
-        @left { pan: -0.6 }
-        @right { pan: 0.6 }
+        @left { pan: -0.6, level: 0.5 }
+        @right { pan: 0.6, level: 0.5 }
     }
+
     left.signal -> mix.in[left]
     right.signal -> mix.in[right]
 
     mix.out_left -> out.in_left
     mix.out_right -> out.in_right
-    
+
     module out : AudioOut
 }
