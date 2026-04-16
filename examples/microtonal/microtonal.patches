@@ -133,9 +133,21 @@ patch {
     module mix : StereoMixer(channels: [drums_l, drums_r, left, right]) {
         @drums_l { pan: -1.0 }
         @drums_r { pan: 1.0 }
-        @left { pan: -0.9, level: 0.5 }
-        @right { pan: 0.9, level: 0.5 }
+        @left { pan: -0.9, level: 0.5, send_a: 0.8 }
+        @right { pan: 0.9, level: 0.5, send_a: 0.8 }
     }
+
+    module delay : StereoDelay(channels: 1) {
+        pingpong: true
+        delay_ms: 400
+        feedback: 0.8
+        tone: 0.4
+    }
+
+    mix.send_a_left -> delay.in_left
+    mix.send_a_right -> delay.in_right
+    delay.out_left -> mix.return_a_left
+    delay.out_right -> mix.return_a_right
 
     drumkit.out_left -> mix.in[drums_l]
     drumkit.out_right -> mix.in[drums_r]
