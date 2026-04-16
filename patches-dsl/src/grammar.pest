@@ -119,7 +119,7 @@ port_group_decl  = { ident ~ ("[" ~ ident ~ "]")? }
 comma_port_decls = { port_group_decl ~ ("," ~ port_group_decl)* ~ ","? }
 in_decl      = { "in:" ~ comma_port_decls }
 out_decl     = { "out:" ~ comma_port_decls }
-port_decls   = { in_decl ~ out_decl }
+port_decls   = { in_decl? ~ out_decl }
 
 // ─── Template parameter declarations ─────────────────────────────────────────
 type_name   = { "float" | "int" | "bool" | "pattern" | "song" | "str" }

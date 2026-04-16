@@ -792,15 +792,21 @@ fn build_template(pair: Pair<'_, Rule>) -> Result<Template, ParseError> {
                 params = next.into_inner().map(build_param_decl).collect::<Result<_, _>>()?;
             }
             Rule::port_decls => {
-                let mut pd = next.into_inner();
-                // in_decl = { "in:" ~ comma_port_decls }
-                let in_decl = pd.next().unwrap();
-                let in_ci = in_decl.into_inner().next().unwrap(); // comma_port_decls
-                in_ports = in_ci.into_inner().map(build_port_group_decl).collect();
+                // in_decl = { "in:" ~ comma_port_decls }  (optional)
                 // out_decl = { "out:" ~ comma_port_decls }
-                let out_decl = pd.next().unwrap();
-                let out_ci = out_decl.into_inner().next().unwrap(); // comma_port_decls
-                out_ports = out_ci.into_inner().map(build_port_group_decl).collect();
+                for decl in next.into_inner() {
+                    match decl.as_rule() {
+                        Rule::in_decl => {
+                            let ci = decl.into_inner().next().unwrap();
+                            in_ports = ci.into_inner().map(build_port_group_decl).collect();
+                        }
+                        Rule::out_decl => {
+                            let ci = decl.into_inner().next().unwrap();
+                            out_ports = ci.into_inner().map(build_port_group_decl).collect();
+                        }
+                        _ => unreachable!("unexpected rule in port_decls: {:?}", decl.as_rule()),
+                    }
+                }
             }
             Rule::statement => body.extend(build_statements(next)?),
             _ => unreachable!("unexpected rule in template: {:?}", next.as_rule()),

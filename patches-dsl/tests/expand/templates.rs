@@ -136,6 +136,28 @@ fn error_recursive_template() {
 // ─── Source provenance (E075) ────────────────────────────────────────────────
 
 #[test]
+fn template_without_in_decl_parses_and_expands() {
+    let src = "
+template tone_gen {
+    out: out
+    module osc : Osc
+    osc.sine -> $.out
+}
+patch {
+    module t : tone_gen
+    module out : StereoOut
+    t.out -> out.in_left
+}";
+    let file = parse(src).expect("parse ok");
+    let flat = expand(&file).expect("expand ok").patch;
+    assert_modules_exist(&flat, &["t/osc", "out"]);
+    assert!(
+        find_connection(&flat, "t/osc", "sine", "out", "in_left").is_some(),
+        "expected t/osc.sine -> out.in_left"
+    );
+}
+
+#[test]
 fn provenance_root_for_unwrapped_module() {
     let src = "patch { module osc : Osc }";
     let file = parse(src).expect("parse ok");

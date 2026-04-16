@@ -154,7 +154,7 @@ module.exports = grammar({
       seq("in", ":", $.port_group_decl, repeat(seq(",", $.port_group_decl))),
     out_decl: ($) =>
       seq("out", ":", $.port_group_decl, repeat(seq(",", $.port_group_decl))),
-    port_decls: ($) => seq($.in_decl, $.out_decl),
+    port_decls: ($) => seq(optional($.in_decl), $.out_decl),
 
     // ─── Template parameter declarations ────────────────────────────────
     type_name: (_) => choice("float", "int", "bool", "pattern", "song", "str"),

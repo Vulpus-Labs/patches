@@ -74,6 +74,20 @@ template digital_delay(time: int) {
         feedback: 0.8
         tone: 0.7
     }
+
+    module crusher_l : Bitcrusher
+    module crusher_r : Bitcrusher
+
+    delay.send_left -> crusher_l.in
+    delay.send_right -> crusher_r.in
+    delay.return_left <- crusher_l.out
+    delay.return_right <- crusher_r.out
+
+    delay.in_left <- $.in_left
+    delay.in_left <- $.in_right
+
+    delay.out_left -> $.out_left
+    delay.out_right -> $.out_right
 }
 
 template voice {
@@ -137,6 +151,7 @@ patch {
     module left : voice
     module right : voice
     module drumkit : drumz
+    module delay : digital_delay(time: 400)
 
     seq_l.clock[left] -> left.clock
     seq_r.clock[right] -> right.clock
@@ -148,8 +163,6 @@ patch {
         @left { pan: -0.9, level: 0.5, send_a: 0.8 }
         @right { pan: 0.9, level: 0.5, send_a: 0.8 }
     }
-
-
 
     mix.send_a_left -> delay.in_left
     mix.send_a_right -> delay.in_right
