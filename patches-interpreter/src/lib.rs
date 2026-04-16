@@ -17,12 +17,14 @@
 //! has no audio-backend or engine dependencies.
 
 pub mod descriptor_bind;
+mod error;
 
 pub use descriptor_bind::{
     bind, bind_with_base_dir, BindError, BindErrorCode, BoundConnection, BoundModule, BoundPatch,
     BoundPortRef, ParamConversionError, ResolvedConnection, ResolvedModule, ResolvedPortRef,
     UnresolvedConnection, UnresolvedModule, UnresolvedPortRef,
 };
+pub use error::{BuildError, BuildErrorSource, InterpretError, InterpretErrorCode};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,159 +34,8 @@ use patches_core::{
     TrackerData, PatternBank, SongBank, Pattern, Song, TrackerStep,
 };
 use patches_core::Provenance;
-use patches_dsl::ast::{Scalar, Span, Value};
+use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::FlatPatch;
-
-/// Classification for an [`InterpretError`] — stage 3b *runtime* graph
-/// construction.
-///
-/// Ticket 0438 narrowed this enum to the runtime concerns that remain
-/// inside [`build`] after descriptor-level binding moved to
-/// [`descriptor_bind::bind`]. Every descriptor-level failure
-/// (unknown module type, shape rejection, param type/range, unknown
-/// port, cable/layout mismatch) now surfaces as a
-/// [`descriptor_bind::BindError`] via [`BoundPatch::errors`]; callers
-/// inspect that list and short-circuit before invoking
-/// [`build_from_bound`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum InterpretErrorCode {
-    /// [`ModuleGraph::connect`] rejected the connection (already-connected
-    /// input, duplicate-id, scale out of range, arity mismatch).
-    ConnectFailed,
-    /// Template-boundary port ref did not resolve against the built graph.
-    OrphanPortRef,
-    /// Song/pattern shape inconsistency discovered while assembling
-    /// tracker data.
-    TrackerShape,
-    /// `MasterSequencer` references an unknown song, or channel count
-    /// disagrees with the song's column count.
-    SequencerSongMismatch,
-    #[default]
-    Other,
-}
-
-impl InterpretErrorCode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::ConnectFailed => "RT0001",
-            Self::OrphanPortRef => "RT0002",
-            Self::TrackerShape => "RT0003",
-            Self::SequencerSongMismatch => "RT0004",
-            Self::Other => "RT9999",
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::ConnectFailed => "connect failed",
-            Self::OrphanPortRef => "orphan port reference",
-            Self::TrackerShape => "tracker shape mismatch",
-            Self::SequencerSongMismatch => "sequencer/song mismatch",
-            Self::Other => "runtime build error",
-        }
-    }
-}
-
-/// An error produced during interpretation of a [`FlatPatch`].
-///
-/// Carries the [`Provenance`] of the offending construct (innermost site plus
-/// the chain of template call sites that led there) and a human-readable
-/// message describing the problem. Every error has an
-/// [`InterpretErrorCode`] so diagnostics can dispatch without
-/// string-matching messages.
-///
-/// `span` returns the innermost site (`provenance.site`) for callers that
-/// only care about the immediate location.
-#[derive(Debug)]
-pub struct InterpretError {
-    pub code: InterpretErrorCode,
-    pub provenance: Provenance,
-    pub message: String,
-}
-
-impl InterpretError {
-    /// Convenience accessor for the innermost source span.
-    pub fn span(&self) -> Span {
-        self.provenance.site
-    }
-
-    /// Construct an error with an explicit [`InterpretErrorCode`].
-    pub fn new(
-        code: InterpretErrorCode,
-        provenance: Provenance,
-        message: impl Into<String>,
-    ) -> Self {
-        Self { code, provenance, message: message.into() }
-    }
-}
-
-impl std::fmt::Display for InterpretError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self.provenance.site;
-        write!(f, "{} (at {}..{})", self.message, s.start, s.end)
-    }
-}
-
-impl std::error::Error for InterpretError {}
-
-/// Unified error returned by the [`build`] / [`build_with_base_dir`]
-/// convenience path — carries either a descriptor-level [`BindError`]
-/// that short-circuited the bind stage, or a runtime [`InterpretError`]
-/// from graph construction. Fail-fast consumers that want to surface
-/// every bind error for a user should drive
-/// [`descriptor_bind::bind_with_base_dir`] + [`build_from_bound`]
-/// themselves; this wrapper exists for callers that prefer a single
-/// `?`-chainable entry point.
-#[derive(Debug)]
-pub struct BuildError {
-    pub message: String,
-    pub provenance: Provenance,
-    pub source: BuildErrorSource,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuildErrorSource {
-    Bind(BindErrorCode),
-    Interpret(InterpretErrorCode),
-}
-
-impl BuildError {
-    pub fn span(&self) -> Span {
-        self.provenance.site
-    }
-
-    pub fn code(&self) -> &'static str {
-        match self.source {
-            BuildErrorSource::Bind(c) => c.as_str(),
-            BuildErrorSource::Interpret(c) => c.as_str(),
-        }
-    }
-
-    pub fn from_bind(err: &BindError) -> Self {
-        Self {
-            message: err.message.clone(),
-            provenance: err.provenance.clone(),
-            source: BuildErrorSource::Bind(err.code),
-        }
-    }
-
-    pub fn from_interpret(err: InterpretError) -> Self {
-        Self {
-            message: err.message,
-            provenance: err.provenance,
-            source: BuildErrorSource::Interpret(err.code),
-        }
-    }
-}
-
-impl std::fmt::Display for BuildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self.provenance.site;
-        write!(f, "{} (at {}..{})", self.message, s.start, s.end)
-    }
-}
-
-impl std::error::Error for BuildError {}
 
 /// The result of interpreting a [`FlatPatch`]: a module graph and optional
 /// tracker data (patterns and songs).
