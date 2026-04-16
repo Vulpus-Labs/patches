@@ -4,6 +4,7 @@
 
 use super::*;
 use std::io::Write;
+use std::path::PathBuf;
 
 /// A freshly-created temporary directory that cleans itself up on drop.
 struct TempDir {
