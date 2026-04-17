@@ -15,11 +15,13 @@
 //! This module retains the public entry point and the shared types threaded
 //! through the expander's recursion.
 
+mod binding;
 mod composition;
 mod connection;
 mod error;
 mod expander;
 mod scope;
+mod substitute;
 
 use std::collections::{HashMap, HashSet};
 
@@ -43,6 +45,15 @@ use error::param_type_name;
 use scope::qualify;
 
 pub use error::{ExpandError, ExpandResult, Warning};
+
+/// Per-body alias-map registry: instance_name → { alias_name → integer index }.
+///
+/// Built during pass 1 of `expand_body` from `AliasList` shape args, consumed
+/// during pass 2 to resolve alias-based port-index references. Owned by the
+/// `expand_body` stack frame, so sibling and nested bodies each get a fresh
+/// map — scope isolation is a property of the frame, not a swap-restore on
+/// `Expander`.
+pub(in crate::expand) type AliasMap = HashMap<String, HashMap<String, u32>>;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -167,7 +178,7 @@ struct PortBinding {
     is_arity: bool,
 }
 
-/// Mutable accumulator shared by the four passes of `expand_body_scoped`.
+/// Mutable accumulator shared by the four passes of `expand_body`.
 ///
 /// Each pass mutates the fields it owns; the caller hands the final struct
 /// to [`BodyResult`]. Keeping the accumulators in one struct (rather than a

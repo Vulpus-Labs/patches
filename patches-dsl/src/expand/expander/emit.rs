@@ -18,7 +18,7 @@ use super::super::connection::{
     check_template_port, combine_index_resolutions, deref_port_index, eval_scale, resolve_from,
     resolve_to, subst_port_label, PortEntry, TemplatePorts,
 };
-use super::super::{ExpandError, ExpansionCtx, PortBinding};
+use super::super::{AliasMap, ExpandError, ExpansionCtx, PortBinding};
 
 impl<'a> Expander<'a> {
     /// Expand a single connection statement in the current scope.
@@ -35,6 +35,7 @@ impl<'a> Expander<'a> {
         flat_connections: &mut Vec<FlatConnection>,
         boundary: &mut TemplatePorts,
         port_refs: &mut Vec<FlatPortRef>,
+        alias_map: &AliasMap,
     ) -> Result<(), ExpandError> {
         let param_env = ctx.param_env;
 
@@ -82,8 +83,8 @@ impl<'a> Expander<'a> {
         check_template_port(from_ref, &from_port, instance_ports, PortDirection::Output)?;
         check_template_port(to_ref, &to_port, instance_ports, PortDirection::Input)?;
 
-        let from_alias_map = self.alias_maps.get(from_ref.module.as_str());
-        let to_alias_map = self.alias_maps.get(to_ref.module.as_str());
+        let from_alias_map = alias_map.get(from_ref.module.as_str());
+        let to_alias_map = alias_map.get(to_ref.module.as_str());
         let from_res =
             deref_port_index(&from_ref.index, param_env, &from_ref.span, from_alias_map)?;
         let to_res =

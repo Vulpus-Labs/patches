@@ -2,7 +2,7 @@
 id: "E091"
 title: Decompose the DSL template expander
 created: 2026-04-17
-tickets: ["0540"]
+tickets: ["0540", "0541", "0547", "0548", "0549", "0550"]
 ---
 
 ## Goal
@@ -191,13 +191,14 @@ holds ≤ 2 fields; `expand_body` under ~40 lines.
 
 ## Tickets
 
-| ID   | Tier | Title                                              | Status |
-| ---- | ---- | -------------------------------------------------- | ------ |
-| 0540 | 1    | Spread `impl Expander` across sibling files        | open   |
-| TBD  | 2    | Stateless substituters → free fns; RAII scope guards | deferred |
-| TBD  | 3    | Extract template-argument binding as pure functions | deferred |
-| TBD  | 3b   | Remove `Expander::alias_maps` global field         | deferred |
-| TBD  | 4    | `BodyFrame` bundle; passes become free translators | deferred |
+| ID   | Tier | Title                                                | Status   |
+| ---- | ---- | ---------------------------------------------------- | -------- |
+| 0540 | 1    | Spread `impl Expander` across sibling files          | closed   |
+| 0541 | 2    | Stateless substituters → free fns; RAII scope guards | closed   |
+| 0547 | 3    | Extract template-argument binding as pure functions  | closed   |
+| 0548 | 3b   | Remove `Expander::alias_maps` global field           | closed   |
+| 0549 | 4a   | Bundle per-body state into `BodyFrame`               | open     |
+| 0550 | 4b   | Pass methods become free translator functions        | open     |
 
 Tier-2-onwards ticket text spelled out above so the epic captures
 scope even before individual tickets are drafted. Ticket drafting
