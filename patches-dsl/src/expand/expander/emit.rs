@@ -1,13 +1,15 @@
 //! Connection flattening at the orchestrator level.
 //!
 //! `expand_connection` resolves arity expansions into a series of concrete
-//! `(from_i, to_i)` pairs; `emit_single_connection` turns one concrete pair
-//! into either a [`FlatConnection`] or a boundary-map entry, composing cable
-//! scales across template-instance boundaries. The stateless primitives
-//! (port resolution, scale composition) live in `super::super::connection`.
+//! `(from_i, to_i)` pairs; `emit_single_connection` turns one concrete
+//! pair into either a [`FlatConnection`] or a boundary-map entry,
+//! composing cable scales across template-instance boundaries. The
+//! stateless primitives (port resolution, scale composition) live in
+//! `super::super::connection`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use super::frame::BodyFrame;
 use super::Expander;
 use crate::ast::{Connection, Direction, PortRef, Span};
 use crate::flat::{FlatConnection, FlatPortRef, PortDirection};
@@ -16,28 +18,24 @@ use crate::structural::StructuralCode as Code;
 
 use super::super::connection::{
     check_template_port, combine_index_resolutions, deref_port_index, eval_scale, resolve_from,
-    resolve_to, subst_port_label, PortEntry, TemplatePorts,
+    resolve_to, subst_port_label, PortAddr, PortEntry,
 };
-use super::super::{AliasMap, ExpandError, ExpansionCtx, PortBinding};
+use super::super::{ExpandError, PortBinding};
 
 impl<'a> Expander<'a> {
     /// Expand a single connection statement in the current scope.
     ///
-    /// Handles arity expansion: if either port index carries an arity-marker name,
-    /// the connection is emitted N times with concrete indices.
-    #[allow(clippy::too_many_arguments)]
+    /// Handles arity expansion: if either port index carries an
+    /// arity-marker name, the connection is emitted N times with
+    /// concrete indices. Module existence is checked before resolving
+    /// port indices so the user isn't misled by a downstream
+    /// alias-lookup failure.
     pub(super) fn expand_connection(
         &mut self,
         conn: &Connection,
-        ctx: &ExpansionCtx<'_, '_>,
-        instance_ports: &HashMap<String, TemplatePorts>,
-        module_names: &HashSet<String>,
-        flat_connections: &mut Vec<FlatConnection>,
-        boundary: &mut TemplatePorts,
-        port_refs: &mut Vec<FlatPortRef>,
-        alias_map: &AliasMap,
+        frame: &mut BodyFrame<'_, '_>,
     ) -> Result<(), ExpandError> {
-        let param_env = ctx.param_env;
+        let param_env = frame.ctx.param_env;
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
         let arrow_scale =
@@ -49,42 +47,35 @@ impl<'a> Expander<'a> {
             Direction::Backward => (&conn.rhs, &conn.lhs),
         };
 
-        // Fail-fast: the highest-level structural error in a port reference is
-        // the module not existing. Catch it before resolving ports/indices so
-        // the user is not misled by a downstream alias-lookup failure.
-        let check_module = |pr: &PortRef| -> Result<(), ExpandError> {
-            if pr.module == "$" || module_names.contains(pr.module.as_str()) {
-                Ok(())
-            } else {
-                let mut known: Vec<&str> =
-                    module_names.iter().map(|s| s.as_str()).collect();
-                known.sort_unstable();
-                let list = if known.is_empty() {
-                    "(none)".to_owned()
-                } else {
-                    known.join(", ")
-                };
-                Err(ExpandError::new(Code::UnknownModuleRef, pr.span, format!(
-                        "unknown module '{}'; known modules: {}",
-                        pr.module, list
-                    )))
-            }
-        };
-        check_module(from_ref)?;
-        check_module(to_ref)?;
+        // Fail-fast: the highest-level structural error in a port reference
+        // is the module not existing. Catch it before resolving
+        // ports/indices so the user is not misled by a downstream
+        // alias-lookup failure.
+        check_module_exists(from_ref, &frame.state.module_names)?;
+        check_module_exists(to_ref, &frame.state.module_names)?;
 
         let from_port = subst_port_label(&from_ref.port, param_env, &from_ref.span)?;
         let to_port = subst_port_label(&to_ref.port, param_env, &to_ref.span)?;
 
-        // Fail-fast: for template-instance refs, validate the port name exists
-        // on the boundary map before resolving any port-index alias on it.
-        // (Plain modules' port descriptors are unknown to the DSL — the
-        // interpreter validates those against the registry.)
-        check_template_port(from_ref, &from_port, instance_ports, PortDirection::Output)?;
-        check_template_port(to_ref, &to_port, instance_ports, PortDirection::Input)?;
+        // Fail-fast: for template-instance refs, validate the port name
+        // exists on the boundary map before resolving any port-index
+        // alias on it. (Plain modules' port descriptors are unknown to
+        // the DSL — the interpreter validates those against the registry.)
+        check_template_port(
+            from_ref,
+            &from_port,
+            &frame.state.instance_ports,
+            PortDirection::Output,
+        )?;
+        check_template_port(
+            to_ref,
+            &to_port,
+            &frame.state.instance_ports,
+            PortDirection::Input,
+        )?;
 
-        let from_alias_map = alias_map.get(from_ref.module.as_str());
-        let to_alias_map = alias_map.get(to_ref.module.as_str());
+        let from_alias_map = frame.alias_map.get(from_ref.module.as_str());
+        let to_alias_map = frame.alias_map.get(to_ref.module.as_str());
         let from_res =
             deref_port_index(&from_ref.index, param_env, &from_ref.span, from_alias_map)?;
         let to_res =
@@ -94,26 +85,18 @@ impl<'a> Expander<'a> {
 
         for (from_i, to_i, from_is_arity, to_is_arity) in pairs {
             let from_bind = PortBinding {
-                port: from_port.clone(),
-                index: from_i,
+                addr: PortAddr::new(from_ref.module.clone(), from_port.clone(), from_i),
                 is_arity: from_is_arity,
             };
             let to_bind = PortBinding {
-                port: to_port.clone(),
-                index: to_i,
+                addr: PortAddr::new(to_ref.module.clone(), to_port.clone(), to_i),
                 is_arity: to_is_arity,
             };
             self.emit_single_connection(
-                &from_ref.module,
                 &from_bind,
-                &to_ref.module,
                 &to_bind,
                 arrow_scale,
-                ctx,
-                instance_ports,
-                flat_connections,
-                boundary,
-                port_refs,
+                frame,
                 &conn.span,
                 &from_ref.span,
                 &to_ref.span,
@@ -123,129 +106,211 @@ impl<'a> Expander<'a> {
         Ok(())
     }
 
-    /// Emit one concrete connection (after arity has been resolved to a single i).
+    /// Emit one concrete connection (after arity has been resolved to a
+    /// single i).
     ///
-    /// Each side of the connection is a [`PortBinding`] holding the resolved
-    /// port name, concrete index, and whether the index came from an arity
-    /// expansion (`[*n]`). The arity flag affects the template boundary-map
-    /// key: arity-sourced indices use `"port/i"`, everything else uses plain
-    /// `"port"`.
+    /// Each side of the connection is a [`PortBinding`] holding the
+    /// authored `(module, port, index)` triple plus whether the index
+    /// came from an arity expansion (`[*n]`). The arity flag affects the
+    /// template boundary-map key: arity-sourced indices use `"port/i"`,
+    /// everything else uses plain `"port"`.
     #[allow(clippy::too_many_arguments)]
     fn emit_single_connection(
         &mut self,
-        from_module: &str,
         from: &PortBinding,
-        to_module: &str,
         to: &PortBinding,
         arrow_scale: f64,
-        ctx: &ExpansionCtx<'_, '_>,
-        instance_ports: &HashMap<String, TemplatePorts>,
-        flat_connections: &mut Vec<FlatConnection>,
-        boundary: &mut TemplatePorts,
-        port_refs: &mut Vec<FlatPortRef>,
+        frame: &mut BodyFrame<'_, '_>,
         span: &Span,
         from_span: &Span,
         to_span: &Span,
     ) -> Result<(), ExpandError> {
-        let namespace = ctx.namespace;
-        let call_chain = ctx.call_chain;
+        let namespace = frame.ctx.namespace;
+        let call_chain = frame.ctx.call_chain;
 
-        // Boundary key: "port/i" for arity-expanded ports, plain "port" otherwise.
-        let from_bkey = if from.is_arity {
-            format!("{}/{}", from.port, from.index)
-        } else {
-            from.port.clone()
-        };
-        let to_bkey = if to.is_arity {
-            format!("{}/{}", to.port, to.index)
-        } else {
-            to.port.clone()
-        };
+        let from_bkey = boundary_key(&from.addr, from.is_arity);
+        let to_bkey = boundary_key(&to.addr, to.is_arity);
 
-        match (from_module == "$", to_module == "$") {
+        match (from.addr.module == "$", to.addr.module == "$") {
             // $.in_port ─→ inner  (template in-port boundary)
             (true, false) => {
                 let dsts = resolve_to(
-                    to_module, &to.port, to.index, namespace, instance_ports, span,
+                    &to.addr.module,
+                    &to.addr.port,
+                    to.addr.index,
+                    namespace,
+                    &frame.state.instance_ports,
+                    span,
                 )?;
-                for (m, p, i, _) in &dsts {
-                    port_refs.push(FlatPortRef {
-                        module: m.clone(),
-                        port: p.clone(),
-                        index: *i,
-                        direction: PortDirection::Input,
-                        provenance: Provenance::with_chain(*span, call_chain),
-                    });
+                for entry in &dsts {
+                    frame
+                        .state
+                        .port_refs
+                        .push(port_ref_from_addr(&entry.addr, PortDirection::Input, span, call_chain));
                 }
-                let scaled: Vec<PortEntry> =
-                    dsts.into_iter().map(|(m, p, i, s)| (m, p, i, arrow_scale * s)).collect();
-                boundary.in_ports.entry(from_bkey).or_default().extend(scaled);
+                let scaled: Vec<PortEntry> = dsts
+                    .into_iter()
+                    .map(|e| PortEntry { addr: e.addr, scale: arrow_scale * e.scale })
+                    .collect();
+                frame
+                    .state
+                    .boundary
+                    .in_ports
+                    .entry(from_bkey)
+                    .or_default()
+                    .extend(scaled);
             }
 
             // inner ─→ $.out_port  (template out-port boundary)
             (false, true) => {
-                let (src_m, src_p, src_i, inner_scale) = resolve_from(
-                    from_module, &from.port, from.index, namespace, instance_ports, span,
+                let src = resolve_from(
+                    &from.addr.module,
+                    &from.addr.port,
+                    from.addr.index,
+                    namespace,
+                    &frame.state.instance_ports,
+                    span,
                 )?;
-                port_refs.push(FlatPortRef {
-                    module: src_m.clone(),
-                    port: src_p.clone(),
-                    index: src_i,
-                    direction: PortDirection::Output,
-                    provenance: Provenance::with_chain(*span, call_chain),
-                });
-                boundary
-                    .out_ports
-                    .insert(to_bkey, (src_m, src_p, src_i, inner_scale * arrow_scale));
+                frame
+                    .state
+                    .port_refs
+                    .push(port_ref_from_addr(&src.addr, PortDirection::Output, span, call_chain));
+                frame.state.boundary.out_ports.insert(
+                    to_bkey,
+                    PortEntry { addr: src.addr, scale: src.scale * arrow_scale },
+                );
             }
 
             // Both sides are boundary markers — this is never valid.
             (true, true) => {
-                return Err(ExpandError::other(*span, "connection has '$' on both sides".to_owned()));
+                return Err(ExpandError::other(
+                    *span,
+                    "connection has '$' on both sides".to_owned(),
+                ));
             }
 
             // Regular connection (from and to are both concrete or instances).
             (false, false) => {
-                let (src_m, src_p, src_i, from_inner) = resolve_from(
-                    from_module, &from.port, from.index, namespace, instance_ports, span,
+                let src = resolve_from(
+                    &from.addr.module,
+                    &from.addr.port,
+                    from.addr.index,
+                    namespace,
+                    &frame.state.instance_ports,
+                    span,
                 )?;
-                let composed = from_inner * arrow_scale;
+                let composed = src.scale * arrow_scale;
                 let mut dsts = resolve_to(
-                    to_module, &to.port, to.index, namespace, instance_ports, span,
+                    &to.addr.module,
+                    &to.addr.port,
+                    to.addr.index,
+                    namespace,
+                    &frame.state.instance_ports,
+                    span,
                 )?;
-                if let Some((last_dst_m, last_dst_p, last_dst_i, last_to_inner)) = dsts.pop() {
+                if let Some(last) = dsts.pop() {
                     let from_prov = Provenance::with_chain(*from_span, call_chain);
                     let to_prov = Provenance::with_chain(*to_span, call_chain);
-                    for (dst_m, dst_p, dst_i, to_inner) in dsts {
-                        flat_connections.push(FlatConnection {
-                            from_module: src_m.clone(),
-                            from_port: src_p.clone(),
-                            from_index: src_i,
-                            to_module: dst_m,
-                            to_port: dst_p,
-                            to_index: dst_i,
-                            scale: composed * to_inner,
-                            provenance: Provenance::with_chain(*span, call_chain),
-                            from_provenance: from_prov.clone(),
-                            to_provenance: to_prov.clone(),
-                        });
+                    for dst in dsts {
+                        frame.state.flat_connections.push(flat_connection(
+                            &src.addr,
+                            dst.addr,
+                            composed * dst.scale,
+                            span,
+                            call_chain,
+                            from_prov.clone(),
+                            to_prov.clone(),
+                        ));
                     }
-                    flat_connections.push(FlatConnection {
-                        from_module: src_m,
-                        from_port: src_p,
-                        from_index: src_i,
-                        to_module: last_dst_m,
-                        to_port: last_dst_p,
-                        to_index: last_dst_i,
-                        scale: composed * last_to_inner,
-                        provenance: Provenance::with_chain(*span, call_chain),
-                        from_provenance: from_prov,
-                        to_provenance: to_prov,
-                    });
+                    frame.state.flat_connections.push(flat_connection(
+                        &src.addr,
+                        last.addr,
+                        composed * last.scale,
+                        span,
+                        call_chain,
+                        from_prov,
+                        to_prov,
+                    ));
                 }
             }
         }
 
         Ok(())
     }
+}
+
+/// Template boundary-map key: `"port/i"` for arity-expanded ports,
+/// plain `"port"` otherwise.
+fn boundary_key<M>(addr: &PortAddr<M>, is_arity: bool) -> String {
+    if is_arity {
+        format!("{}/{}", addr.port, addr.index)
+    } else {
+        addr.port.clone()
+    }
+}
+
+fn port_ref_from_addr(
+    addr: &PortAddr<patches_core::QName>,
+    direction: PortDirection,
+    span: &Span,
+    call_chain: &[Span],
+) -> FlatPortRef {
+    FlatPortRef {
+        module: addr.module.clone(),
+        port: addr.port.clone(),
+        index: addr.index,
+        direction,
+        provenance: Provenance::with_chain(*span, call_chain),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flat_connection(
+    src: &PortAddr<patches_core::QName>,
+    dst: PortAddr<patches_core::QName>,
+    scale: f64,
+    span: &Span,
+    call_chain: &[Span],
+    from_provenance: Provenance,
+    to_provenance: Provenance,
+) -> FlatConnection {
+    FlatConnection {
+        from_module: src.module.clone(),
+        from_port: src.port.clone(),
+        from_index: src.index,
+        to_module: dst.module,
+        to_port: dst.port,
+        to_index: dst.index,
+        scale,
+        provenance: Provenance::with_chain(*span, call_chain),
+        from_provenance,
+        to_provenance,
+    }
+}
+
+/// Fail-fast check that `pr.module` names either a known module in this
+/// body or the boundary marker `$`. Formats the "known modules: ..."
+/// hint for the error message.
+fn check_module_exists(
+    pr: &PortRef,
+    module_names: &HashSet<String>,
+) -> Result<(), ExpandError> {
+    if pr.module == "$" || module_names.contains(pr.module.as_str()) {
+        return Ok(());
+    }
+    let mut known: Vec<&str> = module_names.iter().map(|s| s.as_str()).collect();
+    known.sort_unstable();
+    let list = if known.is_empty() {
+        "(none)".to_owned()
+    } else {
+        known.join(", ")
+    };
+    Err(ExpandError::new(
+        Code::UnknownModuleRef,
+        pr.span,
+        format!(
+            "unknown module '{}'; known modules: {}",
+            pr.module, list
+        ),
+    ))
 }

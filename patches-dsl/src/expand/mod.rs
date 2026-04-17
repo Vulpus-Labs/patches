@@ -77,7 +77,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         &root_scope,
         &[],
     );
-    let result = Expander::new(&templates).expand_body(&file.patch.body, &root_ctx)?;
+    let result = Expander::new(&templates).expand_body(&file.patch.body, root_ctx)?;
 
     // Expand patterns: merge top-level with template-local, resolve generators.
     let mut patterns: Vec<FlatPatternDef> =
@@ -168,13 +168,12 @@ impl<'ctx, 'a: 'ctx> ExpansionCtx<'ctx, 'a> {
 
 /// One endpoint of a connection after port-index resolution.
 ///
-/// `index` is the concrete integer index. `is_arity` records that the index
-/// came from an arity expansion (`[*n]`), which affects the template
-/// boundary-map key ("port/i" vs. plain "port").
+/// `addr` holds the authored `(module, port, index)` triple; `is_arity`
+/// records that the index came from an arity expansion (`[*n]`), which
+/// affects the template boundary-map key ("port/i" vs. plain "port").
 #[derive(Debug)]
 struct PortBinding {
-    port: String,
-    index: u32,
+    addr: connection::PortAddr<String>,
     is_arity: bool,
 }
 

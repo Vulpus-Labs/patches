@@ -1,7 +1,8 @@
 //! The [`Expander`] struct and its methods.
 //!
 //! Methods are spread across sibling files by concern (see ADR 0041):
-//! - [`passes`] — body walker and the four per-body passes.
+//! - [`frame`] — [`frame::BodyFrame`] bundle threaded through per-body passes.
+//! - [`passes`] — body walker and the four free translator passes.
 //! - [`template`] — template instantiation and argument binding.
 //! - [`emit`] — connection flattening and scale composition at emit time.
 //!
@@ -15,6 +16,7 @@ use crate::structural::StructuralCode as Code;
 use super::ExpandError;
 
 mod emit;
+mod frame;
 mod passes;
 mod template;
 

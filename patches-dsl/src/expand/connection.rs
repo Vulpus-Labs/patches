@@ -17,8 +17,39 @@ use crate::ast::{PortIndex, PortLabel, PortRef, Scalar, Span};
 use crate::flat::PortDirection;
 use crate::structural::StructuralCode as Code;
 
-/// A resolved port endpoint: (module_id, port_name, index, scale).
-pub(super) type PortEntry = (QName, String, u32, f64);
+/// The `(module, port, index)` triple that identifies a port on a module.
+///
+/// Generic over the module type because the expander uses two flavours:
+/// `PortAddr<QName>` for fully-qualified endpoints (inside `PortEntry` /
+/// resolved template-boundary maps), and `PortAddr<String>` for authored
+/// references held inside [`PortBinding`](super::PortBinding) before
+/// qualification.
+#[derive(Debug, Clone)]
+pub(super) struct PortAddr<M> {
+    pub(super) module: M,
+    pub(super) port: String,
+    pub(super) index: u32,
+}
+
+impl<M> PortAddr<M> {
+    pub(super) fn new(module: M, port: String, index: u32) -> Self {
+        Self { module, port, index }
+    }
+}
+
+/// A resolved port endpoint: fully-qualified address plus the boundary scale
+/// accumulated along the path to it.
+#[derive(Debug, Clone)]
+pub(super) struct PortEntry {
+    pub(super) addr: PortAddr<QName>,
+    pub(super) scale: f64,
+}
+
+impl PortEntry {
+    pub(super) fn new(module: QName, port: String, index: u32, scale: f64) -> Self {
+        Self { addr: PortAddr::new(module, port, index), scale }
+    }
+}
 
 /// Port maps produced when expanding a template body.
 pub(super) struct TemplatePorts {
@@ -310,7 +341,7 @@ pub(super) fn resolve_from(
             )
         })
     } else {
-        Ok((
+        Ok(PortEntry::new(
             qualify(namespace, from_module),
             from_port.to_owned(),
             from_index,
@@ -350,7 +381,7 @@ pub(super) fn resolve_to(
             )
         })
     } else {
-        Ok(vec![(
+        Ok(vec![PortEntry::new(
             qualify(namespace, to_module),
             to_port.to_owned(),
             to_index,
