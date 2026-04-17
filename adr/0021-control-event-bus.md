@@ -1,8 +1,16 @@
 # ADR 0021 — Observation event bus
 
 **Date:** 2026-03-29
-**Status:** Proposed
+**Status:** Superseded by [ADR 0043 — Cable-tap observation](0043-cable-tap-observation.md)
 **Related:** [ADR 0016 — MIDI as the sole external control mechanism](0016-midi-only-control-architecture.md)
+
+> Superseded 2026-04-17. ADR 0043 moves observation from a per-module
+> emit trait to engine-level taps on cable buffers. The module-facing
+> `EmitsObservations` trait, `ObservationSink`, and per-sub-block emit
+> dispatch are not implemented. The ring-buffer / observer-thread
+> plumbing described below carries over in spirit, but the payload is
+> raw sample streams keyed by cable id rather than tagged observation
+> events. See ADR 0043 for the current design.
 
 ## Context
 
@@ -268,3 +276,30 @@ Each emitting module gets its own ring buffer, sized to its traffic pattern.
 Rejected in favour of a single shared ring buffer for simplicity: one
 allocation, one drain loop, one consumer thread. The `ObservationSink`
 abstraction allows splitting into per-type buffers later if needed.
+
+### Reuse of the poly-frame backplane for observations
+
+Encode observation events as `[f32; 16]` frames (using the same packing
+strategy as `MidiFrame`, ADR 0033) and write them into dedicated backplane
+slots, reusing the poly-cable mechanism that carries `GLOBAL_MIDI` and
+`GLOBAL_TRANSPORT`. Attractive because it unifies one encoding path and
+would make observations visible in-graph (a scope module could tap a
+neighbour's slot without explicit wiring). Rejected for three reasons:
+
+1. **Semantic mismatch.** The backplane is last-write-wins shared state per
+   sample. Scope chunks and event streams require every value delivered,
+   not the most recent — the buffered-overflow protocol used for
+   MIDI-over-poly works only because the consumer reads the same cycle on
+   the audio thread. A non-real-time observer reading across cycles would
+   need a seqlock or frame-index scheme on slot memory.
+2. **Slot scarcity.** Backplane slots are a finite, globally-allocated
+   resource. A slot per `(instance, channel)` exhausts the budget quickly;
+   slot sharing requires arbitration on the audio thread.
+3. **No payoff for the intended consumers.** Observation data flows
+   outward to non-real-time UIs. In-graph taps are a hypothetical benefit;
+   the concrete need is draining to a web UI or logger, which the ring
+   buffer already serves with simpler semantics.
+
+A meter-only split (meters on the backplane, chunks on the ring buffer)
+was considered but rejected as unnecessary complexity for a second
+delivery path.
