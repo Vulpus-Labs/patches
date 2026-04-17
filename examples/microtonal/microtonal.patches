@@ -65,8 +65,6 @@ template drumz {
     drive_l.out ->  verb.in_left
     drive_r.out -> verb.in_right
 
-    module p : MadeUp
-
     verb.out_left -> $.out_left
     verb.out_right -> $.out_right
 }
