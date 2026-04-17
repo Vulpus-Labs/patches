@@ -3,20 +3,19 @@ use std::sync::Arc;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, PolyInput, PolyOutput, ModuleShape, OutputPort,
-    TrackerData, ReceivesTrackerData,
+    TrackerData, ReceivesTrackerData, TransportFrame,
     GLOBAL_TRANSPORT,
 };
 use patches_core::parameter_map::ParameterMap;
+use patches_tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
 
-mod lookup;
 mod params;
-mod playback;
 
 /// Drives song playback with transport controls, swing, and a poly clock bus
 /// per song channel.
 ///
 /// The MasterSequencer reads a named song from `TrackerData` and outputs a poly
-/// clock bus per song channel. Each clock bus carries four voices encoding
+/// clock bus per song channel. Each clock bus carries six voices encoding
 /// timing and pattern-selection data for downstream `PatternPlayer` modules.
 ///
 /// # Inputs
@@ -69,73 +68,24 @@ mod playback;
 pub struct MasterSequencer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    sample_rate: f32,
-    channels: usize,
 
-    // Tracker data
     tracker_data: Option<Arc<TrackerData>>,
-    song_index: Option<usize>,
 
-    // Cached parameters
-    bpm: f32,
-    rows_per_beat: i64,
-    do_loop: bool,
+    // Module-shell settings resolved from parameters.
     autostart: bool,
-    swing: f32,
+    pub(crate) hosted: bool,
+    pub(crate) use_host_transport: bool,
 
-    // Host sync
-    /// Cached `AudioEnvironment::hosted` flag for resolving `sync: auto`.
-    hosted: bool,
-    /// Whether to use host transport (resolved from `sync` param + `hosted` flag).
-    use_host_transport: bool,
+    pub(crate) core: SequencerCore,
+
     /// Fixed input pointing at the GLOBAL_TRANSPORT backplane slot.
     transport_in: PolyInput,
-    /// Previous host playing state for edge detection.
-    prev_host_playing: f32,
 
-    // Transport state
-    state: TransportState,
-    /// Current row in the song order.
-    song_row: usize,
-    /// Current step within the pattern at the current song row.
-    pattern_step: usize,
-    /// Samples remaining until the next tick.
-    samples_until_tick: f32,
-    /// Whether this is the very first tick after starting/restarting.
-    first_tick: bool,
-    /// Whether we just entered a new pattern (first tick of a new song row).
-    pattern_just_reset: bool,
-    /// Global step counter for swing (even/odd alternation).
-    global_step: usize,
-    /// Whether the song has ended (non-looping mode).
-    song_ended: bool,
-    /// Whether to emit the stop sentinel on this sample.
-    emit_stop_sentinel: bool,
-    /// Pre-allocated bank index buffer (one entry per song channel).
-    bank_indices: Vec<f32>,
-    /// Fractional position within the current step (0.0..1.0).
-    /// Non-zero only in host sync mode when the DAW is mid-step.
-    step_fraction: f32,
-
-    // Rising-edge detection
-    prev_start: f32,
-    prev_stop: f32,
-    prev_pause: f32,
-    prev_resume: f32,
-
-    // Ports
     in_start: MonoInput,
     in_stop: MonoInput,
     in_pause: MonoInput,
     in_resume: MonoInput,
     clock_out: Vec<PolyOutput>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum TransportState {
-    Stopped,
-    Playing,
-    Paused,
 }
 
 impl Module for MasterSequencer {
@@ -161,39 +111,16 @@ impl Module for MasterSequencer {
         Self {
             instance_id,
             descriptor,
-            sample_rate: env.sample_rate,
-            channels,
             tracker_data: None,
-            song_index: None,
-            bpm: 120.0,
-            rows_per_beat: 4,
-            do_loop: true,
             autostart: true,
-            swing: 0.5,
-            // Default sync=auto: use host transport if hosted.
             hosted: env.hosted,
             use_host_transport: env.hosted,
+            core: SequencerCore::new(env.sample_rate, channels),
             transport_in: PolyInput {
                 cable_idx: GLOBAL_TRANSPORT,
                 scale: 1.0,
                 connected: true,
             },
-            prev_host_playing: 0.0,
-            state: TransportState::Stopped,
-            song_row: 0,
-            pattern_step: 0,
-            samples_until_tick: 0.0,
-            first_tick: true,
-            pattern_just_reset: true,
-            global_step: 0,
-            song_ended: false,
-            emit_stop_sentinel: false,
-            bank_indices: vec![0.0; channels],
-            step_fraction: 0.0,
-            prev_start: 0.0,
-            prev_stop: 0.0,
-            prev_pause: 0.0,
-            prev_resume: 0.0,
             in_start: MonoInput::default(),
             in_stop: MonoInput::default(),
             in_pause: MonoInput::default(),
@@ -219,44 +146,49 @@ impl Module for MasterSequencer {
         self.in_stop = MonoInput::from_ports(inputs, 1);
         self.in_pause = MonoInput::from_ports(inputs, 2);
         self.in_resume = MonoInput::from_ports(inputs, 3);
-        for i in 0..self.channels {
+        for i in 0..self.core.channels {
             self.clock_out[i] = PolyOutput::from_ports(outputs, i);
         }
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Default: silence on all clock buses
-        let mut tick_fired = false;
-        let mut reset_fired = false;
-        let mut current_tick_duration = self.base_tick_seconds();
-        for v in &mut self.bank_indices { *v = 0.0; }
-        self.step_fraction = 0.0;
-
-        if self.use_host_transport {
-            self.process_host_sync(pool, &mut tick_fired, &mut reset_fired, &mut current_tick_duration);
+        let result = if self.use_host_transport {
+            let transport = pool.read_poly(&self.transport_in);
+            let host = HostTransport {
+                playing: TransportFrame::playing_raw(&transport),
+                tempo: TransportFrame::tempo(&transport),
+                beat: TransportFrame::beat(&transport) as f64,
+                tsig_num: TransportFrame::tsig_num(&transport) as f64,
+                tsig_denom: TransportFrame::tsig_denom(&transport) as f64,
+            };
+            self.tick_host(&host)
         } else {
-            self.process_free_sync(pool, &mut tick_fired, &mut reset_fired, &mut current_tick_duration);
-        }
+            let edges = TransportEdges {
+                start: pool.read_mono(&self.in_start),
+                stop: pool.read_mono(&self.in_stop),
+                pause: pool.read_mono(&self.in_pause),
+                resume: pool.read_mono(&self.in_resume),
+            };
+            self.tick_free(&edges)
+        };
 
-        // Write clock bus outputs
-        if self.emit_stop_sentinel {
-            // Send stop sentinel: bank index -1
-            for i in 0..self.channels {
+        if self.core.emit_stop_sentinel {
+            for i in 0..self.core.channels {
                 let mut bus = [0.0_f32; 16];
-                bus[1] = -1.0; // stop sentinel
-                bus[2] = 1.0;  // tick trigger (so PatternPlayer processes this)
+                bus[1] = -1.0;
+                bus[2] = 1.0;
                 pool.write_poly(&self.clock_out[i], bus);
             }
-            self.emit_stop_sentinel = false;
+            self.core.emit_stop_sentinel = false;
         } else {
-            for i in 0..self.channels {
+            for i in 0..self.core.channels {
                 let mut bus = [0.0_f32; 16];
-                bus[0] = if reset_fired { 1.0 } else { 0.0 };
-                bus[1] = self.bank_indices.get(i).copied().unwrap_or(0.0);
-                bus[2] = if tick_fired { 1.0 } else { 0.0 };
-                bus[3] = current_tick_duration;
-                bus[4] = self.pattern_step as f32;
-                bus[5] = self.step_fraction;
+                bus[0] = if result.reset_fired { 1.0 } else { 0.0 };
+                bus[1] = self.core.bank_indices.get(i).copied().unwrap_or(0.0);
+                bus[2] = if result.tick_fired { 1.0 } else { 0.0 };
+                bus[3] = result.tick_duration_seconds;
+                bus[4] = self.core.pattern_step as f32;
+                bus[5] = self.core.step_fraction;
                 pool.write_poly(&self.clock_out[i], bus);
             }
         }
@@ -269,6 +201,31 @@ impl Module for MasterSequencer {
     fn as_tracker_data_receiver(&mut self) -> Option<&mut dyn ReceivesTrackerData> {
         Some(self)
     }
+}
+
+impl MasterSequencer {
+    fn tick_host(&mut self, host: &HostTransport) -> TickResult {
+        match self.tracker_data.as_ref() {
+            Some(data) => self.core.tick_host(host, data),
+            None => TickResult {
+                tick_fired: false,
+                reset_fired: false,
+                tick_duration_seconds: self.core.base_tick_seconds(),
+            },
+        }
+    }
+
+    fn tick_free(&mut self, edges: &TransportEdges) -> TickResult {
+        match self.tracker_data.as_ref() {
+            Some(data) => self.core.tick_free(edges, data),
+            None => TickResult {
+                tick_fired: false,
+                reset_fired: false,
+                tick_duration_seconds: self.core.base_tick_seconds(),
+            },
+        }
+    }
+
 }
 
 impl ReceivesTrackerData for MasterSequencer {

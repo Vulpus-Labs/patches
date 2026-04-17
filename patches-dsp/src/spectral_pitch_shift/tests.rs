@@ -399,3 +399,311 @@ fn multiple_peaks_shift_independently() {
         "original bin 20 position should be empty: {mag_20}"
     );
 }
+
+// ── Gap tests (E092 / ticket 0545 companion) ───────────────────────────
+
+/// Variant of [`pitch_shift_audio`] that also toggles mono mode and formant
+/// preservation. The existing helper is kept intact so pre-existing tests
+/// are unchanged.
+fn pitch_shift_audio_ext(
+    signal: &[f32],
+    window_size: usize,
+    overlap: usize,
+    semitones: f32,
+    mix: f32,
+    mono: bool,
+    preserve_formants: bool,
+) -> Vec<f32> {
+    use crate::fft::RealPackedFft;
+
+    let hop = window_size / overlap;
+    let fft = RealPackedFft::new(window_size);
+    let mut shifter = SpectralPitchShifter::new(window_size, hop);
+    shifter.set_shift_semitones(semitones);
+    shifter.set_mix(mix);
+    shifter.set_mono(mono);
+    shifter.set_preserve_formants(preserve_formants);
+
+    let hann: Vec<f32> = (0..window_size)
+        .map(|i| {
+            let n = i as f32 / window_size as f32;
+            0.5 * (1.0 - (2.0 * PI * n).cos())
+        })
+        .collect();
+
+    let out_len = signal.len();
+    let mut output = vec![0.0f32; out_len];
+    let mut norm = vec![0.0f32; out_len];
+
+    let mut pos = 0isize;
+    while (pos as usize) + window_size <= signal.len() + window_size {
+        let mut frame = vec![0.0f32; window_size];
+        for i in 0..window_size {
+            let idx = pos + i as isize;
+            if idx >= 0 && (idx as usize) < signal.len() {
+                frame[i] = signal[idx as usize] * hann[i];
+            }
+        }
+
+        fft.forward(&mut frame);
+        shifter.transform(&mut frame);
+        fft.inverse(&mut frame);
+
+        for i in 0..window_size {
+            let idx = pos + i as isize;
+            if idx >= 0 && (idx as usize) < out_len {
+                let oi = idx as usize;
+                output[oi] += frame[i] * hann[i];
+                norm[oi] += hann[i] * hann[i];
+            }
+        }
+
+        pos += hop as isize;
+    }
+
+    for i in 0..out_len {
+        if norm[i] > 1e-10 {
+            output[i] /= norm[i];
+        }
+    }
+    output
+}
+
+/// Stationary 100 Hz sine through a ratio-1.2 (≈ +3.156 semitones) shift over
+/// multiple hops should not produce a phase-flip spike at grain boundaries.
+/// Adjacent-sample differences in the reconstructed output are bounded above
+/// by a shape consistent with a pure sine at the shifted frequency.
+#[test]
+fn grain_boundary_continuity_no_phase_flip_spike() {
+    let sr = 48_000.0_f32;
+    let window_size = 1024;
+    let overlap = 4;
+    let hop = window_size / overlap;
+    // Exact semitones for ratio 1.2
+    let semitones = 12.0 * (1.2_f32).log2();
+
+    // At least warmup + 3 hops of steady state.
+    let duration = window_size * 4;
+    let input_freq_hz = 100.0_f32;
+    let signal: Vec<f32> = (0..duration)
+        .map(|i| (2.0 * PI * input_freq_hz / sr * i as f32).sin())
+        .collect();
+
+    let output = pitch_shift_audio_ext(&signal, window_size, overlap, semitones, 1.0, false, false);
+
+    // Skip initial warmup where overlap-add is building up.
+    let steady_start = window_size * 2;
+    let steady_end = duration - window_size;
+    let mut max_diff = 0.0_f32;
+    for i in steady_start + 1..steady_end {
+        let d = (output[i] - output[i - 1]).abs();
+        if d > max_diff {
+            max_diff = d;
+        }
+    }
+    // The shifted tone is at ~120 Hz; per-sample derivative bound is
+    // 2π·120/48000 ≈ 0.0157. Use 0.05 as a generous ceiling: a phase-flip
+    // spike at hop boundaries would easily exceed 0.1.
+    assert!(
+        max_diff <= 0.05,
+        "grain-boundary max adjacent-sample diff {max_diff:.4} exceeds 0.05 \
+         (hop={hop}, window={window_size}) — phase-flip at grain boundary?"
+    );
+}
+
+fn peak_biquad_coeffs(f0: f32, q: f32, gain_db: f32, sr: f32) -> (f32, f32, f32, f32, f32) {
+    let a = 10.0_f32.powf(gain_db / 40.0);
+    let w = 2.0 * PI * f0 / sr;
+    let alpha = w.sin() / (2.0 * q);
+    let cos_w = w.cos();
+    let b0 = 1.0 + alpha * a;
+    let b1 = -2.0 * cos_w;
+    let b2 = 1.0 - alpha * a;
+    let a0 = 1.0 + alpha / a;
+    let a1 = -2.0 * cos_w;
+    let a2 = 1.0 - alpha / a;
+    (b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0)
+}
+
+fn biquad_tdf2(input: &[f32], c: (f32, f32, f32, f32, f32)) -> Vec<f32> {
+    let (b0, b1, b2, a1, a2) = c;
+    let mut s1 = 0.0_f32;
+    let mut s2 = 0.0_f32;
+    input
+        .iter()
+        .map(|&x| {
+            let y = b0 * x + s1;
+            s1 = b1 * x - a1 * y + s2;
+            s2 = b2 * x - a2 * y;
+            y
+        })
+        .collect()
+}
+
+fn xorshift_noise(n: usize, seed: u64) -> Vec<f32> {
+    let mut s = seed.max(1);
+    (0..n)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            // Map to [-1, 1)
+            ((s as u32) as f32 / u32::MAX as f32) * 2.0 - 1.0
+        })
+        .collect()
+}
+
+/// Smoothed magnitude envelope of a signal segment. Returns the bin index of
+/// the envelope peak in the steady-state FFT.
+fn envelope_peak_bin(signal: &[f32], fft_size: usize) -> usize {
+    use crate::fft::RealPackedFft;
+    let fft = RealPackedFft::new(fft_size);
+    let mut buf = vec![0.0_f32; fft_size];
+    let len = signal.len().min(fft_size);
+    buf[..len].copy_from_slice(&signal[..len]);
+    fft.forward(&mut buf);
+
+    let half_n = fft_size / 2 + 1;
+    let mags: Vec<f32> = (0..half_n)
+        .map(|k| {
+            if k == 0 {
+                buf[0].abs()
+            } else if k == fft_size / 2 {
+                buf[1].abs()
+            } else {
+                buf[2 * k].hypot(buf[2 * k + 1])
+            }
+        })
+        .collect();
+
+    // Moving-average smoothing with the same shape the shifter uses.
+    let width = (half_n / 32).max(4);
+    let mut env = vec![0.0_f32; half_n];
+    for i in 0..half_n {
+        let start = i.saturating_sub(width);
+        let end = (i + width).min(half_n);
+        let sum: f32 = mags[start..end].iter().sum();
+        env[i] = sum / (end - start) as f32;
+    }
+
+    // Skip DC / near-DC bins where the smoothing picks up broadband noise.
+    let mut best_bin = width;
+    let mut best_val = env[width];
+    for (i, &v) in env.iter().enumerate().skip(width) {
+        if v > best_val {
+            best_val = v;
+            best_bin = i;
+        }
+    }
+    best_bin
+}
+
+/// `preserve_formants = true` keeps the input signal's spectral envelope
+/// peak anchored. `preserve_formants = false` moves the envelope peak with
+/// the pitch shift.
+#[test]
+fn formant_preservation_anchors_envelope_peak() {
+    let sr = 48_000.0_f32;
+    let window_size = 1024;
+    let overlap = 4;
+    let fft_size = 4096;
+    let semitones = 9.0_f32; // ratio ≈ 1.682 — large enough to be unambiguous
+    let ratio = 2f32.powf(semitones / 12.0);
+    let formant_hz = 3000.0_f32;
+    let duration = window_size * 12;
+
+    // Broadband noise filtered through a resonant peak biquad at formant_hz.
+    let noise = xorshift_noise(duration, 0x0DDBA11_CAFE_BE42u64);
+    let coeffs = peak_biquad_coeffs(formant_hz, 6.0, 24.0, sr);
+    let signal = biquad_tdf2(&noise, coeffs);
+
+    // Measure input envelope peak bin over the steady-state region.
+    let steady_start = window_size * 2;
+    let steady_len = fft_size;
+    assert!(steady_start + steady_len <= duration);
+    let input_peak = envelope_peak_bin(&signal[steady_start..steady_start + steady_len], fft_size);
+
+    // With formant preservation the envelope peak should remain near the
+    // input's formant. Tolerance reflects the smoothing window width.
+    let preserved =
+        pitch_shift_audio_ext(&signal, window_size, overlap, semitones, 1.0, false, true);
+    let preserved_peak = envelope_peak_bin(
+        &preserved[steady_start..steady_start + steady_len],
+        fft_size,
+    );
+    let preserved_delta = preserved_peak.abs_diff(input_peak);
+
+    // Without formant preservation the envelope peak should shift with the
+    // pitch shift (i.e. move to input_peak * ratio).
+    let shifted =
+        pitch_shift_audio_ext(&signal, window_size, overlap, semitones, 1.0, false, false);
+    let shifted_peak = envelope_peak_bin(
+        &shifted[steady_start..steady_start + steady_len],
+        fft_size,
+    );
+    let expected_shifted = (input_peak as f32 * ratio) as usize;
+    let shifted_delta = shifted_peak.abs_diff(expected_shifted);
+
+    // Preserved peak closer to input peak than to the shifted position; and
+    // shifted peak closer to the shifted position than to the input peak.
+    let preserved_vs_shifted_target = preserved_peak.abs_diff(expected_shifted);
+    assert!(
+        preserved_delta < preserved_vs_shifted_target,
+        "preserve=true envelope peak {preserved_peak} should be closer to input \
+         peak {input_peak} than to shifted target {expected_shifted} \
+         (Δ_input={preserved_delta}, Δ_shifted={preserved_vs_shifted_target})"
+    );
+    let shifted_vs_input = shifted_peak.abs_diff(input_peak);
+    assert!(
+        shifted_delta < shifted_vs_input,
+        "preserve=false envelope peak {shifted_peak} should follow the shift \
+         to ~{expected_shifted} rather than stay at {input_peak} \
+         (Δ_shifted={shifted_delta}, Δ_input={shifted_vs_input})"
+    );
+}
+
+/// Mono (region-based) and poly (per-bin) shifters on a stationary tone
+/// produce output with the same dominant-frequency bin.
+///
+/// The two paths are not bit-identical, but for a clean tone the spectral
+/// peak should land in the same bin after one grain of settling.
+#[test]
+fn mono_poly_parity_on_stationary_tone() {
+    use crate::fft::RealPackedFft;
+    use crate::test_support::dominant_bin;
+
+    let sr = 48_000.0_f32;
+    let window_size = 1024;
+    let overlap = 4;
+    let semitones = 7.0_f32; // ratio ≈ 1.498
+    let duration = window_size * 12;
+
+    let signal: Vec<f32> = (0..duration)
+        .map(|i| (2.0 * PI * 440.0 / sr * i as f32).sin())
+        .collect();
+
+    let mono_out = pitch_shift_audio_ext(&signal, window_size, overlap, semitones, 1.0, true, false);
+    let poly_out = pitch_shift_audio_ext(&signal, window_size, overlap, semitones, 1.0, false, false);
+
+    // Analyse steady-state region (skip warmup of ~2 windows).
+    let analysis_start = window_size * 3;
+    let fft_size = 4096;
+    let fft = RealPackedFft::new(fft_size);
+
+    let mut mono_buf = vec![0.0_f32; fft_size];
+    let mut poly_buf = vec![0.0_f32; fft_size];
+    let copy_len = fft_size.min(duration - analysis_start);
+    mono_buf[..copy_len].copy_from_slice(&mono_out[analysis_start..analysis_start + copy_len]);
+    poly_buf[..copy_len].copy_from_slice(&poly_out[analysis_start..analysis_start + copy_len]);
+    fft.forward(&mut mono_buf);
+    fft.forward(&mut poly_buf);
+
+    let mono_peak = dominant_bin(&mono_buf, fft_size);
+    let poly_peak = dominant_bin(&poly_buf, fft_size);
+    let bin_diff = mono_peak.abs_diff(poly_peak);
+    assert!(
+        bin_diff <= 2,
+        "mono peak bin {mono_peak} vs poly peak bin {poly_peak}: \
+         expected agreement within 2 bins, got {bin_diff}"
+    );
+}

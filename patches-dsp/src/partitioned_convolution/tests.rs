@@ -674,3 +674,147 @@ fn nu_long_ir_matches_naive() {
         "max error {max_err} for long IR non-uniform convolution",
     );
 }
+
+// --- Direct-convolution reference cross-check (E092 / ticket 0545) ---
+
+/// f64 reference direct-convolution. Drives the candidate-vs-reference error
+/// check below. f64 is used so accumulated rounding in the reference does not
+/// mask algorithmic error in the f32 candidate.
+fn naive_convolve_f64(signal: &[f32], ir: &[f32]) -> Vec<f64> {
+    let out_len = signal.len() + ir.len() - 1;
+    let mut out = vec![0.0_f64; out_len];
+    for (i, &s) in signal.iter().enumerate() {
+        let sf = s as f64;
+        for (j, &h) in ir.iter().enumerate() {
+            out[i + j] += sf * h as f64;
+        }
+    }
+    out
+}
+
+/// Documented IR for the reference tests: a pair of impulses (at 0 and 7) with
+/// a first-order exponentially-decaying tail. The tail exercises sustained
+/// multi-partition contributions; the double impulses make partition-boundary
+/// errors easy to read off.
+fn reference_ir() -> Vec<f32> {
+    let mut ir = vec![0.0_f32; 64];
+    ir[0] = 1.0;
+    ir[7] = -0.6;
+    for i in 1..ir.len() {
+        ir[i] += 0.9_f32 * (-0.05 * i as f32).exp() * ((i as f32) * 0.3).sin();
+    }
+    ir
+}
+
+/// Cross-check `PartitionedConvolver` against an f64 direct convolution.
+///
+/// Covers a 64-tap IR (4 partitions at block_size=16) driven by an input at
+/// least 3× the partition length (so the input crosses multiple partition
+/// boundaries) and asserts the output matches direct convolution sample-for-
+/// sample within an FFT-precision tolerance.
+///
+/// # Latency invariant
+///
+/// `PartitionedConvolver` has zero algorithmic latency: block `b`'s output
+/// covers input samples `[b·N, (b+1)·N)`, matching naive convolution position-
+/// for-position. Since `latency == 0`, the "no nonzero samples in positions
+/// `0..latency`" check is vacuously satisfied; the per-sample error check
+/// already enforces that no output sample arrives earlier than the reference.
+#[test]
+fn partitioned_convolver_matches_direct_reference() {
+    let block_size = 16;
+    let ir = reference_ir();
+    assert_eq!(ir.len(), 64);
+    let parts = IrPartitions::from_ir(&ir, block_size);
+    assert_eq!(parts.num_partitions(), 4);
+    let mut conv = PartitionedConvolver::new(parts);
+
+    let num_blocks = 12; // 192 samples = 12 × partition length
+    let total = num_blocks * block_size;
+    assert!(total >= 3 * block_size);
+
+    // Deterministic broadband-ish input: two overlaid sinusoids at
+    // incommensurate rates. The exact choice does not matter; what matters
+    // is that partition boundaries fall at distinct input phases.
+    let signal: Vec<f32> = (0..total)
+        .map(|i| {
+            let x = i as f32;
+            0.8 * (x * 0.37).sin() + 0.3 * (x * 0.11 + 0.7).cos()
+        })
+        .collect();
+
+    let mut output = vec![0.0_f32; total];
+    for b in 0..num_blocks {
+        let s = b * block_size;
+        conv.process_block(&signal[s..s + block_size], &mut output[s..s + block_size]);
+    }
+
+    let reference = naive_convolve_f64(&signal, &ir);
+
+    // Tolerance chosen to reflect accumulated f32 FFT error over 12 blocks
+    // with 4 partitions; measured ~1e-5 on aarch64 macOS, 1e-4 gives comfortable
+    // margin without masking a real regression.
+    const TOLERANCE: f64 = 1.0e-4;
+    let mut max_err = 0.0_f64;
+    let mut worst_idx = 0usize;
+    for i in 0..output.len() {
+        let err = ((output[i] as f64) - reference[i]).abs();
+        if err > max_err {
+            max_err = err;
+            worst_idx = i;
+        }
+    }
+    assert!(
+        max_err < TOLERANCE,
+        "PartitionedConvolver max abs error {max_err:.3e} at sample {worst_idx} \
+         exceeds tolerance {TOLERANCE:.0e}"
+    );
+}
+
+/// Same cross-check against `NonUniformConvolver`.
+///
+/// NonUniform splits the IR into geometrically-growing tiers. Tier 0 processes
+/// every call at `base_block_size`; larger tiers accumulate input before
+/// firing. Internally each tier has its own delay, but the summed output
+/// across tiers aligns position-for-position with naive convolution (same
+/// latency invariant as `PartitionedConvolver`: zero).
+#[test]
+fn non_uniform_convolver_matches_direct_reference() {
+    let base_block = 16;
+    let max_tier_block = 32;
+    let ir = reference_ir();
+    let mut conv = NonUniformConvolver::new(&ir, base_block, max_tier_block);
+
+    let num_blocks = 16; // 256 samples > 3× IR length
+    let total = num_blocks * base_block;
+    let signal: Vec<f32> = (0..total)
+        .map(|i| {
+            let x = i as f32;
+            0.6 * (x * 0.29).sin() + 0.4 * (x * 0.17 + 1.1).cos()
+        })
+        .collect();
+
+    let mut output = vec![0.0_f32; total];
+    for b in 0..num_blocks {
+        let s = b * base_block;
+        conv.process_block(&signal[s..s + base_block], &mut output[s..s + base_block]);
+    }
+
+    let reference = naive_convolve_f64(&signal, &ir);
+
+    const TOLERANCE: f64 = 1.0e-4;
+    let mut max_err = 0.0_f64;
+    let mut worst_idx = 0usize;
+    for i in 0..output.len() {
+        let err = ((output[i] as f64) - reference[i]).abs();
+        if err > max_err {
+            max_err = err;
+            worst_idx = i;
+        }
+    }
+    assert!(
+        max_err < TOLERANCE,
+        "NonUniformConvolver max abs error {max_err:.3e} at sample {worst_idx} \
+         exceeds tolerance {TOLERANCE:.0e}"
+    );
+}
