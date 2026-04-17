@@ -267,7 +267,7 @@
           },
           {
             "type": "PATTERN",
-            "value": "[kK]?[hH][zZ]|[dD][bB]"
+            "value": "[kK]?[hH][zZ]|[dD][bB]|[cCsS]"
           }
         ]
       }
@@ -980,6 +980,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "float_unit"
+        },
+        {
+          "type": "SYMBOL",
           "name": "scale_num"
         }
       ]
@@ -1588,7 +1592,7 @@
                   "members": [
                     {
                       "type": "PATTERN",
-                      "value": "[kK]?[hH][zZ]|[dD][bB]"
+                      "value": "[kK]?[hH][zZ]|[dD][bB]|[cCsS]"
                     },
                     {
                       "type": "BLANK"
@@ -1618,7 +1622,7 @@
                 },
                 {
                   "type": "PATTERN",
-                  "value": "[kK]?[hH][zZ]|[dD][bB]"
+                  "value": "[kK]?[hH][zZ]|[dD][bB]|[cCsS]"
                 }
               ]
             },

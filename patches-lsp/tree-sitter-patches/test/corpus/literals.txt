@@ -1,17 +1,29 @@
 ================================================================================
-Unit literals (Hz and dB)
+Unit literals (Hz, dB, c, s)
 ================================================================================
 
 patch {
     module amp : Gain { gain: -6dB }
     module osc : Osc { freq: 440Hz }
     module osc2 : Osc { freq: 4.4kHz }
+    module osc3 : Osc { detune: 50c }
+    module osc4 : Osc { detune: -3s }
 }
 
 --------------------------------------------------------------------------------
 
 (file
   (patch
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (float_unit)))))))
+    (statement
+      (module_decl
+        name: (ident) type: (ident)
+        (param_block
+          (param_entry (ident) (value (scalar (float_unit)))))))
     (statement
       (module_decl
         name: (ident) type: (ident)

@@ -82,7 +82,7 @@ fn build_at_block(node: tree_sitter::Node, source: &str, diags: &mut Vec<Diagnos
     let index = first_named_child_of_kind(node, "at_block_index")
         .map(|n| build_at_block_index(n, source, diags));
 
-    let entries = first_named_child_of_kind(node, "table")
+    let entries = first_named_child_of_kind(node, "at_block_body")
         .map(|t| build_table_entries(t, source, diags))
         .unwrap_or_default();
 

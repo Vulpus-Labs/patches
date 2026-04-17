@@ -11,6 +11,12 @@ patch {
     module osc3 : Osc { freq: 4.4kHz }
     module osc4 : Osc { freq: 4.4KHZ }    # uppercase
 
+    # cents (`c`): N/1200 v/oct; semis (`s`): N/12 v/oct
+    module d1 : Osc { detune: 50c }
+    module d2 : Osc { detune: -25C }       # case-insensitive, negative
+    module d3 : Osc { detune: 3s }
+    module d4 : Osc { detune: -1.5S }      # mixed case, float
+
     # Note names: v/oct offset from C0
     module n1 : Osc { freq: C4 }
     module n2 : Osc { freq: a4 }          # case-insensitive

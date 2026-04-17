@@ -74,6 +74,10 @@ pub(super) fn parse_float_unit(s: &str, diags: &mut Vec<Diagnostic>, span: crate
         (&s[..s.len() - 2], "hz")
     } else if lower.ends_with("db") {
         (&s[..s.len() - 2], "db")
+    } else if lower.ends_with('c') {
+        (&s[..s.len() - 1], "c")
+    } else if lower.ends_with('s') {
+        (&s[..s.len() - 1], "s")
     } else {
         (s, "")
     };
@@ -109,6 +113,8 @@ pub(super) fn parse_float_unit(s: &str, diags: &mut Vec<Diagnostic>, span: crate
                 (hz / C0_HZ).log2()
             }
         }
+        "c" => num / 1200.0,
+        "s" => num / 12.0,
         _ => num,
     }
 }
@@ -213,7 +219,7 @@ pub(super) fn build_table_entries(
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<(Ident, Value)> {
     super::diagnostics::walk_errors(node, diags);
-    named_children_of_kind(node, "table_entry")
+    named_children_of_kind(node, "at_block_entry")
         .into_iter()
         .filter_map(|te| {
             let key = first_named_child_of_kind(te, "ident").map(|n| build_ident(n, source))?;

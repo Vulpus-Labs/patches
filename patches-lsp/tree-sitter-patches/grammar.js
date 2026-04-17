@@ -34,13 +34,14 @@ module.exports = grammar({
     scale_num: (_) => token(seq(optional("-"), /\d+/, optional(seq(".", /\d*/)))),
 
     // ─── Unit-suffixed numeric literals ─────────────────────────────────
+    // khz/hz/db, plus `c` (cents, N/1200) and `s` (semis, N/12).
     float_unit: (_) =>
       token(
         seq(
           optional("-"),
           /\d+/,
           optional(seq(".", /\d*/)),
-          /[kK]?[hH][zZ]|[dD][bB]/
+          /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/
         )
       ),
 
@@ -130,7 +131,8 @@ module.exports = grammar({
       seq($.module_ident, ".", $.port_label, optional($.port_index)),
 
     // ─── Arrows ─────────────────────────────────────────────────────────
-    scale_val: ($) => choice($.param_ref, $.scale_num),
+    // float_unit before scale_num so "1s" parses as unit, not "1" + leftover.
+    scale_val: ($) => choice($.param_ref, $.float_unit, $.scale_num),
 
     forward_arrow: ($) =>
       choice(seq("-[", $.scale_val, "]->"), "->"),
@@ -215,9 +217,9 @@ module.exports = grammar({
       token(
         prec(2, choice(
           // float with optional unit
-          seq(optional("-"), /\d+/, ".", /\d*/, optional(/[kK]?[hH][zZ]|[dD][bB]/)),
+          seq(optional("-"), /\d+/, ".", /\d*/, optional(/[kK]?[hH][zZ]|[dD][bB]|[cCsS]/)),
           // integer with optional unit
-          seq(optional("-"), /\d+/, /[kK]?[hH][zZ]|[dD][bB]/),
+          seq(optional("-"), /\d+/, /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/),
           // plain integer
           seq(optional("-"), /\d+/),
           // note literal

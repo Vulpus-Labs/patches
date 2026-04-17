@@ -109,9 +109,38 @@ fn unit_literal_conversions() {
         ("A4",    57.0 / 12.0),  // 4*12 + 9 = 57
         ("Bb2",   34.0 / 12.0),  // 2*12 + 10 = 34
         ("A#-1",  -2.0 / 12.0),  // -1*12 + 10 = -2
+        // cents (`c`): N / 1200 v/oct
+        ("50c",    50.0 / 1200.0),
+        ("-25C",  -25.0 / 1200.0),
+        ("12.5c", 12.5 / 1200.0),
+        // semis (`s`): N / 12 v/oct
+        ("3s",    3.0 / 12.0),
+        ("-1s",  -1.0 / 12.0),
+        ("1.5S",  1.5 / 12.0),
     ];
     for &(literal, expected) in cases {
         assert_float_close(parse_one_scalar(literal), expected, literal);
+    }
+}
+
+#[test]
+fn scale_accepts_unit_literal() {
+    let src = "patch {
+        module a : X
+        module b : Y
+        a.out -[1s]-> b.in
+    }";
+    let file = parse(src).unwrap();
+    let conn = file.patch.body.iter().find_map(|s| match s {
+        Statement::Connection(c) => Some(c),
+        _ => None,
+    }).expect("expected connection");
+    match &conn.arrow.scale {
+        Some(Scalar::Float(v)) => assert!(
+            (v - 1.0 / 12.0).abs() < 1e-9,
+            "expected 1/12, got {v}"
+        ),
+        other => panic!("expected Float scale, got {other:?}"),
     }
 }
 

@@ -251,19 +251,20 @@ pub(super) fn build_port_ref(pair: Pair<'_, Rule>) -> Result<PortRef, ParseError
 
 /// Parse a `scale_val` pair into a `Scalar` (Float or ParamRef).
 ///
-/// `scale_val = ${ param_ref | scale_num }` — the inner child is either
-/// `param_ref` or `scale_num`.
+/// `scale_val = ${ param_ref | float_unit | scale_num }` — inner child is
+/// `param_ref`, `float_unit`, or `scale_num`.
 fn build_scale_val(pair: Pair<'_, Rule>) -> Result<Scalar, ParseError> {
     // pair.as_rule() == Rule::scale_val
     let inner = pair.into_inner().next().unwrap();
+    let s_span = span_of(&inner);
     match inner.as_rule() {
-        Rule::scale_num => {
-            let s_span = span_of(&inner);
-            inner.as_str().parse::<f64>().map(Scalar::Float).map_err(|_| ParseError {
+        Rule::scale_num => inner.as_str().parse::<f64>().map(Scalar::Float).map_err(|_| {
+            ParseError {
                 span: s_span,
                 message: format!("invalid scale factor: {:?}", inner.as_str()),
-            })
-        }
+            }
+        }),
+        Rule::float_unit => parse_unit_value(inner.as_str(), s_span).map(Scalar::Float),
         Rule::param_ref => Ok(Scalar::ParamRef(build_param_ref_name(inner))),
         _ => unreachable!("unexpected rule in scale_val: {:?}", inner.as_rule()),
     }

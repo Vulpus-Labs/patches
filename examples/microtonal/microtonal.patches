@@ -105,7 +105,7 @@ template voice {
 
     module pitch_add : Sum(channels: [base, adj])
     player.cv1 -> pitch_add.in[base]
-    player.cv2 -[0.08333]-> pitch_add.in[adj]
+    player.cv2 -[1s]-> pitch_add.in[adj]
 
     module osc1 : Osc { frequency: 0.0, drift: 0.5 }
     module osc2 : Osc { frequency: -0.02, drift: 0.5 }

@@ -8,9 +8,10 @@ use super::error::ParseError;
 /// Frequency of C0 in Hz (A4 = 440 Hz; C0 is 57 semitones below A4).
 const C0_HZ: f64 = 16.351_597_831_287_414;
 
-/// Split a unit-suffixed string (e.g. "440Hz", "-6dB", "5.6kHz") into the
-/// numeric portion and a lowercase unit tag.  Returns the raw number string
-/// (a slice of the original) and one of `"khz"`, `"hz"`, or `"db"`.
+/// Split a unit-suffixed string (e.g. "440Hz", "-6dB", "5.6kHz", "50c", "3s")
+/// into the numeric portion and a lowercase unit tag. Returns the raw number
+/// string (a slice of the original) and one of `"khz"`, `"hz"`, `"db"`,
+/// `"c"`, or `"s"`.
 fn split_unit_suffix(s: &str, span: Span) -> Result<(&str, &'static str), ParseError> {
     let sl = s.to_ascii_lowercase();
     if sl.ends_with("khz") {
@@ -19,6 +20,10 @@ fn split_unit_suffix(s: &str, span: Span) -> Result<(&str, &'static str), ParseE
         Ok((&s[..s.len() - 2], "hz"))
     } else if sl.ends_with("db") {
         Ok((&s[..s.len() - 2], "db"))
+    } else if sl.ends_with('c') {
+        Ok((&s[..s.len() - 1], "c"))
+    } else if sl.ends_with('s') {
+        Ok((&s[..s.len() - 1], "s"))
     } else {
         Err(ParseError {
             span,
@@ -28,7 +33,8 @@ fn split_unit_suffix(s: &str, span: Span) -> Result<(&str, &'static str), ParseE
 }
 
 /// Parse a numeric string with a unit suffix into its linear value (f64).
-/// dB → linear amplitude, Hz/kHz → v/oct.
+/// dB → linear amplitude; Hz/kHz → v/oct; `c` (cents) → N/1200 v/oct;
+/// `s` (semis) → N/12 v/oct.
 pub(super) fn parse_unit_value(s: &str, span: Span) -> Result<f64, ParseError> {
     let (num_str, unit) = split_unit_suffix(s, span)?;
     let num: f64 = num_str.parse().map_err(|_| ParseError {
@@ -39,6 +45,8 @@ pub(super) fn parse_unit_value(s: &str, span: Span) -> Result<f64, ParseError> {
         "db" => Ok(10.0_f64.powf(num / 20.0)),
         "hz" => hz_to_voct(num, span),
         "khz" => hz_to_voct(num * 1000.0, span),
+        "c" => Ok(num / 1200.0),
+        "s" => Ok(num / 12.0),
         _ => unreachable!(),
     }
 }

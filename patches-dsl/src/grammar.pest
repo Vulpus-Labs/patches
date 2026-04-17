@@ -17,10 +17,12 @@ scale_num  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? }
 
 // ─── Unit-suffixed numeric literals ───────────────────────────────────────────
 // kHz before Hz to prevent "kHz" matching as just "Hz" with a dangling "k".
-unit_suffix = @{ ^"khz" | ^"hz" | ^"db" }
+// `c` = cents (N/1200 v/oct); `s` = semis (N/12 v/oct).
+unit_suffix = @{ ^"khz" | ^"hz" | ^"db" | ^"c" | ^"s" }
 // Number (possibly signed) immediately followed by a unit suffix (no whitespace).
-// The parser rejects negative/zero Hz and kHz; negative dB is valid (-6dB ≈ 0.5).
-float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix }
+// Trailing boundary prevents single-letter `c`/`s` from eating subsequent idents.
+// The parser rejects negative/zero Hz and kHz; dB, cents, semis may be negative.
+float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix ~ !(ASCII_ALPHANUMERIC | "_") }
 
 // ─── Note name literals ───────────────────────────────────────────────────────
 // Examples: C1  Bb2  A#-1  f#3  db0  (all case-insensitive)
@@ -100,8 +102,9 @@ port_ref     = ${ module_ident ~ "." ~ port_label ~ port_index? }
 
 // ─── Arrows ───────────────────────────────────────────────────────────────────
 // Compound-atomic: no whitespace inside "-[0.5]->" or "<-[0.5]-"
-// Scale value: either a numeric literal or a <param> reference
-scale_val      = ${ param_ref | scale_num }
+// Scale value: a unit literal, a plain numeric literal, or a <param> reference.
+// float_unit comes first so `1s` is not consumed as `scale_num` "1".
+scale_val      = ${ param_ref | float_unit | scale_num }
 forward_arrow  = ${ ("-[" ~ scale_val ~ "]->") | "->" }
 backward_arrow = ${ ("<-[" ~ scale_val ~ "]-") | "<-" }
 arrow          = { forward_arrow | backward_arrow }

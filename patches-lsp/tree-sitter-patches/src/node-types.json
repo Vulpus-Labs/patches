@@ -859,6 +859,10 @@
       "required": true,
       "types": [
         {
+          "type": "float_unit",
+          "named": true
+        },
+        {
           "type": "param_ref",
           "named": true
         },
