@@ -1,21 +1,17 @@
 [package]
-name = "patches-modules"
-version = "0.6.0"
+name = "patches-vintage"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-registry = { path = "../patches-registry" }
 patches-dsp = { path = "../patches-dsp" }
-patches-io = { path = "../patches-io" }
-patches-tracker-core = { path = "../patches-tracker-core" }
-patches-vintage = { path = "../patches-vintage" }
-rtrb = "0.3"
 
 [dev-dependencies]
 patches-core = { path = "../patches-core", features = ["test-support"] }
 
 [lib]
-name = "patches_modules"
+name = "patches_vintage"
 path = "src/lib.rs"
 doctest = false

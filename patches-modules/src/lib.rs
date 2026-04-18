@@ -183,6 +183,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<HostTransport>();
     r.register::<TempoSync>();
     r.register::<MsTicker>();
+    patches_vintage::register(&mut r);
     r
 }
 
