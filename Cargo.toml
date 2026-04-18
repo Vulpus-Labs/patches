@@ -11,6 +11,7 @@ members = [
     "patches-engine",
     "patches-planner",
     "patches-cpal",
+    "patches-host",
     "patches-integration-tests",
     "patches-player",
     "patches-profiling",

@@ -7,7 +7,6 @@
 use std::ffi::{c_char, c_void};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
 /// Log a message to ~/patches-clap-debug.log for crash diagnosis.
 macro_rules! dlog {
@@ -35,12 +34,11 @@ use clap_sys::process::{
 };
 
 use patches_core::source_map::SourceMap;
-use patches_core::{
-    AudioEnvironment, MidiEvent, ModuleGraph, BASE_PERIODIC_UPDATE_INTERVAL,
-};
+use patches_core::{AudioEnvironment, MidiEvent, BASE_PERIODIC_UPDATE_INTERVAL};
 use patches_registry::Registry;
 use patches_planner::ExecutionPlan;
-use patches_engine::{CleanupAction, PatchProcessor, Planner};
+use patches_engine::PatchProcessor;
+use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 
 use crate::error::CompileError;
 use crate::extensions;
@@ -57,22 +55,19 @@ pub struct PatchesClapPlugin {
     pub(crate) host: *const clap_host,
 
     // ── Audio-thread state ──────────────────────────────────────────
+    /// Taken out of [`HostRuntime`] at activate time so the CLAP audio
+    /// callback can drive it.
     pub(crate) processor: Option<PatchProcessor>,
     pub(crate) plan_rx: Option<rtrb::Consumer<ExecutionPlan>>,
 
     // ── Main-thread state ───────────────────────────────────────────
-    pub(crate) plan_tx: Option<rtrb::Producer<ExecutionPlan>>,
-    pub(crate) cleanup_thread: Option<JoinHandle<()>>,
-    pub(crate) planner: Planner,
+    /// Owns the planner, plan-tx producer, cleanup thread and audio env.
+    /// `None` until [`activate`](plugin_activate); reset on `deactivate`.
+    pub(crate) runtime: Option<HostRuntime>,
     pub(crate) registry: Registry,
-    pub(crate) env: Option<AudioEnvironment>,
 
     // ── DSL state ───────────────────────────────────────────────────
     pub(crate) dsl_source: String,
-    /// Parent directory of the loaded `.patches` file, used to resolve
-    /// relative asset paths (e.g. IR files).
-    pub(crate) base_dir: Option<std::path::PathBuf>,
-    pub(crate) graph: Option<ModuleGraph>,
 
     // ── GUI ─────────────────────────────────────────────────────────
     pub(crate) gui_state: Arc<Mutex<GuiState>>,
@@ -105,52 +100,27 @@ impl PatchesClapPlugin {
     /// Called from `activate` (if source non-empty), `state_load`, and
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
-        use patches_dsl::pipeline::PipelineAudit;
+        let runtime = self.runtime.as_mut().ok_or(CompileError::NotActivated)?;
 
-        let env = self.env.as_ref().ok_or(CompileError::NotActivated)?;
-        // Stages 1–2: load + pest parse (or inline parse fallback when no file path).
-        let (file, source_map) = self.load_or_parse()?;
-        self.last_source_map = Some(source_map);
-        // Stage 3: expansion.
-        let expanded = patches_dsl::pipeline::expand_file(&file)?;
-        let flat = expanded.patch;
-        // Stage 3b: descriptor-level binding (fail-fast on any error;
-        // every bind error is surfaced to the host via the CompileError
-        // diagnostic path).
-        let bound = patches_interpreter::bind_with_base_dir(
-            &flat,
-            &self.registry,
-            self.base_dir.as_deref(),
-        );
-        // Pipeline-layering (PV####) audit — see ticket 0440. Runs before
-        // the fail-fast bind check so warnings surface even when bind
-        // succeeds cleanly. The `PipelineAudit` trait method is the
-        // orchestrator-level hook; patches-clap does not call
-        // `pipeline_layering_warnings` directly.
-        let layering = bound.layering_warnings();
-        if !layering.is_empty() {
-            let rendered: Vec<_> = layering
+        let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
+        let mut source = InMemorySource::new(self.dsl_source.clone());
+        if let Some(path) = file_path {
+            source = source.with_master_path(path);
+        }
+
+        let (loaded, plan) = runtime.compile(&source, &self.registry)?;
+        self.last_source_map = Some(loaded.source_map);
+
+        if !loaded.layering_warnings.is_empty() {
+            let rendered: Vec<_> = loaded
+                .layering_warnings
                 .iter()
                 .map(patches_diagnostics::RenderedDiagnostic::from_layering_warning)
                 .collect();
             lock_gui_mut(&self.gui_state, |g| g.diagnostic_view.diagnostics.extend(rendered));
         }
-        if !bound.errors.is_empty() {
-            return Err(CompileError::Bind(bound.graph.errors));
-        }
-        // Stage 5: runtime graph construction from the validated bound
-        // graph.
-        let build_result = patches_interpreter::build_from_bound(&bound, env)?;
-        let graph = build_result.graph;
-        let tracker_data = build_result.tracker_data;
-        // Stage 4: engine plan.
-        let plan = self
-            .planner
-            .build_with_tracker_data(&graph, &self.registry, env, tracker_data)?;
-        self.graph = Some(graph);
-        if let Some(tx) = &mut self.plan_tx {
-            let _ = tx.push(plan);
-        }
+
+        let _ = runtime.push_plan(plan);
         Ok(())
     }
 
@@ -160,38 +130,6 @@ impl PatchesClapPlugin {
         let source_map = self.last_source_map.clone().unwrap_or_default();
         let diagnostics = err.to_rendered_diagnostics(&source_map);
         DiagnosticView { diagnostics, source_map: Some(source_map) }
-    }
-
-    /// Load the master file using the include loader (resolving includes) when
-    /// a file path is available on disk, or fall back to parsing `dsl_source`
-    /// directly (e.g. state restored without original files).
-    ///
-    /// The master file is read from `self.dsl_source` (already loaded by the
-    /// caller) to avoid a redundant disk read and TOCTOU inconsistency.
-    fn load_or_parse(&self) -> Result<(patches_dsl::File, SourceMap), CompileError> {
-        let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
-        if let Some(path) = file_path {
-            if path.exists() {
-                let master_source = self.dsl_source.clone();
-                let master_canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-                // Pipeline stage 1 (+ 2): resolve includes and pest-parse each file.
-                let load_result = patches_dsl::pipeline::load(&path, |p| {
-                    // For the master file, return the already-read source;
-                    // for included files, read from disk.
-                    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-                    if canonical == master_canonical {
-                        Ok(master_source.clone())
-                    } else {
-                        std::fs::read_to_string(p)
-                    }
-                })?;
-                return Ok((load_result.file, load_result.source_map));
-            }
-        }
-        // Fallback: parse the in-memory source (no include resolution) — emit
-        // an empty SourceMap; diagnostics from this path have no resolvable
-        // paths but still render with line/column derived from the span text.
-        Ok((patches_dsl::pipeline::parse_source(&self.dsl_source)?, SourceMap::new()))
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.
@@ -310,27 +248,24 @@ unsafe extern "C" fn plugin_activate(
         periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
         hosted: true,
     };
-    p.env = Some(env);
 
-    // Cleanup ring buffer.
-    let (cleanup_tx, cleanup_rx) = rtrb::RingBuffer::<CleanupAction>::new(1024);
-
-    // Spawn cleanup thread.
-    match patches_engine::kernel::spawn_cleanup_thread(cleanup_rx) {
-        Ok(handle) => p.cleanup_thread = Some(handle),
+    let mut runtime = match HostBuilder::new().build(env) {
+        Ok(r) => r,
         Err(e) => {
-            eprintln!("patches-clap: failed to spawn cleanup thread: {e}");
+            eprintln!("patches-clap: failed to build host runtime: {e}");
             return false;
         }
-    }
-
-    // Create the processor.
-    p.processor = Some(PatchProcessor::new(4096, 1024, 1, cleanup_tx));
-
-    // Plan delivery channel.
-    let (plan_tx, plan_rx) = rtrb::RingBuffer::<ExecutionPlan>::new(1);
-    p.plan_tx = Some(plan_tx);
+    };
+    let (processor, plan_rx) = match runtime.take_audio_endpoints() {
+        Some(pair) => pair,
+        None => {
+            eprintln!("patches-clap: host runtime missing audio endpoints");
+            return false;
+        }
+    };
+    p.processor = Some(processor);
     p.plan_rx = Some(plan_rx);
+    p.runtime = Some(runtime);
 
     // If we already have DSL source (e.g. from state_load), compile now.
     if !p.dsl_source.is_empty() {
@@ -360,20 +295,12 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     dlog!("deactivate");
     let p = plugin_mut(plugin);
 
-    // Drop plan channel.
-    p.plan_tx.take();
+    // Drop the audio-thread endpoints first (releasing the cleanup_tx
+    // producer the processor holds), then the runtime — its `Drop` joins
+    // the cleanup thread.
     p.plan_rx.take();
-
-    // Drop processor — this drops the cleanup_tx, signalling the
-    // cleanup thread to exit.
     p.processor.take();
-
-    // Join cleanup thread.
-    if let Some(handle) = p.cleanup_thread.take() {
-        let _ = handle.join();
-    }
-
-    p.env = None;
+    p.runtime.take();
 }
 
 unsafe extern "C" fn plugin_start_processing(_plugin: *const clap_plugin) -> bool {
@@ -657,7 +584,6 @@ fn set_status_from_load(
     match std::fs::read_to_string(path) {
         Ok(source) => {
             p.dsl_source = source;
-            p.base_dir = path.parent().map(|d| d.to_path_buf());
             match p.compile_and_push_plan() {
                 Ok(()) => lock_gui_mut(&p.gui_state, |g| {
                     g.push_status(success_msg);

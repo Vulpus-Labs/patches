@@ -183,14 +183,9 @@ unsafe extern "C" fn state_load(
         }
     }
     p.dsl_source = source;
-    p.base_dir = if path_str.is_empty() {
-        None
-    } else {
-        std::path::Path::new(&path_str).parent().map(|d| d.to_path_buf())
-    };
 
     // If activated, compile and push the plan.
-    if p.env.is_some() && !p.dsl_source.is_empty() {
+    if p.runtime.is_some() && !p.dsl_source.is_empty() {
         if let Err(e) = p.compile_and_push_plan() {
             eprintln!("patches-clap: state load compile failed: {e}");
         }

@@ -1,0 +1,23 @@
+[package]
+name = "patches-host"
+version = "0.6.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsl = { path = "../patches-dsl" }
+patches-interpreter = { path = "../patches-interpreter" }
+patches-registry = { path = "../patches-registry" }
+patches-planner = { path = "../patches-planner" }
+patches-engine = { path = "../patches-engine" }
+patches-diagnostics = { path = "../patches-diagnostics" }
+rtrb = "0.3"
+
+[dev-dependencies]
+patches-modules = { path = "../patches-modules" }
+
+[lib]
+name = "patches_host"
+path = "src/lib.rs"
+doctest = false
