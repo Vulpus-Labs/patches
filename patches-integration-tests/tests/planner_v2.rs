@@ -1,6 +1,6 @@
 use patches_core::{AUDIO_OUT_L, CablePool, CableValue, Module, ModuleGraph, ModuleShape, NodeId};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_core::PlannerState;
+use patches_planner::PlannerState;
 use patches_engine::{build_patch, ExecutionPlan, ReadyState, StaleState, ModulePool};
 use patches_modules::{AudioOut, Mixer, Oscillator, Sum};
 use patches_integration_tests::{p, pi, env, POOL_CAP, MODULE_CAP};

@@ -3,12 +3,13 @@ use std::time::Instant;
 use cpal::traits::DeviceTrait;
 use cpal::{Stream, StreamConfig};
 
-use crate::builder::ExecutionPlan;
-use crate::decimator::Decimator;
+use patches_planner::ExecutionPlan;
+use patches_engine::decimator::Decimator;
+use patches_engine::execution_state::SUB_BLOCK_SIZE;
+use patches_engine::midi::{AudioClock, EventQueueConsumer};
+use patches_engine::processor::PatchProcessor;
+
 use crate::engine::EngineError;
-use crate::execution_state::SUB_BLOCK_SIZE;
-use crate::midi::{AudioClock, EventQueueConsumer};
-use crate::processor::PatchProcessor;
 
 /// CPAL output callback.
 ///
@@ -71,7 +72,7 @@ impl AudioCallback {
         control_period_base: usize,
         input_rx: Option<rtrb::Consumer<[f32; 2]>>,
     ) -> Self {
-        use crate::oversampling::OversamplingFactor;
+        use patches_engine::oversampling::OversamplingFactor;
         let factor_enum = match oversampling_factor {
             2 => OversamplingFactor::X2,
             4 => OversamplingFactor::X4,

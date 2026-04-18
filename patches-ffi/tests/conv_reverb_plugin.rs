@@ -6,7 +6,8 @@ use std::time::Instant;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort};
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue};
-use patches_core::{AudioEnvironment, ModuleBuilder};
+use patches_core::AudioEnvironment;
+use patches_registry::ModuleBuilder;
 use patches_ffi::loader::load_plugin;
 
 fn conv_reverb_dylib_path() -> PathBuf {

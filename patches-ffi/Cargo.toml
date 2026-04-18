@@ -9,5 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 patches-core = { path = "../patches-core" }
+patches-registry = { path = "../patches-registry" }
 patches-ffi-common = { path = "../patches-ffi-common" }
 libloading = "0.8"

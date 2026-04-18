@@ -63,7 +63,7 @@ impl X2Stage {
 ///
 /// Constructed once at engine start. `push` is called once per oversampled
 /// inner tick and returns `Some(output)` every `factor` calls.
-pub(crate) enum Decimator {
+pub enum Decimator {
     /// 1× — pass every sample through unchanged.
     Passthrough,
     /// 2× — one halfband FIR stage.
@@ -76,7 +76,7 @@ pub(crate) enum Decimator {
 
 impl Decimator {
     /// Create a decimator for the given oversampling factor.
-    pub(crate) fn new(factor: OversamplingFactor) -> Self {
+    pub fn new(factor: OversamplingFactor) -> Self {
         match factor {
             OversamplingFactor::None => Decimator::Passthrough,
             OversamplingFactor::X2 => Decimator::X2(X2Stage::new()),
@@ -91,7 +91,7 @@ impl Decimator {
     /// `Some(output)` on the final call. For `OversamplingFactor::None` always
     /// returns `Some(x)`.
     #[inline]
-    pub(crate) fn push(&mut self, x: f32) -> Option<f32> {
+    pub fn push(&mut self, x: f32) -> Option<f32> {
         match self {
             Decimator::Passthrough => Some(x),
             Decimator::X2(s) => s.push(x),

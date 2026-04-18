@@ -45,3 +45,14 @@ before and after.
 `patches-engine/src/engine.rs` is the most delicate file: cpal stream
 creation lives alongside backend-agnostic processor setup. Split
 carefully along that seam rather than moving the whole file.
+
+**MIDI decision (2026-04-18):** `patches-engine/src/midi/` has no cpal
+coupling, so it stays in `patches-engine`. `AudioClock`, `EventQueue`,
+`MidiConnector`, `EventScheduler` remain available to non-cpal
+embeddings (CLAP uses them directly).
+
+**PatchEngine followed the split:** `PatchEngine` / `PatchEngineError`
+owned a `SoundEngine`, so they moved to `patches-cpal::patch_engine`.
+`Planner` stays in `patches-engine`. `CleanupAction` /
+`DEFAULT_MODULE_POOL_CAPACITY` extracted to
+`patches-engine/src/cleanup.rs`.

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use patches_core::provenance::Provenance;
 use patches_core::source_map::{line_col, SourceMap};
 use patches_core::source_span::{SourceId, Span};
-use patches_core::{ModuleDescriptor, Registry};
+use patches_core::ModuleDescriptor;
+use patches_registry::Registry;
 use patches_dsl::{FlatConnection, FlatModule, FlatPatch};
 
 use crate::layout::{EdgeHint, LayoutEdge, LayoutNode, NodeHint};

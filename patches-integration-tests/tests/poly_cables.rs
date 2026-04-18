@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, GraphError, InstanceId, Module, ModuleDescriptor,
-    ModuleGraph, ModuleShape, NodeId, PolyLayout, PortDescriptor, PolyInput, PolyOutput, Registry,
+    ModuleGraph, ModuleShape, NodeId, PolyLayout, PortDescriptor, PolyInput, PolyOutput,
 };
+use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::ParameterMap;
 use patches_engine::{build_patch, PlannerState};

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "patches-core",
+    "patches-registry",
     "patches-diagnostics",
     "patches-dsl",
     "patches-dsp",
@@ -8,6 +9,8 @@ members = [
     "patches-modules",
     "patches-io",
     "patches-engine",
+    "patches-planner",
+    "patches-cpal",
     "patches-integration-tests",
     "patches-player",
     "patches-profiling",

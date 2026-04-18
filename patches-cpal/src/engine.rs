@@ -5,14 +5,15 @@ use std::thread;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 
-use patches_core::{AudioEnvironment, CableValue, Module};
+use patches_core::{AudioEnvironment, CableValue};
+use patches_planner::ExecutionPlan;
+use patches_engine::execution_state::SUB_BLOCK_SIZE;
+use patches_engine::midi::{AudioClock, EventQueueConsumer};
+use patches_engine::oversampling::OversamplingFactor;
+use patches_engine::pool::ModulePool;
+use patches_engine::CleanupAction;
 
-use crate::builder::ExecutionPlan;
 use crate::callback::{build_stream, AudioCallback};
-use crate::execution_state::SUB_BLOCK_SIZE;
-use crate::midi::{AudioClock, EventQueueConsumer};
-use crate::oversampling::OversamplingFactor;
-use crate::pool::ModulePool;
 
 /// Configuration for audio device selection.
 ///
@@ -71,27 +72,7 @@ pub fn enumerate_devices() -> Vec<DeviceInfo> {
     devices
 }
 
-/// Default module pool capacity: number of `Option<Box<dyn Module>>` slots
-/// pre-allocated on the audio thread.
-///
-/// 1024 was chosen as a round power-of-two that comfortably covers any realistic
-/// patch (typical patches use tens of modules; even dense live-coding setups rarely
-/// exceed a few hundred).  It supports up to ~1000 simultaneous module instances
-/// with a small margin.  If a patch exceeds this limit, increase this constant or
-/// supply a custom capacity via [`SoundEngine::with_capacity`].
-pub const DEFAULT_MODULE_POOL_CAPACITY: usize = 1024;
-
-/// A value sent to the `"patches-cleanup"` thread for deallocation off the
-/// audio thread.
-///
-/// Introduced in T-0169 to replace the bare `Box<dyn Module>` ring buffer
-/// element type. The cleanup thread simply drops whichever variant it receives.
-pub enum CleanupAction {
-    /// A module evicted from the pool via [`ModulePool::tombstone`].
-    DropModule(Box<dyn Module>),
-    /// An [`ExecutionPlan`] replaced by a newer one.
-    DropPlan(Box<ExecutionPlan>),
-}
+pub use patches_engine::DEFAULT_MODULE_POOL_CAPACITY;
 
 /// Pre-start state: the plan channel consumer, the cable buffer pool, and the
 /// module pool. Stored in [`SoundEngine`] until [`start`](SoundEngine::start)
@@ -243,7 +224,7 @@ pub struct SoundEngine {
     /// Optional WAV recorder.  Held here so that `stop()` can signal the
     /// writer thread *after* dropping the CPAL stream (ensuring no more frames
     /// are pushed to the ring buffer before the writer drains and finalises).
-    recorder: Option<crate::wav_recorder::WavRecorder>,
+    recorder: Option<patches_io::wav_recorder::WavRecorder>,
     /// Input capture handle.  Holds the CPAL input stream alive.
     /// Dropped by [`stop`](Self::stop) after the output stream.
     input_capture: Option<crate::input_capture::InputCapture>,
@@ -279,7 +260,7 @@ impl SoundEngine {
         module_pool_capacity: usize,
         oversampling: OversamplingFactor,
     ) -> Result<Self, EngineError> {
-        let buffer_pool = crate::kernel::init_buffer_pool(buffer_pool_capacity);
+        let buffer_pool = patches_engine::kernel::init_buffer_pool(buffer_pool_capacity);
         let module_pool = ModulePool::new(module_pool_capacity);
         let (plan_tx, plan_rx) = rtrb::RingBuffer::new(1);
         let clock = Arc::new(AudioClock::new());
@@ -400,14 +381,14 @@ impl SoundEngine {
         let (cleanup_tx, cleanup_rx) =
             rtrb::RingBuffer::<CleanupAction>::new(self.module_pool_capacity);
 
-        let cleanup_handle = crate::kernel::spawn_cleanup_thread(cleanup_rx)
+        let cleanup_handle = patches_engine::kernel::spawn_cleanup_thread(cleanup_rx)
             .map_err(EngineError::ThreadSpawnError)?;
 
         self.cleanup_thread = Some(cleanup_handle);
 
         let record_tx = if let Some(path) = record_path {
             let sample_rate = config.sample_rate.0;
-            let (recorder, tx) = crate::wav_recorder::open(path, sample_rate)
+            let (recorder, tx) = patches_io::wav_recorder::open(path, sample_rate)
                 .map_err(EngineError::RecordOpenError)?;
             self.recorder = Some(recorder);
             Some(tx)
@@ -420,7 +401,7 @@ impl SoundEngine {
             capture.play().map_err(EngineError::PlayStreamError)?;
         }
 
-        let processor = crate::processor::PatchProcessor::from_parts(
+        let processor = patches_engine::processor::PatchProcessor::from_parts(
             buffer_pool,
             module_pool,
             self.oversampling_factor,
@@ -510,7 +491,7 @@ mod tests {
     use patches_core::{AudioEnvironment, InstanceId, Module, ModuleDescriptor, ModuleShape};
     use patches_core::parameter_map::ParameterMap;
 
-    use super::CleanupAction;
+    use patches_engine::CleanupAction;
 
     struct ThreadIdDropSpy {
         instance_id: InstanceId,
@@ -587,7 +568,7 @@ mod tests {
         let spy = Box::new(ThreadIdDropSpy::new(Arc::clone(&drop_thread)));
         let (mut tx, rx) = rtrb::RingBuffer::<CleanupAction>::new(16);
 
-        let handle = crate::kernel::spawn_cleanup_thread(rx).unwrap();
+        let handle = patches_engine::kernel::spawn_cleanup_thread(rx).unwrap();
 
         tx.push(CleanupAction::DropModule(spy)).unwrap();
         drop(tx); // abandon producer → cleanup thread exits

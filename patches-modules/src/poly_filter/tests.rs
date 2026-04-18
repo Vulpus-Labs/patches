@@ -4,8 +4,9 @@ use super::*;
 use crate::common::frequency::C0_FREQ;
 use patches_core::{
     AudioEnvironment, CablePool, CableValue, InstanceId, Module, ModuleShape,
-    PolyInput, PolyOutput, Registry, COEFF_UPDATE_INTERVAL,
+    PolyInput, PolyOutput, COEFF_UPDATE_INTERVAL,
 };
+use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::test_support::{assert_attenuated, assert_passes};
 

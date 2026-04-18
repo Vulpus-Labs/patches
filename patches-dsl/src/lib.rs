@@ -44,8 +44,8 @@ pub use ast::{
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use structural::{StructuralCode, StructuralError};
 pub use flat::{
-    FlatConnection, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef, FlatSongDef,
-    FlatSongRow, PatternIdx,
+    FlatConnection, FlatGraph, FlatModule, FlatPatch, FlatPatternChannel, FlatPatternDef,
+    FlatPortRef, FlatSongDef, FlatSongRow, PatternIdx, PortDirection, SongData,
 };
 pub use patches_core::QName;
 pub use include_frontier::{normalize_path, EnterResult, IncludeFrontier};

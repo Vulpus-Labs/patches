@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap};
 use patches_core::AudioEnvironment;
-use patches_core::registries::Registry;
+use patches_registry::Registry;
 use patches_ffi::scanner::{register_plugins, scan_plugins};
 
 fn gain_dylib_path() -> PathBuf {

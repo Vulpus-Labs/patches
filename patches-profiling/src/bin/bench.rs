@@ -12,9 +12,10 @@ use std::process;
 use std::time::Instant;
 
 use patches_core::{
-    AudioEnvironment, CablePool, CableValue, PlannerState, POLY_READ_SINK, POLY_WRITE_SINK,
+    AudioEnvironment, CablePool, CableValue, POLY_READ_SINK, POLY_WRITE_SINK,
 };
-use patches_engine::{build_patch, ExecutionPlan, ReadyState, ModulePool};
+use patches_engine::{ReadyState, ModulePool};
+use patches_planner::{build_patch, ExecutionPlan, PlannerState};
 
 const POOL_CAPACITY: usize = 4096;
 const MODULE_POOL_CAPACITY: usize = 1024;

@@ -46,35 +46,64 @@ pub use modules::{BoundModule, ResolvedModule, UnresolvedModule};
 
 use std::collections::HashMap;
 
-use patches_core::{QName, Registry};
-use patches_dsl::flat::FlatPatch;
+use patches_core::QName;
+use patches_registry::Registry;
+use patches_dsl::flat::{FlatPatch, SongData};
 
 use connections::{bind_connection, bind_port_ref};
 use modules::bind_module;
 
-/// The result of descriptor-level binding.
-///
-/// Mirrors [`FlatPatch`]'s module/connection/port-ref structure with each
-/// element tagged `Resolved` or `Unresolved`. Pattern and song definitions
-/// are **not** duplicated here — they are consumed by [`crate::build`]
-/// alongside a bound graph — callers that need them keep their original
-/// [`FlatPatch`].
-#[derive(Debug, Clone)]
-pub struct BoundPatch {
+/// Graph-relevant half of a [`BoundPatch`]: bound modules, connections,
+/// port refs, and accumulated [`BindError`]s. Mirrors
+/// [`patches_dsl::flat::FlatGraph`]'s structure with each element tagged
+/// `Resolved` or `Unresolved`.
+#[derive(Debug, Clone, Default)]
+pub struct BoundGraph {
     pub modules: Vec<BoundModule>,
     pub connections: Vec<BoundConnection>,
     pub port_refs: Vec<BoundPortRef>,
     pub errors: Vec<BindError>,
 }
 
+impl BoundGraph {
+    /// Look up a bound module by id.
+    pub fn find_module(&self, id: &QName) -> Option<&BoundModule> {
+        self.modules.iter().find(|m| m.id() == id)
+    }
+}
+
+/// The result of descriptor-level binding.
+///
+/// Decomposes into a [`BoundGraph`] (modules/connections/port refs/errors)
+/// and a [`SongData`] threaded through from the [`FlatPatch`] unchanged.
+/// Pattern/song-based tracker data is built later by [`crate::build`].
+#[derive(Debug, Clone, Default)]
+pub struct BoundPatch {
+    pub graph: BoundGraph,
+    pub song_data: SongData,
+}
+
+impl std::ops::Deref for BoundPatch {
+    type Target = BoundGraph;
+    fn deref(&self) -> &BoundGraph {
+        &self.graph
+    }
+}
+
+impl std::ops::DerefMut for BoundPatch {
+    fn deref_mut(&mut self) -> &mut BoundGraph {
+        &mut self.graph
+    }
+}
+
 impl BoundPatch {
     pub fn is_clean(&self) -> bool {
-        self.errors.is_empty()
+        self.graph.errors.is_empty()
     }
 
     /// Look up a bound module by id.
     pub fn find_module(&self, id: &QName) -> Option<&BoundModule> {
-        self.modules.iter().find(|m| m.id() == id)
+        self.graph.find_module(id)
     }
 }
 
@@ -90,7 +119,8 @@ impl patches_dsl::pipeline::PipelineAudit for BoundPatch {
     /// let a reference slip past its own unknown-module check. Future
     /// `PV####` codes land here without a signature change.
     fn layering_warnings(&self) -> Vec<patches_dsl::pipeline::LayeringWarning> {
-        self.errors
+        self.graph
+            .errors
             .iter()
             .filter_map(|e| match e.code {
                 BindErrorCode::UnknownModule => {
@@ -129,7 +159,8 @@ pub fn bind_with_base_dir(
     base_dir: Option<&std::path::Path>,
 ) -> BoundPatch {
     let song_name_to_index: HashMap<String, usize> = {
-        let mut names: Vec<String> = flat.songs.iter().map(|s| s.name.to_string()).collect();
+        let mut names: Vec<String> =
+            flat.song_data.songs.iter().map(|s| s.name.to_string()).collect();
         names.sort();
         names.into_iter().enumerate().map(|(i, n)| (n, i)).collect()
     };
@@ -187,7 +218,10 @@ pub fn bind_with_base_dir(
         port_refs.push(bind_port_ref(pr, &by_id, &port_aliases, &mut errors));
     }
 
-    BoundPatch { modules, connections, port_refs, errors }
+    BoundPatch {
+        graph: BoundGraph { modules, connections, port_refs, errors },
+        song_data: flat.song_data.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -206,13 +240,7 @@ mod tests {
     }
 
     fn empty_flat() -> FlatPatch {
-        FlatPatch {
-            modules: vec![],
-            connections: vec![],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        }
+        FlatPatch::default()
     }
 
     fn osc(id: &str) -> FlatModule {

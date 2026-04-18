@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 patches-dsp = { path = "../patches-dsp" }
+rtrb = "0.3"
 
 [lib]
 name = "patches_io"

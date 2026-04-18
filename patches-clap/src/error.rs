@@ -20,7 +20,7 @@ pub enum CompileError {
     Expand(patches_dsl::ExpandError),
     Bind(Vec<patches_interpreter::BindError>),
     Interpret(patches_interpreter::InterpretError),
-    Plan(patches_engine::builder::BuildError),
+    Plan(patches_planner::BuildError),
 }
 
 impl CompileError {
@@ -90,8 +90,8 @@ impl From<patches_interpreter::InterpretError> for CompileError {
 impl From<Vec<patches_interpreter::BindError>> for CompileError {
     fn from(e: Vec<patches_interpreter::BindError>) -> Self { CompileError::Bind(e) }
 }
-impl From<patches_engine::builder::BuildError> for CompileError {
-    fn from(e: patches_engine::builder::BuildError) -> Self { CompileError::Plan(e) }
+impl From<patches_planner::BuildError> for CompileError {
+    fn from(e: patches_planner::BuildError) -> Self { CompileError::Plan(e) }
 }
 
 #[cfg(test)]

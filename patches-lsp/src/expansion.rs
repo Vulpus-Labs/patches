@@ -42,8 +42,8 @@ impl SpanIndex {
             flat.modules.len()
                 + flat.connections.len()
                 + flat.port_refs.len()
-                + flat.patterns.len()
-                + flat.songs.len(),
+                + flat.song_data.patterns.len()
+                + flat.song_data.songs.len(),
         );
         for (i, m) in flat.modules.iter().enumerate() {
             entries.push((m.provenance.site, FlatNodeRef::Module(i)));
@@ -54,10 +54,10 @@ impl SpanIndex {
         for (i, p) in flat.port_refs.iter().enumerate() {
             entries.push((p.provenance.site, FlatNodeRef::PortRef(i)));
         }
-        for (i, p) in flat.patterns.iter().enumerate() {
+        for (i, p) in flat.song_data.patterns.iter().enumerate() {
             entries.push((p.provenance.site, FlatNodeRef::Pattern(i)));
         }
-        for (i, s) in flat.songs.iter().enumerate() {
+        for (i, s) in flat.song_data.songs.iter().enumerate() {
             entries.push((s.provenance.site, FlatNodeRef::Song(i)));
         }
         Self { entries }
@@ -220,12 +220,12 @@ impl PatchReferences {
                 call_sites.entry(*s).or_default().push(FlatNodeRef::PortRef(i));
             }
         }
-        for (i, p) in flat.patterns.iter().enumerate() {
+        for (i, p) in flat.song_data.patterns.iter().enumerate() {
             for s in &p.provenance.expansion {
                 call_sites.entry(*s).or_default().push(FlatNodeRef::Pattern(i));
             }
         }
-        for (i, s) in flat.songs.iter().enumerate() {
+        for (i, s) in flat.song_data.songs.iter().enumerate() {
             for sp in &s.provenance.expansion {
                 call_sites.entry(*sp).or_default().push(FlatNodeRef::Song(i));
             }

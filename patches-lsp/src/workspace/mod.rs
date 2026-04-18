@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-use patches_core::Registry;
+use patches_registry::Registry;
 use patches_modules::default_registry;
 use tower_lsp::lsp_types::*;
 use tree_sitter::Parser;

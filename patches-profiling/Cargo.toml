@@ -20,5 +20,6 @@ path = "src/bin/profile.rs"
 patches-core        = { path = "../patches-core" }
 patches-dsl         = { path = "../patches-dsl" }
 patches-engine      = { path = "../patches-engine" }
+patches-planner     = { path = "../patches-planner" }
 patches-interpreter = { path = "../patches-interpreter" }
 patches-modules     = { path = "../patches-modules" }

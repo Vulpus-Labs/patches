@@ -14,7 +14,7 @@ fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
-fn registry() -> patches_core::Registry {
+fn registry() -> patches_registry::Registry {
     patches_modules::default_registry()
 }
 
@@ -114,20 +114,15 @@ fn nested_template_expansion() {
 /// with a non-empty message.
 #[test]
 fn unknown_type_returns_error() {
-    let flat = FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![FlatModule {
-            id: "x".into(),
-            type_name: "NoSuchModule".to_string(),
-            shape: vec![],
-            params: vec![],
-            port_aliases: vec![],
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 10)),
-        }],
-        connections: vec![],
-        port_refs: vec![],
-    };
+    let mut flat = FlatPatch::default();
+    flat.graph.modules = vec![FlatModule {
+        id: "x".into(),
+        type_name: "NoSuchModule".to_string(),
+        shape: vec![],
+        params: vec![],
+        port_aliases: vec![],
+        provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 10)),
+    }];
 
     let result = patches_interpreter::build(&flat, &registry(), &env());
     let err = result.expect_err("expected build to fail for unknown type");
@@ -262,44 +257,40 @@ fn pipeline_success_matches_direct_path() {
 /// `Err(InterpretError)` with a non-empty message.
 #[test]
 fn unknown_port_returns_error() {
-    let flat = FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![
-            FlatModule {
-                id: "osc".into(),
-                type_name: "Osc".to_string(),
-                shape: vec![],
-                params: vec![],
-                port_aliases: vec![],
-                provenance: Provenance::root(zero_span()),
-            },
-            FlatModule {
-                id: "out".into(),
-                type_name: "AudioOut".to_string(),
-                shape: vec![],
-                params: vec![],
-                port_aliases: vec![],
-                provenance: Provenance::root(zero_span()),
-            },
-        ],
-        connections: vec![{
-            let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 5));
-            FlatConnection {
-                from_module: "osc".into(),
-                from_port: "no_such_port".to_string(),
-                from_index: 0,
-                to_module: "out".into(),
-                to_port: "in_left".to_string(),
-                to_index: 0,
-                scale: 1.0,
-                provenance: prov.clone(),
-                from_provenance: prov.clone(),
-                to_provenance: prov,
-            }
-        }],
-        port_refs: vec![],
-    };
+    let mut flat = FlatPatch::default();
+    flat.graph.modules = vec![
+        FlatModule {
+            id: "osc".into(),
+            type_name: "Osc".to_string(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: Provenance::root(zero_span()),
+        },
+        FlatModule {
+            id: "out".into(),
+            type_name: "AudioOut".to_string(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: Provenance::root(zero_span()),
+        },
+    ];
+    flat.graph.connections = vec![{
+        let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 5));
+        FlatConnection {
+            from_module: "osc".into(),
+            from_port: "no_such_port".to_string(),
+            from_index: 0,
+            to_module: "out".into(),
+            to_port: "in_left".to_string(),
+            to_index: 0,
+            scale: 1.0,
+            provenance: prov.clone(),
+            from_provenance: prov.clone(),
+            to_provenance: prov,
+        }
+    }];
 
     let result = patches_interpreter::build(&flat, &registry(), &env());
     let err = result.expect_err("expected build to fail for unknown port");

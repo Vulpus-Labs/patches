@@ -27,7 +27,6 @@ pub mod provenance;
 pub mod qname;
 pub mod tracker;
 pub mod random_walk;
-pub mod registries;
 pub mod source_map;
 pub mod source_span;
 
@@ -36,11 +35,12 @@ pub mod source_span;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 pub use audio_environment::AudioEnvironment;
+pub use build_error::BuildError;
 pub use cable_pool::CablePool;
 pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
-pub use graphs::{GraphError, ModuleGraph, NodeId};
+pub use graphs::{GraphError, ModuleGraph, Node, NodeId};
 pub use midi::{MidiEvent, MidiMessage};
 pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::QName;
@@ -52,17 +52,11 @@ pub use modules::{ParameterKey, ParameterMap, ParameterValue};
 pub use modules::parameter_map;
 pub use modules::InstanceId;
 pub use random_walk::{BoundedRandomWalk, GLOBAL_DRIFT_STEP, OSCILLATOR_DRIFT_STEP, HALF_SEMITONE_VOCT};
-pub use registries::FileProcessor;
-pub use registries::ModuleBuilder;
-pub use registries::Registry;
 pub use provenance::Provenance;
 pub use source_map::{line_col, SourceEntry, SourceMap};
 pub use source_span::{SourceId, Span};
 pub use diagnostics::{format_provenance, format_span};
-pub use graphs::planner::{
-    allocate_buffers, classify_nodes, make_decisions,
-    BufferAllocState, BufferAllocation, GraphIndex, ModuleAllocState, NodeDecision, NodeState,
-    PlanDecisions, PlanError, PlannerState, ResolvedGraph,
+pub use cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };

@@ -19,7 +19,8 @@ use std::time::{Duration, SystemTime};
 use patches_core::{AudioEnvironment, SourceMap};
 use patches_diagnostics::RenderedDiagnostic;
 use patches_dsl::pipeline;
-use patches_engine::{new_event_queue, DeviceConfig, EventScheduler, MidiConnector, OversamplingFactor, PatchEngine, PatchEngineError, enumerate_devices};
+use patches_engine::{new_event_queue, EventScheduler, MidiConnector, OversamplingFactor};
+use patches_cpal::{enumerate_devices, DeviceConfig, PatchEngine, PatchEngineError};
 
 mod diagnostic_render;
 
@@ -90,7 +91,7 @@ impl LoadPatchError {
 
 fn load_patch(
     path: &str,
-    registry: &patches_core::Registry,
+    registry: &patches_registry::Registry,
     sample_rate: f32,
 ) -> Result<LoadedPatch, LoadPatchError> {
     let master_path = Path::new(path);
@@ -119,9 +120,9 @@ fn load_patch(
         let sm = loaded.source_map.clone();
         let bound = patches_interpreter::bind_with_base_dir(flat, registry, base_dir.as_deref());
         if !bound.errors.is_empty() {
-            return Err(LoadPatchError::Bind { errs: bound.errors, source_map: sm });
+            return Err(LoadPatchError::Bind { errs: bound.graph.errors, source_map: sm });
         }
-        let build = patches_interpreter::build_from_bound(flat, &bound, &env)
+        let build = patches_interpreter::build_from_bound(&bound, &env)
             .map_err(|err| LoadPatchError::Interpret { err, source_map: sm.clone() })?;
         Ok(PlayerBound { bound, build })
     };

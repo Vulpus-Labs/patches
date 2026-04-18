@@ -8,7 +8,8 @@
 //! diverge, no hint is emitted. (Ticket AC explicitly allows this initial
 //! policy; diverging-shape rendering can ship as a follow-up.)
 
-use patches_core::{ModuleShape, Registry, SourceId, Span as CoreSpan};
+use patches_core::{ModuleShape, SourceId, Span as CoreSpan};
+use patches_registry::Registry;
 use patches_dsl::flat::FlatPatch;
 use patches_dsl::SourceMap;
 use tower_lsp::lsp_types::*;

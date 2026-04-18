@@ -25,7 +25,7 @@ fn tick_runs_without_panic() {
     let (plan, _, module_pool) = default_build(&graph);
     let mut buffer_pool = make_buffer_pool(256);
 
-    let stale = crate::execution_state::ReadyState::new_stale(module_pool);
+    let stale = patches_engine::ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, 32);
     for i in 0..1000 {
         let mut cp = CablePool::new(&mut buffer_pool, i % 2);
@@ -61,9 +61,9 @@ fn input_scale_is_applied_at_tick_time() {
     let mut buf_half = make_buffer_pool(256);
     let mut buf_full = make_buffer_pool(256);
 
-    let stale_half = crate::execution_state::ReadyState::new_stale(pool_half);
+    let stale_half = patches_engine::ReadyState::new_stale(pool_half);
     let mut state_half = stale_half.rebuild(&plan_half, 32);
-    let stale_full = crate::execution_state::ReadyState::new_stale(pool_full);
+    let stale_full = patches_engine::ReadyState::new_stale(pool_full);
     let mut state_full = stale_full.rebuild(&plan_full, 32);
 
     for i in 0..100 {

@@ -36,9 +36,10 @@ use clap_sys::process::{
 
 use patches_core::source_map::SourceMap;
 use patches_core::{
-    AudioEnvironment, MidiEvent, ModuleGraph, Registry, BASE_PERIODIC_UPDATE_INTERVAL,
+    AudioEnvironment, MidiEvent, ModuleGraph, BASE_PERIODIC_UPDATE_INTERVAL,
 };
-use patches_engine::builder::ExecutionPlan;
+use patches_registry::Registry;
+use patches_planner::ExecutionPlan;
 use patches_engine::{CleanupAction, PatchProcessor, Planner};
 
 use crate::error::CompileError;
@@ -135,11 +136,11 @@ impl PatchesClapPlugin {
             lock_gui_mut(&self.gui_state, |g| g.diagnostic_view.diagnostics.extend(rendered));
         }
         if !bound.errors.is_empty() {
-            return Err(CompileError::Bind(bound.errors));
+            return Err(CompileError::Bind(bound.graph.errors));
         }
         // Stage 5: runtime graph construction from the validated bound
         // graph.
-        let build_result = patches_interpreter::build_from_bound(&flat, &bound, env)?;
+        let build_result = patches_interpreter::build_from_bound(&bound, env)?;
         let graph = build_result.graph;
         let tracker_data = build_result.tracker_data;
         // Stage 4: engine plan.

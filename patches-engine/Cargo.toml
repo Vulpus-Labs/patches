@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 patches-core = { path = "../patches-core" }
+patches-registry = { path = "../patches-registry" }
+patches-planner = { path = "../patches-planner" }
 patches-dsp = { path = "../patches-dsp" }
-patches-io = { path = "../patches-io" }
-cpal = "0.15"
 rtrb = "0.3"
 midir = "0.10"
 

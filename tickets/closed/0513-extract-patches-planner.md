@@ -34,13 +34,6 @@ Part of epic E089 (see ADR 0040). Depends on 0512.
 
 ## Notes
 
-ADR 0012 (planner v2 graph-diffing, status *proposed*) overlaps with
-this move. Before starting, decide whether to land ADR 0012's design
-first, land it as part of this ticket, or deliberately carve the
-current code and revisit ADR 0012 afterwards inside the new crate. The
-ticket deliberately does not prescribe — check the ADR's status and
-the latest `PlannerState` code before committing.
-
 `ExecutionPlan` currently lives at
 `patches-engine/src/builder/mod.rs:110+`. Its consumers are
 `engine.rs`, `kernel.rs`, `execution_state.rs`, `callback.rs`,

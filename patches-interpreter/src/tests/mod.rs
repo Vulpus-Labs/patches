@@ -68,13 +68,7 @@ pub(super) fn connection(
 }
 
 pub(super) fn empty_flat() -> FlatPatch {
-    FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![],
-        connections: vec![],
-        port_refs: vec![],
-    }
+    FlatPatch::default()
 }
 
 pub(super) fn trigger_step() -> Step {

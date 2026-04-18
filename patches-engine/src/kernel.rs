@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use patches_core::{CableValue, GLOBAL_MIDI, GLOBAL_TRANSPORT, POLY_READ_SINK, POLY_WRITE_SINK};
 
-use crate::engine::CleanupAction;
+use crate::cleanup::CleanupAction;
 
 /// Allocate and initialise a cable buffer pool.
 ///
@@ -47,7 +47,7 @@ pub fn spawn_cleanup_thread(
 /// [`PatchProcessor::adopt_plan`](crate::processor::PatchProcessor::adopt_plan)
 /// which inlines the same logic.
 #[cfg(test)]
-use crate::builder::ExecutionPlan;
+use patches_planner::ExecutionPlan;
 #[cfg(test)]
 use crate::execution_state::ReadyState;
 
@@ -113,8 +113,8 @@ mod tests {
     };
     use patches_core::parameter_map::ParameterMap;
 
-    use crate::builder::ExecutionPlan;
-    use crate::engine::CleanupAction;
+    use patches_planner::ExecutionPlan;
+    use crate::cleanup::CleanupAction;
     use crate::execution_state::ReadyState;
     use crate::pool::ModulePool;
 

@@ -1,23 +1,23 @@
-mod callback;
-mod decimator;
-mod input_capture;
+mod cleanup;
+pub mod decimator;
 pub mod processor;
-mod wav_recorder;
-pub mod builder;
 pub mod kernel;
-pub mod engine;
 pub mod execution_state;
 pub mod midi;
 pub mod oversampling;
-pub mod planner;
 pub mod pool;
 
-pub use builder::{build_patch, BuildError, ExecutionPlan, ModuleSlot, PatchBuilder};
+pub use cleanup::{CleanupAction, DEFAULT_MODULE_POOL_CAPACITY};
 pub use execution_state::{ReadyState, StaleState};
-pub use patches_core::{BufferAllocState, ModuleAllocState, NodeState, PlannerState};
-pub use engine::{CleanupAction, DeviceConfig, DeviceInfo, EngineError, SoundEngine, enumerate_devices};
 pub use midi::{new_event_queue, AudioClock, ClockAnchor, EventQueueConsumer, EventQueueProducer, EventScheduler, MidiConnector, MidiError, MidiEvent};
 pub use oversampling::OversamplingFactor;
-pub use planner::{PatchEngine, PatchEngineError, Planner};
 pub use pool::ModulePool;
 pub use processor::PatchProcessor;
+
+// ── Re-exports from patches-planner ──
+// Kept temporarily to ease the kernel carve migration; downstream crates
+// should import from `patches_planner` directly.
+pub use patches_planner::{
+    build_patch, BuildError, BufferAllocState, ExecutionPlan, ModuleAllocState, ModuleSlot,
+    NodeState, PatchBuilder, Planner, PlannerState,
+};

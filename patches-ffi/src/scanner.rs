@@ -3,11 +3,10 @@
 
 use std::path::Path;
 
-use patches_core::modules::ModuleShape;
-use patches_core::registries::Registry;
+use patches_core::ModuleShape;
+use patches_registry::{ModuleBuilder, Registry};
 
 use crate::loader::{load_plugin, DylibModuleBuilder};
-use patches_core::registries::ModuleBuilder;
 
 /// The platform-specific shared library extension.
 #[cfg(target_os = "macos")]

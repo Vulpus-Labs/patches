@@ -1,0 +1,12 @@
+[package]
+name = "patches-registry"
+version = "0.6.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "patches_registry"
+path = "src/lib.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }

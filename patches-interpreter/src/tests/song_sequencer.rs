@@ -11,7 +11,7 @@ fn no_patterns_or_songs_returns_none() {
 #[test]
 fn single_pattern_builds_tracker_data() {
     let mut flat = empty_flat();
-    flat.patterns = vec![FlatPatternDef {
+    flat.song_data.patterns = vec![FlatPatternDef {
         name: "drums".into(),
         channels: vec![
             FlatPatternChannel {
@@ -44,7 +44,7 @@ fn pattern_bank_order_matches_flat_patterns() {
     // is the expansion stage's responsibility; the interpreter just
     // trusts whatever ordering it receives.
     let mut flat = empty_flat();
-    flat.patterns = vec![
+    flat.song_data.patterns = vec![
         FlatPatternDef {
             name: "charlie".into(),
             channels: vec![FlatPatternChannel {
@@ -83,7 +83,7 @@ fn pattern_bank_order_matches_flat_patterns() {
 #[test]
 fn song_resolves_pattern_references() {
     let mut flat = empty_flat();
-    flat.patterns = vec![
+    flat.song_data.patterns = vec![
         FlatPatternDef {
             name: "pat_a".into(),
             channels: vec![FlatPatternChannel {
@@ -101,7 +101,7 @@ fn song_resolves_pattern_references() {
             provenance: Provenance::root(span()),
         },
     ];
-    flat.songs = vec![FlatSongDef {
+    flat.song_data.songs = vec![FlatSongDef {
         name: "my_song".into(),
         channels: vec![ident("drums")],
         rows: vec![
@@ -133,7 +133,7 @@ fn song_resolves_pattern_references() {
 #[test]
 fn song_step_count_mismatch_is_error() {
     let mut flat = empty_flat();
-    flat.patterns = vec![
+    flat.song_data.patterns = vec![
         FlatPatternDef {
             name: "four_steps".into(),
             channels: vec![FlatPatternChannel {
@@ -151,7 +151,7 @@ fn song_step_count_mismatch_is_error() {
             provenance: Provenance::root(span()),
         },
     ];
-    flat.songs = vec![FlatSongDef {
+    flat.song_data.songs = vec![FlatSongDef {
         name: "song".into(),
         channels: vec![ident("col")],
         rows: vec![
@@ -168,7 +168,7 @@ fn song_step_count_mismatch_is_error() {
 #[test]
 fn song_channel_count_mismatch_is_error() {
     let mut flat = empty_flat();
-    flat.patterns = vec![
+    flat.song_data.patterns = vec![
         FlatPatternDef {
             name: "one_ch".into(),
             channels: vec![FlatPatternChannel {
@@ -186,7 +186,7 @@ fn song_channel_count_mismatch_is_error() {
             provenance: Provenance::root(span()),
         },
     ];
-    flat.songs = vec![FlatSongDef {
+    flat.song_data.songs = vec![FlatSongDef {
         name: "song".into(),
         channels: vec![ident("col")],
         rows: vec![
@@ -203,7 +203,7 @@ fn song_channel_count_mismatch_is_error() {
 #[test]
 fn shorter_channels_padded_with_rests() {
     let mut flat = empty_flat();
-    flat.patterns = vec![FlatPatternDef {
+    flat.song_data.patterns = vec![FlatPatternDef {
         name: "uneven".into(),
         channels: vec![
             FlatPatternChannel {

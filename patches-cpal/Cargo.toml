@@ -1,0 +1,19 @@
+[package]
+name = "patches-cpal"
+version = "0.6.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "patches_cpal"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-registry = { path = "../patches-registry" }
+patches-engine = { path = "../patches-engine" }
+patches-planner = { path = "../patches-planner" }
+patches-io = { path = "../patches-io" }
+cpal = "0.15"
+rtrb = "0.3"

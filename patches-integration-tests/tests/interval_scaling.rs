@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use patches_core::{
     AudioEnvironment, BASE_PERIODIC_UPDATE_INTERVAL, CableKind, CablePool, InstanceId, Module,
     ModuleDescriptor, ModuleGraph, ModuleShape, PeriodicUpdate, PolyLayout, PortDescriptor,
-    Registry,
 };
+use patches_registry::Registry;
 use patches_core::parameter_map::ParameterMap;
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
 use patches_integration_tests::{HeadlessEngine, POOL_CAP, MODULE_CAP};

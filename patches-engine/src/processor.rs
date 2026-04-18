@@ -19,8 +19,8 @@ use patches_core::{
     MAX_STASH,
 };
 
-use crate::builder::ExecutionPlan;
-use crate::engine::CleanupAction;
+use patches_planner::ExecutionPlan;
+use crate::cleanup::CleanupAction;
 use crate::execution_state::ReadyState;
 use crate::midi::EventQueueConsumer;
 use crate::pool::ModulePool;
@@ -91,7 +91,7 @@ impl PatchProcessor {
 
     /// Construct from pre-existing pools (used by `SoundEngine` which
     /// pre-allocates pools before it knows if/when `start()` will be called).
-    pub(crate) fn from_parts(
+    pub fn from_parts(
         buffer_pool: Box<[[CableValue; 2]]>,
         module_pool: ModulePool,
         oversampling_factor: usize,

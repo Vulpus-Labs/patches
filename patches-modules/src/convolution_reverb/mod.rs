@@ -54,9 +54,10 @@ use patches_core::cable_pool::CablePool;
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::parameter_map::ParameterMap;
 use patches_core::{
-    validate_parameters, AudioEnvironment, FileProcessor, InputPort, InstanceId,
+    validate_parameters, AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_registry::FileProcessor;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
 

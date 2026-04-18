@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
-use crate::audio_environment::AudioEnvironment;
-use crate::build_error::BuildError;
-use crate::modules::{InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap};
+use patches_core::{
+    AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
+};
 
 pub trait ModuleBuilder: Send + Sync {
     fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor;
@@ -39,7 +39,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::InstanceId;
+    use patches_core::InstanceId;
 
     struct TestModule {
         instance_id: InstanceId,
@@ -79,7 +79,7 @@ mod tests {
             self.instance_id
         }
 
-        fn process(&mut self, _pool: &mut crate::cable_pool::CablePool<'_>) {}
+        fn process(&mut self, _pool: &mut patches_core::CablePool<'_>) {}
 
         fn as_any(&self) -> &dyn std::any::Any {
             self

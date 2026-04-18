@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use patches_core::{ModuleDescriptor, ParameterMap, Provenance, QName, Registry};
+use patches_core::{ModuleDescriptor, ParameterMap, Provenance, QName};
+use patches_registry::Registry;
 use patches_dsl::flat::FlatModule;
 
 use super::errors::{BindError, BindErrorCode};

@@ -1,4 +1,4 @@
-use super::*;
+use super::super::partition_inputs;
 
 // ── resolve_input_buffers, build_input_buffer_map, and compute_connectivity
 // tests moved to patches-core (T-0103).

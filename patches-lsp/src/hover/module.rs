@@ -1,7 +1,8 @@
 //! Hover for module types and module-instance names, plus expansion-aware
 //! hover over a single flat module.
 
-use patches_core::{ModuleDescriptor, ModuleShape, Registry};
+use patches_core::{ModuleDescriptor, ModuleShape};
+use patches_registry::Registry;
 use patches_dsl::flat::FlatModule;
 use patches_interpreter::{BoundModule, BoundPatch};
 use tower_lsp::lsp_types::*;

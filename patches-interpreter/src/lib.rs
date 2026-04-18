@@ -22,16 +22,17 @@ mod error;
 mod tracker;
 
 pub use descriptor_bind::{
-    bind, bind_with_base_dir, BindError, BindErrorCode, BoundConnection, BoundModule, BoundPatch,
-    BoundPortRef, ParamConversionError, ResolvedConnection, ResolvedModule, ResolvedPortRef,
-    UnresolvedConnection, UnresolvedModule, UnresolvedPortRef,
+    bind, bind_with_base_dir, BindError, BindErrorCode, BoundConnection, BoundGraph, BoundModule,
+    BoundPatch, BoundPortRef, ParamConversionError, ResolvedConnection, ResolvedModule,
+    ResolvedPortRef, UnresolvedConnection, UnresolvedModule, UnresolvedPortRef,
 };
 pub use error::{BuildError, BuildErrorSource, InterpretError, InterpretErrorCode};
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use patches_core::{AudioEnvironment, ModuleGraph, Registry, TrackerData};
+use patches_core::{AudioEnvironment, ModuleGraph, TrackerData};
+use patches_registry::Registry;
 use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::FlatPatch;
 
@@ -93,33 +94,22 @@ pub fn build_with_base_dir(
     if let Some(first) = bound.errors.first() {
         return Err(BuildError::from_bind(first));
     }
-    build_from_bound(flat, &bound, env).map_err(BuildError::from_interpret)
+    build_from_bound(&bound, env).map_err(BuildError::from_interpret)
 }
 
 /// Build a [`ModuleGraph`] (and optional [`TrackerData`]) from a
-/// [`FlatPatch`] together with its [`BoundPatch`] (produced by
-/// [`descriptor_bind::bind_with_base_dir`]).
+/// [`BoundPatch`] (produced by [`descriptor_bind::bind_with_base_dir`]).
 ///
 /// The caller is responsible for having checked [`BoundPatch::errors`];
 /// unresolved modules are skipped — if a referenced module is missing a
 /// descriptor, this function returns an [`InterpretError::Other`]
-/// rather than swallowing the violation. `flat` is still consulted for
-/// pattern and song definitions, which live outside the bound-graph
-/// artifact.
+/// rather than swallowing the violation. [`BoundPatch::song_data`] carries
+/// the pattern and song definitions threaded through bind unchanged.
 pub fn build_from_bound(
-    flat: &FlatPatch,
     bound: &BoundPatch,
     _env: &AudioEnvironment,
 ) -> Result<BuildResult, InterpretError> {
     let mut graph = ModuleGraph::new();
-
-    // Pre-compute the song name-to-index map — still needed by tracker
-    // data assembly and MasterSequencer song-reference validation.
-    let song_name_to_index: HashMap<String, usize> = {
-        let mut names: Vec<String> = flat.songs.iter().map(|s| s.name.to_string()).collect();
-        names.sort();
-        names.into_iter().enumerate().map(|(i, n)| (n, i)).collect()
-    };
 
     // Stage 1 — add module nodes directly from the bound graph's
     // resolved descriptors + parameter maps. `require_resolved` is
@@ -188,7 +178,7 @@ pub fn build_from_bound(
     }
 
     // Stage 3 — build tracker data from pattern and song blocks.
-    let tracker_data = build_tracker_data(flat, &graph, &song_name_to_index)?;
+    let tracker_data = build_tracker_data(&bound.song_data, &bound.graph.modules)?;
 
     Ok(BuildResult { graph, tracker_data })
 }

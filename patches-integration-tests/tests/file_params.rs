@@ -10,7 +10,7 @@ fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
-fn registry() -> patches_core::Registry {
+fn registry() -> patches_registry::Registry {
     patches_modules::default_registry()
 }
 
@@ -64,22 +64,17 @@ patch {
 /// File extension validation rejects unsupported extensions.
 #[test]
 fn file_extension_validation_rejects_unsupported() {
-    let flat = FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![FlatModule {
-            id: "verb".into(),
-            type_name: "StereoConvReverb".to_string(),
-            shape: vec![],
-            params: vec![
-                ("ir_data".to_string(), Value::File("test.mp3".to_string())),
-            ],
-            port_aliases: vec![],
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
-        }],
-        connections: vec![],
-        port_refs: vec![],
-    };
+    let mut flat = FlatPatch::default();
+    flat.graph.modules = vec![FlatModule {
+        id: "verb".into(),
+        type_name: "StereoConvReverb".to_string(),
+        shape: vec![],
+        params: vec![
+            ("ir_data".to_string(), Value::File("test.mp3".to_string())),
+        ],
+        port_aliases: vec![],
+        provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
+    }];
     let result = patches_interpreter::build(&flat, &registry(), &env());
     let err = result;
     assert!(err.is_err(), "expected error for .mp3 extension");
@@ -93,22 +88,17 @@ fn file_extension_validation_rejects_unsupported() {
 /// A nonexistent file path fails at plan build time, not at parse time.
 #[test]
 fn nonexistent_file_fails_at_plan_build() {
-    let flat = FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![FlatModule {
-            id: "verb".into(),
-            type_name: "StereoConvReverb".to_string(),
-            shape: vec![],
-            params: vec![
-                ("ir_data".to_string(), Value::File("/nonexistent/path/to/ir.wav".to_string())),
-            ],
-            port_aliases: vec![],
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
-        }],
-        connections: vec![],
-        port_refs: vec![],
-    };
+    let mut flat = FlatPatch::default();
+    flat.graph.modules = vec![FlatModule {
+        id: "verb".into(),
+        type_name: "StereoConvReverb".to_string(),
+        shape: vec![],
+        params: vec![
+            ("ir_data".to_string(), Value::File("/nonexistent/path/to/ir.wav".to_string())),
+        ],
+        port_aliases: vec![],
+        provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
+    }];
 
     // The interpreter should succeed (file existence is not checked at parse time).
     let build_result = patches_interpreter::build(&flat, &registry(), &env())
@@ -123,22 +113,17 @@ fn nonexistent_file_fails_at_plan_build() {
 /// Relative file paths are resolved against base_dir.
 #[test]
 fn relative_path_resolved_against_base_dir() {
-    let flat = FlatPatch {
-        patterns: vec![],
-        songs: vec![],
-        modules: vec![FlatModule {
-            id: "verb".into(),
-            type_name: "StereoConvReverb".to_string(),
-            shape: vec![],
-            params: vec![
-                ("ir_data".to_string(), Value::File("relative/ir.wav".to_string())),
-            ],
-            port_aliases: vec![],
-            provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
-        }],
-        connections: vec![],
-        port_refs: vec![],
-    };
+    let mut flat = FlatPatch::default();
+    flat.graph.modules = vec![FlatModule {
+        id: "verb".into(),
+        type_name: "StereoConvReverb".to_string(),
+        shape: vec![],
+        params: vec![
+            ("ir_data".to_string(), Value::File("relative/ir.wav".to_string())),
+        ],
+        port_aliases: vec![],
+        provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 0)),
+    }];
 
     let base_dir = std::path::Path::new("/my/patch/dir");
     let build_result = patches_interpreter::build_with_base_dir(

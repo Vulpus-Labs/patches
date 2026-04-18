@@ -36,9 +36,6 @@ narrow focus and lower blast-radius for changes, support future
 dynamic plugin loading in LSP and CLAP, and align crate boundaries
 with the parse / bind / build / plan / execute phases they represent.
 
-ADR 0012 (planner v2 graph-diffing, status *proposed*) overlaps with
-the planner extraction; coordinate so we do not carve twice.
-
 ## Tickets
 
 | ID   | Title                                               | Priority | Depends on       |
@@ -64,6 +61,41 @@ Execution order:
    than freezing the current dual-arg pairing.
 5. 0517 / 0518 (consumers) — final port; can land in either order but
    both block closing the epic.
+
+## Plan
+
+Five waves:
+
+- **Wave 1** (parallel): 0512, 0514, 0519.
+- **Wave 2** (after 0512): 0513.
+- **Wave 3** (after 0513, 0514): 0515 — verification sweep.
+- **Wave 4** (after 0513, 0515, 0519): 0516.
+- **Wave 5** (parallel final): 0517, 0518.
+
+Start order within Wave 1: 0519 first (smallest, purely structural,
+blocks 0516), then 0512 and 0514 in parallel. All three touch
+`patches-player` and `patches-clap` call sites, so expect merge
+conflicts if run concurrently in worktrees — sequencing the consumer
+updates reduces churn.
+
+### Risks
+
+- **MIDI placement** (0514): stay in engine if cross-embedding,
+  otherwise move. Decision recorded in the 0514 PR.
+- **`patches-host` trait shape** (0516): bends under first real
+  consumers. Expect iteration during 0517 / 0518 rather than
+  freezing the API up front.
+- **0519 must precede 0516**: otherwise the host crate freezes the
+  dual-arg `build_from_bound` pairing and we refactor twice.
+
+### Gate
+
+- `cargo tree -p patches-lsp` shows no transitive `patches-engine`,
+  `patches-planner`, or `cpal`.
+- `grep -r 'patches_core::Registry' --type rust` empty.
+- `grep cpal patches-engine/Cargo.toml patches-engine/src/**/*.rs` empty.
+- Workspace `cargo build` / `test` / `clippy` clean; integration
+  tests unchanged.
 
 ## Definition of done
 

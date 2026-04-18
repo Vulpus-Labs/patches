@@ -1,7 +1,7 @@
 use super::*;
-use crate::cables::{CableKind, PolyLayout};
-use crate::modules::{InstanceId, ModuleDescriptor, ParameterDescriptor, ParameterKind, ParameterValue, PortDescriptor, PortRef};
-use crate::ModuleGraph;
+use patches_core::cables::{CableKind, PolyLayout};
+use patches_core::modules::{InstanceId, ModuleDescriptor, ParameterDescriptor, ParameterKind, ParameterValue, PortDescriptor, PortRef};
+use patches_core::ModuleGraph;
 
 fn p(name: &'static str) -> PortRef {
     PortRef { name, index: 0 }

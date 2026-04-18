@@ -2,14 +2,14 @@ use std::ptr::NonNull;
 
 use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, Module, PeriodicUpdate};
 
-use crate::builder::ExecutionPlan;
+use patches_planner::ExecutionPlan;
 use crate::pool::ModulePool;
 
 /// Number of samples per MIDI sub-block.
 ///
 /// Every `SUB_BLOCK_SIZE` samples the audio callback drains the MIDI event
 /// queue and delivers pending events via the `GLOBAL_MIDI` backplane slot.
-pub(crate) const SUB_BLOCK_SIZE: u64 = 64;
+pub const SUB_BLOCK_SIZE: u64 = 64;
 
 // ── PtrArray ──────────────────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ impl ReadyState {
     /// keep the field valid.  Ticking an empty state is a no-op.
     pub fn empty() -> Self {
         let stale = Self::new_stale(ModulePool::new(0));
-        stale.rebuild(&crate::builder::ExecutionPlan::empty(), BASE_PERIODIC_UPDATE_INTERVAL)
+        stale.rebuild(&patches_planner::ExecutionPlan::empty(), BASE_PERIODIC_UPDATE_INTERVAL)
     }
 
     /// Construct an initial `StaleState` from a fresh `ModulePool`.
@@ -233,7 +233,7 @@ mod tests {
     };
     use patches_core::parameter_map::ParameterMap;
 
-    use crate::builder::ExecutionPlan;
+    use patches_planner::ExecutionPlan;
     use crate::pool::ModulePool;
 
     use super::*;

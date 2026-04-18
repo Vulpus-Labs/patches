@@ -34,7 +34,7 @@ const RING_CAPACITY: usize = 65_536;
 ///
 /// Dropping this signals the writer thread to flush all remaining buffered
 /// samples, finalise the WAV file, and exit.
-pub(crate) struct WavRecorder {
+pub struct WavRecorder {
     stop_flag: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -58,7 +58,7 @@ impl Drop for WavRecorder {
 ///
 /// Returns the recorder handle (to be held by [`SoundEngine`] until stop)
 /// and the ring-buffer producer (to be placed in [`AudioCallback`]).
-pub(crate) fn open(
+pub fn open(
     path: &str,
     sample_rate: u32,
 ) -> std::io::Result<(WavRecorder, rtrb::Producer<[f32; 2]>)> {
@@ -93,7 +93,7 @@ fn run_writer(
     };
     let mut writer = BufWriter::new(file);
 
-    if let Err(e) = patches_io::write_wav_header(&mut writer, 2, 16, sample_rate) {
+    if let Err(e) = crate::write_wav_header(&mut writer, 2, 16, sample_rate) {
         eprintln!("[patches-wav-writer] could not write header to {path:?}: {e}");
         return;
     }
@@ -119,7 +119,7 @@ fn run_writer(
         // Periodically update the WAV size fields so that an ungraceful
         // process exit leaves a playable (truncated) file.
         if frames_written.saturating_sub(frames_at_last_commit) >= sample_rate
-            && patches_io::commit_wav_sizes(&mut writer, 2, 16, frames_written).is_ok()
+            && crate::commit_wav_sizes(&mut writer, 2, 16, frames_written).is_ok()
         {
             frames_at_last_commit = frames_written;
         }
@@ -140,7 +140,7 @@ fn run_writer(
         frames_written = frames_written.saturating_add(1);
     }
 
-    if let Err(e) = patches_io::finalize_wav(&mut writer, 2, 16, frames_written) {
+    if let Err(e) = crate::finalize_wav(&mut writer, 2, 16, frames_written) {
         eprintln!("[patches-wav-writer] could not finalise {path:?}: {e}");
     }
 }

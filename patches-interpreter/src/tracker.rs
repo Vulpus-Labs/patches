@@ -4,30 +4,31 @@
 use std::collections::HashMap;
 
 use patches_core::{
-    ModuleGraph, Pattern, PatternBank, Song, SongBank, TrackerData, TrackerStep,
+    ParameterValue, Pattern, PatternBank, Song, SongBank, TrackerData, TrackerStep,
 };
 use patches_dsl::ast::{Scalar, Value};
-use patches_dsl::flat::FlatPatch;
+use patches_dsl::flat::SongData;
 
-use crate::descriptor_bind::ParamConversionError;
+use crate::descriptor_bind::{BoundModule, ParamConversionError};
 use crate::error::{InterpretError, InterpretErrorCode};
 
-/// Build [`TrackerData`] from the pattern and song definitions in a [`FlatPatch`].
+/// Build [`TrackerData`] from the pattern and song definitions in a
+/// [`SongData`], validating MasterSequencer song/channel references against
+/// the supplied bound modules.
 ///
 /// Returns `None` if there are no patterns and no songs.
 pub(crate) fn build_tracker_data(
-    flat: &FlatPatch,
-    graph: &ModuleGraph,
-    song_name_to_index: &HashMap<String, usize>,
+    song_data: &SongData,
+    bound_modules: &[BoundModule],
 ) -> Result<Option<TrackerData>, InterpretError> {
-    if flat.patterns.is_empty() && flat.songs.is_empty() {
+    if song_data.patterns.is_empty() && song_data.songs.is_empty() {
         return Ok(None);
     }
 
-    // Patterns Vec order follows `flat.patterns` positional order; expansion's
-    // `FlatSongRow` indices refer directly to this list.
-    let mut patterns: Vec<Pattern> = Vec::with_capacity(flat.patterns.len());
-    for fp in &flat.patterns {
+    // Patterns Vec order follows `song_data.patterns` positional order;
+    // expansion's `FlatSongRow` indices refer directly to this list.
+    let mut patterns: Vec<Pattern> = Vec::with_capacity(song_data.patterns.len());
+    for fp in &song_data.patterns {
         let max_steps = fp.channels.iter().map(|c| c.steps.len()).max().unwrap_or(0);
         let mut data = Vec::with_capacity(fp.channels.len());
         for ch in &fp.channels {
@@ -54,7 +55,8 @@ pub(crate) fn build_tracker_data(
     }
 
     let pattern_display_name = |idx: usize| -> &str {
-        flat.patterns
+        song_data
+            .patterns
             .get(idx)
             .map(|p| p.name.name.as_str())
             .unwrap_or("?")
@@ -62,7 +64,7 @@ pub(crate) fn build_tracker_data(
 
     // Convert DSL songs to runtime Songs (alphabetical order so that Vec
     // indices match the pre-computed song_name_to_index map in the caller).
-    let mut sorted_song_defs: Vec<&_> = flat.songs.iter().collect();
+    let mut sorted_song_defs: Vec<&_> = song_data.songs.iter().collect();
     sorted_song_defs.sort_by(|a, b| a.name.cmp(&b.name));
     let mut song_list: Vec<Song> = Vec::new();
     for song_def in &sorted_song_defs {
@@ -121,9 +123,10 @@ pub(crate) fn build_tracker_data(
 
     let song_bank = SongBank { songs: song_list };
 
-    // Validate: MasterSequencer song references and channel matching.
-    // `song_name_to_index` is the shared map computed once by the caller.
-    validate_sequencer_songs(graph, &song_bank, song_name_to_index, flat)?;
+    // Validate: MasterSequencer channel matching against the song its `song`
+    // parameter resolved to during bind (see [`convert_value`] +
+    // `ParameterKind::SongName`).
+    validate_sequencer_songs(&song_bank, bound_modules)?;
 
     Ok(Some(TrackerData {
         patterns: PatternBank { patterns },
@@ -144,52 +147,37 @@ fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
     }
 }
 
-/// Validate that every MasterSequencer's `song` parameter references a defined
-/// song, and that the song's column headers match the sequencer's channels.
+/// Validate that every resolved MasterSequencer's channel count matches the
+/// song it references.
+///
+/// Unknown-song-name detection already happens at bind time via
+/// [`convert_value`] + [`patches_core::ParameterKind::SongName`]: unresolved
+/// names become bind errors, resolved names become `ParameterValue::Int(idx)`
+/// into [`SongBank::songs`]. The default (`-1`) means no song set; we skip it.
 fn validate_sequencer_songs(
-    _graph: &ModuleGraph,
     song_bank: &SongBank,
-    song_name_to_index: &HashMap<String, usize>,
-    flat: &FlatPatch,
+    bound_modules: &[BoundModule],
 ) -> Result<(), InterpretError> {
-    for flat_module in &flat.modules {
-        if flat_module.type_name != "MasterSequencer" {
+    for bm in bound_modules {
+        let Some(resolved) = bm.as_resolved() else { continue };
+        if resolved.type_name != "MasterSequencer" {
             continue;
         }
-        // Find the `song` parameter value.
-        let song_name = flat_module.params.iter().find_map(|(name, value)| {
-            if name == "song" {
-                match value {
-                    Value::Scalar(Scalar::Str(s)) => Some(s.as_str()),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        });
-        if let Some(song_name) = song_name {
-            let Some(&song_idx) = song_name_to_index.get(song_name) else {
-                return Err(InterpretError::new(InterpretErrorCode::SequencerSongMismatch, flat_module.provenance.clone(), format!(
-                        "MasterSequencer '{}': song '{}' not found",
-                        flat_module.id, song_name,
-                    )));
-            };
-            // Validate channel matching: the song's column count must match
-            // the sequencer's declared channel count.
-            let song = &song_bank.songs[song_idx];
-            let seq_channels = flat_module.shape.iter().find_map(|(name, scalar)| {
-                if name == "channels" {
-                    if let Scalar::Int(n) = scalar { Some(*n as usize) } else { None }
-                } else {
-                    None
-                }
-            }).unwrap_or(0);
-            if seq_channels != song.channels {
-                return Err(InterpretError::new(InterpretErrorCode::SequencerSongMismatch, flat_module.provenance.clone(), format!(
-                        "MasterSequencer '{}': has {} channels but song '{}' has {} columns",
-                        flat_module.id, seq_channels, song_name, song.channels,
-                    )));
-            }
+        let song_idx = match resolved.params.get_scalar("song") {
+            Some(ParameterValue::Int(idx)) if *idx >= 0 => *idx as usize,
+            _ => continue,
+        };
+        let Some(song) = song_bank.songs.get(song_idx) else { continue };
+        let seq_channels = resolved.descriptor.shape.channels;
+        if seq_channels != song.channels {
+            return Err(InterpretError::new(
+                InterpretErrorCode::SequencerSongMismatch,
+                resolved.provenance.clone(),
+                format!(
+                    "MasterSequencer '{}': has {} channels but song at index {} has {} columns",
+                    resolved.id, seq_channels, song_idx, song.channels,
+                ),
+            ));
         }
     }
     Ok(())

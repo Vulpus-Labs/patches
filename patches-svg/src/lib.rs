@@ -20,7 +20,7 @@ mod hints;
 mod render;
 
 use patches_core::source_map::SourceMap;
-use patches_core::Registry;
+use patches_registry::Registry;
 use patches_dsl::FlatPatch;
 
 use crate::layout::LayoutConfig;
@@ -111,41 +111,38 @@ mod tests {
     }
 
     fn sample_patch() -> FlatPatch {
-        FlatPatch {
-            modules: vec![
-                FlatModule {
-                    id: "osc".into(),
-                    type_name: "Osc".into(),
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-                FlatModule {
-                    id: "vca".into(),
-                    type_name: "Vca".into(),
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-            ],
-            connections: vec![FlatConnection {
-                from_module: "osc".into(),
-                from_port: "sine".into(),
-                from_index: 0,
-                to_module: "vca".into(),
-                to_port: "in".into(),
-                to_index: 0,
-                scale: 1.0,
+        let mut patch = FlatPatch::default();
+        patch.graph.modules = vec![
+            FlatModule {
+                id: "osc".into(),
+                type_name: "Osc".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
-                from_provenance: Provenance::root(synthetic_span()),
-                to_provenance: Provenance::root(synthetic_span()),
-            }],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        }
+            },
+            FlatModule {
+                id: "vca".into(),
+                type_name: "Vca".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+            },
+        ];
+        patch.graph.connections = vec![FlatConnection {
+            from_module: "osc".into(),
+            from_port: "sine".into(),
+            from_index: 0,
+            to_module: "vca".into(),
+            to_port: "in".into(),
+            to_index: 0,
+            scale: 1.0,
+            provenance: Provenance::root(synthetic_span()),
+            from_provenance: Provenance::root(synthetic_span()),
+            to_provenance: Provenance::root(synthetic_span()),
+        }];
+        patch
     }
 
     fn render(patch: &FlatPatch, opts: &SvgOptions) -> String {
@@ -154,13 +151,7 @@ mod tests {
 
     #[test]
     fn empty_patch_renders_minimal_svg() {
-        let flat = FlatPatch {
-            modules: vec![],
-            connections: vec![],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        };
+        let flat = FlatPatch::default();
         let svg = render(&flat, &SvgOptions::default());
         assert!(svg.starts_with("<svg"));
         assert!(svg.ends_with("</svg>"));
@@ -206,20 +197,15 @@ mod tests {
 
     #[test]
     fn xml_escapes_special_characters_in_labels() {
-        let patch = FlatPatch {
-            modules: vec![FlatModule {
-                id: "a&b".into(),
-                type_name: "<Odd>".into(),
-                shape: vec![],
-                params: vec![],
-                port_aliases: vec![],
-                provenance: Provenance::root(synthetic_span()),
-            }],
-            connections: vec![],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        };
+        let mut patch = FlatPatch::default();
+        patch.graph.modules = vec![FlatModule {
+            id: "a&b".into(),
+            type_name: "<Odd>".into(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: Provenance::root(synthetic_span()),
+        }];
         let svg = render(&patch, &SvgOptions::default());
         assert!(svg.contains("a&amp;b : &lt;Odd&gt;"));
         assert!(!svg.contains("<Odd>"));
@@ -289,41 +275,37 @@ mod tests {
 
     #[test]
     fn unknown_module_type_falls_back_to_base_cable() {
-        let patch = FlatPatch {
-            modules: vec![
-                FlatModule {
-                    id: "a".into(),
-                    type_name: "NoSuchModule".into(),
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-                FlatModule {
-                    id: "b".into(),
-                    type_name: "NoSuchModule".into(),
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-            ],
-            connections: vec![FlatConnection {
-                from_module: "a".into(),
-                from_port: "out".into(),
-                from_index: 0,
-                to_module: "b".into(),
-                to_port: "in".into(),
-                to_index: 0,
-                scale: 1.0,
+        let mut patch = FlatPatch::default();
+        patch.graph.modules = vec![
+            FlatModule {
+                id: "a".into(),
+                type_name: "NoSuchModule".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
-                from_provenance: Provenance::root(synthetic_span()),
-                to_provenance: Provenance::root(synthetic_span()),
-            }],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        };
+            },
+            FlatModule {
+                id: "b".into(),
+                type_name: "NoSuchModule".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+            },
+        ];
+        patch.graph.connections = vec![FlatConnection {
+            from_module: "a".into(),
+            from_port: "out".into(),
+            from_index: 0,
+            to_module: "b".into(),
+            to_port: "in".into(),
+            to_index: 0,
+            scale: 1.0,
+            provenance: Provenance::root(synthetic_span()),
+            from_provenance: Provenance::root(synthetic_span()),
+            to_provenance: Provenance::root(synthetic_span()),
+        }];
         let svg = render(&patch, &SvgOptions::default());
         assert!(svg.contains(r#"<path class="cable""#));
         assert!(!svg.contains(r#"<path class="cable cable-"#));
@@ -361,41 +343,37 @@ mod tests {
             _ => return, // no poly-audio output modules in registry; skip
         };
 
-        let patch = FlatPatch {
-            modules: vec![
-                FlatModule {
-                    id: "src".into(),
-                    type_name: from_name,
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-                FlatModule {
-                    id: "sink".into(),
-                    type_name: "AudioOut".into(),
-                    shape: vec![],
-                    params: vec![],
-                    port_aliases: vec![],
-                    provenance: Provenance::root(synthetic_span()),
-                },
-            ],
-            connections: vec![FlatConnection {
-                from_module: "src".into(),
-                from_port,
-                from_index: 0,
-                to_module: "sink".into(),
-                to_port: "in_left".into(),
-                to_index: 0,
-                scale: 1.0,
+        let mut patch = FlatPatch::default();
+        patch.graph.modules = vec![
+            FlatModule {
+                id: "src".into(),
+                type_name: from_name,
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
-                from_provenance: Provenance::root(synthetic_span()),
-                to_provenance: Provenance::root(synthetic_span()),
-            }],
-            patterns: vec![],
-            songs: vec![],
-            port_refs: vec![],
-        };
+            },
+            FlatModule {
+                id: "sink".into(),
+                type_name: "AudioOut".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+            },
+        ];
+        patch.graph.connections = vec![FlatConnection {
+            from_module: "src".into(),
+            from_port,
+            from_index: 0,
+            to_module: "sink".into(),
+            to_port: "in_left".into(),
+            to_index: 0,
+            scale: 1.0,
+            provenance: Provenance::root(synthetic_span()),
+            from_provenance: Provenance::root(synthetic_span()),
+            to_provenance: Provenance::root(synthetic_span()),
+        }];
         let svg = render(&patch, &SvgOptions::default());
         assert!(
             svg.contains("cable-poly-audio"),

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use patches_core::{ModuleDescriptor, ModuleShape, Registry};
+use patches_core::{ModuleDescriptor, ModuleShape};
+use patches_registry::Registry;
 use patches_dsl::{FlatPatch, QName};
 
 use crate::layout::{node_height, EdgeHint, LayoutConfig, LayoutEdge, LayoutNode, NodeHint};

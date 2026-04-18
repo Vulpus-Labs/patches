@@ -3,8 +3,9 @@ use patches_core::{
     BASE_PERIODIC_UPDATE_INTERVAL,
     AudioEnvironment, CableKind, CablePool, CableValue, InstanceId, MidiEvent,
     Module, ModuleDescriptor, ModuleGraph, ModuleShape, MonoOutput,
-    PolyLayout, PortDescriptor, PortRef, Registry,
+    PolyLayout, PortDescriptor, PortRef,
 };
+use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{

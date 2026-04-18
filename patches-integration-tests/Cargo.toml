@@ -9,7 +9,9 @@ doctest = false
 
 [dependencies]
 patches-core = { path = "../patches-core", features = ["test-support"] }
+patches-registry = { path = "../patches-registry" }
 patches-engine = { path = "../patches-engine" }
+patches-planner = { path = "../patches-planner" }
 rtrb = "0.3"
 
 [dev-dependencies]

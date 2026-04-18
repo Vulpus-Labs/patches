@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::modules::InstanceId;
+use patches_core::modules::InstanceId;
 use super::graph_index::GraphIndex;
-use super::super::graph::NodeId;
+use patches_core::graphs::graph::NodeId;
 use super::PlanError;
 
 // Re-export so callers that import from the planner do not need to reach into
 // cables directly.
-pub use crate::cables::{
+pub use patches_core::cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
@@ -199,7 +199,7 @@ mod tests {
 
     use super::*;
     use super::super::PlanError;
-    use crate::modules::InstanceId;
+    use patches_core::modules::InstanceId;
 
     fn fresh_ids(n: usize) -> Vec<InstanceId> {
         (0..n).map(|_| InstanceId::next()).collect()

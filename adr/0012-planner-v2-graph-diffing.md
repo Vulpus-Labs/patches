@@ -1,7 +1,7 @@
 # ADR 0012 — Planner v2: graph-diffing and data-driven planning
 
 **Date:** 2026-03-04
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

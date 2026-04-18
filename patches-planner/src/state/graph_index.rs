@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::cables::{CableKind, MONO_READ_SINK, POLY_READ_SINK};
-use crate::modules::{ModuleDescriptor, PortConnectivity};
-use super::super::graph::{ModuleGraph, Node, NodeId};
+use patches_core::cables::{CableKind, MONO_READ_SINK, POLY_READ_SINK};
+use patches_core::modules::{ModuleDescriptor, PortConnectivity};
+use patches_core::graphs::graph::{ModuleGraph, Node, NodeId};
 use super::PlanError;
 
 // ── Type aliases ──────────────────────────────────────────────────────────────
@@ -202,10 +202,10 @@ mod tests {
 
     use super::*;
     use super::super::PlanError;
-    use crate::cables::{CableKind, PolyLayout};
-    use crate::modules::{ModuleDescriptor, ModuleShape, PortDescriptor};
-    use crate::parameter_map::ParameterMap;
-    use crate::ModuleGraph;
+    use patches_core::cables::{CableKind, PolyLayout};
+    use patches_core::modules::{ModuleDescriptor, ModuleShape, PortDescriptor};
+    use patches_core::parameter_map::ParameterMap;
+    use patches_core::ModuleGraph;
 
     fn two_node_graph() -> (ModuleGraph, NodeId, NodeId) {
         let src_desc = ModuleDescriptor {

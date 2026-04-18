@@ -115,8 +115,8 @@ pub use host_transport::HostTransport;
 pub use tempo_sync::TempoSync;
 pub use ms_ticker::MsTicker;
 
-pub fn default_registry() -> patches_core::Registry {
-    let mut r = patches_core::Registry::new();
+pub fn default_registry() -> patches_registry::Registry {
+    let mut r = patches_registry::Registry::new();
     r.register::<Oscillator>();
     r.register::<Sum>();
     r.register::<Vca>();

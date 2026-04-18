@@ -8,7 +8,8 @@ mod param;
 mod port;
 mod template;
 
-use patches_core::{Registry, Span as CoreSpan};
+use patches_core::Span as CoreSpan;
+use patches_registry::Registry;
 use patches_dsl::flat::{FlatConnection, FlatPatch};
 use patches_dsl::SourceMap;
 use patches_interpreter::BoundPatch;

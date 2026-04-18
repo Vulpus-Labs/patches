@@ -28,7 +28,9 @@ use std::collections::{HashMap, HashSet};
 use patches_core::QName;
 
 use crate::ast::{File, ParamType, Scalar, ShapeArg, ShapeArgValue, Span, Template};
-use crate::flat::{FlatConnection, FlatModule, FlatPatch, FlatPatternDef, FlatPortRef};
+use crate::flat::{
+    FlatConnection, FlatGraph, FlatModule, FlatPatch, FlatPatternDef, FlatPortRef, SongData,
+};
 use crate::structural::StructuralCode as Code;
 
 use composition::{expand_pattern_def, flatten_song, index_songs, AssembledSong};
@@ -97,7 +99,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     songs.extend(result.songs);
 
     // Canonicalise: sort patterns alphabetically by qualified name so that
-    // `FlatPatch::patterns` has a stable, deterministic order irrespective of
+    // `SongData::patterns` has a stable, deterministic order irrespective of
     // template expansion order. `index_songs` requires sorted patterns —
     // [`composition::SortedPatterns`] makes that precondition a type, so the
     // call site can't accidentally feed in unsorted input.
@@ -106,11 +108,15 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
 
     Ok(ExpandResult {
         patch: FlatPatch {
-            modules: result.modules,
-            connections: result.connections,
-            patterns: patterns.into_inner(),
-            songs: resolved_songs,
-            port_refs: result.port_refs,
+            graph: FlatGraph {
+                modules: result.modules,
+                connections: result.connections,
+                port_refs: result.port_refs,
+            },
+            song_data: SongData {
+                patterns: patterns.into_inner(),
+                songs: resolved_songs,
+            },
         },
         warnings: vec![],
     })

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::cables::{InputPort, OutputPort};
-use crate::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, PortConnectivity};
-use super::graph::{ModuleGraph, NodeId};
+use patches_core::cables::{InputPort, OutputPort};
+use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, PortConnectivity};
+use patches_core::graphs::graph::{ModuleGraph, NodeId};
 
 pub mod alloc;
 pub mod graph_index;

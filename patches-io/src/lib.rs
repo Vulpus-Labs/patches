@@ -13,6 +13,7 @@ pub use audio_data::{AudioData, AudioIoError};
 
 pub mod aiff;
 pub mod wav_read;
+pub mod wav_recorder;
 pub mod wav_write;
 
 pub use aiff::read_aiff;

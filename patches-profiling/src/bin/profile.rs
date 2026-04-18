@@ -14,10 +14,11 @@ use std::process;
 use std::sync::Arc;
 
 use patches_core::{
-    AudioEnvironment, CablePool, CableValue, Module, PlannerState,
+    AudioEnvironment, CablePool, CableValue, Module,
     POLY_READ_SINK, POLY_WRITE_SINK,
 };
-use patches_engine::{build_patch, ReadyState, ModulePool};
+use patches_engine::{ReadyState, ModulePool};
+use patches_planner::{build_patch, PlannerState};
 use patches_profiling::timing_collector::TimingCollector;
 use patches_profiling::timing_shim::TimingShim;
 

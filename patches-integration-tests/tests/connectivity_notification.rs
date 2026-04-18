@@ -2,8 +2,9 @@ use std::any::Any;
 
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, PolyLayout, PortDescriptor, PortRef, Registry,
+    ModuleShape, NodeId, PolyLayout, PortDescriptor, PortRef,
 };
+use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator};

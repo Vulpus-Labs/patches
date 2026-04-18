@@ -13,7 +13,7 @@ pub fn env() -> AudioEnvironment {
     }
 }
 
-pub fn registry() -> patches_core::Registry {
+pub fn registry() -> patches_registry::Registry {
     patches_modules::default_registry()
 }
 

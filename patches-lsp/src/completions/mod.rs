@@ -27,7 +27,7 @@ mod params;
 mod ports;
 mod shape;
 
-use patches_core::Registry;
+use patches_registry::Registry;
 use tower_lsp::lsp_types::*;
 use tree_sitter::Tree;
 

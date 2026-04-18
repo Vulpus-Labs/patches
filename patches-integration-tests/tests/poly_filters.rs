@@ -9,8 +9,9 @@ use std::f32::consts::TAU;
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
     ModuleShape, NodeId, ParameterDescriptor, ParameterKind, PolyLayout, PortDescriptor, PortRef,
-    PolyOutput, Registry,
+    PolyOutput,
 };
+use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};

@@ -14,7 +14,7 @@ use patches_core::cables::{InputPort, OutputPort};
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
 use patches_core::{AudioEnvironment, Module};
-use patches_core::registries::ModuleBuilder;
+use patches_registry::ModuleBuilder;
 
 use crate::json;
 use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiInputPort, FfiModuleShape, FfiOutputPort, FfiPluginVTable};

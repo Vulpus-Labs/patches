@@ -1,5 +1,4 @@
-use crate::audio_environment::AudioEnvironment;
-use crate::modules::module_descriptor::ModuleShape;
+use patches_core::{AudioEnvironment, ModuleShape};
 
 /// Trait for modules that can pre-process file contents on the control thread.
 ///

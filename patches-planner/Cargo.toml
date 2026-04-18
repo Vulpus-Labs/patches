@@ -1,0 +1,17 @@
+[package]
+name = "patches-planner"
+version = "0.6.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "patches_planner"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-registry = { path = "../patches-registry" }
+
+[dev-dependencies]
+patches-modules = { path = "../patches-modules" }
