@@ -1,4 +1,5 @@
 use super::*;
+use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
 use patches_core::AudioEnvironment;
 use patches_core::test_support::{assert_attenuated, assert_passes, ModuleHarness, params};

@@ -1,4 +1,5 @@
 use super::*;
+use crate::cable_pool::CablePool;
 
 fn mono_pool(value: f32) -> Vec<CableValue> {
     vec![CableValue::Mono(value)]
