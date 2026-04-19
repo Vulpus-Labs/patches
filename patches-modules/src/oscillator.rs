@@ -1,9 +1,17 @@
 use patches_core::{
+    params_enum,
     AudioEnvironment, BoundedRandomWalk, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
     OSCILLATOR_DRIFT_STEP,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+
+params_enum! {
+    pub enum OscFmType {
+        Linear => "linear",
+        Logarithmic => "logarithmic",
+    }
+}
 use patches_dsp::polyblep;
 use crate::common::approximate::lookup_sine;
 use crate::common::frequency::{C0_FREQ, FMMode, MonoFrequencyConverter, MonoFrequencyChangeTracker};
@@ -85,7 +93,7 @@ impl Module for Oscillator {
             .mono_out("sawtooth")
             .mono_out("square")
             .float_param("frequency", -4.0, 12.0, 0.0)
-            .enum_param("fm_type", &["linear", "logarithmic"], "linear")
+            .enum_param("fm_type", OscFmType::VARIANTS, "linear")
             .float_param("drift", 0.0, 1.0, 0.0)
     }
 
@@ -114,19 +122,20 @@ impl Module for Oscillator {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("frequency") {
             self.freq_tracker.set_voct_offset(*v);
             let inc = self.freq_converter.to_increment(self.freq_tracker.base_frequency());
             self.phase_acc.set_increment(inc);
         }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("fm_type") {
-            let fm_mode = match *v {
-                "linear" => FMMode::Linear,
-                "logarithmic" => FMMode::Exponential,
-                _ => return,
-            };
-            self.freq_tracker.set_fm_mode(fm_mode);
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("fm_type") {
+            if let Ok(t) = OscFmType::try_from(v) {
+                let fm_mode = match t {
+                    OscFmType::Linear => FMMode::Linear,
+                    OscFmType::Logarithmic => FMMode::Exponential,
+                };
+                self.freq_tracker.set_fm_mode(fm_mode);
+            }
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("drift") {
             self.drift = *v;

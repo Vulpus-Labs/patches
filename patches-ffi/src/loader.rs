@@ -17,7 +17,7 @@ use patches_core::{AudioEnvironment, Module};
 use patches_registry::ModuleBuilder;
 
 use crate::json;
-use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiInputPort, FfiModuleShape, FfiOutputPort, FfiPluginVTable};
+use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiInputPort, FfiModuleShape, FfiOutputPort, FfiPluginManifest, FfiPluginVTable};
 
 // ── DylibModule ──────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ impl Module for DylibModule {
         unreachable!("DylibModule::prepare is not callable directly; use DylibModuleBuilder")
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         let json = json::serialize_parameter_map(params);
         unsafe {
             (self.vtable.update_validated_parameters)(
@@ -166,6 +166,21 @@ impl DylibModuleBuilder {
     pub fn vtable(&self) -> &FfiPluginVTable {
         &self.vtable
     }
+
+    /// Access the shared library handle. Test/diagnostic use only.
+    pub fn library_arc(&self) -> Arc<libloading::Library> {
+        Arc::clone(&self.lib)
+    }
+
+    /// Strong count of the shared library `Arc`. Test/diagnostic use only.
+    pub fn library_strong_count(&self) -> usize {
+        Arc::strong_count(&self.lib)
+    }
+
+    /// Per-module semver-packed version declared by the plugin.
+    pub fn module_version(&self) -> u32 {
+        self.vtable.module_version
+    }
 }
 
 impl ModuleBuilder for DylibModuleBuilder {
@@ -233,34 +248,75 @@ impl ModuleBuilder for DylibModuleBuilder {
 
 // ── load_plugin ──────────────────────────────────────────────────────────────
 
-/// Load a plugin from a shared library at `path`.
+/// Load a plugin bundle from a shared library at `path`.
 ///
-/// Returns a `DylibModuleBuilder` that can be registered in the `Registry`.
+/// Returns one `DylibModuleBuilder` per vtable in the plugin's manifest; all
+/// builders share a single `Arc<libloading::Library>`, so the DSP the plugin
+/// carries is linked once and shared across every module it exposes.
 ///
 /// # Errors
 /// Returns an error if the library cannot be opened, the init symbol is
-/// missing, or the ABI version does not match.
-pub fn load_plugin(path: &Path) -> Result<DylibModuleBuilder, String> {
+/// missing, the ABI version does not match, or the manifest has no vtables
+/// or duplicate module names.
+pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| format!("failed to load library {}: {e}", path.display()))?;
 
-    let init_fn: libloading::Symbol<unsafe extern "C" fn() -> FfiPluginVTable> = unsafe {
+    let init_fn: libloading::Symbol<unsafe extern "C" fn() -> FfiPluginManifest> = unsafe {
         lib.get(b"patches_plugin_init")
     }.map_err(|e| format!("symbol 'patches_plugin_init' not found in {}: {e}", path.display()))?;
 
-    let vtable = unsafe { init_fn() };
+    let manifest = unsafe { init_fn() };
 
-    if vtable.abi_version != ABI_VERSION {
+    if manifest.abi_version != ABI_VERSION {
         return Err(format!(
             "ABI version mismatch for {}: plugin has {}, host expects {}",
             path.display(),
-            vtable.abi_version,
+            manifest.abi_version,
             ABI_VERSION,
         ));
     }
 
-    Ok(DylibModuleBuilder {
-        vtable,
-        lib: Arc::new(lib),
-    })
+    if manifest.vtables.is_null() || manifest.count == 0 {
+        return Err(format!(
+            "plugin {} exposes an empty manifest",
+            path.display(),
+        ));
+    }
+
+    let vtables: &[FfiPluginVTable] = unsafe {
+        std::slice::from_raw_parts(manifest.vtables, manifest.count)
+    };
+
+    let lib_arc = Arc::new(lib);
+    let mut builders: Vec<DylibModuleBuilder> = Vec::with_capacity(vtables.len());
+    let mut names: Vec<String> = Vec::with_capacity(vtables.len());
+
+    let default_shape = patches_core::ModuleShape::default();
+    for vt in vtables.iter() {
+        if vt.abi_version != ABI_VERSION {
+            return Err(format!(
+                "ABI version mismatch within bundle {}: vtable has {}, host expects {}",
+                path.display(),
+                vt.abi_version,
+                ABI_VERSION,
+            ));
+        }
+        let builder = DylibModuleBuilder {
+            vtable: *vt,
+            lib: Arc::clone(&lib_arc),
+        };
+        let name = builder.describe(&default_shape).module_name.to_string();
+        if names.iter().any(|n| n == &name) {
+            return Err(format!(
+                "duplicate module_name {:?} within bundle {}",
+                name,
+                path.display(),
+            ));
+        }
+        names.push(name);
+        builders.push(builder);
+    }
+
+    Ok(builders)
 }

@@ -130,9 +130,6 @@ pub(crate) fn format_parameter_kind(kind: &patches_core::ParameterKind) -> Strin
             let vs = variants.join(" | ");
             format!("enum ({vs}, default {default})")
         }
-        patches_core::ParameterKind::String { default } => {
-            format!("string (default \"{default}\")")
-        }
         patches_core::ParameterKind::File { extensions } => {
             let exts = extensions.join(", ");
             format!("file ({exts})")

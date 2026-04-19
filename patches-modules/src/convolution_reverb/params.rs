@@ -37,11 +37,20 @@ pub(super) const PROCESSING_BUDGET: usize = 1024;
 /// Tiers double from BLOCK_SIZE up to this cap.
 pub(super) const MAX_TIER_BLOCK_SIZE: usize = 32768;
 
-/// IR variant names.
-pub(super) const IR_VARIANTS: &[&str] = &["room", "hall", "plate", "file"];
+patches_core::params_enum! {
+    pub enum IrVariant {
+        Room => "room",
+        Hall => "hall",
+        Plate => "plate",
+        File => "file",
+    }
+}
+
+/// IR variant names (snake_case) in descriptor/declaration order.
+pub(super) const IR_VARIANTS: &[&str] = IrVariant::VARIANTS;
 
 /// Index of the "file" variant in [`IR_VARIANTS`].
-pub(super) const FILE_VARIANT_IDX: u8 = 3;
+pub(super) const FILE_VARIANT_IDX: u8 = IrVariant::File as u8;
 
 /// File extensions supported by the convolution reverb's `ir_data` parameter.
 pub(super) const IR_FILE_EXTENSIONS: &[&str] = &["wav", "aiff", "aif"];
@@ -122,7 +131,3 @@ pub(super) fn generate_stereo_variant_ir(variant: &str, sample_rate: f32) -> (Ve
     )
 }
 
-/// Map an IR variant name to its index in [`IR_VARIANTS`].
-pub(super) fn ir_variant_index(name: &str) -> u8 {
-    IR_VARIANTS.iter().position(|&v| v == name).unwrap_or(0) as u8
-}

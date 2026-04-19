@@ -44,7 +44,7 @@ impl Module for TimingShim {
         unimplemented!("TimingShim is a wrapper; construct via TimingShim::new")
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         self.inner.update_validated_parameters(params);
     }
 

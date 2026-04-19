@@ -90,7 +90,7 @@ impl Module for TransientShaper {
         s
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         let mut speed_changed = false;
         if let Some(ParameterValue::Float(v)) = params.get_scalar("attack") {
             self.attack_amount = v.clamp(-1.0, 1.0);

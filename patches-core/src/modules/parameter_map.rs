@@ -64,10 +64,10 @@ pub enum ParameterValue {
     Float(f32),
     Int(i64),
     Bool(bool),
-    Enum(&'static str),
-    /// A single runtime string (e.g. a file path). Owned because values come
-    /// from the DSL at runtime.
-    String(String),
+    /// Enum variant index matching the order of
+    /// [`ParameterKind::Enum::variants`](super::module_descriptor::ParameterKind::Enum).
+    /// See ADR 0045 Spike 0.
+    Enum(u32),
     /// A resolved absolute file path. Produced by the interpreter from
     /// `file("path")` DSL syntax. The planner replaces this with `FloatBuffer`
     /// after calling the module's `FileProcessor::process_file`.
@@ -79,6 +79,16 @@ pub enum ParameterValue {
     FloatBuffer(Arc<[f32]>),
 }
 
+impl From<f32> for ParameterValue {
+    fn from(v: f32) -> Self { ParameterValue::Float(v) }
+}
+impl From<bool> for ParameterValue {
+    fn from(v: bool) -> Self { ParameterValue::Bool(v) }
+}
+impl From<i64> for ParameterValue {
+    fn from(v: i64) -> Self { ParameterValue::Int(v) }
+}
+
 impl ParameterValue {
     pub fn kind_name(&self) -> &'static str {
         match self {
@@ -86,7 +96,6 @@ impl ParameterValue {
             ParameterValue::Int(_) => "int",
             ParameterValue::Bool(_) => "bool",
             ParameterValue::Enum(_) => "enum",
-            ParameterValue::String(_) => "string",
             ParameterValue::File(_) => "file",
             ParameterValue::FloatBuffer(_) => "float_buffer",
         }

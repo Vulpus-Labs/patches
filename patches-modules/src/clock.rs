@@ -77,7 +77,7 @@ impl Module for Clock {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("bpm") {
             self.bpm = *v;
             self.beat_phase_delta = self.bpm / (60.0 * self.sample_rate);

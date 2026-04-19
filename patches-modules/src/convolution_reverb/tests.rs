@@ -30,7 +30,7 @@ fn descriptor_ports_and_params_mono() {
 #[test]
 fn initial_build_installs_processor_synchronously() {
     let h = ModuleHarness::build_with_env::<ConvolutionReverb>(
-        params!["ir" => "room", "mix" => 1.0_f32],
+        params!["ir" => super::params::IrVariant::Room, "mix" => 1.0_f32],
         env(),
     );
     let cr = h.as_any().downcast_ref::<ConvolutionReverb>().unwrap();
@@ -50,7 +50,7 @@ fn initial_build_installs_processor_synchronously() {
 /// Because the processor runs on a background thread, slot completions
 /// depend on OS scheduling; we drive many samples and budget wall time
 /// for the thread to catch up before checking the output buffer.
-fn drive_impulse_and_measure_peak(variant: &'static str) -> f32 {
+fn drive_impulse_and_measure_peak(variant: super::params::IrVariant) -> f32 {
     let mut h = ModuleHarness::build_with_env::<ConvolutionReverb>(
         params!["ir" => variant, "mix" => 1.0_f32],
         env(),
@@ -81,7 +81,7 @@ fn drive_impulse_and_measure_peak(variant: &'static str) -> f32 {
         sleep(Duration::from_millis(2));
     }
     assert!(peak.is_finite(), "non-finite output");
-    assert!(peak < 10.0, "{variant}: peak {peak} exceeds bounded-response limit");
+    assert!(peak < 10.0, "{variant:?}: peak {peak} exceeds bounded-response limit");
     peak
 }
 
@@ -90,7 +90,8 @@ fn drive_impulse_and_measure_peak(variant: &'static str) -> f32 {
 /// spawn, convolution, overlap-add) produces signal at all.
 #[test]
 fn at_least_one_ir_variant_produces_signal() {
-    let peaks: Vec<(&str, f32)> = ["room", "hall", "plate"].iter()
+    use super::params::IrVariant;
+    let peaks: Vec<(IrVariant, f32)> = [IrVariant::Room, IrVariant::Hall, IrVariant::Plate].iter()
         .map(|&v| (v, drive_impulse_and_measure_peak(v)))
         .collect();
     let max_peak = peaks.iter().map(|(_, p)| *p).fold(0.0_f32, f32::max);

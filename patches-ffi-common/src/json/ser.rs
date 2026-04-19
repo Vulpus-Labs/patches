@@ -135,11 +135,6 @@ fn write_parameter_kind(out: &mut String, kind: &ParameterKind) {
             write_string(out, default);
             out.push('}');
         }
-        ParameterKind::String { default } => {
-            out.push_str("{\"type\":\"string\",\"default\":");
-            write_string(out, default);
-            out.push('}');
-        }
         ParameterKind::File { extensions } => {
             out.push_str("{\"type\":\"file\",\"extensions\":[");
             for (i, ext) in extensions.iter().enumerate() {
@@ -189,14 +184,9 @@ fn write_parameter_value(out: &mut String, value: &ParameterValue) {
             out.push_str(&format!("{{\"type\":\"bool\",\"v\":{v}}}"));
         }
         ParameterValue::Enum(v) => {
-            out.push_str("{\"type\":\"enum\",\"v\":");
-            write_string(out, v);
-            out.push('}');
-        }
-        ParameterValue::String(v) => {
-            out.push_str("{\"type\":\"string\",\"v\":");
-            write_string(out, v);
-            out.push('}');
+            // ADR 0045 Spike 0: emit variant index (u32) not name. Decoders are
+            // all in-tree and match the audio-thread representation.
+            out.push_str(&format!("{{\"type\":\"enum\",\"v\":{v}}}"));
         }
         ParameterValue::File(v) => {
             out.push_str("{\"type\":\"file\",\"v\":");

@@ -47,7 +47,7 @@ impl Module for PolySum {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.instance_id }

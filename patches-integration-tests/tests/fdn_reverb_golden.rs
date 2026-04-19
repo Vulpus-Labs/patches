@@ -52,7 +52,7 @@ fn make_harness() -> ModuleHarness {
         hosted: false,
     };
     let mut h = ModuleHarness::build_with_env::<FdnReverb>(
-        params!["size" => 0.5_f32, "brightness" => 0.5_f32, "character" => "plate"],
+        params!["size" => 0.5_f32, "brightness" => 0.5_f32, "character" => patches_modules::fdn_reverb::params::Character::Plate],
         env,
     );
     // Disconnect CV inputs and the right audio input (mono source).

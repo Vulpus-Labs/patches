@@ -36,7 +36,7 @@
 
 mod line;
 mod matrix;
-mod params;
+pub mod params;
 mod processor;
 
 use crate::common::delay_buffer::{DelayBuffer, ThiranInterp};

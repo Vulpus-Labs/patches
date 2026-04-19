@@ -1,9 +1,18 @@
+use patches_core::params_enum;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 
 use super::MasterSequencer;
 
+params_enum! {
+    pub enum SyncMode {
+        Auto => "auto",
+        Free => "free",
+        Host => "host",
+    }
+}
+
 impl MasterSequencer {
-    pub(super) fn apply_params(&mut self, params: &mut ParameterMap) {
+    pub(super) fn apply_params(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("bpm") {
             self.core.bpm = *v;
         }
@@ -25,11 +34,11 @@ impl MasterSequencer {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("swing") {
             self.core.swing = *v;
         }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("sync") {
-            self.use_host_transport = match *v {
-                "free" => false,
-                "host" => true,
-                _ /* auto */ => self.hosted,
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("sync") {
+            self.use_host_transport = match SyncMode::try_from(v) {
+                Ok(SyncMode::Free) => false,
+                Ok(SyncMode::Host) => true,
+                _ => self.hosted,
             };
         }
     }

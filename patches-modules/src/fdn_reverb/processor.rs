@@ -14,7 +14,7 @@ use crate::common::phase_accumulator::MonoPhaseAccumulator;
 use super::line::{absorption_coeffs, BASE_MS};
 use super::matrix::{hadamard8, INV_SQRT8, LINES, OUT_L, OUT_R};
 use super::params::{
-    char_index, derive_params, ScaledCharacter, CHARS, MAX_LINE_SECS, MAX_PRE_DELAY_SECS,
+    derive_params, Character, ScaledCharacter, CHARS, MAX_LINE_SECS, MAX_PRE_DELAY_SECS,
 };
 use super::FdnReverb;
 
@@ -59,7 +59,7 @@ impl Module for FdnReverb {
             .float_param("brightness", 0.0, 1.0, 0.5)
             .float_param("pre_delay",  0.0, 1.0, 0.0)
             .float_param("mix",        0.0, 1.0, 1.0)
-            .enum_param("character", &["plate", "room", "chamber", "hall", "cathedral"], "hall")
+            .enum_param("character", Character::VARIANTS, "hall")
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -131,7 +131,7 @@ impl Module for FdnReverb {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("size") {
             if self.size_param != *v {
                 self.size_param = *v;
@@ -150,8 +150,8 @@ impl Module for FdnReverb {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
             self.mix_param = *v;
         }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("character") {
-            let new_char = char_index(v);
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("character") {
+            let new_char = Character::try_from(v).unwrap_or(Character::Hall) as usize;
             if self.character != new_char {
                 self.character = new_char;
                 self.sc = ScaledCharacter::new(new_char, self.sample_rate);

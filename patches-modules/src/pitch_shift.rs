@@ -226,7 +226,7 @@ impl patches_core::Module for PitchShift {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("semitones") {
             self.base_semitones = *v;
         }

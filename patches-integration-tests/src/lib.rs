@@ -109,7 +109,7 @@ impl Module for ImpulseSource {
         Self { id, descriptor: d, out: MonoOutput::default(), fired: false }
     }
 
-    fn update_validated_parameters(&mut self, _: &mut ParameterMap) {}
+    fn update_validated_parameters(&mut self, _: &ParameterMap) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.id }
 
@@ -145,7 +145,7 @@ impl Module for ConstSource {
         Self { id, descriptor: d, out: MonoOutput::default(), value: 1.0 }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("amplitude") {
             self.value = *v;
         }
@@ -196,7 +196,7 @@ impl Module for SineSource {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("amplitude") {
             self.amplitude = *v;
         }

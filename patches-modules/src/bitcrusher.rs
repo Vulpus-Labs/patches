@@ -77,7 +77,7 @@ impl Module for Bitcrusher {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("rate") {
             self.rate = *v;
             self.kernel.set_rate(self.rate, self.sample_rate);

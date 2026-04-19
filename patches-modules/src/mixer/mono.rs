@@ -103,7 +103,7 @@ impl Module for Mixer {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         for i in 0..self.channels {
             self.levels[i]        = get_float(params, "level",  i, self.levels[i]);
             self.send_a_levels[i] = get_float(params, "send_a", i, self.send_a_levels[i]);

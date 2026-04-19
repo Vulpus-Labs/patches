@@ -1,4 +1,5 @@
 use super::*;
+use crate::vchorus::core::{Mode, Variant};
 use patches_core::test_support::{params, ModuleHarness};
 use patches_core::{AudioEnvironment, ModuleShape};
 
@@ -60,8 +61,8 @@ fn descriptor_shape() {
 fn off_on_bright_bypasses_signal() {
     let mut h = ModuleHarness::build_full::<VChorus>(
         params![
-            "variant" => "bright",
-            "mode" => "off",
+            "variant" => Variant::Bright,
+            "mode" => Mode::Off,
             "hiss" => 0.0_f32,
         ],
         ENV,
@@ -79,7 +80,7 @@ fn off_on_bright_bypasses_signal() {
 fn hiss_silent_at_zero_and_bounded_at_one() {
     // hiss=0: silent input stays silent (steady state).
     let mut h = ModuleHarness::build_full::<VChorus>(
-        params!["mode" => "one", "hiss" => 0.0_f32],
+        params!["mode" => Mode::One, "hiss" => 0.0_f32],
         ENV,
         shape(),
     );
@@ -92,7 +93,7 @@ fn hiss_silent_at_zero_and_bounded_at_one() {
 
     // hiss=1: noise present but not huge.
     let mut h2 = ModuleHarness::build_full::<VChorus>(
-        params!["mode" => "one", "hiss" => 1.0_f32],
+        params!["mode" => Mode::One, "hiss" => 1.0_f32],
         ENV,
         shape(),
     );
@@ -107,26 +108,28 @@ fn hiss_silent_at_zero_and_bounded_at_one() {
 }
 
 #[test]
-fn mode_both_on_bright_tighter_than_mode_one() {
-    // Mode I on bright: slow sweep, strong L/R anti-correlation.
+fn mode_both_on_bright_more_modulated_than_mode_one() {
+    // FM index ≈ f_carrier * delay_depth * lfo_rate. Mode I+II on
+    // bright has depth=0.2 ms, rate=9.75 Hz → index bigger than mode I
+    // (depth=1.85 ms, rate=0.513 Hz) despite the tighter sweep, so L/R
+    // decorrelate more under the inverse-LFO trick.
     let mut h1 = ModuleHarness::build_full::<VChorus>(
         params![
-            "variant" => "bright",
-            "mode" => "one",
+            "variant" => Variant::Bright,
+            "mode" => Mode::One,
             "hiss" => 0.0_f32,
         ],
         ENV,
         shape(),
     );
-    let n = (SR * 0.8) as usize; // long enough for the 0.5 Hz LFO to move
+    let n = (SR * 0.8) as usize;
     let (l1, r1) = run_sine(&mut h1, n);
     let c1 = xcorr_lr(&l1, &r1);
 
-    // Mode I+II on bright: fast tight sweep, higher correlation.
     let mut h2 = ModuleHarness::build_full::<VChorus>(
         params![
-            "variant" => "bright",
-            "mode" => "both",
+            "variant" => Variant::Bright,
+            "mode" => Mode::Both,
             "hiss" => 0.0_f32,
         ],
         ENV,
@@ -136,8 +139,8 @@ fn mode_both_on_bright_tighter_than_mode_one() {
     let c2 = xcorr_lr(&l2, &r2);
 
     assert!(
-        c2 > c1,
-        "mode both should yield tighter (higher) L/R correlation than mode one: both={c2}, one={c1}"
+        c2 < c1,
+        "mode both should yield lower L/R correlation than mode one: both={c2}, one={c1}"
     );
 }
 
@@ -147,8 +150,8 @@ fn dark_variant_does_not_bypass_when_off() {
     // so it is *not* bit-identical to the input (unlike bright).
     let mut h = ModuleHarness::build_full::<VChorus>(
         params![
-            "variant" => "dark",
-            "mode" => "off",
+            "variant" => Variant::Dark,
+            "mode" => Mode::Off,
             "hiss" => 0.0_f32,
         ],
         ENV,

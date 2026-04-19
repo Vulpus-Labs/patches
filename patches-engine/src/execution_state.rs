@@ -273,7 +273,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor }
         }
-        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, _pool: &mut CablePool<'_>) {}
@@ -316,7 +316,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor, count: Arc::new(AtomicUsize::new(0)) }
         }
-        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, _pool: &mut CablePool<'_>) {
@@ -363,7 +363,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true }, value: 0.0 }
         }
-        fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, pool: &mut CablePool<'_>) {

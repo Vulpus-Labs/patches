@@ -85,7 +85,7 @@ impl Module for StereoPolyMixer {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         for i in 0..self.channels {
             self.levels[i] = get_float(params, "level", i, self.levels[i]);
             self.pans[i]   = get_float(params, "pan",   i, self.pans[i]);

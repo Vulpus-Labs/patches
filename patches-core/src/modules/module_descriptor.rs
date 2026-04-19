@@ -54,8 +54,6 @@ pub enum ParameterKind {
     Int   { min: i64, max: i64, default: i64 },
     Bool  { default: bool },
     Enum  { variants: &'static [&'static str], default: &'static str },
-    /// A single runtime string (e.g. a file path).
-    String { default: &'static str },
     /// A file path parameter. The DSL writes `file("path")` which the interpreter
     /// resolves to an absolute path against the patch file's directory.
     ///
@@ -80,8 +78,13 @@ impl ParameterKind {
             ParameterKind::Float { default, .. } => ParameterValue::Float(*default),
             ParameterKind::Int   { default, .. } => ParameterValue::Int(*default),
             ParameterKind::Bool  { default }     => ParameterValue::Bool(*default),
-            ParameterKind::Enum  { default, .. } => ParameterValue::Enum(default),
-            ParameterKind::String { default }    => ParameterValue::String(default.to_string()),
+            ParameterKind::Enum  { variants, default } => {
+                let idx = variants
+                    .iter()
+                    .position(|v| v == default)
+                    .unwrap_or(0) as u32;
+                ParameterValue::Enum(idx)
+            }
             ParameterKind::File { .. } => ParameterValue::File(String::new()),
             ParameterKind::SongName => ParameterValue::Int(-1),
         }
@@ -94,7 +97,6 @@ impl ParameterKind {
             ParameterKind::Int   { .. } => "int",
             ParameterKind::Bool  { .. } => "bool",
             ParameterKind::Enum   { .. } => "enum",
-            ParameterKind::String { .. } => "string",
             ParameterKind::File  { .. } => "file",
             ParameterKind::SongName => "song_name",
         }
@@ -256,10 +258,6 @@ impl ModuleDescriptor {
     param_builder!(enum_param, enum_param_multi,
         (variants: &'static [&'static str], default: &'static str),
         ParameterKind::Enum { variants, default });
-
-    param_builder!(string_param, string_param_multi,
-        (default: &'static str),
-        ParameterKind::String { default });
 
     param_builder!(file_param, file_param_multi,
         (extensions: &'static [&'static str]),

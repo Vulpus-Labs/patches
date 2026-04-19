@@ -98,7 +98,7 @@ impl Module for ClapDrum {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
             self.decay_time = *v;
             self.tail_env.set_decay(self.decay_time);

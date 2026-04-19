@@ -71,17 +71,17 @@ pub fn validate_parameters(
             }
             (ParameterKind::Bool { .. }, ParameterValue::Bool(_)) => {}
             (ParameterKind::Enum { variants, .. }, ParameterValue::Enum(v)) => {
-                if !variants.contains(v) {
+                if (*v as usize) >= variants.len() {
                     return Err(BuildError::Custom {
                         module: descriptor.module_name,
                         message: format!(
-                            "parameter '{}' has unrecognised value '{v}'",
-                            param_desc.name
+                            "parameter '{}' has out-of-range enum index {v} (variants: {})",
+                            param_desc.name,
+                            variants.len()
                         ), origin: None,
                     });
                 }
             }
-            (ParameterKind::String { .. }, ParameterValue::String(_)) => {}
             (ParameterKind::SongName, ParameterValue::Int(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::File(_)) => {}
             (ParameterKind::File { .. }, ParameterValue::FloatBuffer(_)) => {}
@@ -212,11 +212,13 @@ pub trait Module: Send {
     /// validation passes. All keys are guaranteed to be declared in the descriptor and their
     /// values are guaranteed to be correctly typed and within bounds.
     ///
-    /// Takes `&mut ParameterMap` so that modules can destructively read values
-    /// (via [`ParameterMap::take_scalar`] etc.) without cloning on the audio
-    /// thread.  The plan retains ownership of the map; any values left behind
-    /// are deallocated on the cleanup thread when the plan is dropped.
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap);
+    /// Takes `&ParameterMap` (read-only). After E096 / ADR 0045 Spike 0 every
+    /// remaining `ParameterValue` variant is `Copy` or a refcounted handle
+    /// (`FloatBuffer(Arc<[f32]>)`), so destructive take is no longer needed —
+    /// a `get_scalar` + `Arc::clone` has the same O(1) cost on the audio
+    /// thread. This alignment with the `ParamView` shape of Spike 5 is
+    /// intentional.
+    fn update_validated_parameters(&mut self, params: &ParameterMap);
 
     /// Validate `params` against the module's descriptor, then apply them.
     ///
@@ -225,7 +227,7 @@ pub trait Module: Send {
     /// if custom validation beyond what [`validate_parameters`] provides is needed.
     fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
         validate_parameters(params, self.descriptor())?;
-        self.update_validated_parameters(&mut params.clone());
+        self.update_validated_parameters(params);
         Ok(())
     }
 

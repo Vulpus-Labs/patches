@@ -15,7 +15,7 @@ use super::ir_loader::{
     MonoProcessorReady, ProcessorReady, ProcessorTeardown, StereoProcessorReady,
 };
 use super::params::{
-    generate_stereo_variant_ir, generate_variant_ir, ir_variant_index, SharedParams, BLOCK_SIZE,
+    generate_stereo_variant_ir, generate_variant_ir, SharedParams, BLOCK_SIZE,
     FILE_VARIANT_IDX, IR_VARIANTS, MAX_TIER_BLOCK_SIZE,
 };
 
@@ -176,8 +176,11 @@ impl ConvReverbCore {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
             self.base_mix = *v;
         }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            self.ir_variant_idx = ir_variant_index(v);
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("ir") {
+            let idx = v as u8;
+            if (idx as usize) < IR_VARIANTS.len() {
+                self.ir_variant_idx = idx;
+            }
         }
 
         // Handle pre-processed file data (FloatBuffer from planner's FileProcessor).
@@ -224,20 +227,20 @@ impl ConvReverbCore {
     /// Handle parameter updates on the audio thread (hot reload).
     ///
     /// Must be real-time safe: no file I/O, no thread spawn/join, no blocking.
-    pub(super) fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    pub(super) fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
             self.base_mix = *v;
         }
 
         // Handle pre-processed file data — FloatBuffer from planner.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.take_scalar("ir_data") {
+        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
             self.ir_variant_idx = FILE_VARIANT_IDX;
             self.send_load_request(IrLoadRequest {
                 stereo: self.stereo,
                 variant_idx: FILE_VARIANT_IDX,
                 sample_rate: self.sample_rate,
                 base_mix: self.base_mix,
-                pre_fft_data: Some(data),
+                pre_fft_data: Some(Arc::clone(data)),
             });
             self.update_shared_mix(0.0);
             return;
@@ -245,9 +248,9 @@ impl ConvReverbCore {
 
         let mut ir_changed = false;
 
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            let idx = ir_variant_index(v);
-            if idx != self.ir_variant_idx {
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("ir") {
+            let idx = v as u8;
+            if (idx as usize) < IR_VARIANTS.len() && idx != self.ir_variant_idx {
                 self.ir_variant_idx = idx;
                 ir_changed = true;
             }

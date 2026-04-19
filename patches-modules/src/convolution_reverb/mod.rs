@@ -144,7 +144,7 @@ impl patches_core::Module for ConvolutionReverb {
         self.core.update_parameters(params, "ConvReverb")
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         self.core.update_validated_parameters(params);
     }
 

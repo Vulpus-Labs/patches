@@ -30,7 +30,7 @@ impl Module for Doubler {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
 
@@ -77,7 +77,7 @@ impl Module for PolyPass {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
 
@@ -163,7 +163,7 @@ fn disconnect_input_delivers_false_connected() {
         fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
             Self { id, descriptor: d, saw_connected: false }
         }
-        fn update_validated_parameters(&mut self, _: &mut ParameterMap) {}
+        fn update_validated_parameters(&mut self, _: &ParameterMap) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.id }
         fn set_ports(&mut self, inputs: &[InputPort], _outputs: &[OutputPort]) {
@@ -237,7 +237,7 @@ fn assert_steady_state_bounded_fails_for_alternating() {
         fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
             Self { id, descriptor: d, output: MonoOutput::default(), sign: 1.0 }
         }
-        fn update_validated_parameters(&mut self, _: &mut ParameterMap) {}
+        fn update_validated_parameters(&mut self, _: &ParameterMap) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.id }
         fn set_ports(&mut self, _i: &[InputPort], o: &[OutputPort]) {

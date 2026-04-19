@@ -74,7 +74,7 @@ impl Module for Adsr {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         let mut changed = false;
         if let Some(ParameterValue::Float(v)) = params.get_scalar("attack") {
             self.attack_secs = *v;

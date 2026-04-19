@@ -55,7 +55,7 @@ impl Module for Wavefolder {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(d)) = params.get_scalar("drive") {
             self.drive = *d;
         }

@@ -29,30 +29,19 @@
 /// | `bias`  | float | -1.0--1.0                    | `0.0`      | DC offset before shaper (asymmetry) |
 /// | `mix`   | float | 0.0--1.0                     | `1.0`      | Dry/wet blend                       |
 use patches_core::{
+    params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_dsp::{fast_tanh, fast_sine, BitcrusherKernel, DcBlocker, ToneFilter};
 
-// ─── Distortion mode ─────────────────────────────────────────────────────────
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DriveMode {
-    Saturate,
-    Fold,
-    Clip,
-    Crush,
-}
-
-fn parse_mode(s: &str) -> DriveMode {
-    match s {
-        "saturate" => DriveMode::Saturate,
-        "fold" => DriveMode::Fold,
-        "clip" => DriveMode::Clip,
-        "crush" => DriveMode::Crush,
-        // Descriptor's enum_param validates variants before reaching here.
-        other => unreachable!("unexpected drive mode variant: {other}"),
+params_enum! {
+    pub enum DriveMode {
+        Saturate => "saturate",
+        Fold => "fold",
+        Clip => "clip",
+        Crush => "crush",
     }
 }
 
@@ -81,7 +70,7 @@ impl Module for Drive {
             .mono_in("in")
             .mono_in("drive_cv")
             .mono_out("out")
-            .enum_param("mode", &["saturate", "fold", "clip", "crush"], "saturate")
+            .enum_param("mode", DriveMode::VARIANTS, "saturate")
             .float_param("drive", 0.1, 50.0, 1.0)
             .float_param("tone", 0.0, 1.0, 0.5)
             .float_param("bias", -1.0, 1.0, 0.0)
@@ -112,9 +101,11 @@ impl Module for Drive {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("mode") {
-            self.mode = parse_mode(v);
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("mode") {
+            if let Ok(m) = DriveMode::try_from(v) {
+                self.mode = m;
+            }
         }
         if let Some(ParameterValue::Float(v)) = params.get_scalar("drive") {
             self.drive = v.clamp(0.1, 50.0);
@@ -221,7 +212,7 @@ mod tests {
     #[test]
     fn saturate_mode_unity_drive_near_transparent() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "saturate", "drive" => 1.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+            params!["mode" => DriveMode::Saturate, "drive" => 1.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
         );
         // Warm up DC blocker
         for _ in 0..4410 {
@@ -239,7 +230,7 @@ mod tests {
     #[test]
     fn clip_mode_clamps_output() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "clip", "drive" => 10.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+            params!["mode" => DriveMode::Clip, "drive" => 10.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
         );
         // Warm up DC blocker
         for _ in 0..4410 {
@@ -256,7 +247,7 @@ mod tests {
     #[test]
     fn mix_zero_passes_dry() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "saturate", "drive" => 5.0_f32, "tone" => 0.5_f32, "mix" => 0.0_f32],
+            params!["mode" => DriveMode::Saturate, "drive" => 5.0_f32, "tone" => 0.5_f32, "mix" => 0.0_f32],
         );
         h.set_mono("in", 0.42);
         h.tick();
@@ -266,7 +257,7 @@ mod tests {
     #[test]
     fn fold_mode_bounded_output() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "fold", "drive" => 20.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+            params!["mode" => DriveMode::Fold, "drive" => 20.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
         );
         // Even at extreme drive, fold should stay in [-1, 1]
         for i in 0..1000 {
@@ -281,7 +272,7 @@ mod tests {
     #[test]
     fn drive_cv_modulates_output() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "saturate", "drive" => 1.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+            params!["mode" => DriveMode::Saturate, "drive" => 1.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
         );
         // Warm up DC blocker (ensure periodic_update fires by ticking many cycles)
         for _ in 0..4410 {
@@ -313,7 +304,7 @@ mod tests {
     #[test]
     fn drive_cv_reverts_to_base_on_zero() {
         let mut h = ModuleHarness::build::<Drive>(
-            params!["mode" => "clip", "drive" => 5.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
+            params!["mode" => DriveMode::Clip, "drive" => 5.0_f32, "tone" => 1.0_f32, "bias" => 0.0_f32, "mix" => 1.0_f32],
         );
         // Warm up
         for _ in 0..4410 {
@@ -346,16 +337,16 @@ mod tests {
 
     #[test]
     fn all_modes_produce_finite_output() {
-        for mode in &["saturate", "fold", "clip", "crush"] {
+        for mode in [DriveMode::Saturate, DriveMode::Fold, DriveMode::Clip, DriveMode::Crush] {
             let mut h = ModuleHarness::build::<Drive>(
-                params!["mode" => *mode, "drive" => 25.0_f32, "tone" => 0.5_f32, "bias" => 0.5_f32, "mix" => 1.0_f32],
+                params!["mode" => mode, "drive" => 25.0_f32, "tone" => 0.5_f32, "bias" => 0.5_f32, "mix" => 1.0_f32],
             );
             for i in 0..500 {
                 let x = (i as f32 * 0.03).sin();
                 h.set_mono("in", x);
                 h.tick();
                 let out = h.read_mono("out");
-                assert!(out.is_finite(), "mode={mode} produced non-finite output at sample {i}");
+                assert!(out.is_finite(), "mode={mode:?} produced non-finite output at sample {i}");
             }
         }
     }

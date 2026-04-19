@@ -324,12 +324,6 @@ fn deserialize_parameter_kind(val: &JsonValue) -> Result<ParameterKind, String> 
             );
             Ok(ParameterKind::Enum { variants, default })
         }
-        "string" => {
-            let default = leak_str(
-                val.get("default").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            );
-            Ok(ParameterKind::String { default })
-        }
         "file" => {
             let empty = vec![];
             let exts_json = val.get("extensions").and_then(|v| v.as_array()).unwrap_or(&empty);
@@ -378,14 +372,14 @@ fn deserialize_parameter_value(val: &JsonValue) -> Result<ParameterValue, String
             Ok(ParameterValue::Bool(v))
         }
         "enum" => {
-            let v = leak_str(
-                val.get("v").and_then(|v| v.as_str()).ok_or("enum missing v")?.to_string(),
-            );
-            Ok(ParameterValue::Enum(v))
-        }
-        "string" => {
-            let v = val.get("v").and_then(|v| v.as_str()).ok_or("string missing v")?.to_string();
-            Ok(ParameterValue::String(v))
+            let v = val
+                .get("v")
+                .and_then(|v| v.as_i64())
+                .ok_or("enum missing numeric v (ADR 0045 Spike 0: u32 variant index)")?;
+            if v < 0 {
+                return Err(format!("enum index must be non-negative, got {v}"));
+            }
+            Ok(ParameterValue::Enum(v as u32))
         }
         "file" => {
             let v = val.get("v").and_then(|v| v.as_str()).ok_or("file missing v")?.to_string();

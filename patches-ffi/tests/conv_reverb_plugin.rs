@@ -47,13 +47,15 @@ fn make_ports() -> (Vec<InputPort>, Vec<OutputPort>) {
 
 #[test]
 fn basic_lifecycle() {
-    let builder = load_plugin(&conv_reverb_dylib_path())
+    let mut builders = load_plugin(&conv_reverb_dylib_path())
         .expect("failed to load conv-reverb plugin");
+    assert_eq!(builders.len(), 1, "conv-reverb plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape::default();
 
     let mut params = ParameterMap::new();
-    params.insert("ir".to_string(), ParameterValue::Enum("room"));
+    params.insert("ir".to_string(), ParameterValue::Enum(0));
 
     let mut module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -84,28 +86,31 @@ fn basic_lifecycle() {
 
 #[test]
 fn file_error_propagation() {
-    let builder = load_plugin(&conv_reverb_dylib_path())
+    let mut builders = load_plugin(&conv_reverb_dylib_path())
         .expect("failed to load conv-reverb plugin");
+    assert_eq!(builders.len(), 1, "conv-reverb plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape::default();
 
     let mut params = ParameterMap::new();
-    params.insert("ir".to_string(), ParameterValue::Enum("file"));
-    params.insert("path".to_string(), ParameterValue::String("/nonexistent/ir.wav".to_string()));
+    params.insert("ir".to_string(), ParameterValue::Enum(99)); // out-of-range variant
 
     let result = builder.build(&env, &shape, &params, InstanceId::next());
-    assert!(result.is_err(), "expected error for nonexistent file");
+    assert!(result.is_err(), "expected error for invalid ir variant index");
 }
 
 #[test]
 fn drop_joins_threads() {
-    let builder = load_plugin(&conv_reverb_dylib_path())
+    let mut builders = load_plugin(&conv_reverb_dylib_path())
         .expect("failed to load conv-reverb plugin");
+    assert_eq!(builders.len(), 1, "conv-reverb plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape::default();
 
     let mut params = ParameterMap::new();
-    params.insert("ir".to_string(), ParameterValue::Enum("room"));
+    params.insert("ir".to_string(), ParameterValue::Enum(0));
 
     let module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -122,13 +127,15 @@ fn drop_joins_threads() {
 
 #[test]
 fn cleanup_thread_drop() {
-    let builder = load_plugin(&conv_reverb_dylib_path())
+    let mut builders = load_plugin(&conv_reverb_dylib_path())
         .expect("failed to load conv-reverb plugin");
+    assert_eq!(builders.len(), 1, "conv-reverb plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape::default();
 
     let mut params = ParameterMap::new();
-    params.insert("ir".to_string(), ParameterValue::Enum("room"));
+    params.insert("ir".to_string(), ParameterValue::Enum(0));
 
     let module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -142,13 +149,15 @@ fn cleanup_thread_drop() {
 
 #[test]
 fn multiple_instances() {
-    let builder = load_plugin(&conv_reverb_dylib_path())
+    let mut builders = load_plugin(&conv_reverb_dylib_path())
         .expect("failed to load conv-reverb plugin");
+    assert_eq!(builders.len(), 1, "conv-reverb plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape::default();
 
     let mut params = ParameterMap::new();
-    params.insert("ir".to_string(), ParameterValue::Enum("room"));
+    params.insert("ir".to_string(), ParameterValue::Enum(0));
 
     let module1 = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build module 1 failed");

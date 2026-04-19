@@ -52,7 +52,7 @@ impl Module for MidiCc {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Int(v)) = params.get_scalar("cc") {
             self.cc_number = (*v).clamp(0, 127) as u8;
         }

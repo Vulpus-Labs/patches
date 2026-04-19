@@ -99,7 +99,7 @@ impl Module for Tom {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("pitch") {
             self.pitch = *v;
         }

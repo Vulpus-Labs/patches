@@ -271,7 +271,7 @@ pub(crate) fn convert_params(
     base_dir: Option<&Path>,
     song_name_to_index: &HashMap<String, usize>,
 ) -> Result<patches_core::ParameterMap, ParamConversionError> {
-    use patches_core::{ParameterKind, ParameterMap, ParameterValue};
+    use patches_core::{ParameterMap, ParameterValue};
     let mut map = ParameterMap::new();
     for (raw_name, value) in params {
         let (base_name, idx) = parse_param_name(raw_name);
@@ -307,14 +307,6 @@ pub(crate) fn convert_params(
         if let Some(dir) = base_dir {
             match &mut pv {
                 ParameterValue::File(s) if !s.is_empty() && !Path::new(s.as_str()).is_absolute() => {
-                    *s = dir.join(s.as_str()).to_string_lossy().into_owned();
-                }
-                ParameterValue::String(s)
-                    if matches!(param_desc.parameter_type, ParameterKind::String { .. })
-                        && param_desc.name == "path"
-                        && !s.is_empty()
-                        && !Path::new(s.as_str()).is_absolute() =>
-                {
                     *s = dir.join(s.as_str()).to_string_lossy().into_owned();
                 }
                 _ => {}

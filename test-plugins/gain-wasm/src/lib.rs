@@ -33,7 +33,7 @@ impl Module for Gain {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(g)) = params.get_scalar("gain") {
             self.gain = *g;
         }

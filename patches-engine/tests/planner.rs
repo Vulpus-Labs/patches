@@ -56,7 +56,7 @@ impl Module for Counter {
         Self { instance_id, descriptor, count: 0 }
     }
 
-    fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor

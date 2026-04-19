@@ -1,8 +1,17 @@
 use patches_core::{
+    params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+
+params_enum! {
+    pub enum LfoMode {
+        Bipolar => "bipolar",
+        UnipolarPositive => "unipolar_positive",
+        UnipolarNegative => "unipolar_negative",
+    }
+}
 use crate::common::approximate::lookup_sine;
 use patches_dsp::xorshift64;
 
@@ -52,7 +61,7 @@ pub struct Lfo {
     phase: f32,
     phase_increment: f32,
     phase_offset: f32,
-    mode: PolarityMode,
+    mode: LfoMode,
     rate: f32,
     prng_state: u64,
     random_value: f32,
@@ -69,18 +78,11 @@ pub struct Lfo {
     out_random: MonoOutput,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum PolarityMode {
-    Bipolar,
-    UniposPositive,
-    UnipolarNegative,
-}
-
-fn apply_mode(v: f32, mode: PolarityMode) -> f32 {
+fn apply_mode(v: f32, mode: LfoMode) -> f32 {
     match mode {
-        PolarityMode::Bipolar => v,
-        PolarityMode::UniposPositive => 0.5 + 0.5 * v,
-        PolarityMode::UnipolarNegative => -(0.5 + 0.5 * v),
+        LfoMode::Bipolar => v,
+        LfoMode::UnipolarPositive => 0.5 + 0.5 * v,
+        LfoMode::UnipolarNegative => -(0.5 + 0.5 * v),
     }
 }
 
@@ -98,7 +100,7 @@ impl Module for Lfo {
             .mono_out("random")
             .float_param("rate", 0.01, 20.0, 1.0)
             .float_param("phase_offset", 0.0, 1.0, 0.0)
-            .enum_param("mode", &["bipolar", "unipolar_positive", "unipolar_negative"], "bipolar")
+            .enum_param("mode", LfoMode::VARIANTS, "bipolar")
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -110,7 +112,7 @@ impl Module for Lfo {
             phase: 0.0,
             phase_increment: 1.0 / audio_environment.sample_rate,
             phase_offset: 0.0,
-            mode: PolarityMode::Bipolar,
+            mode: LfoMode::Bipolar,
             rate: 1.0,
             prng_state,
             random_value: 0.0,
@@ -126,7 +128,7 @@ impl Module for Lfo {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("rate") {
             self.rate = *v;
             self.phase_increment = v / self.sample_rate;
@@ -134,13 +136,10 @@ impl Module for Lfo {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("phase_offset") {
             self.phase_offset = *v;
         }
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("mode") {
-            self.mode = match *v {
-                "bipolar" => PolarityMode::Bipolar,
-                "unipolar_positive" => PolarityMode::UniposPositive,
-                "unipolar_negative" => PolarityMode::UnipolarNegative,
-                _ => return,
-            };
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("mode") {
+            if let Ok(m) = LfoMode::try_from(v) {
+                self.mode = m;
+            }
         }
     }
 
@@ -294,7 +293,7 @@ mod tests {
         let period = 100_usize;
         let sample_rate = rate * period as f32;
         let mut h = ModuleHarness::build_with_env::<Lfo>(
-            params!["rate" => rate, "mode" => "unipolar_positive"],
+            params!["rate" => rate, "mode" => LfoMode::UnipolarPositive],
             env(sample_rate),
         );
         h.disconnect_all_inputs();
@@ -309,7 +308,7 @@ mod tests {
         let period = 100_usize;
         let sample_rate = rate * period as f32;
         let mut h = ModuleHarness::build_with_env::<Lfo>(
-            params!["rate" => rate, "mode" => "unipolar_positive"],
+            params!["rate" => rate, "mode" => LfoMode::UnipolarPositive],
             env(sample_rate),
         );
         h.disconnect_all_inputs();

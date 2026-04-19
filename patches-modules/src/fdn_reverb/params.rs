@@ -1,7 +1,18 @@
 //! Character archetype data, parameter derivation, and buffer sizing.
 
+use patches_core::params_enum;
 use super::line::BASE_MS;
 use super::matrix::LINES;
+
+params_enum! {
+    pub enum Character {
+        Plate => "plate",
+        Room => "room",
+        Chamber => "chamber",
+        Hall => "hall",
+        Cathedral => "cathedral",
+    }
+}
 
 #[derive(Copy, Clone)]
 pub(super) struct CharData {
@@ -46,16 +57,6 @@ pub(super) const CHARS: [CharData; 5] = [
                rt60_lf_min: 1.5, rt60_lf_max: 8.0 },
 ];
 
-pub(super) fn char_index(name: &str) -> usize {
-    match name {
-        "plate"     => 0,
-        "room"      => 1,
-        "chamber"   => 2,
-        "hall"      => 3,
-        "cathedral" => 4,
-        _           => 3,
-    }
-}
 
 /// Returns `(delay_scale, rt60_lf, rt60_hf, crossover_hz)` from user-facing knobs.
 pub(super) fn derive_params(size: f32, brightness: f32, char_idx: usize) -> (f32, f32, f32, f32) {

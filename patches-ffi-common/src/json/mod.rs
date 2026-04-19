@@ -35,7 +35,6 @@ mod tests {
                 ParameterDescriptor { name: "mode", index: 0, parameter_type: ParameterKind::Enum { variants: &["linear", "log"], default: "linear" } },
                 ParameterDescriptor { name: "active", index: 0, parameter_type: ParameterKind::Bool { default: true } },
                 ParameterDescriptor { name: "voices", index: 0, parameter_type: ParameterKind::Int { min: 1, max: 8, default: 4 } },
-                ParameterDescriptor { name: "label", index: 0, parameter_type: ParameterKind::String { default: "default" } },
             ],
         };
 
@@ -53,7 +52,7 @@ mod tests {
         assert_eq!(back.inputs[1].kind, CableKind::Poly);
         assert_eq!(back.outputs.len(), 1);
         assert_eq!(back.outputs[0].name, "out");
-        assert_eq!(back.parameters.len(), 5);
+        assert_eq!(back.parameters.len(), 4);
 
         // Float param
         match &back.parameters[0].parameter_type {
@@ -92,11 +91,6 @@ mod tests {
             other => panic!("expected Int, got {other:?}"),
         }
 
-        // String param
-        match &back.parameters[4].parameter_type {
-            ParameterKind::String { default } => assert_eq!(*default, "default"),
-            other => panic!("expected String, got {other:?}"),
-        }
     }
 
     #[test]
@@ -106,8 +100,7 @@ mod tests {
         params.insert_param("pan".to_string(), 1, ParameterValue::Float(-0.5));
         params.insert("active".to_string(), ParameterValue::Bool(true));
         params.insert("voices".to_string(), ParameterValue::Int(6));
-        params.insert("mode".to_string(), ParameterValue::Enum("log"));
-        params.insert("path".to_string(), ParameterValue::String("/tmp/test.wav".to_string()));
+        params.insert("mode".to_string(), ParameterValue::Enum(1));
 
         let json = serialize_parameter_map(&params);
         let back = deserialize_parameter_map(&json).expect("deserialize failed");
@@ -116,12 +109,7 @@ mod tests {
         assert_eq!(back.get("pan", 1), Some(&ParameterValue::Float(-0.5)));
         assert_eq!(back.get_scalar("active"), Some(&ParameterValue::Bool(true)));
         assert_eq!(back.get_scalar("voices"), Some(&ParameterValue::Int(6)));
-        // Enum: the deserialized variant is a leaked &'static str, compare by value
-        match back.get_scalar("mode") {
-            Some(ParameterValue::Enum(v)) => assert_eq!(*v, "log"),
-            other => panic!("expected Enum(\"log\"), got {other:?}"),
-        }
-        assert_eq!(back.get_scalar("path"), Some(&ParameterValue::String("/tmp/test.wav".to_string())));
+        assert_eq!(back.get_scalar("mode"), Some(&ParameterValue::Enum(1)));
     }
 
     #[test]

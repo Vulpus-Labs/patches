@@ -103,7 +103,7 @@ impl Module for MasterSequencer {
             .bool_param("loop", true)
             .bool_param("autostart", true)
             .float_param("swing", 0.0, 1.0, 0.5)
-            .enum_param("sync", &["auto", "free", "host"], "auto")
+            .enum_param("sync", self::params::SyncMode::VARIANTS, "auto")
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -129,7 +129,7 @@ impl Module for MasterSequencer {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         self.apply_params(params);
     }
 

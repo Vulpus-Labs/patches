@@ -197,7 +197,7 @@ impl Module for WasmModule {
         unreachable!("WasmModule::prepare is not callable directly; use WasmModuleBuilder")
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         let params_json = json::serialize_parameter_map(params);
         let ptr = match self.write_bytes(&params_json) {
             Ok(p) => p,

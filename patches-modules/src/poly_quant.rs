@@ -75,7 +75,7 @@ impl Module for PolyQuant {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         let channels = self.descriptor.shape.channels.max(1);
         parse_pitches(params, channels, &mut self.notes_buf, &mut self.notes_len);
         if let Some(ParameterValue::Float(v)) = params.get_scalar("centre") {

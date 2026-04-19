@@ -206,14 +206,11 @@ pub(crate) fn convert_value(
         }
         (Value::Scalar(Scalar::Str(s)), ParameterKind::Enum { variants, .. }) => variants
             .iter()
-            .find(|&&v| v == s.as_str())
-            .map(|&v| ParameterValue::Enum(v))
+            .position(|&v| v == s.as_str())
+            .map(|idx| ParameterValue::Enum(idx as u32))
             .ok_or_else(|| {
                 ParamConversionError::OutOfRange(format!("invalid enum variant '{s}'"))
             }),
-        (Value::Scalar(Scalar::Str(s)), ParameterKind::String { .. }) => {
-            Ok(ParameterValue::String(s.clone()))
-        }
         (Value::File(path), ParameterKind::File { extensions }) => {
             if !path.is_empty() {
                 let ext = std::path::Path::new(path)

@@ -1,12 +1,13 @@
 use super::*;
+use super::params::Character;
 use patches_core::test_support::{ModuleHarness, params};
 use patches_core::{AudioEnvironment, Module, ModuleShape};
 
 const SR: f32 = 44_100.0;
 
-fn make_fdn(char_name: &'static str, size: f32, brightness: f32) -> ModuleHarness {
+fn make_fdn(character: Character, size: f32, brightness: f32) -> ModuleHarness {
     ModuleHarness::build_with_env::<FdnReverb>(
-        params!["size" => size, "brightness" => brightness, "character" => char_name],
+        params!["size" => size, "brightness" => brightness, "character" => character],
         AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false },
     )
 }
@@ -38,8 +39,8 @@ fn descriptor_ports_and_params() {
 /// not divergence or sustain).
 #[test]
 fn impulse_decays_for_all_characters() {
-    for char_name in ["plate", "room", "chamber", "hall", "cathedral"] {
-        let mut h = make_fdn(char_name, 0.5, 0.5);
+    for character in [Character::Plate, Character::Room, Character::Chamber, Character::Hall, Character::Cathedral] {
+        let mut h = make_fdn(character, 0.5, 0.5);
         h.disconnect_input("in_right");
         h.disconnect_input("size_cv");
         h.disconnect_input("brightness_cv");
@@ -57,14 +58,14 @@ fn impulse_decays_for_all_characters() {
         let out: Vec<f32> = (0..n).map(|_| { h.tick(); h.read_mono("out_left") }).collect();
 
         let peak = out.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
-        assert!(peak.is_finite(), "character={char_name}: non-finite output");
-        assert!(peak > 0.0, "character={char_name}: zero output after impulse");
+        assert!(peak.is_finite(), "character={character:?}: non-finite output");
+        assert!(peak > 0.0, "character={character:?}: zero output after impulse");
         // Bounded response: with mix=0.5 and a unit impulse, output must
         // not exceed unity by more than a small headroom; runaway feedback
         // would blow past this.
         assert!(
             peak < 2.0,
-            "character={char_name}: peak {peak} exceeds bounded-response limit"
+            "character={character:?}: peak {peak} exceeds bounded-response limit"
         );
 
         // Decay check: RMS of the last quarter must be measurably smaller
@@ -74,7 +75,7 @@ fn impulse_decays_for_all_characters() {
         let late: f32 = out[3 * q..].iter().map(|v| v * v).sum::<f32>() / q as f32;
         assert!(
             early > 0.0 && late < early * 0.5,
-            "character={char_name}: late RMS² ({late:.6e}) must be < 50% of early RMS² ({early:.6e}) — no decay"
+            "character={character:?}: late RMS² ({late:.6e}) must be < 50% of early RMS² ({early:.6e}) — no decay"
         );
     }
 }
@@ -83,7 +84,7 @@ fn impulse_decays_for_all_characters() {
 #[test]
 fn dc_input_produces_finite_output() {
     // Use plate (short delays, fastest settling) at small size.
-    let mut h = make_fdn("plate", 0.1, 0.5);
+    let mut h = make_fdn(Character::Plate, 0.1, 0.5);
     h.disconnect_input("in_right");
     h.disconnect_input("size_cv");
     h.disconnect_input("brightness_cv");
@@ -121,7 +122,7 @@ fn dc_input_produces_finite_output() {
 /// In mono mode (out_r disconnected), out_r's pool slot is never written.
 #[test]
 fn mono_mode_out_r_unchanged() {
-    let mut h = make_fdn("hall", 0.5, 0.5);
+    let mut h = make_fdn(Character::Hall, 0.5, 0.5);
     h.disconnect_input("in_right");
     h.disconnect_input("size_cv");
     h.disconnect_input("brightness_cv");
@@ -149,7 +150,7 @@ fn mono_mode_out_r_unchanged() {
 /// In stereo mode with mono input, out_l and out_r differ (channel decorrelation).
 #[test]
 fn stereo_output_decorrelation() {
-    let mut h = make_fdn("hall", 0.5, 0.5);
+    let mut h = make_fdn(Character::Hall, 0.5, 0.5);
     h.disconnect_input("in_right");
     h.disconnect_input("size_cv");
     h.disconnect_input("brightness_cv");

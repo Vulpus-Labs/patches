@@ -80,7 +80,7 @@ impl Module for PatternPlayer {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, _params: &ParameterMap) {
         // PatternPlayer has no parameters — all data comes from tracker data
         // and the clock bus.
     }

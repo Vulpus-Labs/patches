@@ -70,7 +70,7 @@ fn sync_free_overrides_hosted() {
     let desc = MasterSequencer::describe(&s);
     let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
     let mut params = ParameterMap::new();
-    params.insert("sync".into(), ParameterValue::Enum("free"));
+    params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Free as u32));
     seq.update_validated_parameters(&mut params);
     assert!(!seq.use_host_transport, "sync=free should override hosted");
 }
@@ -81,7 +81,7 @@ fn sync_host_overrides_standalone() {
     let desc = MasterSequencer::describe(&s);
     let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
     let mut params = ParameterMap::new();
-    params.insert("sync".into(), ParameterValue::Enum("host"));
+    params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Host as u32));
     seq.update_validated_parameters(&mut params);
     assert!(seq.use_host_transport, "sync=host should override standalone");
 }

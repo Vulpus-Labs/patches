@@ -108,7 +108,7 @@ impl Module for PolyResonantLowpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("cutoff") {
             self.cutoff = *v;
         }
@@ -283,7 +283,7 @@ impl Module for PolyResonantHighpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("cutoff") {
             self.cutoff = *v;
         }
@@ -458,7 +458,7 @@ impl Module for PolyResonantBandpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(v)) = params.get_scalar("center") {
             self.center = *v;
         }

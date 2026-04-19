@@ -197,7 +197,7 @@ impl Module for StereoDelay {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         
         if let Some(ParameterValue::Float(v)) = params.get_scalar("dry_wet") {
             self.dry_wet = *v;

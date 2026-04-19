@@ -28,10 +28,47 @@
 //! multiply by 2/3.
 
 use patches_core::{
+    params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+
+params_enum! {
+    pub enum Subdivision {
+        Whole => "1/1",
+        Half => "1/2",
+        HalfDotted => "1/2d",
+        HalfTriplet => "1/2t",
+        Quarter => "1/4",
+        QuarterDotted => "1/4d",
+        QuarterTriplet => "1/4t",
+        Eighth => "1/8",
+        EighthDotted => "1/8d",
+        EighthTriplet => "1/8t",
+        Sixteenth => "1/16",
+        SixteenthDotted => "1/16d",
+        SixteenthTriplet => "1/16t",
+    }
+}
+
+fn subdivision_factor(s: Subdivision) -> f32 {
+    match s {
+        Subdivision::Whole => 1.0,
+        Subdivision::Half => 0.5,
+        Subdivision::HalfDotted => 0.75,
+        Subdivision::HalfTriplet => 1.0 / 3.0,
+        Subdivision::Quarter => 0.25,
+        Subdivision::QuarterDotted => 0.375,
+        Subdivision::QuarterTriplet => 1.0 / 6.0,
+        Subdivision::Eighth => 0.125,
+        Subdivision::EighthDotted => 0.1875,
+        Subdivision::EighthTriplet => 1.0 / 12.0,
+        Subdivision::Sixteenth => 0.0625,
+        Subdivision::SixteenthDotted => 0.09375,
+        Subdivision::SixteenthTriplet => 1.0 / 24.0,
+    }
+}
 
 /// BPM + subdivision to ms calculator.  See [module-level documentation](self).
 pub struct TempoSync {
@@ -42,41 +79,12 @@ pub struct TempoSync {
     out_ms: MonoOutput,
 }
 
-/// Subdivision factor relative to a whole note (1/1 = 1.0).
-fn subdivision_factor(name: &str) -> f32 {
-    match name {
-        "1/1"   => 1.0,
-        "1/2"   => 0.5,
-        "1/2d"  => 0.75,
-        "1/2t"  => 1.0 / 3.0,
-        "1/4"   => 0.25,
-        "1/4d"  => 0.375,
-        "1/4t"  => 1.0 / 6.0,
-        "1/8"   => 0.125,
-        "1/8d"  => 0.1875,
-        "1/8t"  => 1.0 / 12.0,
-        "1/16"  => 0.0625,
-        "1/16d" => 0.09375,
-        "1/16t" => 1.0 / 24.0,
-        _       => 0.25,
-    }
-}
-
 impl Module for TempoSync {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("TempoSync", shape.clone())
             .mono_in("bpm")
             .mono_out("ms")
-            .enum_param(
-                "subdivision",
-                &[
-                    "1/1", "1/2", "1/2d", "1/2t",
-                    "1/4", "1/4d", "1/4t",
-                    "1/8", "1/8d", "1/8t",
-                    "1/16", "1/16d", "1/16t",
-                ],
-                "1/4",
-            )
+            .enum_param("subdivision", Subdivision::VARIANTS, "1/4")
     }
 
     fn prepare(
@@ -87,15 +95,17 @@ impl Module for TempoSync {
         Self {
             instance_id,
             descriptor,
-            subdivision_factor: subdivision_factor("1/4"),
+            subdivision_factor: subdivision_factor(Subdivision::Quarter),
             in_bpm: MonoInput::default(),
             out_ms: MonoOutput::default(),
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
-        if let Some(ParameterValue::Enum(v)) = params.get_scalar("subdivision") {
-            self.subdivision_factor = subdivision_factor(v);
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("subdivision") {
+            if let Ok(s) = Subdivision::try_from(v) {
+                self.subdivision_factor = subdivision_factor(s);
+            }
         }
     }
 
@@ -124,15 +134,15 @@ mod tests {
     use patches_core::test_support::ModuleHarness;
     use patches_core::parameter_map::ParameterValue;
 
-    fn make_tempo_sync(subdivision: &'static str) -> ModuleHarness {
+    fn make_tempo_sync(subdivision: Subdivision) -> ModuleHarness {
         ModuleHarness::build::<TempoSync>(&[
-            ("subdivision", ParameterValue::Enum(subdivision)),
+            ("subdivision", ParameterValue::Enum(subdivision as u32)),
         ])
     }
 
     #[test]
     fn quarter_note_at_120_bpm() {
-        let mut h = make_tempo_sync("1/4");
+        let mut h = make_tempo_sync(Subdivision::Quarter);
         h.set_mono("bpm", 120.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -141,7 +151,7 @@ mod tests {
 
     #[test]
     fn eighth_note_at_120_bpm() {
-        let mut h = make_tempo_sync("1/8");
+        let mut h = make_tempo_sync(Subdivision::Eighth);
         h.set_mono("bpm", 120.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -150,7 +160,7 @@ mod tests {
 
     #[test]
     fn dotted_quarter_at_120_bpm() {
-        let mut h = make_tempo_sync("1/4d");
+        let mut h = make_tempo_sync(Subdivision::QuarterDotted);
         h.set_mono("bpm", 120.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -159,7 +169,7 @@ mod tests {
 
     #[test]
     fn triplet_eighth_at_120_bpm() {
-        let mut h = make_tempo_sync("1/8t");
+        let mut h = make_tempo_sync(Subdivision::EighthTriplet);
         h.set_mono("bpm", 120.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -169,7 +179,7 @@ mod tests {
 
     #[test]
     fn whole_note_at_60_bpm() {
-        let mut h = make_tempo_sync("1/1");
+        let mut h = make_tempo_sync(Subdivision::Whole);
         h.set_mono("bpm", 60.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -178,7 +188,7 @@ mod tests {
 
     #[test]
     fn bpm_clamped_to_minimum() {
-        let mut h = make_tempo_sync("1/4");
+        let mut h = make_tempo_sync(Subdivision::Quarter);
         h.set_mono("bpm", 0.0);
         h.tick();
         let ms = h.read_mono("ms");
@@ -187,7 +197,7 @@ mod tests {
 
     #[test]
     fn sixteenth_note_at_140_bpm() {
-        let mut h = make_tempo_sync("1/16");
+        let mut h = make_tempo_sync(Subdivision::Sixteenth);
         h.set_mono("bpm", 140.0);
         h.tick();
         let ms = h.read_mono("ms");

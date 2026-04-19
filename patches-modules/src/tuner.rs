@@ -71,7 +71,7 @@ impl Module for Tuner {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &mut ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Int(v)) = params.get_scalar("octave") { self.octave = *v; }
         if let Some(ParameterValue::Int(v)) = params.get_scalar("semi")   { self.semi = *v; }
         if let Some(ParameterValue::Int(v)) = params.get_scalar("cent")   { self.cent = *v; }
