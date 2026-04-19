@@ -30,7 +30,7 @@ use patches_dsp::HalfbandFir;
 /// Collects two input samples, then calls `HalfbandFir::process` to
 /// produce one output. Returns `None` on the first push of each pair and
 /// `Some(output)` on the second.
-pub(crate) struct X2Stage {
+pub struct X2Stage {
     filter: HalfbandFir,
     pending: Option<f32>,
 }

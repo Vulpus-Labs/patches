@@ -33,7 +33,6 @@ use clap_sys::process::{
     clap_process, clap_process_status, CLAP_PROCESS_CONTINUE,
 };
 
-use patches_core::source_map::SourceMap;
 use patches_core::{AudioEnvironment, MidiEvent, BASE_PERIODIC_UPDATE_INTERVAL};
 use patches_registry::Registry;
 use patches_planner::ExecutionPlan;
@@ -76,11 +75,6 @@ pub struct PatchesClapPlugin {
 
     pub(crate) sample_rate: f64,
 
-    /// Source map from the most recent successful `load_or_parse` — retained
-    /// so downstream `CompileError`s can be rendered as structured diagnostics
-    /// in the GUI. Reset to `None` in `deactivate`.
-    pub(crate) last_source_map: Option<SourceMap>,
-
     // ── Transport edge detection ───────────────────────────────────
     /// Previous beat position, used to detect beat boundary crossings.
     pub(crate) prev_beat: f64,
@@ -100,7 +94,10 @@ impl PatchesClapPlugin {
     /// Called from `activate` (if source non-empty), `state_load`, and
     /// `on_main_thread`.
     pub(crate) fn compile_and_push_plan(&mut self) -> Result<(), CompileError> {
-        let runtime = self.runtime.as_mut().ok_or(CompileError::NotActivated)?;
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| CompileError::new(patches_host::CompileErrorKind::NotActivated))?;
 
         let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
         let mut source = InMemorySource::new(self.dsl_source.clone());
@@ -108,8 +105,7 @@ impl PatchesClapPlugin {
             source = source.with_master_path(path);
         }
 
-        let (loaded, plan) = runtime.compile(&source, &self.registry)?;
-        self.last_source_map = Some(loaded.source_map);
+        let loaded = runtime.compile_and_push(&source, &self.registry)?;
 
         if !loaded.layering_warnings.is_empty() {
             let rendered: Vec<_> = loaded
@@ -120,16 +116,17 @@ impl PatchesClapPlugin {
             lock_gui_mut(&self.gui_state, |g| g.diagnostic_view.diagnostics.extend(rendered));
         }
 
-        let _ = runtime.push_plan(plan);
         Ok(())
     }
 
-    /// Most recently built source map — held so that a `CompileError` can be
-    /// converted into structured [`RenderedDiagnostic`]s for GUI rendering.
+    /// Render a `CompileError` into a [`DiagnosticView`] using the
+    /// source map the error itself carries.
     pub(crate) fn take_diagnostic_view(&mut self, err: &CompileError) -> DiagnosticView {
-        let source_map = self.last_source_map.clone().unwrap_or_default();
-        let diagnostics = err.to_rendered_diagnostics(&source_map);
-        DiagnosticView { diagnostics, source_map: Some(source_map) }
+        let diagnostics = err.to_rendered_diagnostics();
+        DiagnosticView {
+            diagnostics,
+            source_map: Some(err.source_map.clone()),
+        }
     }
 
     /// Request the host to call `on_main_thread` at its earliest convenience.

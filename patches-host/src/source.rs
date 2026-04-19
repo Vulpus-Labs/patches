@@ -70,15 +70,24 @@ impl HostFileSource for PathSource {
 /// `source` is substituted for the master file's contents to avoid a
 /// redundant disk read or TOCTOU). Otherwise the source is parsed as a
 /// single file with no include resolution and an empty `SourceMap`.
+///
+/// The canonical form of `master_path` is computed once at construction
+/// so include resolution does not re-canonicalize per file.
 pub struct InMemorySource {
     pub source: String,
-    pub master_path: Option<PathBuf>,
+    master_path: Option<PathBuf>,
+    master_canonical: Option<PathBuf>,
     pub base_dir: Option<PathBuf>,
 }
 
 impl InMemorySource {
     pub fn new(source: String) -> Self {
-        Self { source, master_path: None, base_dir: None }
+        Self {
+            source,
+            master_path: None,
+            master_canonical: None,
+            base_dir: None,
+        }
     }
 
     pub fn with_master_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -86,17 +95,23 @@ impl InMemorySource {
         if self.base_dir.is_none() {
             self.base_dir = path.parent().map(|p| p.to_path_buf());
         }
+        self.master_canonical = Some(
+            path.canonicalize().unwrap_or_else(|_| path.clone()),
+        );
         self.master_path = Some(path);
         self
     }
+
+    pub fn master_path(&self) -> Option<&Path> { self.master_path.as_deref() }
 }
 
 impl HostFileSource for InMemorySource {
     fn load(&self) -> Result<LoadedSource, CompileError> {
-        if let Some(path) = self.master_path.as_deref() {
+        if let (Some(path), Some(master_canonical)) =
+            (self.master_path.as_deref(), self.master_canonical.as_deref())
+        {
             if path.exists() {
-                let master_source = self.source.clone();
-                let master_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+                let master_source = &self.source;
                 let lr = pipeline::load(path, |p| {
                     let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
                     if canonical == master_canonical {

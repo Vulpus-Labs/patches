@@ -1,18 +1,51 @@
 ---
 id: "E090"
-title: VChorus — Juno-60-style chorus with reusable BBD core
+title: VChorus — vintage BBD chorus module with reusable BBD core
 created: 2026-04-18
-tickets: ["0552", "0553"]
+tickets: ["0552", "0553", "0554", "0555"]
 ---
 
 ## Goal
 
-Ship `VChorus` (vintage chorus), a Juno-60-style stereo chorus module,
-built on a reusable BBD primitive in `patches-dsp` that will later
-underpin a vintage BBD delay module (CE-2 / Small Clone territory).
+Ship `VChorus` (vintage chorus), a stereo BBD chorus module with two
+voicings (`bright` and `dark`) inspired by two well-known early-80s
+Roland BBD choruses, built on a reusable BBD primitive in a new
+`patches-vintage` crate that will later underpin a vintage BBD delay
+module (CE-2 / Small Clone territory).
+
+### Crate placement
+
+Everything in this epic lives in a new **`patches-vintage`** workspace
+crate: the BBD core, the compander primitive, and the VChorus module.
+`patches-modules` adds a path dependency on `patches-vintage` and
+calls its registration hook from `default_registry()` so VChorus is
+available through the default module set with no DSL-surface change.
+
+These are add-on effects, not core modular primitives. A later epic
+will convert `patches-vintage` into a dynamically loadable plugin
+bundle via the FFI mechanism already landed in E088; at that point
+the static dependency in `patches-modules` is removed. Keeping the
+crate separate from day one makes that future move mechanical.
 
 A separate modern digital chorus module will be planned later and is
 out of scope for this epic.
+
+## Trademark / naming policy
+
+"Juno" is a Roland trademark. This epic and related tickets cite the
+Juno-60 and Juno-106 as hardware references under nominative fair use
+— the discussion of what the effects do is accurate historical
+description. User-facing names **must not** use the Roland names:
+
+- Module name: `VChorus` (generic "vintage chorus").
+- Variant enum values: `bright` and `dark` (descriptive of voicing),
+  not `juno60` / `juno106`.
+- Mode values: `one`, `two`, `both`, `off` (Roman numerals on the
+  original hardware; generic ordinals here).
+
+Implementation comments and design documents may reference the
+Juno-60/Juno-106 for precision. Marketing copy and module
+descriptions shown to users must not.
 
 ## Background — Juno-60 chorus
 
@@ -69,18 +102,47 @@ point the full model matters clearly. Write once, use everywhere.
 No existing Rust port of Holters-Parker is known; this crate becomes
 the reference implementation.
 
+## `dark` variant (Juno-106 reference)
+
+VChorus ships both `bright` (Juno-60 reference) and `dark` (Juno-106
+reference) voicings. Contrary to common belief, the Juno-106 chorus
+**does not** use a compander (verified against service notes and
+florian-anwander.de). The "quieter 106" comes from gain-staging and a
+darker reconstruction filter, not companding.
+
+Actual Juno-106 differences from the Juno-60 (informing the `dark`
+voicing):
+
+- Same 2× MN3009 + MN3101 BBDs.
+- **Two modes only** (I, II). No `I+II` fast mode. Inversion is not
+  user-defeatable (always stereo).
+- Darker post-BBD reconstruction filter (~7 kHz corner vs 60's
+  ~9 kHz).
+- Closer to 50/50 dry/wet summing (60 runs wet hotter).
+- Chorus is always in-path — "off" means "no modulation", signal
+  still traverses the BBD (slight colouration even at rest).
+- ~6–8 dB quieter noise floor from the above, no companding.
+
+The user asked for a "106 mode with companding"; since companding is
+not historically accurate for the 106, the 106 preset is faithful and
+the compander lands in ticket 0555 as a reusable primitive for
+future Dimension-D / CE-2 / Small-Clone modules (which do compand).
+
 ## Tickets
 
-| ID   | Title                                               | Priority | Depends on |
-| ---- | --------------------------------------------------- | -------- | ---------- |
-| 0552 | BBD core (Holters-Parker) in patches-dsp            | medium   | —          |
-| 0553 | VChorus module in patches-modules                   | medium   | 0552       |
+| ID   | Title                                                | Priority | Depends on |
+| ---- | ---------------------------------------------------- | -------- | ---------- |
+| 0552 | Scaffold `patches-vintage` crate                     | medium   | —          |
+| 0553 | BBD core (Holters-Parker) in patches-vintage         | medium   | 0552       |
+| 0554 | VChorus module + registry hook into patches-modules  | medium   | 0553       |
+| 0555 | Compander primitive (NE570-style) in patches-vintage | low      | 0552       |
 
 ## Out of scope
 
 - Modern digital chorus module (separate epic later).
-- Vintage BBD delay module (future consumer of the BBD core; separate
-  ticket once VChorus lands and BBD API is proven).
+- Vintage BBD delay module and Dimension-D-style module (future
+  consumers of BBD core + compander; separate tickets once VChorus
+  lands and the APIs are proven).
 - Per-stage BBD saturation nonlinearity (v2; audible only hot).
 
 ## References

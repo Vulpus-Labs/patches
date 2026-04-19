@@ -4,7 +4,7 @@ const SR: f32 = 48_000.0;
 
 #[test]
 fn impulse_response_is_bounded() {
-    let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
     bbd.set_delay_seconds(0.003);
     let mut peak = 0.0_f32;
     // Fire an impulse and run for ~50 ms.
@@ -19,9 +19,40 @@ fn impulse_response_is_bounded() {
     assert!(peak < 10.0, "impulse response peak too large: {peak}");
 }
 
+/// 440 Hz sine is well inside the passband of the Juno-class BBD
+/// (256-stage @ ~3 ms delay → ~42 kHz clock, reconstruction LPF far
+/// above audio). Output peak should sit within ±4 dB of the input
+/// peak once the filter banks have settled. The Holters-Parker filter fit
+/// is not pre-normalised to unity at DC; mild in-band boost/trim is
+/// expected. Catches gross AC-gain bugs regardless.
+#[test]
+fn sine_gain_near_unity_in_passband() {
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
+    bbd.set_delay_seconds(0.003);
+    let freq = 440.0_f32;
+    let amp = 0.5_f32;
+    let settle = (SR * 0.05) as usize; // 50 ms warm-up
+    let n = (SR * 0.25) as usize;
+    let mut peak_out = 0.0_f32;
+    for i in 0..n {
+        let t = i as f32 / SR;
+        let x = amp * (std::f32::consts::TAU * freq * t).sin();
+        let y = bbd.process(x);
+        if i > settle {
+            peak_out = peak_out.max(y.abs());
+        }
+    }
+    let lo = amp * 0.6310; // -4 dB
+    let hi = amp * 1.5849; // +4 dB
+    assert!(
+        peak_out > lo && peak_out < hi,
+        "440 Hz sine peak out {peak_out} outside ±4 dB window [{lo}, {hi}]"
+    );
+}
+
 #[test]
 fn steady_state_bounded_on_constant_input() {
-    let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
     bbd.set_delay_seconds(0.003);
     // Let the BBD warm up, then check the output stays bounded on DC.
     let mut last = 0.0_f32;
@@ -37,7 +68,7 @@ fn steady_state_bounded_on_constant_input() {
 
 #[test]
 fn delay_sweep_is_click_free() {
-    let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
     // Slowly sweep delay from 1 ms to 5 ms over 100 ms while feeding a
     // 440 Hz sine. Output shouldn't jump.
     let mut prev = 0.0_f32;
@@ -66,7 +97,7 @@ fn longer_delay_shifts_response_later() {
     // read pointer falls further behind the write pointer, so the
     // impulse emerges later. Compare time-to-peak at two delays.
     fn time_to_peak(delay_s: f32) -> usize {
-        let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+        let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
         bbd.set_delay_seconds(delay_s);
         // Fire impulse, run past the delay, find peak sample index.
         let horizon = (SR * (delay_s * 3.0 + 0.01)) as usize;
@@ -92,7 +123,7 @@ fn longer_delay_shifts_response_later() {
 
 #[test]
 fn reset_clears_state() {
-    let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
     bbd.set_delay_seconds(0.003);
     for i in 0..1024 {
         bbd.process((i as f32 * 0.01).sin());
@@ -106,7 +137,7 @@ fn reset_clears_state() {
 fn set_delay_seconds_does_not_allocate() {
     // Smoke test: call repeatedly; Box allocation would trigger under
     // miri but a negative-delay guard is the visible contract here.
-    let mut bbd = Bbd::new(&BbdDevice::MN3009, SR);
+    let mut bbd = Bbd::new(&BbdDevice::BBD_256, SR);
     for i in 0..1000 {
         let d = 0.001 + (i as f32) * 1.0e-6;
         bbd.set_delay_seconds(d);

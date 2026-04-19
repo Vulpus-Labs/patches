@@ -7,7 +7,8 @@ use std::path::Path;
 
 use patches_core::AudioEnvironment;
 use patches_host::{
-    load_patch, CompileError, HostBuilder, HostFileSource, InMemorySource, LoadedSource,
+    load_patch, CompileError, CompileErrorKind, HostBuilder, HostFileSource, InMemorySource,
+    LoadedSource,
 };
 
 fn env() -> AudioEnvironment {
@@ -52,7 +53,10 @@ fn load_helper_surfaces_parse_error_as_compile_error() {
     // structural pass rejects). Both are acceptable starting positions —
     // pinning to one would couple the test to grammar internals.
     assert!(
-        matches!(err, CompileError::Parse(_) | CompileError::Expand(_) | CompileError::Load(_)),
+        matches!(
+            err.kind,
+            CompileErrorKind::Parse(_) | CompileErrorKind::Expand(_) | CompileErrorKind::Load(_)
+        ),
         "expected an early-stage compile error, got {err:?}"
     );
 }

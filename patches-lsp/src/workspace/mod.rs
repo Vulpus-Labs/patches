@@ -12,8 +12,10 @@
 //! diagnostics.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
+use patches_ffi::{PluginScanner, ScanReport};
 use patches_registry::Registry;
 use patches_modules::default_registry;
 use tower_lsp::lsp_types::*;
@@ -75,7 +77,8 @@ pub(crate) struct WorkspaceState {
 /// Per-workspace analysis state. Holds every piece of mutable state the LSP
 /// needs except the `Client`.
 pub struct DocumentWorkspace {
-    pub(super) registry: Registry,
+    pub(super) registry: RwLock<Registry>,
+    pub(super) module_paths: Mutex<Vec<PathBuf>>,
     pub(super) parser: Mutex<Parser>,
     pub(super) state: Mutex<WorkspaceState>,
 }
@@ -87,7 +90,8 @@ impl DocumentWorkspace {
             .set_language(&language())
             .expect("loading patches grammar");
         Self {
-            registry: default_registry(),
+            registry: RwLock::new(default_registry()),
+            module_paths: Mutex::new(Vec::new()),
             parser: Mutex::new(parser),
             state: Mutex::new(WorkspaceState {
                 documents: HashMap::new(),
@@ -104,6 +108,46 @@ impl DocumentWorkspace {
 impl Default for DocumentWorkspace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl DocumentWorkspace {
+    /// Shared read access to the module registry.
+    pub(crate) fn registry_read(&self) -> RwLockReadGuard<'_, Registry> {
+        self.registry.read().expect("registry lock poisoned")
+    }
+
+    /// Replace the configured module-search paths. Does not rescan — callers
+    /// must invoke [`Self::rescan_modules`] explicitly (matches ADR 0044 §5).
+    pub fn set_module_paths(&self, paths: Vec<PathBuf>) {
+        *self.module_paths.lock().expect("module_paths lock poisoned") = paths;
+    }
+
+    /// Current module paths.
+    pub fn module_paths(&self) -> Vec<PathBuf> {
+        self.module_paths.lock().expect("module_paths lock poisoned").clone()
+    }
+
+    /// Hard-rebuild the registry from the default set plus a fresh scan of
+    /// the configured module paths. Returns the [`ScanReport`].
+    pub fn rescan_modules(&self) -> ScanReport {
+        let paths = self.module_paths();
+        let mut fresh = default_registry();
+        let report = PluginScanner::new(paths).scan(&mut fresh);
+        *self.registry.write().expect("registry lock poisoned") = fresh;
+        report
+    }
+
+    /// List the URIs of every currently-open document. Used by the server
+    /// to refresh diagnostics after a rescan.
+    pub fn open_uris(&self) -> Vec<Url> {
+        self.state
+            .lock()
+            .expect("state lock poisoned")
+            .documents
+            .keys()
+            .cloned()
+            .collect()
     }
 }
 

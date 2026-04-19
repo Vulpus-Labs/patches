@@ -24,6 +24,8 @@ members = [
     "patches-ffi-common",
     "test-plugins/gain",
     "test-plugins/conv-reverb",
+    "test-plugins/drums-bundle",
+    "test-plugins/old-abi",
 ]
 # Shelved WASM crates — excluded from build. See adr/0027-wasm-module-loading.md.
 # "patches-wasm-sdk",

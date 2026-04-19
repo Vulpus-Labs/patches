@@ -11,7 +11,6 @@ doctest = false
 
 [dependencies]
 patches-core = { path = "../patches-core" }
-patches-registry = { path = "../patches-registry" }
 patches-engine = { path = "../patches-engine" }
 patches-planner = { path = "../patches-planner" }
 patches-io = { path = "../patches-io" }

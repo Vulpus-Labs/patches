@@ -45,7 +45,7 @@
 
 patch {
     module kbd       : PolyMidiIn
-    module vibrato   : Lfo        { rate: 5.0 }
+    #module vibrato   : Lfo        { rate: 5.0 }
     module pm_spread : MonoToPoly
     module osc       : PolyOsc
     module mix       : PolySum(channels: 2)
@@ -57,7 +57,7 @@ patch {
     module out       : AudioOut
 
     # Vibrato LFO → phase modulation on all voices
-    vibrato.sine   -[0.03]-> pm_spread.in
+    #vibrato.sine   -[0.03]-> pm_spread.in
     pm_spread.out         -> osc.phase_mod
 
     # V/oct: keyboard → oscillator (all voices)
@@ -87,8 +87,27 @@ patch {
 
     # Collapse all voices to mono
     filt.out               -> collapse.in
+    
+    module chorus : VChorus {
+        mode: two
+        variant: bright
+        hiss: 1.0
+    }
 
-    # Stereo output — scale down to avoid clipping with many voices
-    collapse.out  -[0.12]-> out.in_left
-    collapse.out  -[0.12]-> out.in_right
+    module limit : Limiter
+
+    collapse.out -[0.12]-> limit.in
+
+    # BBD reverb — 4-line FDN of MN3007-class BBDs wrapped in a
+    # compander. Dark, hissy, short-ish tail; room-to-small-plate.
+    module reverb : VReverb {
+        dry_wet: 1.0
+        size: 0.6
+        decay: 0.7
+    }
+
+    limit.out -> reverb.in
+
+    reverb.out_left  -> out.in_left
+    reverb.out_right -> out.in_right
 }

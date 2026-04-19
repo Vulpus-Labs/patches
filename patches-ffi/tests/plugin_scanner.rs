@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap};
 use patches_core::AudioEnvironment;
 use patches_registry::Registry;
-use patches_ffi::scanner::{register_plugins, scan_plugins};
+use patches_ffi::scanner::{register_plugins, scan_plugins, PluginScanner, SkipReason};
 
 fn gain_dylib_path() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -62,6 +62,34 @@ fn scan_and_register_gain_plugin() {
 
     // Clean up
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scanner_fresh_load_reports_loaded() {
+    let source = gain_dylib_path();
+    assert!(source.exists());
+    let mut registry = Registry::new();
+    let report = PluginScanner::new([source.clone()]).scan(&mut registry);
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(report.loaded.iter().any(|m| m.name == "Gain"));
+    assert!(report.replaced.is_empty());
+}
+
+#[test]
+fn scanner_same_version_is_skipped_on_rescan() {
+    let source = gain_dylib_path();
+    let mut registry = Registry::new();
+    let scanner = PluginScanner::new([source.clone()]);
+    let first = scanner.scan(&mut registry);
+    assert!(first.loaded.iter().any(|m| m.name == "Gain"));
+    let second = scanner.scan(&mut registry);
+    // Second pass: same version → skipped as LowerVersion (v == existing).
+    assert!(second.loaded.is_empty());
+    assert!(second.replaced.is_empty());
+    assert!(matches!(
+        second.skipped.iter().find(|s| matches!(s, SkipReason::LowerVersion { name, .. } if name == "Gain")),
+        Some(_),
+    ));
 }
 
 #[test]

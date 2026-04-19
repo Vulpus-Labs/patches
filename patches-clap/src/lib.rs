@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 //! CLAP audio plugin wrapping the Patches engine.
 //!
 //! This crate builds as a `cdylib` exporting the CLAP entry point.

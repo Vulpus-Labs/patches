@@ -1,8 +1,7 @@
 //! Pipeline-stage-aligned compile error (ADR 0038).
 //!
-//! Promoted from `patches-clap` so player, CLAP, and any future host
-//! converge on the same shape and the same `RenderedDiagnostic`
-//! converters in `patches-diagnostics`.
+//! Carries the `SourceMap` built during loading so consumers can render
+//! diagnostics without re-reading the source file on the error path.
 
 use std::fmt;
 
@@ -10,7 +9,7 @@ use patches_core::source_map::SourceMap;
 use patches_diagnostics::RenderedDiagnostic;
 
 #[derive(Debug)]
-pub enum CompileError {
+pub enum CompileErrorKind {
     /// Caller asked to compile before activation supplied an
     /// `AudioEnvironment`. Used by hosts that delay activation
     /// (e.g. CLAP plugin instances created before `activate`).
@@ -23,23 +22,39 @@ pub enum CompileError {
     Plan(patches_planner::BuildError),
 }
 
+#[derive(Debug)]
+pub struct CompileError {
+    pub kind: CompileErrorKind,
+    pub source_map: SourceMap,
+}
+
 impl CompileError {
-    pub fn to_rendered_diagnostics(&self, source_map: &SourceMap) -> Vec<RenderedDiagnostic> {
-        match self {
-            CompileError::NotActivated => {
+    pub fn new(kind: CompileErrorKind) -> Self {
+        Self { kind, source_map: SourceMap::new() }
+    }
+
+    pub fn with_source_map(mut self, source_map: SourceMap) -> Self {
+        self.source_map = source_map;
+        self
+    }
+
+    pub fn to_rendered_diagnostics(&self) -> Vec<RenderedDiagnostic> {
+        let sm = &self.source_map;
+        match &self.kind {
+            CompileErrorKind::NotActivated => {
                 vec![RenderedDiagnostic::synthetic("not-activated", "not activated", "here")]
             }
-            CompileError::Load(e) => vec![RenderedDiagnostic::from_load_error(e, source_map)],
-            CompileError::Parse(e) => vec![RenderedDiagnostic::from_parse_error(e)],
-            CompileError::Expand(e) => vec![RenderedDiagnostic::from_expand_error(e, source_map)],
-            CompileError::Bind(errs) => errs
+            CompileErrorKind::Load(e) => vec![RenderedDiagnostic::from_load_error(e, sm)],
+            CompileErrorKind::Parse(e) => vec![RenderedDiagnostic::from_parse_error(e)],
+            CompileErrorKind::Expand(e) => vec![RenderedDiagnostic::from_expand_error(e, sm)],
+            CompileErrorKind::Bind(errs) => errs
                 .iter()
-                .map(|e| RenderedDiagnostic::from_bind_error(e, source_map))
+                .map(|e| RenderedDiagnostic::from_bind_error(e, sm))
                 .collect(),
-            CompileError::Interpret(e) => {
-                vec![RenderedDiagnostic::from_interpret_error(e, source_map)]
+            CompileErrorKind::Interpret(e) => {
+                vec![RenderedDiagnostic::from_interpret_error(e, sm)]
             }
-            CompileError::Plan(e) => vec![RenderedDiagnostic::from_plan_error(
+            CompileErrorKind::Plan(e) => vec![RenderedDiagnostic::from_plan_error(
                 "plan",
                 e.to_string(),
                 e.origin.as_ref(),
@@ -51,38 +66,46 @@ impl CompileError {
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CompileError::NotActivated => write!(f, "not activated"),
-            CompileError::Load(e) => write!(f, "{e}"),
-            CompileError::Parse(e) => write!(f, "{e}"),
-            CompileError::Expand(e) => write!(f, "{e}"),
-            CompileError::Bind(errs) => match errs.first() {
+        match &self.kind {
+            CompileErrorKind::NotActivated => write!(f, "not activated"),
+            CompileErrorKind::Load(e) => write!(f, "{e}"),
+            CompileErrorKind::Parse(e) => write!(f, "{e}"),
+            CompileErrorKind::Expand(e) => write!(f, "{e}"),
+            CompileErrorKind::Bind(errs) => match errs.first() {
                 Some(first) => write!(f, "{}", first.message),
                 None => write!(f, "bind error"),
             },
-            CompileError::Interpret(e) => write!(f, "{e}"),
-            CompileError::Plan(e) => write!(f, "{e}"),
+            CompileErrorKind::Interpret(e) => write!(f, "{e}"),
+            CompileErrorKind::Plan(e) => write!(f, "{e}"),
         }
     }
 }
 
 impl std::error::Error for CompileError {}
 
+impl From<CompileErrorKind> for CompileError {
+    fn from(kind: CompileErrorKind) -> Self { CompileError::new(kind) }
+}
+
 impl From<patches_dsl::LoadError> for CompileError {
-    fn from(e: patches_dsl::LoadError) -> Self { CompileError::Load(e) }
+    fn from(e: patches_dsl::LoadError) -> Self { CompileError::new(CompileErrorKind::Load(e)) }
 }
 impl From<patches_dsl::ParseError> for CompileError {
-    fn from(e: patches_dsl::ParseError) -> Self { CompileError::Parse(e) }
+    fn from(e: patches_dsl::ParseError) -> Self { CompileError::new(CompileErrorKind::Parse(e)) }
 }
 impl From<patches_dsl::ExpandError> for CompileError {
-    fn from(e: patches_dsl::ExpandError) -> Self { CompileError::Expand(e) }
+    fn from(e: patches_dsl::ExpandError) -> Self { CompileError::new(CompileErrorKind::Expand(e)) }
 }
 impl From<patches_interpreter::InterpretError> for CompileError {
-    fn from(e: patches_interpreter::InterpretError) -> Self { CompileError::Interpret(e) }
+    fn from(e: patches_interpreter::InterpretError) -> Self {
+        CompileError::new(CompileErrorKind::Interpret(e))
+    }
 }
 impl From<Vec<patches_interpreter::BindError>> for CompileError {
-    fn from(e: Vec<patches_interpreter::BindError>) -> Self { CompileError::Bind(e) }
+    fn from(e: Vec<patches_interpreter::BindError>) -> Self {
+        CompileError::new(CompileErrorKind::Bind(e))
+    }
 }
 impl From<patches_planner::BuildError> for CompileError {
-    fn from(e: patches_planner::BuildError) -> Self { CompileError::Plan(e) }
+    fn from(e: patches_planner::BuildError) -> Self { CompileError::new(CompileErrorKind::Plan(e)) }
 }

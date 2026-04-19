@@ -12,7 +12,7 @@ use patches_dsl::pipeline::{LayeringWarning, PipelineAudit};
 use patches_interpreter::BuildResult;
 use patches_registry::Registry;
 
-use crate::{CompileError, HostFileSource};
+use crate::{CompileError, CompileErrorKind, HostFileSource};
 
 /// Output of [`load_patch`]: the build result ready for planner ingestion
 /// plus everything a host needs to render diagnostics and watch
@@ -29,24 +29,28 @@ pub struct LoadedPatch {
 /// and build the runtime `ModuleGraph`.
 ///
 /// Stops at the first failing stage and returns a [`CompileError`]
-/// tagged with that stage. Bind errors are aggregated into a single
-/// `Bind` variant (matching the player and CLAP behaviour pre-host).
+/// tagged with that stage and the source map built during loading
+/// (empty if the failure happened before parsing).
 pub fn load_patch(
     source: &dyn HostFileSource,
     registry: &Registry,
     env: &AudioEnvironment,
 ) -> Result<LoadedPatch, CompileError> {
     let loaded = source.load()?;
-    let expanded = patches_dsl::pipeline::expand_file(&loaded.file)?;
+    let sm = loaded.source_map.clone();
+    let expanded = patches_dsl::pipeline::expand_file(&loaded.file)
+        .map_err(|e| CompileError::from(e).with_source_map(sm.clone()))?;
     let flat = expanded.patch;
 
     let bound = patches_interpreter::bind_with_base_dir(&flat, registry, source.base_dir());
     let layering_warnings = bound.layering_warnings();
     if !bound.errors.is_empty() {
-        return Err(CompileError::Bind(bound.graph.errors));
+        return Err(CompileError::new(CompileErrorKind::Bind(bound.graph.errors))
+            .with_source_map(sm));
     }
 
-    let build_result = patches_interpreter::build_from_bound(&bound, env)?;
+    let build_result = patches_interpreter::build_from_bound(&bound, env)
+        .map_err(|e| CompileError::from(e).with_source_map(sm.clone()))?;
 
     Ok(LoadedPatch {
         build_result,

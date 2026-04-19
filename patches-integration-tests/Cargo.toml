@@ -18,3 +18,5 @@ rtrb = "0.3"
 patches-modules = { path = "../patches-modules" }
 patches-dsl = { path = "../patches-dsl" }
 patches-interpreter = { path = "../patches-interpreter" }
+patches-ffi = { path = "../patches-ffi" }
+test-drums-bundle = { path = "../test-plugins/drums-bundle" }

@@ -133,7 +133,8 @@ impl DocumentWorkspace {
             std::fs::read_to_string(&key)
         };
 
-        let registry = &self.registry;
+        let registry_guard = self.registry_read();
+        let registry = &*registry_guard;
         let run = pipeline::run_accumulate(&master_path, read, |flat| {
             descriptor_bind::bind(flat, registry)
         });

@@ -50,7 +50,7 @@ impl DocumentWorkspace {
 
         // Gather template env from the transitive include closure.
         let env = collect_external_templates(&state, uri);
-        let model = analysis::analyse_with_env(&file, &self.registry, &env);
+        let model = analysis::analyse_with_env(&file, &*self.registry_read(), &env);
 
         let mut root_diags: Vec<Diagnostic> =
             lsp_util::syntax_to_lsp_diagnostics(&line_index, &syntax_diags);
@@ -127,7 +127,7 @@ impl DocumentWorkspace {
         state.include_graph.rewrite_edges(uri, &direct_children);
 
         let env = collect_external_templates(state, uri);
-        let model = analysis::analyse_with_env(&file, &self.registry, &env);
+        let model = analysis::analyse_with_env(&file, &*self.registry_read(), &env);
 
         let mut root_diags = lsp_util::syntax_to_lsp_diagnostics(&line_index, &syntax_diags);
         root_diags.extend(include_diags.into_iter().map(|(span, msg)| {
@@ -184,7 +184,7 @@ impl DocumentWorkspace {
                 let line_index = lsp_util::build_line_index(&new_source);
                 // Placeholder model; reanalyse_cached below overwrites it.
                 let (file, _) = ast_builder::build_ast(&tree, &new_source);
-                let model = analysis::analyse_with_env(&file, &self.registry, &HashMap::new());
+                let model = analysis::analyse_with_env(&file, &*self.registry_read(), &HashMap::new());
                 state.documents.insert(
                     uri.clone(),
                     DocumentState {
@@ -339,7 +339,7 @@ impl DocumentWorkspace {
             state.include_graph.rewrite_edges(&inc_uri, &child_children);
 
             let child_env = collect_external_templates(state, &inc_uri);
-            let model = analysis::analyse_with_env(&file, &self.registry, &child_env);
+            let model = analysis::analyse_with_env(&file, &*self.registry_read(), &child_env);
             let line_index = lsp_util::build_line_index(&source);
 
             state.documents.insert(

@@ -1,0 +1,12 @@
+[package]
+name = "test-old-abi-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "test_old_abi_plugin"
+crate-type = ["cdylib"]
+
+[dependencies]
+patches-ffi-common = { path = "../../patches-ffi-common" }

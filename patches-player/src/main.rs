@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::BufRead;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -18,21 +18,15 @@ use std::time::{Duration, SystemTime};
 
 use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
 use patches_diagnostics::RenderedDiagnostic;
-use patches_dsl::pipeline;
 use patches_engine::{new_event_queue, EventScheduler, MidiConnector, OversamplingFactor};
-use patches_host::{CompileError, HostBuilder, HostRuntime, LoadedPatch, PathSource};
-use patches_planner::ExecutionPlan;
+use patches_host::{CompileError, HostBuilder, LoadedPatch, PathSource};
 
 mod diagnostic_render;
 
-/// Render a [`CompileError`] to stderr, re-deriving the source map from the
-/// master file when possible (cheap on the error path).
-fn render_compile_error(err: &CompileError, path: &Path) {
-    let source_map = pipeline::load(path, |p| fs::read_to_string(p))
-        .map(|lr| lr.source_map)
-        .unwrap_or_default();
-    for d in err.to_rendered_diagnostics(&source_map) {
-        diagnostic_render::render_to_stderr(&d, &source_map);
+/// Render a [`CompileError`] to stderr using the source map it carries.
+fn render_compile_error(err: &CompileError) {
+    for d in err.to_rendered_diagnostics() {
+        diagnostic_render::render_to_stderr(&d, &err.source_map);
     }
 }
 
@@ -44,20 +38,6 @@ fn render_load_warnings(loaded: &LoadedPatch) {
     for w in &loaded.layering_warnings {
         let d = RenderedDiagnostic::from_layering_warning(w);
         diagnostic_render::render_to_stderr(&d, &loaded.source_map);
-    }
-}
-
-/// Push a plan, blocking until the audio thread drains the previous one.
-/// Matches the pre-host `push_build_result` retry-with-sleep semantics.
-fn push_plan_blocking(runtime: &mut HostRuntime, mut plan: ExecutionPlan) {
-    loop {
-        match runtime.push_plan(plan) {
-            Ok(()) => return,
-            Err(returned) => {
-                plan = returned;
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
     }
 }
 
@@ -76,8 +56,27 @@ fn run(
     oversampling: OversamplingFactor,
     no_stdin: bool,
     device_config: DeviceConfig,
+    module_paths: Vec<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let registry = patches_modules::default_registry();
+    let mut registry = patches_modules::default_registry();
+
+    if !module_paths.is_empty() {
+        let scanner = patches_ffi::PluginScanner::new(module_paths);
+        let report = scanner.scan(&mut registry);
+        println!("module scan: {}", report.summary());
+        for m in &report.loaded {
+            println!("  loaded  {} v{:#x} ({})", m.name, m.version, m.path.display());
+        }
+        for r in &report.replaced {
+            println!("  replaced {} v{:#x} → v{:#x} ({})", r.name, r.from, r.to, r.path.display());
+        }
+        for s in &report.skipped {
+            println!("  skipped  {s:?}");
+        }
+        for (p, e) in &report.errors {
+            eprintln!("  error   {}: {e}", p.display());
+        }
+    }
 
     // Open the audio device first so we know the actual sample rate before
     // building the planner / processor / patch.
@@ -90,15 +89,14 @@ fn run(
         .build(env)?;
 
     let source = PathSource::new(path);
-    let (loaded, plan) = match runtime.compile(&source, &registry) {
-        Ok(pair) => pair,
+    let loaded = match runtime.compile_and_push_blocking(&source, &registry) {
+        Ok(loaded) => loaded,
         Err(e) => {
-            render_compile_error(&e, Path::new(path));
+            render_compile_error(&e);
             return Err("failed to load patch".into());
         }
     };
     render_load_warnings(&loaded);
-    push_plan_blocking(&mut runtime, plan);
 
     let dependencies = loaded.dependencies.clone();
     drop(loaded);
@@ -160,16 +158,15 @@ fn run(
         });
 
         if changed {
-            match runtime.compile(&source, &registry) {
-                Ok((loaded, plan)) => {
+            match runtime.compile_and_push_blocking(&source, &registry) {
+                Ok(loaded) => {
                     render_load_warnings(&loaded);
-                    push_plan_blocking(&mut runtime, plan);
                     println!("Reloaded.");
                     refresh_watched(&mut watched, &loaded.dependencies);
                 }
                 Err(e) => {
                     eprintln!("parse error (keeping current patch):");
-                    render_compile_error(&e, Path::new(path));
+                    render_compile_error(&e);
                     // Update mtimes so we don't spam errors on every poll.
                     for (p, last) in watched.iter_mut() {
                         if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
@@ -195,6 +192,7 @@ fn print_usage() {
     eprintln!("  --input-device <name>      Open named input device for audio capture");
     eprintln!("  --list-devices             List available audio devices and exit");
     eprintln!("  --no-stdin                 Run without stdin (kill process to stop)");
+    eprintln!("  --module-path <DIR|FILE>   Scan directory or file for FFI plugin bundles (repeatable)");
 }
 
 fn main() {
@@ -204,11 +202,19 @@ fn main() {
     let mut no_stdin = false;
     let mut list_devices = false;
     let mut device_config = DeviceConfig::default();
+    let mut module_paths: Vec<PathBuf> = Vec::new();
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-stdin" => no_stdin = true,
+            "--module-path" => match args.next() {
+                Some(p) => module_paths.push(PathBuf::from(p)),
+                None => {
+                    eprintln!("error: --module-path requires a directory or file argument");
+                    process::exit(1);
+                }
+            },
             "--list-devices" => list_devices = true,
             "--output-device" => match args.next() {
                 Some(name) => device_config.output_device = Some(name),
@@ -275,7 +281,7 @@ fn main() {
         }
     };
 
-    if let Err(e) = run(&path, record_path.as_deref(), oversampling, no_stdin, device_config) {
+    if let Err(e) = run(&path, record_path.as_deref(), oversampling, no_stdin, device_config, module_paths) {
         // Structured diagnostics (CompileError) have already been rendered
         // to stderr at the source. Non-source errors surface as plain text.
         eprintln!("error: {e}");

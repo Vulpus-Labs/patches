@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 //! Shared composition for binaries that drive a Patches engine: the DSL
 //! pipeline, planner construction, plan-channel wiring, and processor
 //! spawn. Designed to be plugged into both `patches-player` (CLI, file
@@ -9,13 +10,13 @@
 //! (tickets 0517 and 0518).
 
 pub mod builder;
-pub mod callback;
 pub mod error;
 pub mod load;
+pub mod runtime;
 pub mod source;
 
-pub use builder::{HostBuilder, HostRuntime};
-pub use callback::HostAudioCallback;
-pub use error::CompileError;
+pub use builder::HostBuilder;
+pub use error::{CompileError, CompileErrorKind};
 pub use load::{load_patch, LoadedPatch};
+pub use runtime::{HostAudioCallback, HostRuntime};
 pub use source::{HostFileSource, InMemorySource, LoadedSource, PathSource};

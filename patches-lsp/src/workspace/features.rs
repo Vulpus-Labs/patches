@@ -79,12 +79,13 @@ impl DocumentWorkspace {
             return Vec::new();
         };
         let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
+        let registry = self.registry_read();
         completions::compute_completions(
             &doc.tree,
             &doc.source,
             byte_offset,
             &doc.model,
-            &self.registry,
+            &registry,
         )
     }
 
@@ -123,12 +124,13 @@ impl DocumentWorkspace {
             tracing::debug!(%uri, "hover: document dropped between expansion and fallback path");
             return None;
         };
+        let registry = self.registry_read();
         let h = hover::compute_hover(
             &doc.tree,
             &doc.source,
             byte_offset,
             &doc.model,
-            &self.registry,
+            &registry,
             &doc.line_index,
         );
         if h.is_none() {
@@ -169,6 +171,7 @@ impl DocumentWorkspace {
     /// (stage 1–3 failed) — there's nothing to hint against.
     pub fn inlay_hints(&self, uri: &Url, range: Range) -> Vec<InlayHint> {
         let mut state = self.state.lock().expect("lock workspace state");
+        let registry = self.registry_read();
         self.with_expansion_context(&mut state, uri, |ctx| {
             Some(crate::inlay::compute_inlay_hints(
                 uri,
@@ -177,7 +180,7 @@ impl DocumentWorkspace {
                 ctx.references,
                 ctx.source_map,
                 &ctx.doc.line_index,
-                &self.registry,
+                &registry,
             ))
         })
         .unwrap_or_default()

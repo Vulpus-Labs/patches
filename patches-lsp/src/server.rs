@@ -33,7 +33,15 @@ impl PatchesLanguageServer {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for PatchesLanguageServer {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Pull `patches.modulePaths` from initializationOptions if the
+        // client sent any; `workspace/configuration` pull is handled on
+        // `initialized` via a follow-up request.
+        if let Some(opts) = &params.initialization_options {
+            if let Some(paths) = extract_module_paths(opts) {
+                self.workspace.set_module_paths(paths);
+            }
+        }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -74,6 +82,9 @@ impl LanguageServer for PatchesLanguageServer {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        // Pull patches.modulePaths from workspace/configuration and do an
+        // initial scan before the first diagnostics batch.
+        self.pull_and_scan_module_paths().await;
         // Dynamically register a file watcher for `.patches` files so the
         // client forwards disk-level changes for files the editor hasn't
         // opened — needed to keep include-loaded docs in sync with disk.
@@ -106,6 +117,12 @@ impl LanguageServer for PatchesLanguageServer {
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
+        // Re-pull the configuration but do NOT auto-rescan — the client
+        // must invoke `patches/rescanModules` to rebuild the registry.
+        self.pull_module_paths_only().await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -268,6 +285,85 @@ pub struct RenderSvgDiagnostic {
     pub severity: RenderSvgSeverity,
     /// Byte-range in the master document, if known.
     pub span: Option<(u32, u32)>,
+}
+
+// ─── Module-path configuration + rescan ─────────────────────────────────────
+
+fn extract_module_paths(value: &serde_json::Value) -> Option<Vec<PathBuf>> {
+    let paths = value.get("patches")?.get("modulePaths")?.as_array()?;
+    Some(
+        paths
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(PathBuf::from)
+            .collect(),
+    )
+}
+
+/// Result payload for `patches/rescanModules`.
+#[derive(Debug, Serialize)]
+pub struct RescanModulesResult {
+    pub loaded: Vec<patches_ffi::LoadedModule>,
+    pub replaced: Vec<patches_ffi::Replacement>,
+    pub skipped: Vec<patches_ffi::SkipReason>,
+    pub errors: Vec<(PathBuf, String)>,
+    pub summary: String,
+}
+
+impl From<patches_ffi::ScanReport> for RescanModulesResult {
+    fn from(r: patches_ffi::ScanReport) -> Self {
+        let summary = r.summary();
+        Self {
+            loaded: r.loaded,
+            replaced: r.replaced,
+            skipped: r.skipped,
+            errors: r.errors,
+            summary,
+        }
+    }
+}
+
+impl PatchesLanguageServer {
+    async fn pull_and_scan_module_paths(&self) {
+        self.pull_module_paths_only().await;
+        let report = self.workspace.rescan_modules();
+        self.client
+            .log_message(MessageType::INFO, format!("patches scan: {}", report.summary()))
+            .await;
+    }
+
+    async fn pull_module_paths_only(&self) {
+        let config_items = vec![ConfigurationItem {
+            scope_uri: None,
+            section: Some("patches".into()),
+        }];
+        if let Ok(values) = self.client.configuration(config_items).await {
+            if let Some(first) = values.first() {
+                // `configuration` returns the requested section's value, so
+                // the structure here is `{ modulePaths: [...] }` — wrap it.
+                let wrapped = serde_json::json!({ "patches": first });
+                if let Some(paths) = extract_module_paths(&wrapped) {
+                    self.workspace.set_module_paths(paths);
+                }
+            }
+        }
+    }
+
+    /// Handle `patches/rescanModules` — rebuilds the registry and refreshes
+    /// diagnostics for every open document. Returns the scan report.
+    pub async fn rescan_modules(&self, _: serde_json::Value) -> Result<RescanModulesResult> {
+        let report = self.workspace.rescan_modules();
+        // Re-analyse every open document so diagnostics reflect the new
+        // registry. `refresh_from_disk` forces a reanalysis from the
+        // current in-memory source.
+        for uri in self.workspace.open_uris() {
+            let affected = self.workspace.refresh_from_disk(&uri);
+            for (u, d) in affected {
+                self.client.publish_diagnostics(u, d, None).await;
+            }
+        }
+        Ok(report.into())
+    }
 }
 
 impl PatchesLanguageServer {

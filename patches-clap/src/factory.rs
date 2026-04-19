@@ -90,7 +90,6 @@ unsafe extern "C" fn create_plugin(
         gui_handle: None,
         gui_scale: 1.0,
         sample_rate: 0.0,
-        last_source_map: None,
         prev_beat: -1.0,
         prev_bar: -1,
     });

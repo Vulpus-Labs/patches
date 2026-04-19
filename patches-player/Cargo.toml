@@ -17,4 +17,5 @@ patches-dsl         = { path = "../patches-dsl" }
 patches-modules     = { path = "../patches-modules" }
 patches-core        = { path = "../patches-core" }
 patches-diagnostics = { path = "../patches-diagnostics" }
+patches-ffi         = { path = "../patches-ffi" }
 ariadne             = "0.6"

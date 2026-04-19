@@ -1,37 +1,33 @@
 //! Bucket-brigade-device (BBD) model for vintage BBD effects.
 //!
-//! Follows the structure of Holters & Parker (DAFx-18, "A Combined Model
-//! for a Bucket Brigade Device and its Input and Output Filters",
-//! <https://www.dafx.de/paper-archive/2018/papers/DAFx2018_paper_25.pdf>)
-//! and the ChowDSP C++ reference
-//! (<https://github.com/Chowdhury-DSP/chowdsp_utils>): a bucket ring
-//! buffer of `N` stages bracketed by two banks of four parallel
-//! complex one-pole filters (anti-imaging before the bucket,
-//! reconstruction after it). The inner loop advances BBD clock ticks at
-//! the current clock rate and, on each tick, samples the input filter
-//! states into the bucket or reads the bucket into the output filter
-//! states.
+//! Port of the Holters & Parker (DAFx-18) BBD model following the
+//! ChowDSP C++ reference
+//! (<https://github.com/Chowdhury-DSP/chowdsp_utils>,
+//! `chowdsp_BBDFilterBank.h` / `chowdsp_BBDDelayLine.h`): two banks of
+//! four parallel complex-pole filters bracket a bucket ring buffer.
+//! The input bank sums charge-weighted states into buckets at BBD tick
+//! rate; the output bank reconstructs from bucket deltas. Pole/root
+//! values are the measured 1024-stage filter fit from the paper, good down to
+//! ~5 kHz clocks where image folding becomes audible.
 //!
-//! # API stability
-//!
-//! The public surface ([`Bbd`], [`BbdDevice`], [`BbdDevice::MN3009`])
-//! is fixed by ticket 0553. The internal per-pole constants are tuned
-//! empirically against the Juno-60 / Juno-106 references
-//! (~1–7 ms delays, ~70 kHz BBD clock) and deliberately stay in the
-//! "delay-dependent reconstruction LPF" regime that Holters-Parker
-//! reduces to at those rates. A follow-up ticket will swap in the
-//! paper's exact 4-wide pole/root vectors for CE-2 / Small-Clone-class
-//! consumers where clock drops to 5–20 kHz and image folding becomes
-//! audible; the API does not change.
+//! [`BbdDevice::BBD_256`] and [`BbdDevice::BBD_1024`] select the
+//! number of bucket stages. Chip-to-chip filter differences beyond
+//! stage count are below the audible threshold of the Holters-Parker
+//! fit; one filter bank serves all emulations.
 //!
 //! # Real-time safety
 //!
 //! All buffers are allocated in [`Bbd::new`]. [`Bbd::process`] and
 //! [`Bbd::set_delay_seconds`] perform no allocations and contain no
 //! locks or syscalls.
+//!
+//! See Holters & Parker (2018),
+//! <https://www.dafx.de/paper-archive/2018/papers/DAFx2018_paper_25.pdf>.
 
 #[cfg(test)]
 mod tests;
+
+use patches_dsp::approximate::fast_tanh;
 
 /// Minimal complex-f32 helper local to this crate — avoids pulling
 /// `num-complex` as a dependency for four poles.
@@ -49,10 +45,10 @@ impl Complex32 {
 
 /// Device-specific constants for a BBD chip.
 ///
-/// `stages` is the number of bucket stages (e.g. 256 for MN3009).
-/// The four roots / poles per bank describe the anti-imaging filter
-/// before the bucket and the reconstruction filter after it; see
-/// Holters-Parker section 3 for the derivation.
+/// `stages` is the number of bucket stages. The four roots / poles
+/// per bank describe the anti-imaging filter before the bucket and
+/// the reconstruction filter after it, in continuous-time (s-plane,
+/// rad/s) units matching the Holters-Parker fit.
 #[derive(Clone, Copy, Debug)]
 pub struct BbdDevice {
     pub stages: usize,
@@ -60,223 +56,390 @@ pub struct BbdDevice {
     pub input_poles: [Complex32; 4],
     pub output_roots: [Complex32; 4],
     pub output_poles: [Complex32; 4],
+    /// Pre-output-filter soft saturation drive: `y = tanh(drive*x) / drive`.
+    /// Models per-capacitor charge-transfer nonlinearity. `0.0` disables.
+    pub saturation_drive: f32,
 }
 
+// Holters-Parker (DAFx-18) fit, values from ChowDSP's
+// `chowdsp_BBDFilterBank.h`. Fitted against a 1024-stage reference
+// chip; filter-bank differences between stage counts are below the
+// fit's resolution, so the same values serve both presets.
+const IFILT_ROOTS: [Complex32; 4] = [
+    Complex32::new(-10_329.271, -329.848),
+    Complex32::new(-10_329.271, 329.848),
+    Complex32::new(366.990_57, -1811.4318),
+    Complex32::new(366.990_57, 1811.4318),
+];
+const IFILT_POLES: [Complex32; 4] = [
+    Complex32::new(-55482.0, -25082.0),
+    Complex32::new(-55482.0, 25082.0),
+    Complex32::new(-26292.0, -59437.0),
+    Complex32::new(-26292.0, 59437.0),
+];
+const OFILT_ROOTS: [Complex32; 4] = [
+    Complex32::new(-11256.0, -99566.0),
+    Complex32::new(-11256.0, 99566.0),
+    Complex32::new(-13802.0, -24606.0),
+    Complex32::new(-13802.0, 24606.0),
+];
+const OFILT_POLES: [Complex32; 4] = [
+    Complex32::new(-51468.0, -21437.0),
+    Complex32::new(-51468.0, 21437.0),
+    Complex32::new(-26276.0, -59699.0),
+    Complex32::new(-26276.0, 59699.0),
+];
+
 impl BbdDevice {
-    /// MN3009 — 256-stage BBD used in the Juno-60 / Juno-106 chorus and
-    /// CE-2 / Small-Clone delays. Pole constants chosen to approximate
-    /// the charge-transfer-inefficiency-driven HF rolloff measured in
-    /// Holters-Parker figure 4 at ~70 kHz clock.
-    ///
-    /// TODO(vintage): replace with the exact 4-wide root/pole vectors
-    /// from the paper once fitted against CE-2 data (not needed by
-    /// VChorus — Juno clock is high enough that these act as a plain
-    /// reconstruction LPF).
-    pub const MN3009: Self = Self {
+    /// 256-stage preset. Emulates small-chip BBDs in the 1.5–7 ms /
+    /// tens-of-kHz clock regime — early-80s stereo-chorus territory.
+    pub const BBD_256: Self = Self {
         stages: 256,
-        // Anti-image bank: mild pre-BBD LPF. Poles on negative real axis,
-        // normalised in the BBD-clock domain.
-        input_roots: [
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-        ],
-        input_poles: [
-            Complex32::new(-2.0, 0.0),
-            Complex32::new(-4.0, 0.0),
-            Complex32::new(-8.0, 0.0),
-            Complex32::new(-16.0, 0.0),
-        ],
-        // Reconstruction bank: steeper post-BBD LPF, the audible
-        // "bucket colouration".
-        output_roots: [
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-            Complex32::new(0.25, 0.0),
-        ],
-        output_poles: [
-            Complex32::new(-1.5, 0.0),
-            Complex32::new(-3.0, 0.0),
-            Complex32::new(-6.0, 0.0),
-            Complex32::new(-12.0, 0.0),
-        ],
+        input_roots: IFILT_ROOTS,
+        input_poles: IFILT_POLES,
+        output_roots: OFILT_ROOTS,
+        output_poles: OFILT_POLES,
+        saturation_drive: 1.2,
+    };
+
+    /// 1024-stage preset. Emulates the larger BBDs used in vintage
+    /// analog delays and flangers (~0.5–100 ms depending on clock).
+    /// Clock drops far enough that the Holters-Parker filter fit
+    /// earns its keep here.
+    pub const BBD_1024: Self = Self {
+        stages: 1024,
+        input_roots: IFILT_ROOTS,
+        input_poles: IFILT_POLES,
+        output_roots: OFILT_ROOTS,
+        output_poles: OFILT_POLES,
+        saturation_drive: 1.2,
     };
 }
 
-/// Bucket-brigade delay line with anti-imaging and reconstruction
-/// filter banks. Scalar — SIMD not warranted for four poles.
+/// Measured cutoff of the Holters-Parker input filter (rad/s → Hz).
+/// A user-tweakable cutoff knob would rescale poles/roots by
+/// `freq / INPUT_ORIG_CUTOFF`; we fix `freq == INPUT_ORIG_CUTOFF` so
+/// the scaling collapses to unity and the filter sits at the measured
+/// chip response.
+const INPUT_ORIG_CUTOFF: f32 = 9900.0;
+const OUTPUT_ORIG_CUTOFF: f32 = 9500.0;
+// Unused while freqFactor == 1.0, kept documented to flag the
+// extension point.
+const _: [f32; 2] = [INPUT_ORIG_CUTOFF, OUTPUT_ORIG_CUTOFF];
+
+/// Input filter bank. Four parallel complex one-poles whose states
+/// evolve at host-sample rate; the per-BBD-tick rotation of `gcalc`
+/// extracts sub-sample values via Holters-Parker's partial-fraction
+/// form.
+#[derive(Clone, Copy, Debug, Default)]
+struct InputBank {
+    // State x (complex per pole).
+    x_re: [f32; 4],
+    x_im: [f32; 4],
+    // Host-sample-rate step: exp(pole * Ts).
+    pc_re: [f32; 4],
+    pc_im: [f32; 4],
+    // Angle of pole_corr — used for the sub-sample rotation.
+    pc_angle: [f32; 4],
+    // gCoef = roots * Ts. Fixed once host Ts is known.
+    gcoef_re: [f32; 4],
+    gcoef_im: [f32; 4],
+    // Running sub-sample gain, rotated by `aplus` each BBD tick.
+    gcalc_re: [f32; 4],
+    gcalc_im: [f32; 4],
+    // Pure rotation per BBD tick: exp(i * pc_angle * (2*bbd_ts)).
+    aplus_re: [f32; 4],
+    aplus_im: [f32; 4],
+}
+
+impl InputBank {
+    fn new(roots: [Complex32; 4], poles: [Complex32; 4], host_ts: f32) -> Self {
+        let mut b = Self::default();
+        for k in 0..4 {
+            let pc = cexp(Complex32::new(poles[k].re * host_ts, poles[k].im * host_ts));
+            b.pc_re[k] = pc.re;
+            b.pc_im[k] = pc.im;
+            b.pc_angle[k] = pc.im.atan2(pc.re);
+            b.gcoef_re[k] = roots[k].re * host_ts;
+            b.gcoef_im[k] = roots[k].im * host_ts;
+            // Initial Gcalc = gCoef — first calcG() rotates it by Aplus.
+            b.gcalc_re[k] = b.gcoef_re[k];
+            b.gcalc_im[k] = b.gcoef_im[k];
+        }
+        b
+    }
+
+    fn set_delta(&mut self, delta: f32) {
+        for k in 0..4 {
+            let (s, c) = (self.pc_angle[k] * delta).sin_cos();
+            self.aplus_re[k] = c;
+            self.aplus_im[k] = s;
+        }
+    }
+
+    fn reset_gcalc(&mut self) {
+        for k in 0..4 {
+            self.gcalc_re[k] = self.gcoef_re[k];
+            self.gcalc_im[k] = self.gcoef_im[k];
+        }
+    }
+
+    #[inline(always)]
+    fn calc_g(&mut self) {
+        for k in 0..4 {
+            let (gr, gi) = (self.gcalc_re[k], self.gcalc_im[k]);
+            let (ar, ai) = (self.aplus_re[k], self.aplus_im[k]);
+            self.gcalc_re[k] = ar * gr - ai * gi;
+            self.gcalc_im[k] = ar * gi + ai * gr;
+        }
+    }
+
+    /// Real part of sum_k Gcalc_k * x_k. Called on an input tick right
+    /// after `calc_g` to produce a bucket-write value.
+    #[inline(always)]
+    fn readout_real(&self) -> f32 {
+        let mut s = 0.0_f32;
+        for k in 0..4 {
+            s += self.gcalc_re[k] * self.x_re[k] - self.gcalc_im[k] * self.x_im[k];
+        }
+        s
+    }
+
+    /// Advance the state once per host sample: x = pole_corr * x + (u, 0).
+    #[inline(always)]
+    fn advance(&mut self, u: f32) {
+        for k in 0..4 {
+            let nr = self.pc_re[k] * self.x_re[k] - self.pc_im[k] * self.x_im[k] + u;
+            let ni = self.pc_re[k] * self.x_im[k] + self.pc_im[k] * self.x_re[k];
+            self.x_re[k] = nr;
+            self.x_im[k] = ni;
+        }
+    }
+
+    fn reset_state(&mut self) {
+        self.x_re = [0.0; 4];
+        self.x_im = [0.0; 4];
+    }
+}
+
+/// Output filter bank. Mirrors [`InputBank`] but with `gCoef = roots /
+/// poles` (partial-fraction residues) and an initial `Amult = gCoef *
+/// pole_corr`. The DC gain `H0` is `-sum(real(gCoef))`.
+#[derive(Clone, Copy, Debug, Default)]
+struct OutputBank {
+    x_re: [f32; 4],
+    x_im: [f32; 4],
+    pc_re: [f32; 4],
+    pc_im: [f32; 4],
+    pc_angle: [f32; 4],
+    amult_re: [f32; 4],
+    amult_im: [f32; 4],
+    gcalc_re: [f32; 4],
+    gcalc_im: [f32; 4],
+    aplus_re: [f32; 4],
+    aplus_im: [f32; 4],
+    h0: f32,
+}
+
+impl OutputBank {
+    fn new(roots: [Complex32; 4], poles: [Complex32; 4], host_ts: f32) -> Self {
+        let mut b = Self::default();
+        let mut h0 = 0.0_f32;
+        for k in 0..4 {
+            // gCoef = roots / poles (complex).
+            let denom = poles[k].re * poles[k].re + poles[k].im * poles[k].im;
+            let gcoef_re = (roots[k].re * poles[k].re + roots[k].im * poles[k].im) / denom;
+            let gcoef_im = (roots[k].im * poles[k].re - roots[k].re * poles[k].im) / denom;
+            h0 -= gcoef_re;
+
+            let pc = cexp(Complex32::new(poles[k].re * host_ts, poles[k].im * host_ts));
+            b.pc_re[k] = pc.re;
+            b.pc_im[k] = pc.im;
+            b.pc_angle[k] = pc.im.atan2(pc.re);
+            // Amult = gCoef * pole_corr.
+            b.amult_re[k] = gcoef_re * pc.re - gcoef_im * pc.im;
+            b.amult_im[k] = gcoef_re * pc.im + gcoef_im * pc.re;
+            // Initial Gcalc = Amult — first calc_g rotates by Aplus.
+            b.gcalc_re[k] = b.amult_re[k];
+            b.gcalc_im[k] = b.amult_im[k];
+        }
+        b.h0 = h0;
+        b
+    }
+
+    fn set_delta(&mut self, delta: f32) {
+        // Output bank rotates with the opposite sign.
+        for k in 0..4 {
+            let (s, c) = (-self.pc_angle[k] * delta).sin_cos();
+            self.aplus_re[k] = c;
+            self.aplus_im[k] = s;
+        }
+    }
+
+    fn reset_gcalc(&mut self) {
+        for k in 0..4 {
+            self.gcalc_re[k] = self.amult_re[k];
+            self.gcalc_im[k] = self.amult_im[k];
+        }
+    }
+
+    #[inline(always)]
+    fn calc_g(&mut self) {
+        for k in 0..4 {
+            let (gr, gi) = (self.gcalc_re[k], self.gcalc_im[k]);
+            let (ar, ai) = (self.aplus_re[k], self.aplus_im[k]);
+            self.gcalc_re[k] = ar * gr - ai * gi;
+            self.gcalc_im[k] = ar * gi + ai * gr;
+        }
+    }
+
+    /// Advance by accumulated per-sample output: x = pole_corr * x + u.
+    #[inline(always)]
+    fn advance(&mut self, u_re: [f32; 4], u_im: [f32; 4]) {
+        for k in 0..4 {
+            let nr = self.pc_re[k] * self.x_re[k] - self.pc_im[k] * self.x_im[k] + u_re[k];
+            let ni = self.pc_re[k] * self.x_im[k] + self.pc_im[k] * self.x_re[k] + u_im[k];
+            self.x_re[k] = nr;
+            self.x_im[k] = ni;
+        }
+    }
+
+    fn reset_state(&mut self) {
+        self.x_re = [0.0; 4];
+        self.x_im = [0.0; 4];
+    }
+}
+
+/// Bucket-brigade delay line with Holters-Parker filter banks.
 pub struct Bbd {
     device: BbdDevice,
 
-    /// Host sample rate, Hz.
-    host_sr: f32,
-    /// Host sample period, seconds.
     host_ts: f32,
-
-    /// Current delay target, seconds. Set via [`set_delay_seconds`].
     delay_s: f32,
-    /// BBD clock rate, Hz.  `stages / (2 * delay_s)`.
-    bbd_rate: f32,
-    /// BBD tick period, seconds.
     bbd_ts: f32,
+    inv_two_stages: f32,
 
-    /// Ring buffer of bucket stages.
+    sat_drive: f32,
+    sat_inv_drive: f32,
+
     buckets: Box<[f32]>,
-    /// Next write index.
+    bucket_mask: usize,
     write_idx: usize,
-    /// Next read index.
     read_idx: usize,
 
-    /// Input filter states (one complex state per pole).
-    input_state: [Complex32; 4],
-    /// Cached `exp(pole * host_ts)` per input pole — the IIR step
-    /// coefficient for the per-host-sample update.
-    input_step: [Complex32; 4],
+    input_bank: InputBank,
+    output_bank: OutputBank,
 
-    /// Output filter states.
-    output_state: [Complex32; 4],
-    output_step: [Complex32; 4],
-
-    /// Fractional BBD clock phase left over from the previous host
-    /// sample; range [0, bbd_ts). Keeps the inner loop click-free
-    /// under delay modulation.
-    clock_phase: f32,
-
-    /// Alternates input/output operation on successive BBD half-ticks.
-    next_is_input: bool,
-
-    /// Previous BBD bucket read, for the output delta step.
-    y_bbd_prev: f32,
+    /// Loop time carry, in host seconds. Range [0, host_ts).
+    tn: f32,
+    even_on: bool,
+    y_bbd_old: f32,
 }
 
 impl Bbd {
     /// Construct a new [`Bbd`] for the given device and host sample rate.
-    ///
-    /// All allocation is done here; `process` and `set_delay_seconds`
-    /// never allocate.
     pub fn new(device: &BbdDevice, host_sample_rate: f32) -> Self {
         let host_ts = 1.0 / host_sample_rate;
-        let buckets = vec![0.0_f32; device.stages + 1].into_boxed_slice();
+        let ring_len = (device.stages + 1).next_power_of_two();
+        let buckets = vec![0.0_f32; ring_len].into_boxed_slice();
+        let initial_write = device.stages;
 
         let mut me = Self {
             device: *device,
-            host_sr: host_sample_rate,
             host_ts,
             delay_s: 0.0,
-            bbd_rate: 0.0,
             bbd_ts: 0.0,
+            inv_two_stages: 1.0 / (2.0 * device.stages as f32),
+            sat_drive: device.saturation_drive,
+            sat_inv_drive: if device.saturation_drive > 0.0 {
+                1.0 / device.saturation_drive
+            } else {
+                1.0
+            },
             buckets,
-            write_idx: 0,
+            bucket_mask: ring_len - 1,
+            write_idx: initial_write,
             read_idx: 0,
-            input_state: [Complex32::default(); 4],
-            input_step: [Complex32::default(); 4],
-            output_state: [Complex32::default(); 4],
-            output_step: [Complex32::default(); 4],
-            clock_phase: 0.0,
-            next_is_input: true,
-            y_bbd_prev: 0.0,
+            input_bank: InputBank::new(device.input_roots, device.input_poles, host_ts),
+            output_bank: OutputBank::new(device.output_roots, device.output_poles, host_ts),
+            tn: 0.0,
+            even_on: true,
+            y_bbd_old: 0.0,
         };
-        me.recompute_steps();
         me.set_delay_seconds(0.003);
         me
     }
 
     /// Set the delay line's target delay in seconds.
     ///
-    /// Derives the BBD clock rate as `stages / (2 * delay)` (two BBD
-    /// half-ticks per bucket cell). Safe to call per audio sample.
+    /// Derives the BBD clock period as `delay / (2 * stages)` and
+    /// updates the filter banks' per-tick rotation. Safe to call per
+    /// audio sample: the cost is four `sin_cos` per bank.
     pub fn set_delay_seconds(&mut self, delay: f32) {
         let delay = delay.max(1.0e-5);
         if (delay - self.delay_s).abs() < 1.0e-9 {
             return;
         }
         self.delay_s = delay;
-        self.bbd_rate = (self.device.stages as f32) / (2.0 * delay);
-        self.bbd_ts = 1.0 / self.bbd_rate;
-        // Clamp clock phase into the new tick window.
-        if self.clock_phase > self.bbd_ts {
-            self.clock_phase = 0.0;
+        self.bbd_ts = delay * self.inv_two_stages;
+        let delta = 2.0 * self.bbd_ts;
+        self.input_bank.set_delta(delta);
+        self.output_bank.set_delta(delta);
+        if self.tn > self.host_ts {
+            self.tn = 0.0;
         }
     }
 
     /// Process one host sample; returns the reconstructed BBD output.
     pub fn process(&mut self, input: f32) -> f32 {
-        // 1. Advance input-filter states by the full host period. This
-        //    matches Holters-Parker's "pre-gain" IIR form where the
-        //    input is injected once per host sample and sampled out of
-        //    the filter bank on each BBD input tick.
-        for k in 0..4 {
-            self.input_state[k] = cadd(
-                cmul(self.input_step[k], self.input_state[k]),
-                Complex32::new(input, 0.0),
-            );
-        }
-
-        // 2. Advance BBD clock through this host sample. Each full
-        //    BBD tick alternates input (push into bucket) and output
-        //    (read from bucket) operations at the BBD clock rate.
-        let mut out_accum = 0.0_f32;
-        let mut t = -self.clock_phase;
         let ts = self.host_ts;
         let bbd_ts = self.bbd_ts;
 
-        while t + bbd_ts <= ts {
-            t += bbd_ts;
-            if self.next_is_input {
-                // Input tick: sum real parts of root·state across 4 poles.
-                let mut acc = 0.0_f32;
-                for k in 0..4 {
-                    let contrib = cmul(self.device.input_roots[k], self.input_state[k]);
-                    acc += contrib.re;
-                }
-                self.buckets[self.write_idx] = acc;
-                self.write_idx = (self.write_idx + 1) % self.buckets.len();
+        // xOutAccum carries complex per-pole contributions through the
+        // loop so the output bank's single per-sample state advance can
+        // fold them in.
+        let mut xout_re = [0.0_f32; 4];
+        let mut xout_im = [0.0_f32; 4];
+
+        while self.tn < ts {
+            if self.even_on {
+                // Input tick: rotate Gcalc, push weighted real readout.
+                self.input_bank.calc_g();
+                let raw = self.input_bank.readout_real();
+                // Per-bucket soft saturation. Identity when sat_drive == 0.
+                let y = if self.sat_drive > 0.0 {
+                    fast_tanh(self.sat_drive * raw) * self.sat_inv_drive
+                } else {
+                    raw
+                };
+                self.buckets[self.write_idx] = y;
+                self.write_idx = (self.write_idx + 1) & self.bucket_mask;
             } else {
-                // Output tick: pull bucket, feed to output filter bank as
-                // an impulse at this BBD tick; accumulate its contribution
-                // to the host-sample output by weighting the output
-                // states with their roots.
-                let y_bbd = self.buckets[self.read_idx];
-                self.read_idx = (self.read_idx + 1) % self.buckets.len();
-                let delta = y_bbd - self.y_bbd_prev;
-                self.y_bbd_prev = y_bbd;
+                // Output tick: read bucket, rotate output Gcalc, accumulate.
+                let y = self.buckets[self.read_idx];
+                self.read_idx = (self.read_idx + 1) & self.bucket_mask;
+                let delta = y - self.y_bbd_old;
+                self.y_bbd_old = y;
+                self.output_bank.calc_g();
                 for k in 0..4 {
-                    self.output_state[k] = cadd(
-                        self.output_state[k],
-                        Complex32::new(delta, 0.0),
-                    );
+                    xout_re[k] += self.output_bank.gcalc_re[k] * delta;
+                    xout_im[k] += self.output_bank.gcalc_im[k] * delta;
                 }
-                // Output contribution from this tick (real part of
-                // root·state). Holters-Parker integrates this across
-                // host-sample; the repeated accumulation below is a
-                // cheap rectangular approximation that matches the
-                // paper's result at host rates high enough that
-                // several BBD ticks fall per host sample.
-                let mut tick_out = 0.0_f32;
-                for k in 0..4 {
-                    let contrib =
-                        cmul(self.device.output_roots[k], self.output_state[k]);
-                    tick_out += contrib.re;
-                }
-                out_accum += tick_out;
             }
-            self.next_is_input = !self.next_is_input;
+            self.even_on = !self.even_on;
+            self.tn += bbd_ts;
         }
-        self.clock_phase = ts - t;
+        self.tn -= ts;
 
-        // 3. Advance output-filter states by the full host period (the
-        //    steady-state decay between input impulses).
-        for k in 0..4 {
-            self.output_state[k] = cmul(self.output_step[k], self.output_state[k]);
+        // Advance filter states once per host sample.
+        self.input_bank.advance(input);
+        self.output_bank.advance(xout_re, xout_im);
+
+        let mut sum_out = 0.0_f32;
+        for v in xout_re {
+            sum_out += v;
         }
-
-        // Normalise so that a unit DC input yields ~unit DC output.
-        // With real negative poles, sum(root/(-pole)) sets the DC gain
-        // of each bank; the product of the two bank gains equals the
-        // full loop gain. Compute once per call (four mults + add).
-        out_accum * self.dc_norm()
+        self.output_bank.h0 * self.y_bbd_old + sum_out
     }
 
     /// Reset all filter state and buckets.
@@ -284,42 +447,15 @@ impl Bbd {
         for b in self.buckets.iter_mut() {
             *b = 0.0;
         }
-        self.input_state = [Complex32::default(); 4];
-        self.output_state = [Complex32::default(); 4];
-        self.clock_phase = 0.0;
-        self.next_is_input = true;
-        self.y_bbd_prev = 0.0;
-        self.write_idx = 0;
+        self.input_bank.reset_state();
+        self.input_bank.reset_gcalc();
+        self.output_bank.reset_state();
+        self.output_bank.reset_gcalc();
+        self.tn = 0.0;
+        self.even_on = true;
+        self.y_bbd_old = 0.0;
+        self.write_idx = self.device.stages;
         self.read_idx = 0;
-    }
-
-    /// Precomputed `exp(pole * host_ts)` values.
-    fn recompute_steps(&mut self) {
-        for k in 0..4 {
-            self.input_step[k] = cexp_real(self.device.input_poles[k], self.host_ts);
-            self.output_step[k] = cexp_real(self.device.output_poles[k], self.host_ts);
-        }
-    }
-
-    /// DC-normalisation factor so unit DC in ≈ unit DC out.
-    #[inline]
-    fn dc_norm(&self) -> f32 {
-        let mut gi = 0.0_f32;
-        let mut go = 0.0_f32;
-        for k in 0..4 {
-            // For a real negative pole `p` and real root `r`:
-            // DC bank gain = sum r / -p.
-            gi += self.device.input_roots[k].re / (-self.device.input_poles[k].re).max(1.0e-6);
-            go += self.device.output_roots[k].re / (-self.device.output_poles[k].re).max(1.0e-6);
-        }
-        // One factor of host_sr falls out of the double IIR integration;
-        // the remaining reciprocal keeps overall gain near unity.
-        let raw = gi * go;
-        if raw.abs() < 1.0e-9 {
-            1.0
-        } else {
-            1.0 / raw / self.host_sr
-        }
     }
 
     /// Currently-set delay in seconds (for tests and diagnostics).
@@ -328,22 +464,10 @@ impl Bbd {
     }
 }
 
-// ─── scalar complex helpers ───────────────────────────────────────────
-
+/// `exp` of a complex number.
 #[inline]
-fn cadd(a: Complex32, b: Complex32) -> Complex32 {
-    Complex32::new(a.re + b.re, a.im + b.im)
-}
-
-#[inline]
-fn cmul(a: Complex32, b: Complex32) -> Complex32 {
-    Complex32::new(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re)
-}
-
-/// `exp(pole * dt)` for a complex pole.
-#[inline]
-fn cexp_real(pole: Complex32, dt: f32) -> Complex32 {
-    let m = (pole.re * dt).exp();
-    let theta = pole.im * dt;
-    Complex32::new(m * theta.cos(), m * theta.sin())
+fn cexp(z: Complex32) -> Complex32 {
+    let m = z.re.exp();
+    let (s, c) = z.im.sin_cos();
+    Complex32::new(m * c, m * s)
 }

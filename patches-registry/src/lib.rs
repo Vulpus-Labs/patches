@@ -12,4 +12,4 @@ pub mod registry;
 
 pub use file_processor::FileProcessor;
 pub use module_builder::{Builder, ModuleBuilder};
-pub use registry::Registry;
+pub use registry::{Registry, RegisterOutcome};

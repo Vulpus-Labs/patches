@@ -37,7 +37,9 @@ fn default_env() -> AudioEnvironment {
 
 #[test]
 fn describe_returns_correct_metadata() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let desc = builder.describe(&shape);
 
@@ -52,7 +54,9 @@ fn describe_returns_correct_metadata() {
 
 #[test]
 fn build_and_process_with_default_gain() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let params = ParameterMap::new();
@@ -85,7 +89,9 @@ fn build_and_process_with_default_gain() {
 
 #[test]
 fn update_parameters_changes_gain() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let params = ParameterMap::new();
@@ -120,7 +126,9 @@ fn update_parameters_changes_gain() {
 
 #[test]
 fn parameter_validation_rejects_out_of_range() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let params = ParameterMap::new();
@@ -146,7 +154,9 @@ fn parameter_validation_rejects_out_of_range() {
 
 #[test]
 fn drop_does_not_crash() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let params = ParameterMap::new();
@@ -166,7 +176,9 @@ fn abi_version_mismatch_rejected() {
 
 #[test]
 fn multiple_instances_from_same_plugin() {
-    let builder = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
+    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
+    let builder = builders.remove(0);
     let env = default_env();
     let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
     let params = ParameterMap::new();

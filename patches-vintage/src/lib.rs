@@ -12,11 +12,23 @@
 
 pub mod bbd;
 pub mod compander;
+pub mod vbbd;
 pub mod vchorus;
+pub mod vflanger;
+pub mod vflanger_stereo;
+pub mod vreverb;
 
+pub use vbbd::VBbd;
 pub use vchorus::VChorus;
+pub use vflanger::VFlanger;
+pub use vflanger_stereo::VFlangerStereo;
+pub use vreverb::VReverb;
 
 /// Register every module in this crate with the supplied registry.
 pub fn register(r: &mut patches_registry::Registry) {
     r.register::<VChorus>();
+    r.register::<VBbd>();
+    r.register::<VFlanger>();
+    r.register::<VFlangerStereo>();
+    r.register::<VReverb>();
 }
