@@ -22,6 +22,7 @@ members = [
     "patches-vintage",
     "patches-ffi",
     "patches-ffi-common",
+    "patches-alloc-trap",
     "test-plugins/gain",
     "test-plugins/conv-reverb",
     "test-plugins/drums-bundle",

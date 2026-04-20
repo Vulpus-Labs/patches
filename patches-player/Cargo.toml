@@ -18,4 +18,10 @@ patches-modules     = { path = "../patches-modules" }
 patches-core        = { path = "../patches-core" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-ffi         = { path = "../patches-ffi" }
+patches-alloc-trap  = { path = "../patches-alloc-trap" }
 ariadne             = "0.6"
+
+[features]
+default = []
+# Install the audio-thread allocator trap (ADR 0045 spike 4). Debug-only.
+audio-thread-allocator-trap = ["patches-alloc-trap/audio-thread-allocator-trap"]

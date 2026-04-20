@@ -20,3 +20,11 @@ patches-dsl = { path = "../patches-dsl" }
 patches-interpreter = { path = "../patches-interpreter" }
 patches-ffi = { path = "../patches-ffi" }
 test-drums-bundle = { path = "../test-plugins/drums-bundle" }
+patches-alloc-trap = { path = "../patches-alloc-trap" }
+
+[features]
+default = []
+# Run integration tests under the audio-thread allocator trap.
+# Enables the trap feature in `patches-alloc-trap`; individual tests are
+# expected to install `TrappingAllocator` as the `#[global_allocator]`.
+audio-thread-allocator-trap = ["patches-alloc-trap/audio-thread-allocator-trap"]

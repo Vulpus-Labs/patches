@@ -66,3 +66,16 @@ spike 4 / spike 7. Scope here is the in-process transport.
   allocator was not installed: it conflicts with workspace-level tests
   and requires careful TLS-reentry handling. Spike 4's audio-thread
   allocator trap will retro-validate the no-alloc claim.
+
+## Rolled back
+
+The no-alloc soak test covered the shuttle's steady-state recycling
+loop. With the shuttle removed (see ticket 0588 roll-back notes),
+the soak test went with it. Frames now flow inside `ExecutionPlan`
+and are dropped off-thread via the existing cleanup ring (ADR 0010)
+— the no-alloc-on-audio-thread property is inherited from ADR 0002,
+not re-proven per-frame here. Spike 4's audio-thread allocator trap
+will retro-validate across the whole audio path.
+
+Retained: round-trip coverage of every `ScalarTag`, PHF determinism,
+shadow-oracle divergence detection, 64-key PHF stress.

@@ -330,6 +330,10 @@ unsafe extern "C" fn plugin_process(
     plugin: *const clap_plugin,
     process: *const clap_process,
 ) -> clap_process_status {
+    // Tag the host's audio thread on first entry (ADR 0045 spike 4).
+    // Idempotent; no-op when the allocator-trap feature is off.
+    patches_alloc_trap::mark_audio_thread();
+
     if PROCESS_LOGGED.set(()).is_ok() {
         dlog!("process: first call");
     }

@@ -11,10 +11,10 @@
 //! ## Scope
 //!
 //! This helper is the transport-equivalence oracle. Full engine wiring
-//! (per-instance `ParamViewIndex`, per-instance `ParamFrameShuttle`,
-//! descriptor threading through `ModulePool::install`) is a multi-file
-//! change and is punted to a follow-up: the in-crate shadow tests call
-//! this helper directly, proving the transport at the same granularity.
+//! (per-instance `ParamViewIndex` and routing of `ParamFrame` through
+//! `ExecutionPlan.parameter_updates`) is a multi-file change and is
+//! punted to Spike 5; the in-crate tests call this helper directly,
+//! proving the transport at the same granularity.
 
 use patches_core::modules::parameter_map::{ParameterMap, ParameterValue};
 

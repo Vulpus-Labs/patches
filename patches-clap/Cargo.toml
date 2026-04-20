@@ -16,6 +16,7 @@ patches-engine = { path = "../patches-engine" }
 patches-planner = { path = "../patches-planner" }
 patches-modules = { path = "../patches-modules" }
 patches-diagnostics = { path = "../patches-diagnostics" }
+patches-alloc-trap = { path = "../patches-alloc-trap" }
 clap-sys = "0.5"
 rfd = "0.17"
 rtrb = "0.3"

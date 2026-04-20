@@ -121,11 +121,12 @@ never locks it; it communicates exclusively through the lock-free
    `ArcTable` at a fresh id, refcount = 1. The id, together with a
    ptr+len snapshot captured now, is written into the parameter
    frame.
-2. *Deliver:* frame crosses the SPSC to the audio thread. Plugin
-   reads the id, uses the ptr+len to process samples.
-3. *Retain by default on delivery:* at frame dispatch the host
-   performs one `arc_retain` per id present in the frame, on behalf
-   of the plugin. The plugin therefore observes every id already
+2. *Deliver:* the frame travels to the audio thread inside the
+   containing `ExecutionPlan` via the plan-adoption channel (ADR
+   0002). Plugin reads the id, uses the ptr+len to process samples.
+3. *Retain by default on delivery:* when the plan is shipped the host
+   performs one `arc_retain` per id present in each parameter frame,
+   on behalf of the plugin. The plugin therefore observes every id already
    held by an outstanding reference — no action required to keep
    the buffer alive across the call. Rationale: the alternative
    (plugin calls `arc_retain` to keep the buffer) converts a
@@ -144,9 +145,10 @@ never locks it; it communicates exclusively through the lock-free
    fixed-capacity open-addressed table sized at startup) that sits
    alongside the `ArcTable`; insertions and removals happen only on
    the control thread when ids are minted or finally released.
-5. *Frame cleanup:* when a consumed frame returns via the cleanup
-   SPSC, the host issues one `arc_release` per id carried in the
-   frame's tail slots. This cancels the mint-time refcount. The
+5. *Frame cleanup:* when a consumed plan returns via the cleanup ring
+   (ADR 0010), the host issues one `arc_release` per id carried in
+   every parameter frame's tail slots. This cancels the mint-time
+   refcount. The
    retain bumped at dispatch (point 3) is still held, either still
    by the plugin or released by it when the plugin finished with
    the id.
@@ -210,32 +212,39 @@ No index tags, no keys on the wire, no length prefixes for scalars.
 Reading a `Float` at offset `o` is `*(buffer.add(o) as *const f32)`.
 Reading a buffer slot is `buffer_tail[slot_index] as FloatBufferId`.
 
-Scratch buffers (`Vec<u8>`) are owned by frames. Each frame travels
-through three SPSCs:
+Frames ride on the existing plan-adoption channel (ADR 0002). There is
+**no** per-instance SPSC for parameter frames, no free-list, no
+coalescing. Every `ParamFrame` is built on the control thread as part
+of preparing an `ExecutionPlan` and travels inside the plan's
+`parameter_updates` field; the audio thread consumes it during
+`adopt_plan` and hands the view to the target module exactly once.
+Evicted frames follow the plan's owned state to the existing cleanup
+ring (ADR 0010) for off-thread drop.
 
-```
- control thread              audio thread                cleanup thread
- ──────────────              ────────────                ──────────────
- pop free Vec<u8>
-  (pre-sized)  ──frame SPSC──▶ vtable call into plugin
- pack layout                   (plugin reads view)
- (alloc-free)                  push consumed ──cleanup SPSC──▶
-                                                              release Arcs
-                                                              zero len, keep cap
-                               ◀───── free SPSC ────────── return Vec<u8>
-```
+This is a deliberate departure from earlier drafts of this ADR.
+Parameter updates are **not part of the audio-rate performance
+surface**: the parameter space is a property of the patch definition,
+shaped by file save / parse / diff and propagated at plan-adoption
+cadence only. Audio-rate control — MIDI CC, note events, automation —
+flows through the MIDI/control-rate architecture (ADR 0008) and is
+sample-synced there, not through parameter frames. Paying for a
+per-instance three-SPSC shuttle + free-list + coalescing to serve a
+demand that does not exist would be speculative infrastructure in
+direct conflict with the "no half-finished implementations, no
+abstractions beyond what the task requires" convention.
 
-Steady state: no allocation anywhere. A burst of new frames beyond
-the free-list capacity can allocate on the control thread — never on
-the audio thread. The free-list capacity is sized from the expected
-update rate plus headroom; undersizing is a performance bug, not a
-correctness bug.
+Consequence: no allocation on the audio thread remains a hard rule,
+but it is satisfied by the existing plan-adoption channel (already
+allocation-free on the audio side — plans are built on the control
+thread and ownership transfers intact). `ParamFrame` itself is an
+owned `Vec<u64>`; its drop happens on the cleanup worker, never on
+the audio thread.
 
-**Back-pressure:** param updates coalesce per `(module_idx,
-ParameterKey)`. A slot table in front of the frame SPSC holds at
-most one pending frame per key; a newer update overwrites the
-pending frame (parameter updates are last-wins). This keeps queue
-depth bounded regardless of controller rate.
+If a real audio-rate parameter source ever appears — it is not
+currently projected — the minimal reintroduction is one SPSC per
+live instance with no coalescing (coalescing belongs in the planner
+where `module_idx` is meaningful). Even then, it would live alongside
+the plan-rate path, not replace it.
 
 ### 4. Read-only `ParamView` with name-based lookup
 
@@ -285,9 +294,9 @@ pub struct PortFrame {
 ```
 
 The frame is a single pre-allocated `Vec<u8>` sized to the
-descriptor's port count at `prepare`. It flows through the same SPSC
-triplet as parameter frames (or its own triplet, depending on
-coalescing policy). The plugin sees a borrowed view:
+descriptor's port count at `prepare`. It rides the plan-adoption
+channel alongside parameter frames (ADR 0002 / §3 above). The plugin
+sees a borrowed view:
 
 ```rust
 fn set_ports(&mut self, ports: &PortView<'_>);
@@ -407,8 +416,9 @@ The rules above are enforced through a layered strategy:
 - A per-id refcount audit in the `ArcTable` drain: every id release
   must correspond to a prior retain or mint. Double-release trips
   the audit.
-- Frame SPSC length assertions: a frame's scalar area size must
-  equal the module's `ParamLayout::scalar_size`.
+- Frame shape assertions: a frame's scalar area size must equal the
+  module's `ParamLayout::scalar_size` and its descriptor hash must
+  match the index built at `prepare`.
 
 **Property tests (CI):**
 
@@ -561,29 +571,35 @@ Tests:
 Deliverable: a `patches-ffi-common::arc_table` module usable by
 later spikes. No wiring into audio path yet.
 
-### Spike 3 — `ParamFrame`, SPSC triplet, pack + view (in-process only)
+### Spike 3 — `ParamFrame`, pack + view (in-process only)
 
-Scope: define `ParamFrame` (owned `Vec<u8>` with scalar area + tail
-slot table), the three SPSCs (dispatch / cleanup / free-list), and
-the `pack_into(layout, &ParameterMap, &mut scratch)` encoder on the
-control thread. Define `ParamView<'a>` with name-based lookup via a
-perfect hash built at `prepare`. Wire this alongside the existing
-`ParameterMap` path as a **shadow path**: for every in-process
-parameter update, the engine encodes a frame, decodes through
-`ParamView`, compares field-by-field against the live
-`ParameterMap`, and asserts equality in debug builds.
+Scope: define `ParamFrame` (owned `Vec<u64>` with scalar area + tail
+slot table) and the `pack_into(layout, &ParameterMap, &mut frame)`
+encoder on the control thread. Define `ParamView<'a>` with name-based
+lookup via a perfect hash built at `prepare`. Verify transport
+equivalence against the live `ParameterMap` via an
+`assert_view_matches_map` oracle exercised in unit tests.
+
+**Excluded from this spike:** the three-SPSC frame shuttle (dispatch
+/ cleanup / free-list) and the per-key coalescing slot table. §3
+above explains: parameter updates are plan-rate only, so they ride
+the existing plan-adoption channel (ADR 0002). A per-instance
+shuttle + free-list was prototyped during the E099 work and rolled
+back once it became clear it solved no real problem in this system.
+No audio-rate parameter source is projected; MIDI-driven modulation
+flows via ADR 0008.
 
 Tests:
 
-- Round-trip property tests: random `ParameterMap` → pack → view →
-  equals original for every key.
-- Shadow assertion is quiet on the full existing test suite.
-- Free-list recycling: 10 000 iterations allocate nothing after
-  warm-up.
+- Round-trip coverage: every `ScalarTag` + buffer slots packed and
+  read back through `ParamView`.
+- Perfect-hash determinism: same descriptor ⇒ same index.
+- Shadow oracle detects deliberate frame corruption.
 
-Deliverable: the data-plane mechanism exists and is verified to
-match existing semantics, but production reads still go through
-`ParameterMap`. No audio-thread behaviour change yet.
+Deliverable: `ParamFrame`, `pack_into`, `ParamView`, `ParamViewIndex`
+in `patches-ffi-common`. Production reads still go through
+`ParameterMap`; Spike 5 flips the trait signature and routes frames
+through `ExecutionPlan.parameter_updates`.
 
 ### Spike 4 — Audio-thread allocator trap
 

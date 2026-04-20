@@ -1,0 +1,33 @@
+name: test-debug-alloc-trap
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  alloc-trap:
+    name: Integration tests with audio-thread allocator trap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: System audio deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Build with trap feature
+        run: |
+          cargo build -p patches-integration-tests \
+            --features audio-thread-allocator-trap \
+            --tests
+
+      - name: Run alloc-trap integration tests
+        run: |
+          cargo test -p patches-integration-tests \
+            --features audio-thread-allocator-trap \
+            --test alloc_trap --test alloc_trap_negative

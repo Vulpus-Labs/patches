@@ -3,6 +3,10 @@
 //! Usage:
 //!   patch_player <path-to-patch.patches>
 
+#[cfg(feature = "audio-thread-allocator-trap")]
+#[global_allocator]
+static ALLOC: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAllocator;
+
 use std::collections::HashMap;
 use std::env;
 use std::fs;

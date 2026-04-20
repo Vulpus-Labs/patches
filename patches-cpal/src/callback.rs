@@ -171,6 +171,13 @@ impl AudioCallback {
         data: &mut [T],
         _info: &cpal::OutputCallbackInfo,
     ) {
+        // Tag the CPAL callback thread on its first invocation so the
+        // audio-thread allocator trap (ADR 0045 spike 4) covers every
+        // subsequent `process` / `set_ports` / `update_validated_parameters`
+        // call that happens on this thread. Idempotent; no-op when the
+        // `audio-thread-allocator-trap` feature is off.
+        patches_alloc_trap::mark_audio_thread();
+
         let playback_time = Instant::now();
 
         self.receive_plan();

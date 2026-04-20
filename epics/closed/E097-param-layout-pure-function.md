@@ -80,7 +80,9 @@ After this epic:
 
 ## Out of scope
 
-- `ParamFrame`, SPSC triplet, `pack_into`, `ParamView` (Spike 3).
+- `ParamFrame`, `pack_into`, `ParamView` (Spike 3). The SPSC-triplet
+  shuttle originally planned alongside these was rolled back during
+  E099 — see ADR 0045 §3 and ticket 0588 roll-back notes.
 - `ArcTable` and refcount map (Spike 2).
 - Audio-thread allocator trap (Spike 4).
 - Any FFI ABI change or descriptor-hash check at load (Spike 7).

@@ -1,111 +1,23 @@
-//! Audio-thread allocator trap.
+//! Audio-thread allocator trap (ADR 0045 spike 4).
 //!
-//! Installs a global allocator that aborts on any `alloc` / `dealloc` /
-//! `realloc` call made while a per-thread "no alloc" flag is set. The test
-//! wraps the audio-thread entry point (`HeadlessEngine::tick`) inside a
-//! guard that raises the flag. Any allocation — from the engine, the module
-//! pool, module `process()` methods, or anything downstream — aborts the
-//! process with `SIGTRAP`-visible call stack.
+//! Uses the shared `patches-alloc-trap` crate's `TrappingAllocator` as the
+//! global allocator. Each test wraps the hot path in a `NoAllocGuard` that
+//! tags the current thread as audio-thread for the duration of the scope;
+//! any allocation inside that scope aborts the process (or, under
+//! `TrapMode::Count`, increments a counter for test assertion).
 //!
-//! If this test blows up, the stack trace shows which allocation slipped
-//! into the audio path. If it passes, the in-process audio loop is clean
-//! for the graphs it exercises.
+//! When the `audio-thread-allocator-trap` feature is off, the allocator
+//! compiles to a transparent `System` forward and all guards are no-ops —
+//! the tests still run and pass, but no trapping occurs.
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+#[global_allocator]
+static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAllocator;
 
+use patches_alloc_trap::{trap_hits, NoAllocGuard};
 use patches_integration_tests::{build_engine, env, run_n_stereo};
 use patches_modules::default_registry;
 
-// ── Trapping allocator ────────────────────────────────────────────────────────
-
-struct TrappingAllocator;
-
-thread_local! {
-    static NO_ALLOC_ACTIVE: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Set to true the first time the guard is entered, so allocator hooks know
-/// the mechanism is live. Before the first entry we let everything through
-/// unconditionally — avoids tripping on static initialisers.
-static TRAP_ARMED: AtomicBool = AtomicBool::new(false);
-
-/// Number of times the trap would have fired. We record and abort so that
-/// the debugger catches the exact stack; the counter is mostly here for
-/// any future "count but don't abort" soft mode.
-static TRAP_HITS: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for TrappingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if TRAP_ARMED.load(Ordering::Relaxed) {
-            NO_ALLOC_ACTIVE.with(|f| {
-                if f.get() {
-                    TRAP_HITS.fetch_add(1, Ordering::Relaxed);
-                    // abort, not panic — panic! itself allocates.
-                    std::process::abort();
-                }
-            });
-        }
-        System.alloc(layout)
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if TRAP_ARMED.load(Ordering::Relaxed) {
-            NO_ALLOC_ACTIVE.with(|f| {
-                if f.get() {
-                    TRAP_HITS.fetch_add(1, Ordering::Relaxed);
-                    std::process::abort();
-                }
-            });
-        }
-        System.dealloc(ptr, layout)
-    }
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        if TRAP_ARMED.load(Ordering::Relaxed) {
-            NO_ALLOC_ACTIVE.with(|f| {
-                if f.get() {
-                    TRAP_HITS.fetch_add(1, Ordering::Relaxed);
-                    std::process::abort();
-                }
-            });
-        }
-        System.alloc_zeroed(layout)
-    }
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if TRAP_ARMED.load(Ordering::Relaxed) {
-            NO_ALLOC_ACTIVE.with(|f| {
-                if f.get() {
-                    TRAP_HITS.fetch_add(1, Ordering::Relaxed);
-                    std::process::abort();
-                }
-            });
-        }
-        System.realloc(ptr, layout, new_size)
-    }
-}
-
-#[global_allocator]
-static A: TrappingAllocator = TrappingAllocator;
-
-// ── Guard ─────────────────────────────────────────────────────────────────────
-
-struct NoAllocGuard;
-
-impl NoAllocGuard {
-    fn enter() -> Self {
-        TRAP_ARMED.store(true, Ordering::Relaxed);
-        NO_ALLOC_ACTIVE.with(|f| f.set(true));
-        NoAllocGuard
-    }
-}
-
-impl Drop for NoAllocGuard {
-    fn drop(&mut self) {
-        NO_ALLOC_ACTIVE.with(|f| f.set(false));
-    }
-}
-
-// ── Test ──────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn load(path_rel: &str) -> String {
     let path = format!("{}/../{}", env!("CARGO_MANIFEST_DIR"), path_rel);
@@ -128,10 +40,13 @@ fn build_simple_engine() -> patches_integration_tests::HeadlessEngine {
     build_engine_from("patches-dsl/tests/fixtures/simple.patches")
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 /// Drive the engine for many ticks with the alloc trap armed around the
 /// hot path. Any allocation inside `tick()` aborts the test process.
 #[test]
 fn audio_tick_performs_no_allocation() {
+    let hits_before = trap_hits();
     let mut engine = build_simple_engine();
 
     // Warm-up: first few ticks may allocate in paths that haven't been
@@ -142,48 +57,53 @@ fn audio_tick_performs_no_allocation() {
     }
 
     // Armed loop. 4096 ticks ≈ 93 ms of audio at 44.1 kHz.
-    let guard = NoAllocGuard::enter();
-    for _ in 0..4096 {
-        engine.tick();
+    {
+        let _g = NoAllocGuard::enter();
+        for _ in 0..4096 {
+            engine.tick();
+        }
     }
-    drop(guard);
 
     // Prevent the engine from dropping inside any accidental residual
     // guard scope. (Drop allocates to join the cleanup thread etc.)
     drop(engine);
 
-    assert_eq!(TRAP_HITS.load(Ordering::Relaxed), 0);
+    assert_eq!(trap_hits(), hits_before);
 }
 
 /// Same mechanism, broader graph: run a realistic stereo signal chain.
 #[test]
 fn audio_tick_no_allocation_stereo_batch() {
+    let hits_before = trap_hits();
     let mut engine = build_simple_engine();
     // Warm-up.
     let _ = run_n_stereo(&mut engine, 64);
 
-    let guard = NoAllocGuard::enter();
-    for _ in 0..8192 {
-        engine.tick();
+    {
+        let _g = NoAllocGuard::enter();
+        for _ in 0..8192 {
+            engine.tick();
+        }
     }
-    drop(guard);
 
     drop(engine);
-    assert_eq!(TRAP_HITS.load(Ordering::Relaxed), 0);
+    assert_eq!(trap_hits(), hits_before);
 }
 
 fn sweep(path_rel: &str, warmup: usize, iters: usize) {
+    let hits_before = trap_hits();
     let mut engine = build_engine_from(path_rel);
     for _ in 0..warmup {
         engine.tick();
     }
-    let guard = NoAllocGuard::enter();
-    for _ in 0..iters {
-        engine.tick();
+    {
+        let _g = NoAllocGuard::enter();
+        for _ in 0..iters {
+            engine.tick();
+        }
     }
-    drop(guard);
     drop(engine);
-    assert_eq!(TRAP_HITS.load(Ordering::Relaxed), 0);
+    assert_eq!(trap_hits(), hits_before);
 }
 
 #[test]

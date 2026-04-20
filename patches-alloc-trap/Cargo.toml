@@ -1,0 +1,18 @@
+[package]
+name = "patches-alloc-trap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "patches_alloc_trap"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Install the trapping allocator behaviour. Without this feature, the crate
+# compiles to no-op shims and `TrappingAllocator` is a transparent forward
+# to `std::alloc::System`.
+audio-thread-allocator-trap = []
+
+[dependencies]

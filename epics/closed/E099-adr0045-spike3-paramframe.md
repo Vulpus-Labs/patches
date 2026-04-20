@@ -133,3 +133,17 @@ Deviations from the epic DoD:
 - **Buffer-id stand-in.** Spike 3 lacks ArcTable integration; buffer
   slots encode `Arc::as_ptr(arc) as u64` so the shadow self-agrees.
   Spike 6/7 replaces this with real `FloatBufferId::pack(gen, slot)`.
+
+## Shuttle rolled back
+
+Review after Spike 3 landed pushed back on the per-instance SPSC
+transport: parameter updates are plan-rate and ride the existing
+plan-adoption channel (ADR 0002); audio-rate control is MIDI-only
+(ADR 0008). A three-SPSC shuttle + free-list + coalescing was
+speculative infrastructure for traffic that does not exist.
+
+`ParamFrameShuttle` and its tests were removed. The actual data-plane
+win — packed `ParamFrame` + typed O(1) `ParamView` reads — remains
+and is exercised by the shadow oracle. ADR 0045 §3 and Spike 3
+description were rewritten to state the plan-rate-only decision and
+flag the shuttle as excluded.

@@ -14,5 +14,6 @@ patches-core = { path = "../patches-core" }
 patches-engine = { path = "../patches-engine" }
 patches-planner = { path = "../patches-planner" }
 patches-io = { path = "../patches-io" }
+patches-alloc-trap = { path = "../patches-alloc-trap" }
 cpal = "0.15"
 rtrb = "0.3"

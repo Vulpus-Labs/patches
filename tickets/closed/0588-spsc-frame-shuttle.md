@@ -74,3 +74,22 @@ one.
 ## Closed notes
 
 Landed in patches-ffi-common/src/param_frame/. Tests green; clippy clean.
+
+## Rolled back
+
+Shuttle (three-SPSC transport + free-list recycling) was removed
+after the E099 review. Justification: parameter updates in this
+system are plan-rate, not audio-rate. They ride the existing
+plan-adoption channel (ADR 0002). Audio-rate control flows via MIDI
+(ADR 0008), not parameter frames. A per-instance SPSC + free-list +
+coalescing solves a demand that does not exist.
+
+Removed from `patches-ffi-common::param_frame`:
+`ParamFrameShuttle`, `ShuttleControl`, `ShuttleAudio`,
+`ShuttleCleanup`, `ShuttleStats`, and their tests. `ParamFrame`,
+`pack_into`, `ParamView`, `ParamViewIndex`, and
+`assert_view_matches_map` are retained — those remain the actual
+transport wins (packed bytes + typed O(1) audio-side reads).
+
+ADR 0045 §3 rewritten to state this explicitly and list the shuttle
+as excluded from Spike 3.
