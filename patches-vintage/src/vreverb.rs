@@ -47,6 +47,7 @@
 //! | `size` | float | 0.0--1.0 | `0.5` | Room size (scales all four delays) |
 //! | `decay` | float | 0.0--0.95 | `0.7` | FDN feedback coefficient |
 
+use patches_core::modules::module::PeriodicUpdate;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -136,10 +137,13 @@ impl Module for VReverb {
         instance_id: InstanceId,
     ) -> Self {
         let sr = env.sample_rate;
+        let interval = env.periodic_update_interval;
         Self {
             instance_id,
             descriptor,
-            bbds: std::array::from_fn(|_| Bbd::new(&BbdDevice::BBD_1024, sr)),
+            bbds: std::array::from_fn(|_| {
+                Bbd::new_with_smoothing_interval(&BbdDevice::BBD_1024, sr, interval)
+            }),
             y_prev: [0.0; N],
             dry_wet: 0.3,
             size: 0.5,
@@ -195,12 +199,7 @@ impl Module for VReverb {
             l_in
         };
 
-        let size = (self.size + pool.read_mono(&self.size_cv)).clamp(0.0, 1.0);
         let decay = (self.decay + pool.read_mono(&self.decay_cv)).clamp(0.0, DECAY_MAX);
-        let scale = SIZE_MIN_SCALE + (SIZE_MAX_SCALE - SIZE_MIN_SCALE) * size;
-        for (k, base) in BASE_DELAYS_MS.iter().enumerate() {
-            self.bbds[k].set_delay_seconds(base * scale * 0.001);
-        }
 
         // Drive the first four BBD lines from the left channel and the
         // second four from the right. The Hadamard mix cross-pollinates
@@ -233,6 +232,24 @@ impl Module for VReverb {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
+        Some(self)
+    }
+}
+
+impl PeriodicUpdate for VReverb {
+    fn periodic_update(&mut self, pool: &CablePool<'_>) {
+        // Delay times are driven by the `size` parameter + `size_cv`
+        // input; both change at Periodic cadence, so one `set_delay`
+        // per line per tick is enough. The BBD smooths internally
+        // across its own (finer) smoothing interval.
+        let size = (self.size + pool.read_mono(&self.size_cv)).clamp(0.0, 1.0);
+        let scale = SIZE_MIN_SCALE + (SIZE_MAX_SCALE - SIZE_MIN_SCALE) * size;
+        for (k, base) in BASE_DELAYS_MS.iter().enumerate() {
+            self.bbds[k].set_delay_seconds(base * scale * 0.001);
+        }
     }
 }
 

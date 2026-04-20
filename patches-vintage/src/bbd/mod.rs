@@ -34,6 +34,7 @@ pub struct BbdDevice {
 impl BbdDevice {
     pub const BBD_256: Self = Self { stages: 256, saturation_drive: 1.2 };
     pub const BBD_1024: Self = Self { stages: 1024, saturation_drive: 1.2 };
+    pub const BBD_4096: Self = Self { stages: 4096, saturation_drive: 1.2 };
 }
 
 /// Input / output filter pole set. Two well-damped conjugate-pole
@@ -42,33 +43,27 @@ impl BbdDevice {
 /// output transfer stays below unity everywhere — this keeps feedback
 /// networks (FDN reverbs, self-feedback delays) from gaining at any
 /// in-band frequency. Not a specific chip; tuned generically.
-fn default_poles() -> [Complex32; 4] {
+///
+/// Returns one pole per conjugate pair; the bank adds the conjugate
+/// twins implicitly.
+fn default_pole_pairs() -> [Complex32; 2] {
     [
         Complex32::new(-30_000.0, 20_000.0),
-        Complex32::new(-30_000.0, -20_000.0),
         Complex32::new(-50_000.0, 30_000.0),
-        Complex32::new(-50_000.0, -30_000.0),
     ]
 }
 
-/// Residues normalised so that the filter's DC gain `Σ -r_k/p_k` is
-/// exactly 1 — callers can then rely on unity low-frequency response
-/// through the whole BBD chain.
-fn normalised_residues(poles: &[Complex32; 4]) -> [Complex32; 4] {
-    let raw = [Complex32::new(1.0, 0.0); 4];
-    // Σ -r/p for this pole set with r=1.
+/// Residues (one per pair) normalised so the filter's DC gain
+/// `2·Σ Re(-r/p)` over the halves is exactly 1.
+fn normalised_pair_residues(poles: &[Complex32; 2]) -> [Complex32; 2] {
+    let raw = [Complex32::new(1.0, 0.0); 2];
     let mut g = 0.0_f32;
     for (p, r) in poles.iter().zip(raw.iter()) {
         let q = -*r / *p;
-        g += q.re;
+        g += 2.0 * q.re;
     }
     let inv_g = 1.0 / g;
-    [
-        raw[0] * inv_g,
-        raw[1] * inv_g,
-        raw[2] * inv_g,
-        raw[3] * inv_g,
-    ]
+    [raw[0] * inv_g, raw[1] * inv_g]
 }
 
 /// Bucket-brigade delay line.
@@ -78,17 +73,46 @@ pub struct Bbd {
     stages: usize,
 }
 
+/// Power-of-two smoothing interval targeting ~333 μs between delay
+/// updates (the "Periodic tick" stride clients use when modulating
+/// delay from CV). 16 at 48 kHz; scales up at higher sample rates.
+fn smoothing_interval_for(sample_rate: f32) -> u32 {
+    let raw = (sample_rate / 3000.0).max(1.0) as u32;
+    raw.next_power_of_two()
+}
+
 impl Bbd {
+    /// Construct with a sample-rate-derived smoothing interval. Use
+    /// when the BBD's delay is driven internally (e.g. by a kernel-
+    /// owned LFO in chorus/flanger), so the stride can be finer than
+    /// the module's Periodic cadence.
     pub fn new(device: &BbdDevice, sample_rate: f32) -> Self {
-        let poles = default_poles();
-        let residues = normalised_residues(&poles);
-        let mut proto = BbdProto::new(
+        Self::new_with_smoothing_interval(
+            device,
+            sample_rate,
+            smoothing_interval_for(sample_rate),
+        )
+    }
+
+    /// Construct with an explicit smoothing interval — for modules
+    /// that drive `set_delay_seconds` from `PeriodicUpdate`, pass
+    /// `env.periodic_update_interval` so the BBD's ramp aligns with
+    /// the Periodic callback cadence.
+    pub fn new_with_smoothing_interval(
+        device: &BbdDevice,
+        sample_rate: f32,
+        smoothing_interval: u32,
+    ) -> Self {
+        let poles = default_pole_pairs();
+        let residues = normalised_pair_residues(&poles);
+        let mut proto = BbdProto::new_conjugate_pairs(
             poles,
             residues,
             poles,
             residues,
             device.stages,
             sample_rate,
+            smoothing_interval,
         );
         proto.set_saturation_drive(device.saturation_drive);
         let mut me = Self { proto, delay_s: 0.0, stages: device.stages };
@@ -119,5 +143,13 @@ impl Bbd {
 
     pub fn stages(&self) -> usize {
         self.stages
+    }
+
+    /// Smoothing interval in samples. Clients modulating delay should
+    /// call [`Self::set_delay_seconds`] once every `interval` samples
+    /// for best perf (one `exp()` per pole per call, amortised). A
+    /// power of two — use `counter & (interval - 1) == 0` to gate.
+    pub fn smoothing_interval(&self) -> u32 {
+        self.proto.smoothing_interval()
     }
 }

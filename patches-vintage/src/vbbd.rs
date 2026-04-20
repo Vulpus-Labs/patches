@@ -34,10 +34,11 @@
 //! | Name | Type | Range | Default | Description |
 //! |------|------|-------|---------|-------------|
 //! | `dry_wet` | float | 0.0--1.0 | `0.5` | Dry/wet mix (global) |
-//! | `delay_ms[i]` | float | 1.0--85.0 | `40.0` | Delay time in ms (per tap) |
+//! | `delay_ms[i]` | float | 1.0--340.0 | `40.0` | Delay time in ms (per tap) |
 //! | `gain[i]` | float | 0.0--1.0 | `1.0` | Tap gain (per tap) |
 //! | `feedback[i]` | float | 0.0--0.95 | `0.0` | Self-feedback per tap |
 
+use patches_core::modules::module::PeriodicUpdate;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -49,11 +50,11 @@ use crate::bbd::{Bbd, BbdDevice};
 
 use crate::compander::{CompanderParams, Compressor, Expander};
 
-/// Honest ceiling for a 1024-stage BBD: ~85 ms at ~6 kHz clock, past
+/// Honest ceiling for a 4096-stage BBD: ~340 ms at ~6 kHz clock, past
 /// which image-folding becomes audible. The module uses
-/// [`BbdDevice::BBD_1024`] for its taps, putting vintage analog-delay
+/// [`BbdDevice::BBD_4096`] for its taps, putting vintage analog-delay
 /// territory in range.
-const DELAY_MS_MAX: f32 = 85.0;
+const DELAY_MS_MAX: f32 = 340.0;
 const DELAY_MS_MIN: f32 = 1.0;
 const FEEDBACK_MAX: f32 = 0.95;
 
@@ -67,15 +68,14 @@ struct Tap {
 }
 
 impl Tap {
-    fn new(sr: f32) -> Self {
+    fn new(sr: f32, smoothing_interval: u32) -> Self {
         Self {
-            bbd: Bbd::new(&BbdDevice::BBD_1024, sr),
+            bbd: Bbd::new_with_smoothing_interval(&BbdDevice::BBD_4096, sr, smoothing_interval),
             comp: Compressor::new(CompanderParams::NE570_DEFAULT, sr),
             exp: Expander::new(CompanderParams::NE570_DEFAULT, sr),
             fb_state: 0.0,
         }
     }
-
 }
 
 /// Vintage multi-tap BBD delay. See the module-level documentation.
@@ -129,8 +129,9 @@ impl Module for VBbd {
         instance_id: InstanceId,
     ) -> Self {
         let sr = env.sample_rate;
+        let interval = env.periodic_update_interval;
         let taps = descriptor.shape.channels;
-        let tap_state = (0..taps).map(|_| Tap::new(sr)).collect();
+        let tap_state = (0..taps).map(|_| Tap::new(sr, interval)).collect();
 
         Self {
             instance_id,
@@ -188,11 +189,6 @@ impl Module for VBbd {
 
         let mut wet_sum = 0.0_f32;
         for i in 0..self.taps {
-            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
-            let delay_s = (self.delay_ms[i] * (1.0 + cv) * 0.001)
-                .clamp(DELAY_MS_MIN * 0.001, DELAY_MS_MAX * 0.001);
-            self.tap_state[i].bbd.set_delay_seconds(delay_s);
-
             // BBD input = dry + own feedback (saturated so runaway is bounded).
             let drive = in_val + self.tap_state[i].fb_state;
             let compressed = self.tap_state[i].comp.process(fast_tanh(drive));
@@ -214,6 +210,25 @@ impl Module for VBbd {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
+        Some(self)
+    }
+}
+
+impl PeriodicUpdate for VBbd {
+    fn periodic_update(&mut self, pool: &CablePool<'_>) {
+        // Delay is driven by `delay_ms[i]` parameter + `delay_cv[i]`
+        // input; both change at Periodic cadence, so one `set_delay`
+        // per Periodic tick per tap is enough. The BBD smooths
+        // internally across its own (finer) smoothing interval.
+        for i in 0..self.taps {
+            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
+            let delay_s = (self.delay_ms[i] * (1.0 + cv) * 0.001)
+                .clamp(DELAY_MS_MIN * 0.001, DELAY_MS_MAX * 0.001);
+            self.tap_state[i].bbd.set_delay_seconds(delay_s);
+        }
     }
 }
 

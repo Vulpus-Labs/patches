@@ -56,8 +56,7 @@ impl Chain {
     }
 
     #[inline]
-    fn process(&mut self, x: f32, delay_s: f32, fb: f32, mix: f32, lf_bypass: bool) -> f32 {
-        self.bbd.set_delay_seconds(delay_s);
+    fn process(&mut self, x: f32, fb: f32, mix: f32, lf_bypass: bool) -> f32 {
         let lf = self.lf_split.process(x);
         let hf = x - lf;
         let drive = hf + fb * self.fb_state;
@@ -79,6 +78,10 @@ pub struct VFlangerStereoCore {
 
     lfo_phase: f32,
 
+    /// `smoothing_interval - 1` for both BBDs (same at a given SR).
+    mod_interval_mask: u32,
+    mod_counter: u32,
+
     rate_hz: f32,
     depth: f32,
     manual_s: f32,
@@ -89,11 +92,15 @@ pub struct VFlangerStereoCore {
 
 impl VFlangerStereoCore {
     pub fn new(sample_rate: f32) -> Self {
+        let left = Chain::new(sample_rate);
+        let mod_interval_mask = left.bbd.smoothing_interval() - 1;
         Self {
             sample_rate,
-            left: Chain::new(sample_rate),
+            left,
             right: Chain::new(sample_rate),
             lfo_phase: 0.0,
+            mod_interval_mask,
+            mod_counter: 0,
             rate_hz: 0.5,
             depth: 0.5,
             manual_s: 0.002,
@@ -158,10 +165,14 @@ impl VFlangerStereoCore {
 
         let fb = (self.feedback + fb_offset).clamp(-FB_MAX, FB_MAX);
 
-        let y_l = self.left.process(mono, delay_l, fb, self.mix, self.lf_bypass);
-        let y_r = self
-            .right
-            .process(mono, delay_r, fb, self.mix, self.lf_bypass);
+        if self.mod_counter & self.mod_interval_mask == 0 {
+            self.left.bbd.set_delay_seconds(delay_l);
+            self.right.bbd.set_delay_seconds(delay_r);
+        }
+        self.mod_counter = self.mod_counter.wrapping_add(1);
+
+        let y_l = self.left.process(mono, fb, self.mix, self.lf_bypass);
+        let y_r = self.right.process(mono, fb, self.mix, self.lf_bypass);
         (y_l, y_r)
     }
 }

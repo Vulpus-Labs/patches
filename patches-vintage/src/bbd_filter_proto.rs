@@ -47,6 +47,11 @@ impl Complex32 {
         let (s, c) = (ang * b).sin_cos();
         Self { re: new_mag * c, im: new_mag * s }
     }
+    /// Multiplicative inverse `1/z`. Undefined at zero.
+    pub fn inv(self) -> Self {
+        let inv_d = 1.0 / (self.re * self.re + self.im * self.im);
+        Self { re: self.re * inv_d, im: -self.im * inv_d }
+    }
 }
 
 impl std::ops::Add for Complex32 {
@@ -73,10 +78,10 @@ impl std::ops::Mul<f32> for Complex32 {
 impl std::ops::Div for Complex32 {
     type Output = Self;
     fn div(self, o: Self) -> Self {
-        let d = o.re * o.re + o.im * o.im;
+        let inv_d = 1.0 / (o.re * o.re + o.im * o.im);
         Self {
-            re: (self.re * o.re + self.im * o.im) / d,
-            im: (self.im * o.re - self.re * o.im) / d,
+            re: (self.re * o.re + self.im * o.im) * inv_d,
+            im: (self.im * o.re - self.re * o.im) * inv_d,
         }
     }
 }
@@ -94,7 +99,10 @@ impl std::ops::AddAssign for Complex32 {
 pub struct ContinuousPole {
     /// Continuous-time pole (rad/s). Typically Re(p) < 0 for stability.
     pole: Complex32,
-    host_ts: f32,
+    /// `1 / pole` — precomputed for ψ-formation on hot path.
+    inv_pole: Complex32,
+    /// `pole · host_ts` — precomputed so sub-sample φ eval is one scalar mul + exp.
+    pole_ts: Complex32,
     /// `φ(1) = exp(p·Ts)` — per-host-sample state transition.
     pole_corr: Complex32,
     /// `ψ(1) = (φ(1) - 1) / p` — per-host-sample input response.
@@ -106,11 +114,14 @@ pub struct ContinuousPole {
 impl ContinuousPole {
     pub fn new(pole: Complex32, sample_rate: f32) -> Self {
         let host_ts = 1.0 / sample_rate;
-        let pole_corr = (pole * host_ts).exp();
-        let psi1 = (pole_corr - Complex32::new(1.0, 0.0)) / pole;
+        let pole_ts = pole * host_ts;
+        let pole_corr = pole_ts.exp();
+        let inv_pole = pole.inv();
+        let psi1 = Complex32 { re: pole_corr.re - 1.0, im: pole_corr.im } * inv_pole;
         Self {
             pole,
-            host_ts,
+            inv_pole,
+            pole_ts,
             pole_corr,
             psi1,
             x: Complex32::new(0.0, 0.0),
@@ -134,7 +145,7 @@ impl ContinuousPole {
     /// residual contribution at the end of the host sample:
     /// `contribution = φ(1 - τ) · impulse_value`.
     pub fn phi(&self, tau: f32) -> Complex32 {
-        (self.pole * (tau * self.host_ts)).exp()
+        (self.pole_ts * tau).exp()
     }
 
     /// Replace the state — for tests and external drivers that bypass
@@ -151,15 +162,15 @@ impl ContinuousPole {
     /// sample. `τ ∈ [0, 1]` — at `τ = 0` the state-contribution
     /// dominates; at `τ = 1` this matches the post-advance state.
     pub fn evaluate(&self, tau: f32, u: f32) -> Complex32 {
-        let phi = (self.pole * (tau * self.host_ts)).exp();
-        let psi = (phi - Complex32::new(1.0, 0.0)) / self.pole;
-        phi * self.x + psi * Complex32::new(u, 0.0)
+        let phi = (self.pole_ts * tau).exp();
+        let psi = Complex32 { re: phi.re - 1.0, im: phi.im } * self.inv_pole;
+        phi * self.x + psi * u
     }
 
     /// Roll state forward one host sample with input `u` held over
     /// `[n·Ts, (n+1)·Ts)`.
     pub fn advance(&mut self, u: f32) {
-        self.x = self.pole_corr * self.x + self.psi1 * Complex32::new(u, 0.0);
+        self.x = self.pole_corr * self.x + self.psi1 * u;
     }
 
     /// Evolve state by a fraction `Δτ ∈ [0, 1]` of a host sample with
@@ -168,9 +179,9 @@ impl ContinuousPole {
     /// where the input to the filter changes at sub-sample Read-tick
     /// boundaries.
     pub fn advance_by(&mut self, delta_tau: f32, u: f32) {
-        let phi = (self.pole * (delta_tau * self.host_ts)).exp();
-        let psi = (phi - Complex32::new(1.0, 0.0)) / self.pole;
-        self.x = phi * self.x + psi * Complex32::new(u, 0.0);
+        let phi = (self.pole_ts * delta_tau).exp();
+        let psi = Complex32 { re: phi.re - 1.0, im: phi.im } * self.inv_pole;
+        self.x = phi * self.x + psi * u;
     }
 }
 
@@ -251,6 +262,299 @@ impl ContinuousPoleBank {
             sum += *r * pole.state();
         }
         sum.re
+    }
+}
+
+/// Structure-of-arrays conjugate-pair pole bank with precomputed
+/// per-pole `alpha = exp(pole_ts · Δτ_tick)` for incremental-phasor
+/// evaluation across uniform sub-sample steps.
+///
+/// Stores one pole per conjugate pair; output is `2·Re(Σ r_k x_k)`
+/// over the stored halves. All per-pole quantities live in parallel
+/// `Vec<f32>`s so the tight per-sample loops are scalar-flat and
+/// autovectorisable — no struct indirection, no complex-type ops.
+///
+/// `set_tick_delta_tau` recomputes the `alpha` table for a given
+/// uniform tick increment, letting callers replace per-call `exp()`
+/// with a cheap complex multiply.
+#[derive(Clone, Debug)]
+pub struct ConjPairPoleBankSoa {
+    pole_ts_re: Vec<f32>,
+    pole_ts_im: Vec<f32>,
+    inv_pole_re: Vec<f32>,
+    inv_pole_im: Vec<f32>,
+    pole_corr_re: Vec<f32>,
+    pole_corr_im: Vec<f32>,
+    psi1_re: Vec<f32>,
+    psi1_im: Vec<f32>,
+    r_re: Vec<f32>,
+    r_im: Vec<f32>,
+    x_re: Vec<f32>,
+    x_im: Vec<f32>,
+    /// `exp(pole_ts · Δτ)` for the currently-configured uniform tick
+    /// step. Initialised to identity until `set_tick_delta_tau` runs.
+    /// During delay smoothing this is the per-sample running value
+    /// (`alpha_cur`), linearly interpolated toward `alpha_target`.
+    alpha_re: Vec<f32>,
+    alpha_im: Vec<f32>,
+    /// Target alpha — destination of the current ramp.
+    alpha_target_re: Vec<f32>,
+    alpha_target_im: Vec<f32>,
+    /// Per-sample increment: `(target - cur) · inv_interval` at the
+    /// time of the last target update.
+    alpha_step_re: Vec<f32>,
+    alpha_step_im: Vec<f32>,
+}
+
+impl ConjPairPoleBankSoa {
+    pub fn new(
+        pair_poles: impl IntoIterator<Item = Complex32>,
+        pair_residues: impl IntoIterator<Item = Complex32>,
+        sample_rate: f32,
+    ) -> Self {
+        let host_ts = 1.0 / sample_rate;
+        let poles: Vec<Complex32> = pair_poles.into_iter().collect();
+        let residues: Vec<Complex32> = pair_residues.into_iter().collect();
+        assert_eq!(poles.len(), residues.len());
+        let n = poles.len();
+        let mut b = Self {
+            pole_ts_re: Vec::with_capacity(n),
+            pole_ts_im: Vec::with_capacity(n),
+            inv_pole_re: Vec::with_capacity(n),
+            inv_pole_im: Vec::with_capacity(n),
+            pole_corr_re: Vec::with_capacity(n),
+            pole_corr_im: Vec::with_capacity(n),
+            psi1_re: Vec::with_capacity(n),
+            psi1_im: Vec::with_capacity(n),
+            r_re: Vec::with_capacity(n),
+            r_im: Vec::with_capacity(n),
+            x_re: vec![0.0; n],
+            x_im: vec![0.0; n],
+            alpha_re: vec![1.0; n],
+            alpha_im: vec![0.0; n],
+            alpha_target_re: vec![1.0; n],
+            alpha_target_im: vec![0.0; n],
+            alpha_step_re: vec![0.0; n],
+            alpha_step_im: vec![0.0; n],
+        };
+        for (&p, &r) in poles.iter().zip(residues.iter()) {
+            let pole_ts = p * host_ts;
+            let pole_corr = pole_ts.exp();
+            let inv_p = p.inv();
+            let psi1 =
+                Complex32 { re: pole_corr.re - 1.0, im: pole_corr.im } * inv_p;
+            b.pole_ts_re.push(pole_ts.re);
+            b.pole_ts_im.push(pole_ts.im);
+            b.inv_pole_re.push(inv_p.re);
+            b.inv_pole_im.push(inv_p.im);
+            b.pole_corr_re.push(pole_corr.re);
+            b.pole_corr_im.push(pole_corr.im);
+            b.psi1_re.push(psi1.re);
+            b.psi1_im.push(psi1.im);
+            b.r_re.push(r.re);
+            b.r_im.push(r.im);
+        }
+        b
+    }
+
+    pub fn len(&self) -> usize {
+        self.pole_ts_re.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pole_ts_re.is_empty()
+    }
+
+    /// Snap `alpha_cur = alpha_target = exp(pole_ts · delta_tau)`
+    /// with zero step — for initial configuration or hard retargets.
+    /// Costs one complex `exp` per pole.
+    pub fn snap_tick_delta_tau(&mut self, delta_tau: f32) {
+        for i in 0..self.len() {
+            let sre = self.pole_ts_re[i] * delta_tau;
+            let sim = self.pole_ts_im[i] * delta_tau;
+            let m = sre.exp();
+            let (s, c) = sim.sin_cos();
+            let tr = m * c;
+            let ti = m * s;
+            self.alpha_re[i] = tr;
+            self.alpha_im[i] = ti;
+            self.alpha_target_re[i] = tr;
+            self.alpha_target_im[i] = ti;
+            self.alpha_step_re[i] = 0.0;
+            self.alpha_step_im[i] = 0.0;
+        }
+    }
+
+    /// Schedule a linear ramp of `alpha_cur` toward `alpha_target =
+    /// exp(pole_ts · delta_tau_target)` over `1/inv_interval` samples.
+    /// Costs one complex `exp` per pole — amortised across the
+    /// smoothing interval.
+    pub fn target_tick_delta_tau(
+        &mut self,
+        delta_tau_target: f32,
+        inv_interval: f32,
+    ) {
+        for i in 0..self.len() {
+            let sre = self.pole_ts_re[i] * delta_tau_target;
+            let sim = self.pole_ts_im[i] * delta_tau_target;
+            let m = sre.exp();
+            let (s, c) = sim.sin_cos();
+            let tr = m * c;
+            let ti = m * s;
+            self.alpha_target_re[i] = tr;
+            self.alpha_target_im[i] = ti;
+            self.alpha_step_re[i] = (tr - self.alpha_re[i]) * inv_interval;
+            self.alpha_step_im[i] = (ti - self.alpha_im[i]) * inv_interval;
+        }
+    }
+
+    /// Advance `alpha_cur` one sample toward `alpha_target`.
+    pub fn advance_alpha_smoothing(&mut self) {
+        for i in 0..self.len() {
+            self.alpha_re[i] += self.alpha_step_re[i];
+            self.alpha_im[i] += self.alpha_step_im[i];
+        }
+    }
+
+    /// Snap `alpha_cur` exactly to `alpha_target` and zero the step —
+    /// called at the end of a ramp to eliminate float accumulation.
+    pub fn snap_alpha_to_target(&mut self) {
+        self.alpha_re.copy_from_slice(&self.alpha_target_re);
+        self.alpha_im.copy_from_slice(&self.alpha_target_im);
+        for v in self.alpha_step_re.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.alpha_step_im.iter_mut() {
+            *v = 0.0;
+        }
+    }
+
+    /// Fill caller-provided scratch with `phi[i] = exp(pole_ts[i] · tau)`.
+    pub fn fill_phi(&self, tau: f32, phi_re: &mut [f32], phi_im: &mut [f32]) {
+        for i in 0..self.len() {
+            let sre = self.pole_ts_re[i] * tau;
+            let sim = self.pole_ts_im[i] * tau;
+            let m = sre.exp();
+            let (s, c) = sim.sin_cos();
+            phi_re[i] = m * c;
+            phi_im[i] = m * s;
+        }
+    }
+
+    /// In-place `phi *= alpha` per pole — incremental phasor step.
+    pub fn step_phi(&self, phi_re: &mut [f32], phi_im: &mut [f32]) {
+        for i in 0..self.len() {
+            let pr = phi_re[i];
+            let pi = phi_im[i];
+            let ar = self.alpha_re[i];
+            let ai = self.alpha_im[i];
+            phi_re[i] = pr * ar - pi * ai;
+            phi_im[i] = pr * ai + pi * ar;
+        }
+    }
+
+    /// Copy the precomputed alpha table into caller scratch (useful
+    /// when you need a "phi" buffer equal to alpha for a constant-Δτ
+    /// advance_by call).
+    pub fn copy_alpha_into(&self, phi_re: &mut [f32], phi_im: &mut [f32]) {
+        phi_re[..self.len()].copy_from_slice(&self.alpha_re);
+        phi_im[..self.len()].copy_from_slice(&self.alpha_im);
+    }
+
+    /// Evaluate using caller-provided phi per pole. Returns
+    /// `2·Re(Σ r_k · (phi_k · x_k + psi_k · u))` with
+    /// `psi_k = (phi_k - 1) · inv_pole_k`.
+    pub fn evaluate_with_phi(&self, phi_re: &[f32], phi_im: &[f32], u: f32) -> f32 {
+        let mut sum_re = 0.0_f32;
+        for i in 0..self.len() {
+            let pr = phi_re[i];
+            let pi = phi_im[i];
+            let mr = pr - 1.0;
+            let mi = pi;
+            let ipr = self.inv_pole_re[i];
+            let ipi = self.inv_pole_im[i];
+            let psi_re = mr * ipr - mi * ipi;
+            let psi_im = mr * ipi + mi * ipr;
+            let xr = self.x_re[i];
+            let xi = self.x_im[i];
+            let y_re = pr * xr - pi * xi + psi_re * u;
+            let y_im = pr * xi + pi * xr + psi_im * u;
+            sum_re += self.r_re[i] * y_re - self.r_im[i] * y_im;
+        }
+        2.0 * sum_re
+    }
+
+    /// Advance state by caller-provided phi per pole (state update
+    /// equivalent of [`Self::evaluate_with_phi`]).
+    pub fn advance_by_phi(&mut self, phi_re: &[f32], phi_im: &[f32], u: f32) {
+        for i in 0..self.len() {
+            let pr = phi_re[i];
+            let pi = phi_im[i];
+            let mr = pr - 1.0;
+            let mi = pi;
+            let ipr = self.inv_pole_re[i];
+            let ipi = self.inv_pole_im[i];
+            let psi_re = mr * ipr - mi * ipi;
+            let psi_im = mr * ipi + mi * ipr;
+            let xr = self.x_re[i];
+            let xi = self.x_im[i];
+            self.x_re[i] = pr * xr - pi * xi + psi_re * u;
+            self.x_im[i] = pr * xi + pi * xr + psi_im * u;
+        }
+    }
+
+    /// `advance_by` with phi computed inline from `delta_tau` — used
+    /// for variable-duration segments (first/tail) where the cached
+    /// alpha doesn't apply.
+    pub fn advance_by(&mut self, delta_tau: f32, u: f32) {
+        for i in 0..self.len() {
+            let sre = self.pole_ts_re[i] * delta_tau;
+            let sim = self.pole_ts_im[i] * delta_tau;
+            let m = sre.exp();
+            let (s, c) = sim.sin_cos();
+            let pr = m * c;
+            let pi = m * s;
+            let mr = pr - 1.0;
+            let mi = pi;
+            let ipr = self.inv_pole_re[i];
+            let ipi = self.inv_pole_im[i];
+            let psi_re = mr * ipr - mi * ipi;
+            let psi_im = mr * ipi + mi * ipr;
+            let xr = self.x_re[i];
+            let xi = self.x_im[i];
+            self.x_re[i] = pr * xr - pi * xi + psi_re * u;
+            self.x_im[i] = pr * xi + pi * xr + psi_im * u;
+        }
+    }
+
+    /// Full-sample advance using cached `pole_corr`/`psi1`.
+    pub fn advance(&mut self, u: f32) {
+        for i in 0..self.len() {
+            let pcr = self.pole_corr_re[i];
+            let pci = self.pole_corr_im[i];
+            let xr = self.x_re[i];
+            let xi = self.x_im[i];
+            self.x_re[i] = pcr * xr - pci * xi + self.psi1_re[i] * u;
+            self.x_im[i] = pcr * xi + pci * xr + self.psi1_im[i] * u;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for v in self.x_re.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.x_im.iter_mut() {
+            *v = 0.0;
+        }
+    }
+
+    /// `2·Re(Σ r_k · x_k)` — conjugate-pair doubled real output.
+    pub fn real_output(&self) -> f32 {
+        let mut sum_re = 0.0_f32;
+        for i in 0..self.len() {
+            sum_re += self.r_re[i] * self.x_re[i] - self.r_im[i] * self.x_im[i];
+        }
+        2.0 * sum_re
     }
 }
 

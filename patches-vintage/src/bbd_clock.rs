@@ -39,6 +39,8 @@ pub struct Tick {
 /// alternation; free of filter/delay state.
 pub struct BbdClock {
     host_ts: f32,
+    /// `1 / host_ts` — precomputed for sub-sample τ without a divide.
+    inv_host_ts: f32,
     bbd_ts: f32,
     /// Sub-sample carry in seconds, in `[0, host_ts)`.
     tn: f32,
@@ -50,6 +52,7 @@ impl BbdClock {
     pub fn new(host_sample_rate: f32) -> Self {
         Self {
             host_ts: 1.0 / host_sample_rate,
+            inv_host_ts: host_sample_rate,
             bbd_ts: 0.0,
             tn: 0.0,
             even_on: true,
@@ -69,8 +72,10 @@ impl BbdClock {
     /// Convenience: set clock from a delay time and stage count.
     /// `clock_rate = 2·stages/delay`, `bbd_ts = 1/clock_rate`.
     pub fn set_delay(&mut self, delay_seconds: f32, stages: usize) {
-        let clock_rate_hz = (2.0 * stages as f32) / delay_seconds.max(1.0e-5);
-        self.set_bbd_ts(1.0 / clock_rate_hz);
+        // bbd_ts = 1 / clock_rate = delay / (2·stages); collapses two
+        // divides into one.
+        let bbd_ts = delay_seconds.max(1.0e-5) / (2.0 * stages as f32);
+        self.set_bbd_ts(bbd_ts);
     }
 
     pub fn bbd_ts(&self) -> f32 {
@@ -91,8 +96,12 @@ impl BbdClock {
     /// this sample, call `on_tick`. Sub-sample time `tau` is relative
     /// to the start of the current host sample and lies in `[0, 1)`.
     pub fn step<F: FnMut(Tick)>(&mut self, mut on_tick: F) {
+        // Largest f32 strictly below 1.0 (= `1.0f32.next_down()`).
+        // `tn · inv_host_ts` can round up to exactly 1.0 even when
+        // `tn < host_ts`; pin τ below 1 so `Tick::tau ∈ [0, 1)` holds.
+        const MAX_TAU: f32 = f32::from_bits(0x3F7F_FFFF);
         while self.tn < self.host_ts {
-            let tau = (self.tn / self.host_ts).clamp(0.0, 1.0_f32.next_down());
+            let tau = (self.tn * self.inv_host_ts).min(MAX_TAU);
             let tick = Tick {
                 phase: if self.even_on { TickPhase::Write } else { TickPhase::Read },
                 tau,

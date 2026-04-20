@@ -123,21 +123,31 @@ pub struct VChorusCore {
 
     lfo_phase: f32,
     noise_state: u64,
+
+    /// `smoothing_interval - 1`; gates delay updates to the BBDs via
+    /// `counter & mask == 0`.
+    mod_interval_mask: u32,
+    mod_counter: u32,
 }
 
 impl VChorusCore {
     pub fn new(sample_rate: f32, noise_seed: u64) -> Self {
+        let bbd_l = Bbd::new(&BbdDevice::BBD_256, sample_rate);
+        let bbd_r = Bbd::new(&BbdDevice::BBD_256, sample_rate);
+        let mod_interval_mask = bbd_l.smoothing_interval() - 1;
         let mut me = Self {
             sample_rate,
             variant: Variant::Bright,
             mode: Mode::One,
             hiss_amount: 1.0,
-            bbd_l: Bbd::new(&BbdDevice::BBD_256, sample_rate),
-            bbd_r: Bbd::new(&BbdDevice::BBD_256, sample_rate),
+            bbd_l,
+            bbd_r,
             lpf_l: OnePoleLpf::default(),
             lpf_r: OnePoleLpf::default(),
             lfo_phase: 0.0,
             noise_state: noise_seed,
+            mod_interval_mask,
+            mod_counter: 0,
         };
         me.apply_variant_filters();
         me
@@ -246,8 +256,11 @@ impl VChorusCore {
         let max_d = center + table.depth();
         let delay_l = (center + depth * lfo).clamp(min_d, max_d);
         let delay_r = (center - depth * lfo).clamp(min_d, max_d);
-        self.bbd_l.set_delay_seconds(delay_l);
-        self.bbd_r.set_delay_seconds(delay_r);
+        if self.mod_counter & self.mod_interval_mask == 0 {
+            self.bbd_l.set_delay_seconds(delay_l);
+            self.bbd_r.set_delay_seconds(delay_r);
+        }
+        self.mod_counter = self.mod_counter.wrapping_add(1);
 
         // ── Hiss injection (pre-BBD: filtered + modulated) ──────────
         let floor = Self::hiss_floor(self.variant) * self.hiss_amount;

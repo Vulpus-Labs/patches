@@ -53,6 +53,11 @@ pub struct VFlangerCore {
     // Last wet sample — carried for the feedback path.
     fb_state: f32,
 
+    /// `smoothing_interval - 1` for the BBD — a power-of-two mask
+    /// lets us gate `set_delay_seconds` with a single AND.
+    mod_interval_mask: u32,
+    mod_counter: u32,
+
     // Parameters.
     rate_hz: f32,
     depth: f32,
@@ -64,15 +69,19 @@ pub struct VFlangerCore {
 
 impl VFlangerCore {
     pub fn new(sample_rate: f32) -> Self {
+        let bbd = Bbd::new(&BbdDevice::BBD_1024, sample_rate);
+        let mod_interval_mask = bbd.smoothing_interval() - 1;
         let mut me = Self {
             sample_rate,
-            bbd: Bbd::new(&BbdDevice::BBD_1024, sample_rate),
+            bbd,
             comp: Compressor::new(CompanderParams::NE570_DEFAULT, sample_rate),
             exp: Expander::new(CompanderParams::NE570_DEFAULT, sample_rate),
             recon_lpf: OnePoleLpf::default(),
             lf_split: OnePoleLpf::default(),
             lfo_phase: 0.0,
             fb_state: 0.0,
+            mod_interval_mask,
+            mod_counter: 0,
             rate_hz: 0.5,
             depth: 0.5,
             manual_s: 0.002,
@@ -126,7 +135,10 @@ impl VFlangerCore {
         let manual = (self.manual_s + manual_offset * 0.001).clamp(DELAY_MIN_S, DELAY_MAX_S);
         let span = 0.5 * (DELAY_MAX_S - DELAY_MIN_S) * depth;
         let delay = (manual + span * tri).clamp(DELAY_MIN_S, DELAY_MAX_S);
-        self.bbd.set_delay_seconds(delay);
+        if self.mod_counter & self.mod_interval_mask == 0 {
+            self.bbd.set_delay_seconds(delay);
+        }
+        self.mod_counter = self.mod_counter.wrapping_add(1);
 
         // ── LF/HF split ─────────────────────────────────────────────
         // HPF is always applied to the BBD path — matches the ~100 Hz

@@ -21,15 +21,39 @@
 //! back through the sub-sample sampling pattern. Tested explicitly.
 
 use crate::bbd_clock::{BbdClock, TickPhase};
-use crate::bbd_filter_proto::{Complex32, ContinuousPoleBank};
+use crate::bbd_filter_proto::{Complex32, ConjPairPoleBankSoa, ContinuousPoleBank};
 use patches_dsp::approximate::fast_tanh;
+
+/// Placeholder smoothing interval for the legacy AoS constructor,
+/// which does not use the SoA incremental-phasor / ramp machinery.
+/// Real SoA clients receive their interval at construction time.
+const AOS_PLACEHOLDER_INTERVAL: u32 = 1;
+
+/// Internal bank storage: full AoS bank for the general constructor,
+/// SoA conjugate-pair bank for the optimised path. The size delta is
+/// intentional — a given `BbdProto` lives with one variant for its
+/// lifetime and we avoid a Box on the audio path.
+#[allow(clippy::large_enum_variant)]
+enum Banks {
+    Aos {
+        input: ContinuousPoleBank,
+        output: ContinuousPoleBank,
+    },
+    Soa {
+        input: ConjPairPoleBankSoa,
+        output: ConjPairPoleBankSoa,
+        /// Per-pole phasor scratch reused across ticks within a
+        /// sample. Running `phi` for the input path's Write ticks.
+        phi_re: Vec<f32>,
+        phi_im: Vec<f32>,
+    },
+}
 
 /// End-to-end BBD driven by an explicit clock and sub-sample-evaluated
 /// continuous-time filter banks.
 pub struct BbdProto {
     clock: BbdClock,
-    input_bank: ContinuousPoleBank,
-    output_bank: ContinuousPoleBank,
+    banks: Banks,
 
     buckets: Vec<f32>,
     /// Shared bucket pointer. Advances on Write ticks only; Read ticks
@@ -54,6 +78,26 @@ pub struct BbdProto {
     saturation_inv_drive: f32,
 
     stages: usize,
+
+    /// Smoothing interval in samples for delay-modulation ramps on
+    /// the SoA path. Clients are expected to call [`Self::set_delay`]
+    /// every `smoothing_interval` samples; between calls the filter
+    /// linearly interpolates `bbd_ts` and the per-pole phasor `alpha`.
+    smoothing_interval: u32,
+    inv_smoothing_interval: f32,
+
+    /// Current `bbd_ts` (in seconds) driving the clock. On the SoA
+    /// path it is ramped toward `bbd_ts_target` one sample at a time
+    /// across `smoothing_interval` samples.
+    bbd_ts_cur: f32,
+    bbd_ts_target: f32,
+    bbd_ts_step: f32,
+    /// Samples remaining in the current ramp. Zero when no ramp in
+    /// flight.
+    ramp_samples_remaining: u32,
+    /// Set to true after the first `set_delay` so subsequent calls
+    /// know to schedule a ramp rather than snap.
+    has_delay_set: bool,
 }
 
 impl BbdProto {
@@ -66,18 +110,14 @@ impl BbdProto {
         host_sample_rate: f32,
     ) -> Self {
         let clock = BbdClock::new(host_sample_rate);
-        let input_bank =
+        let input =
             ContinuousPoleBank::new(input_poles, input_residues, host_sample_rate);
-        let output_bank =
+        let output =
             ContinuousPoleBank::new(output_poles, output_residues, host_sample_rate);
-        let _ = output_bank.pole_count();
-        // Reasonable default capacity: at worst a few dozen ticks per
-        // host sample at very short delays. Vec will grow if needed.
         let read_events = Vec::with_capacity(16);
         Self {
             clock,
-            input_bank,
-            output_bank,
+            banks: Banks::Aos { input, output },
             buckets: vec![0.0; stages + 1],
             buffer_ptr: 0,
             last_bucket_read: 0.0,
@@ -85,6 +125,74 @@ impl BbdProto {
             saturation_drive: 0.0,
             saturation_inv_drive: 1.0,
             stages,
+            smoothing_interval: AOS_PLACEHOLDER_INTERVAL,
+            inv_smoothing_interval: 1.0 / AOS_PLACEHOLDER_INTERVAL as f32,
+            bbd_ts_cur: 0.0,
+            bbd_ts_target: 0.0,
+            bbd_ts_step: 0.0,
+            ramp_samples_remaining: 0,
+            has_delay_set: false,
+        }
+    }
+
+    /// Conjugate-pair variant: each supplied pole represents a
+    /// conjugate pair; the bank stores only the halves and doubles
+    /// the real output internally. Uses a SoA pole layout and an
+    /// incremental phasor so that per-sample `exp()` calls are
+    /// eliminated for uniform-Δτ tick and segment increments.
+    ///
+    /// `smoothing_interval` sets the number of samples between
+    /// expected [`Self::set_delay`] calls; the filter linearly
+    /// interpolates `bbd_ts` and per-pole `alpha` between them.
+    /// Expected to be a power of two so the client can gate the call
+    /// with `counter & (interval - 1) == 0`. Chosen at construction
+    /// time as a function of sample rate and not changed thereafter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_conjugate_pairs(
+        input_pole_pairs: impl IntoIterator<Item = Complex32>,
+        input_residue_pairs: impl IntoIterator<Item = Complex32>,
+        output_pole_pairs: impl IntoIterator<Item = Complex32>,
+        output_residue_pairs: impl IntoIterator<Item = Complex32>,
+        stages: usize,
+        host_sample_rate: f32,
+        smoothing_interval: u32,
+    ) -> Self {
+        let smoothing_interval = smoothing_interval.max(1);
+        let clock = BbdClock::new(host_sample_rate);
+        let input = ConjPairPoleBankSoa::new(
+            input_pole_pairs,
+            input_residue_pairs,
+            host_sample_rate,
+        );
+        let output = ConjPairPoleBankSoa::new(
+            output_pole_pairs,
+            output_residue_pairs,
+            host_sample_rate,
+        );
+        let scratch_n = input.len().max(output.len());
+        let read_events = Vec::with_capacity(16);
+        Self {
+            clock,
+            banks: Banks::Soa {
+                input,
+                output,
+                phi_re: vec![0.0; scratch_n],
+                phi_im: vec![0.0; scratch_n],
+            },
+            buckets: vec![0.0; stages + 1],
+            buffer_ptr: 0,
+            last_bucket_read: 0.0,
+            read_events,
+            saturation_drive: 0.0,
+            saturation_inv_drive: 1.0,
+            stages,
+            smoothing_interval,
+            inv_smoothing_interval: 1.0 / smoothing_interval as f32,
+            bbd_ts_cur: 0.0,
+            bbd_ts_target: 0.0,
+            bbd_ts_step: 0.0,
+            ramp_samples_remaining: 0,
+            has_delay_set: false,
         }
     }
 
@@ -99,8 +207,56 @@ impl BbdProto {
         };
     }
 
+    pub fn smoothing_interval(&self) -> u32 {
+        self.smoothing_interval
+    }
+
+    /// Set the target delay. On the SoA path, the first call snaps
+    /// immediately; subsequent calls schedule a linear ramp of
+    /// `bbd_ts` and per-pole `alpha` over `smoothing_interval`
+    /// samples. Expected call cadence from the client is once every
+    /// `smoothing_interval` samples — matching the standard Periodic
+    /// mechanism used for module parameter updates — but calls at
+    /// other rates are safe (they just restart the ramp).
     pub fn set_delay(&mut self, delay_seconds: f32) {
-        self.clock.set_delay(delay_seconds, self.stages);
+        // Clamp delay using the same floor the clock applies so cur
+        // and clock stay in lock-step.
+        let bbd_ts_target = delay_seconds.max(1.0e-5) / (2.0 * self.stages as f32);
+        let host_ts = self.clock.host_ts();
+        let clock_floor = host_ts * 0.01;
+        let bbd_ts_target = bbd_ts_target.max(clock_floor);
+
+        self.bbd_ts_target = bbd_ts_target;
+
+        match &mut self.banks {
+            Banks::Aos { .. } => {
+                // Legacy path: no per-pole smoothing, snap the clock.
+                self.clock.set_bbd_ts(bbd_ts_target);
+                self.bbd_ts_cur = bbd_ts_target;
+                self.bbd_ts_step = 0.0;
+                self.ramp_samples_remaining = 0;
+                self.has_delay_set = true;
+            }
+            Banks::Soa { input, output, .. } => {
+                let delta_tau_target = 2.0 * bbd_ts_target / host_ts;
+                if !self.has_delay_set {
+                    // First call — snap clock and alpha; no ramp.
+                    self.clock.set_bbd_ts(bbd_ts_target);
+                    self.bbd_ts_cur = bbd_ts_target;
+                    self.bbd_ts_step = 0.0;
+                    self.ramp_samples_remaining = 0;
+                    input.snap_tick_delta_tau(delta_tau_target);
+                    output.snap_tick_delta_tau(delta_tau_target);
+                    self.has_delay_set = true;
+                } else {
+                    let inv = self.inv_smoothing_interval;
+                    self.bbd_ts_step = (bbd_ts_target - self.bbd_ts_cur) * inv;
+                    self.ramp_samples_remaining = self.smoothing_interval;
+                    input.target_tick_delta_tau(delta_tau_target, inv);
+                    output.target_tick_delta_tau(delta_tau_target, inv);
+                }
+            }
+        }
     }
 
     pub fn reset(&mut self) {
@@ -110,15 +266,27 @@ impl BbdProto {
         self.buffer_ptr = 0;
         self.last_bucket_read = 0.0;
         self.read_events.clear();
-        self.input_bank.reset();
-        self.output_bank.reset();
+        match &mut self.banks {
+            Banks::Aos { input, output } => {
+                input.reset();
+                output.reset();
+            }
+            Banks::Soa { input, output, .. } => {
+                input.reset();
+                output.reset();
+            }
+        }
         self.clock.reset();
+        // Clear any in-flight ramp. `bbd_ts_cur` / alpha remain at
+        // their last values; a subsequent `set_delay` will ramp from
+        // there (or snap, if it is the first call after construction).
+        self.bbd_ts_step = 0.0;
+        self.ramp_samples_remaining = 0;
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
         let buckets = &mut self.buckets;
         let len = buckets.len();
-        let input_bank = &self.input_bank;
         let mut ptr = self.buffer_ptr;
         let sat = self.saturation_drive;
         let inv_sat = self.saturation_inv_drive;
@@ -126,52 +294,142 @@ impl BbdProto {
         self.read_events.clear();
         let read_events = &mut self.read_events;
 
-        self.clock.step(|tick| match tick.phase {
-            TickPhase::Write => {
-                let raw = input_bank.evaluate(tick.tau, input);
-                let charge = if sat > 0.0 {
-                    fast_tanh(sat * raw) * inv_sat
-                } else {
-                    raw
-                };
-                buckets[ptr] = charge;
-                ptr = (ptr + 1) % len;
-            }
-            TickPhase::Read => {
-                let bucket_val = buckets[ptr];
-                read_events.push((tick.tau, bucket_val));
-            }
-        });
+        match &mut self.banks {
+            Banks::Aos { input: input_bank, output: output_bank } => {
+                let ib = &*input_bank;
+                self.clock.step(|tick| match tick.phase {
+                    TickPhase::Write => {
+                        let raw = ib.evaluate(tick.tau, input);
+                        let charge = if sat > 0.0 {
+                            fast_tanh(sat * raw) * inv_sat
+                        } else {
+                            raw
+                        };
+                        buckets[ptr] = charge;
+                        ptr += 1;
+                        if ptr == len {
+                            ptr = 0;
+                        }
+                    }
+                    TickPhase::Read => {
+                        let bucket_val = buckets[ptr];
+                        read_events.push((tick.tau, bucket_val));
+                    }
+                });
+                self.buffer_ptr = ptr;
+                input_bank.advance(input);
 
-        self.buffer_ptr = ptr;
-
-        // Advance input state once the sub-sample evaluations have
-        // been drawn from it.
-        self.input_bank.advance(input);
-
-        // Output reconstruction: evolve the output bank through each
-        // held-value segment between Read ticks. The segment before
-        // the first Read tick holds the previous sample's final
-        // bucket value (`last_bucket_read`); subsequent segments take
-        // the bucket value read at their starting tick.
-        let mut last_tau = 0.0_f32;
-        let mut current_bucket = self.last_bucket_read;
-        for &(tau, new_bucket) in self.read_events.iter() {
-            let dtau = tau - last_tau;
-            if dtau > 0.0 {
-                self.output_bank.advance_by(dtau, current_bucket);
+                let mut last_tau = 0.0_f32;
+                let mut current_bucket = self.last_bucket_read;
+                for &(tau, new_bucket) in read_events.iter() {
+                    let dtau = tau - last_tau;
+                    if dtau > 0.0 {
+                        output_bank.advance_by(dtau, current_bucket);
+                    }
+                    last_tau = tau;
+                    current_bucket = new_bucket;
+                }
+                let dtau_tail = 1.0 - last_tau;
+                if dtau_tail > 0.0 {
+                    output_bank.advance_by(dtau_tail, current_bucket);
+                }
+                self.last_bucket_read = current_bucket;
+                output_bank.real_output()
             }
-            last_tau = tau;
-            current_bucket = new_bucket;
+            Banks::Soa { input: input_bank, output: output_bank, phi_re, phi_im } => {
+                // Advance any in-flight delay-smoothing ramp one
+                // sample. bbd_ts and per-pole alpha interpolate
+                // linearly toward their targets over
+                // `smoothing_interval` samples.
+                if self.ramp_samples_remaining > 0 {
+                    self.bbd_ts_cur += self.bbd_ts_step;
+                    input_bank.advance_alpha_smoothing();
+                    output_bank.advance_alpha_smoothing();
+                    self.ramp_samples_remaining -= 1;
+                    if self.ramp_samples_remaining == 0 {
+                        // Snap to eliminate float accumulation drift.
+                        self.bbd_ts_cur = self.bbd_ts_target;
+                        self.bbd_ts_step = 0.0;
+                        input_bank.snap_alpha_to_target();
+                        output_bank.snap_alpha_to_target();
+                    }
+                    self.clock.set_bbd_ts(self.bbd_ts_cur);
+                }
+
+                // Incremental-phasor state for Writes within this
+                // sample: the first Write computes phi via exp; each
+                // subsequent Write multiplies phi by the precomputed
+                // tick alpha — no exp on the hot path.
+                let mut have_phi = false;
+                let ib = &*input_bank;
+                let phi_re_s = &mut phi_re[..];
+                let phi_im_s = &mut phi_im[..];
+
+                self.clock.step(|tick| match tick.phase {
+                    TickPhase::Write => {
+                        if !have_phi {
+                            ib.fill_phi(tick.tau, phi_re_s, phi_im_s);
+                            have_phi = true;
+                        } else {
+                            ib.step_phi(phi_re_s, phi_im_s);
+                        }
+                        let raw = ib.evaluate_with_phi(phi_re_s, phi_im_s, input);
+                        let charge = if sat > 0.0 {
+                            fast_tanh(sat * raw) * inv_sat
+                        } else {
+                            raw
+                        };
+                        buckets[ptr] = charge;
+                        ptr += 1;
+                        if ptr == len {
+                            ptr = 0;
+                        }
+                    }
+                    TickPhase::Read => {
+                        let bucket_val = buckets[ptr];
+                        read_events.push((tick.tau, bucket_val));
+                    }
+                });
+                self.buffer_ptr = ptr;
+                input_bank.advance(input);
+
+                // Output segments: first (variable Δτ) uses inline
+                // exp; middle segments all share `2·bbd_ts/host_ts` so
+                // reuse the cached alpha table as phi; tail uses
+                // inline exp again.
+                let mut last_tau = 0.0_f32;
+                let mut current_bucket = self.last_bucket_read;
+                let mut is_first = true;
+                let nout = output_bank.len();
+                for &(tau, new_bucket) in read_events.iter() {
+                    let dtau = tau - last_tau;
+                    if dtau > 0.0 {
+                        if is_first {
+                            output_bank.advance_by(dtau, current_bucket);
+                            is_first = false;
+                        } else {
+                            output_bank.copy_alpha_into(
+                                &mut phi_re[..nout],
+                                &mut phi_im[..nout],
+                            );
+                            output_bank.advance_by_phi(
+                                &phi_re[..nout],
+                                &phi_im[..nout],
+                                current_bucket,
+                            );
+                        }
+                    }
+                    last_tau = tau;
+                    current_bucket = new_bucket;
+                }
+                let dtau_tail = 1.0 - last_tau;
+                if dtau_tail > 0.0 {
+                    output_bank.advance_by(dtau_tail, current_bucket);
+                }
+                self.last_bucket_read = current_bucket;
+                output_bank.real_output()
+            }
         }
-        // Final segment to end of host sample.
-        let dtau_tail = 1.0 - last_tau;
-        if dtau_tail > 0.0 {
-            self.output_bank.advance_by(dtau_tail, current_bucket);
-        }
-        self.last_bucket_read = current_bucket;
-
-        self.output_bank.real_output()
     }
 }
 
