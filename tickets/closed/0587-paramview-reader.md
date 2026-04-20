@@ -60,3 +60,7 @@ once per prepare.
 
 The `ParamViewIndex` is what `prepare` caches alongside the
 layout. Lifetime: index outlives every `ParamView` it builds.
+
+## Closed notes
+
+Landed in patches-ffi-common/src/param_frame/. Tests green; clippy clean.

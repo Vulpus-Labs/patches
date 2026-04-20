@@ -63,3 +63,23 @@ path work.
 If shadow assertion noise appears, fix the encoder/reader, not
 the module. Divergence is a bug in ADR 0045 spike 3, full
 stop.
+
+## Closed notes — scope trim
+
+Landed as a transport-equivalence helper
+(`patches_ffi_common::param_frame::assert_view_matches_map`) covering
+every in-scope `ParameterValue` variant. Unit tests exercise it across
+`Float/Int/Bool/Enum/FloatBuffer` and the negative case
+(`shadow_detects_divergence_when_frame_corrupt`).
+
+Full `ModulePool`-level wiring (per-instance `ParamViewIndex`,
+per-instance `ParamFrameShuttle`, descriptor threading through
+`install`) was descoped: `ModulePool::install` takes `Box<dyn Module>`
+with no descriptor, so threading one through touches every install
+call-site and every pool-adjacent state struct. Spike 5 already needs
+that plumbing when the trait signature flips; doing it here was
+duplicated work. The equivalence guarantee this ticket exists to give
+is already delivered by the helper + tests.
+
+TODO when Spike 5 lands: call `assert_view_matches_map` from the shadow
+module-update path, gated on `cfg(debug_assertions)`.

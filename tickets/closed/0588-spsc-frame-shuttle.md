@@ -70,3 +70,7 @@ Cleanup-thread wiring: `patches-engine` already has a
 parameter-map cleanup path (destructive take from in-process
 path). Reuse that thread where practical; don't spawn a new
 one.
+
+## Closed notes
+
+Landed in patches-ffi-common/src/param_frame/. Tests green; clippy clean.

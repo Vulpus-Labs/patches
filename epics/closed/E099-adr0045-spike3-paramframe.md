@@ -111,3 +111,25 @@ SPSCs, free-list recycling, coalescing — against the live
 behaviour of every in-process module without a flag-day switch.
 The production trait change is deferred to spike 5 precisely
 because spike 3 has already proven equivalence at that point.
+
+## Closed notes
+
+Shadow transport lands in `patches-ffi-common::param_frame` as
+`ParamFrame`, `pack_into`, `ParamView`/`ParamViewIndex`,
+`ParamFrameShuttle`, and the `assert_view_matches_map` oracle. All
+tests green, clippy clean, no new deps.
+
+Deviations from the epic DoD:
+
+- **No engine-level shadow wiring.** The transport's equivalence with
+  `ParameterMap` is exercised by `assert_view_matches_map` tests; per-
+  instance shuttle threading through `ModulePool` is deferred to
+  Spike 5 (which needs the same plumbing to flip the trait signature).
+- **No process-wide counting allocator.** Steady-state no-alloc is
+  exercised functionally by the 10k-cycle soak over the preallocated
+  hot path. Spike 4's audio-thread allocator trap will retro-validate.
+- **`proptest` not added.** Round-trip + PHF determinism are covered by
+  comprehensive table-driven tests instead.
+- **Buffer-id stand-in.** Spike 3 lacks ArcTable integration; buffer
+  slots encode `Arc::as_ptr(arc) as u64` so the shadow self-agrees.
+  Spike 6/7 replaces this with real `FloatBufferId::pack(gen, slot)`.

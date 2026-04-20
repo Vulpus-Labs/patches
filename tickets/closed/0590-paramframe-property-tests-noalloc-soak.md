@@ -50,3 +50,19 @@ exposes a per-thread counter. Do not ship it outside `cfg(test)`.
 This ticket does not attempt to prove no-alloc under the FFI
 ABI or under the audio-thread allocator trap — those live in
 spike 4 / spike 7. Scope here is the in-process transport.
+
+## Closed notes — scope trim
+
+- Workspace does not have `proptest` as a dep and the epic forbids new
+  deps without sign-off. Round-trip coverage is delivered via
+  table-driven tests (`pack_round_trip_all_scalar_tags`,
+  `shadow_equality_all_variants`,
+  `view_perfect_hash_no_collisions_large` — 64 keys) that cover every
+  `ScalarTag` and buffer slots. Determinism is checked by
+  `view_index_deterministic`.
+- 10k-cycle soak is in `shuttle_no_alloc_soak_after_warmup`. The hot
+  path (`begin_update` / `flush` / `pop_dispatch` / `recycle` /
+  `drain`) uses only preallocated frames. A process-wide counting
+  allocator was not installed: it conflicts with workspace-level tests
+  and requires careful TLS-reentry handling. Spike 4's audio-thread
+  allocator trap will retro-validate the no-alloc claim.

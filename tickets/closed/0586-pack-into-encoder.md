@@ -62,3 +62,7 @@ The split `defaults` / `overrides` keeps the caller honest
 about which values are planner-provided and which come from
 current parameter state; the engine already maintains both
 today.
+
+## Closed notes
+
+Landed in patches-ffi-common/src/param_frame/. Tests green; clippy clean.

@@ -1,6 +1,7 @@
 pub mod arc_table;
 pub mod ids;
 pub mod json;
+pub mod param_frame;
 pub mod param_layout;
 pub mod types;
 

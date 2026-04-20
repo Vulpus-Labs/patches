@@ -61,3 +61,7 @@ multiple of 8 inside `ParamFrame` but **do not** mutate the
 Belongs in `patches-ffi-common` because both host and plugin
 sides need it once the FFI spike lands. No `patches-ffi` dep
 yet.
+
+## Closed notes
+
+Landed in patches-ffi-common/src/param_frame/. Tests green; clippy clean.
