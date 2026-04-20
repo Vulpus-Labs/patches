@@ -1,6 +1,6 @@
 //! `patches-vintage` — vintage-style BBD effects.
 //!
-//! Houses a reusable BBD primitive (Holters & Parker, DAFx-18) plus
+//! Houses a reusable BBD primitive plus
 //! modules built on top of it (currently [`vchorus::VChorus`]). Also
 //! ships an NE570-style compander primitive for future BBD-delay and
 //! Dimension-D-style modules.

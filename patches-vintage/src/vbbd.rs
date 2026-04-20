@@ -49,10 +49,10 @@ use crate::bbd::{Bbd, BbdDevice};
 
 use crate::compander::{CompanderParams, Compressor, Expander};
 
-/// Honest ceiling for a 1024-stage BBD under the Holters-Parker
-/// filter fit: ~85 ms at ~6 kHz clock. Past that, image folding
-/// becomes audible. The module uses [`BbdDevice::BBD_1024`] for its
-/// taps, putting vintage analog-delay territory in range.
+/// Honest ceiling for a 1024-stage BBD: ~85 ms at ~6 kHz clock, past
+/// which image-folding becomes audible. The module uses
+/// [`BbdDevice::BBD_1024`] for its taps, putting vintage analog-delay
+/// territory in range.
 const DELAY_MS_MAX: f32 = 85.0;
 const DELAY_MS_MIN: f32 = 1.0;
 const FEEDBACK_MAX: f32 = 0.95;
