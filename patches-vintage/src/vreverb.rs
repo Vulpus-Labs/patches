@@ -26,7 +26,8 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in` | mono | Audio input |
+//! | `in_left` | mono | Left audio input |
+//! | `in_right` | mono | Right audio input (falls back to `in_left` if unpatched) |
 //! | `drywet_cv` | mono | Additive CV for dry/wet |
 //! | `size_cv` | mono | Additive CV for size |
 //! | `decay_cv` | mono | Additive CV for decay |
@@ -54,7 +55,6 @@ use patches_core::{
 use patches_dsp::approximate::fast_tanh;
 
 use crate::bbd::{Bbd, BbdDevice};
-use crate::compander::{CompanderParams, Compressor, Expander};
 
 const DECAY_MAX: f32 = 0.95;
 const N: usize = 8;
@@ -98,8 +98,6 @@ pub struct VReverb {
     descriptor: ModuleDescriptor,
 
     bbds: [Bbd; N],
-    comps: [Compressor; N],
-    exps: [Expander; N],
     /// Previous-sample BBD outputs carried through the 1-sample cable
     /// delay that makes the FDN causal.
     y_prev: [f32; N],
@@ -108,7 +106,8 @@ pub struct VReverb {
     size: f32,
     decay: f32,
 
-    in_port: MonoInput,
+    in_l: MonoInput,
+    in_r: MonoInput,
     drywet_cv: MonoInput,
     size_cv: MonoInput,
     decay_cv: MonoInput,
@@ -119,7 +118,8 @@ pub struct VReverb {
 impl Module for VReverb {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("VReverb", shape.clone())
-            .mono_in("in")
+            .mono_in("in_left")
+            .mono_in("in_right")
             .mono_in("drywet_cv")
             .mono_in("size_cv")
             .mono_in("decay_cv")
@@ -140,17 +140,12 @@ impl Module for VReverb {
             instance_id,
             descriptor,
             bbds: std::array::from_fn(|_| Bbd::new(&BbdDevice::BBD_1024, sr)),
-            comps: std::array::from_fn(|_| {
-                Compressor::new(CompanderParams::NE570_DEFAULT, sr)
-            }),
-            exps: std::array::from_fn(|_| {
-                Expander::new(CompanderParams::NE570_DEFAULT, sr)
-            }),
             y_prev: [0.0; N],
             dry_wet: 0.3,
             size: 0.5,
             decay: 0.7,
-            in_port: MonoInput::default(),
+            in_l: MonoInput::default(),
+            in_r: MonoInput::default(),
             drywet_cv: MonoInput::default(),
             size_cv: MonoInput::default(),
             decay_cv: MonoInput::default(),
@@ -180,16 +175,25 @@ impl Module for VReverb {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_port = MonoInput::from_ports(inputs, 0);
-        self.drywet_cv = MonoInput::from_ports(inputs, 1);
-        self.size_cv = MonoInput::from_ports(inputs, 2);
-        self.decay_cv = MonoInput::from_ports(inputs, 3);
+        self.in_l = MonoInput::from_ports(inputs, 0);
+        self.in_r = MonoInput::from_ports(inputs, 1);
+        self.drywet_cv = MonoInput::from_ports(inputs, 2);
+        self.size_cv = MonoInput::from_ports(inputs, 3);
+        self.decay_cv = MonoInput::from_ports(inputs, 4);
         self.out_l = MonoOutput::from_ports(outputs, 0);
         self.out_r = MonoOutput::from_ports(outputs, 1);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let in_val = pool.read_mono(&self.in_port);
+        let l_in = pool.read_mono(&self.in_l);
+        // Fall back to the left input when right is unpatched — mono
+        // sources can plug into `in_left` alone and still feed the
+        // whole reverb.
+        let r_in = if self.in_r.is_connected() {
+            pool.read_mono(&self.in_r)
+        } else {
+            l_in
+        };
 
         let size = (self.size + pool.read_mono(&self.size_cv)).clamp(0.0, 1.0);
         let decay = (self.decay + pool.read_mono(&self.decay_cv)).clamp(0.0, DECAY_MAX);
@@ -198,17 +202,21 @@ impl Module for VReverb {
             self.bbds[k].set_delay_seconds(base * scale * 0.001);
         }
 
-        let x = fast_tanh(in_val);
+        // Drive the first four BBD lines from the left channel and the
+        // second four from the right. The Hadamard mix cross-pollinates
+        // them in the tail, so energy migrates between sides for a
+        // natural stereo spread while early reflections stay sided.
+        let x_l = fast_tanh(l_in);
+        let x_r = fast_tanh(r_in);
         let mixed = hadamard8(self.y_prev);
 
         let mut y = [0.0_f32; N];
         for k in 0..N {
+            let drive_src = if k < N / 2 { x_l } else { x_r };
             // Soft-clip the recirculating path: Hadamard + tanh is
             // strictly passive, so this bounds the loop at `decay < 1`.
-            let drive = x + fast_tanh(decay * mixed[k]);
-            let compressed = self.comps[k].process(drive);
-            let bbd_out = self.bbds[k].process(compressed);
-            y[k] = self.exps[k].process(bbd_out);
+            let drive = drive_src + fast_tanh(decay * mixed[k]);
+            y[k] = self.bbds[k].process(drive);
         }
         self.y_prev = y;
 
@@ -219,8 +227,8 @@ impl Module for VReverb {
         let wet_r = norm * (y[0] + y[1] - y[2] - y[3] + y[4] + y[5] - y[6] - y[7]);
 
         let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);
-        pool.write_mono(&self.out_l, in_val + eff_dw * (wet_l - in_val));
-        pool.write_mono(&self.out_r, in_val + eff_dw * (wet_r - in_val));
+        pool.write_mono(&self.out_l, l_in + eff_dw * (wet_l - l_in));
+        pool.write_mono(&self.out_r, r_in + eff_dw * (wet_r - r_in));
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -260,7 +268,8 @@ mod tests {
         let mut h =
             ModuleHarness::build_full::<VReverb>(params!["dry_wet" => 0.0_f32], ENV, shape());
         disconnect_cvs(&mut h);
-        h.set_mono("in", 0.7);
+        h.set_mono("in_left", 0.7);
+        h.disconnect_input("in_right");
         h.tick();
         assert_eq!(h.read_mono("out_left"), 0.7);
         assert_eq!(h.read_mono("out_right"), 0.7);
@@ -276,9 +285,10 @@ mod tests {
         h.update_params_map(&pm);
         disconnect_cvs(&mut h);
 
+        h.disconnect_input("in_right");
         for i in 0..40_000 {
             let t = i as f32 / SR;
-            h.set_mono("in", 0.5 * (std::f32::consts::TAU * 440.0 * t).sin());
+            h.set_mono("in_left", 0.5 * (std::f32::consts::TAU * 440.0 * t).sin());
             h.tick();
             let l = h.read_mono("out_left");
             let r = h.read_mono("out_right");
@@ -299,9 +309,10 @@ mod tests {
         h.update_params_map(&pm);
         disconnect_cvs(&mut h);
 
-        h.set_mono("in", 1.0);
+        h.disconnect_input("in_right");
+        h.set_mono("in_left", 1.0);
         h.tick();
-        h.set_mono("in", 0.0);
+        h.set_mono("in_left", 0.0);
 
         let mut early_peak = 0.0_f32;
         for _ in 0..((0.2 * SR) as usize) {

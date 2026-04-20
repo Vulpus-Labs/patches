@@ -1,31 +1,28 @@
 //! Bucket-brigade-device (BBD) model.
 //!
-//! A fractional-delay ring buffer bracketed by cascaded one-pole
-//! anti-imaging (~10 kHz) and reconstruction (~10 kHz) lowpasses, with
-//! optional soft-saturation on the bucket writes. The cutoffs
-//! approximate the analog-BBD chip family responsible for the
-//! characteristic "dark, slightly compressed, warbly" voice; no
-//! specific chip is modelled in detail.
+//! Uses the clean-room sub-sample-evaluated prototype from
+//! [`crate::bbd_proto`] as its engine: a BBD clock yields write/read
+//! ticks at their exact sub-sample instants, the input filter bank is
+//! evaluated at each write-tick `τ`, and the output filter bank is
+//! evolved through held-value segments between read ticks. Gives BBD-
+//! clock image folding at long delays and a stable passband at short
+//! delays.
+//!
+//! The filter shapes here are a plausible analog anti-imaging /
+//! reconstruction design — two conjugate-pole pairs per side, residues
+//! normalised for unit DC gain. Not a specific chip; tuned generically
+//! for character and stability.
 //!
 //! # Real-time safety
 //!
 //! All buffers allocated in [`Bbd::new`]. [`Bbd::process`] and
-//! [`Bbd::set_delay_seconds`] perform no allocations and no syscalls.
+//! [`Bbd::set_delay_seconds`] perform no allocations.
 
 #[cfg(test)]
 mod tests;
 
-use patches_dsp::approximate::fast_tanh;
-
-/// Input anti-imaging cutoff (Hz). Sits above the audio band but low
-/// enough to shape the characteristic dark BBD voice.
-const INPUT_CUTOFF_HZ: f32 = 10_000.0;
-/// Output reconstruction cutoff (Hz).
-const OUTPUT_CUTOFF_HZ: f32 = 10_000.0;
-
-/// Number of one-pole LP stages cascaded per filter. Four gives
-/// 24 dB/oct asymptotic rolloff.
-const FILTER_ORDER: usize = 4;
+use crate::bbd_filter_proto::Complex32;
+use crate::bbd_proto::BbdProto;
 
 #[derive(Clone, Copy, Debug)]
 pub struct BbdDevice {
@@ -39,103 +36,62 @@ impl BbdDevice {
     pub const BBD_1024: Self = Self { stages: 1024, saturation_drive: 1.2 };
 }
 
-/// One-pole lowpass: `y = y + a · (x - y)`.
-#[derive(Clone, Copy, Debug, Default)]
-struct OnePoleLp {
-    y: f32,
-    a: f32,
+/// Input / output filter pole set. Two well-damped conjugate-pole
+/// pairs (Q ≈ 0.3) giving a non-peaking ~4-pole lowpass rolling off
+/// from ~6 kHz. Damped by design so that the BBD's combined input ×
+/// output transfer stays below unity everywhere — this keeps feedback
+/// networks (FDN reverbs, self-feedback delays) from gaining at any
+/// in-band frequency. Not a specific chip; tuned generically.
+fn default_poles() -> [Complex32; 4] {
+    [
+        Complex32::new(-30_000.0, 20_000.0),
+        Complex32::new(-30_000.0, -20_000.0),
+        Complex32::new(-50_000.0, 30_000.0),
+        Complex32::new(-50_000.0, -30_000.0),
+    ]
 }
 
-impl OnePoleLp {
-    fn new(cutoff_hz: f32, sample_rate: f32) -> Self {
-        // Impulse-invariant one-pole coefficient: `a = 1 - exp(-2πfc/fs)`.
-        let a = 1.0 - (-std::f32::consts::TAU * cutoff_hz / sample_rate).exp();
-        Self { y: 0.0, a }
+/// Residues normalised so that the filter's DC gain `Σ -r_k/p_k` is
+/// exactly 1 — callers can then rely on unity low-frequency response
+/// through the whole BBD chain.
+fn normalised_residues(poles: &[Complex32; 4]) -> [Complex32; 4] {
+    let raw = [Complex32::new(1.0, 0.0); 4];
+    // Σ -r/p for this pole set with r=1.
+    let mut g = 0.0_f32;
+    for (p, r) in poles.iter().zip(raw.iter()) {
+        let q = -*r / *p;
+        g += q.re;
     }
-
-    #[inline(always)]
-    fn process(&mut self, x: f32) -> f32 {
-        self.y += self.a * (x - self.y);
-        self.y
-    }
-
-    fn reset(&mut self) {
-        self.y = 0.0;
-    }
-}
-
-/// Cascade of one-pole lowpasses.
-#[derive(Clone, Debug)]
-struct LpChain {
-    stages: [OnePoleLp; FILTER_ORDER],
-}
-
-impl LpChain {
-    fn new(cutoff_hz: f32, sample_rate: f32) -> Self {
-        Self {
-            stages: [OnePoleLp::new(cutoff_hz, sample_rate); FILTER_ORDER],
-        }
-    }
-
-    #[inline(always)]
-    fn process(&mut self, mut x: f32) -> f32 {
-        for s in self.stages.iter_mut() {
-            x = s.process(x);
-        }
-        x
-    }
-
-    fn reset(&mut self) {
-        for s in self.stages.iter_mut() {
-            s.reset();
-        }
-    }
+    let inv_g = 1.0 / g;
+    [
+        raw[0] * inv_g,
+        raw[1] * inv_g,
+        raw[2] * inv_g,
+        raw[3] * inv_g,
+    ]
 }
 
 /// Bucket-brigade delay line.
 pub struct Bbd {
-    sample_rate: f32,
-    stages: usize,
-    saturation_drive: f32,
-    saturation_inv_drive: f32,
-
-    buckets: Box<[f32]>,
-    write_idx: usize,
-
-    /// Target delay in host samples (may be fractional).
-    delay_samples: f32,
+    proto: BbdProto,
     delay_s: f32,
-
-    input_lpf: LpChain,
-    output_lpf: LpChain,
+    stages: usize,
 }
 
 impl Bbd {
     pub fn new(device: &BbdDevice, sample_rate: f32) -> Self {
-        // Worst-case delay: the device's 1024-stage chip at its longest
-        // practical clock rate (~5 kHz) holds about 100 ms of audio;
-        // round up to 200 ms of host samples so the ring never needs
-        // reallocation for any valid delay setting.
-        let max_samples = (sample_rate * 0.2).ceil() as usize;
-        let buckets = vec![0.0_f32; max_samples.max(device.stages + 4)]
-            .into_boxed_slice();
-
-        let mut me = Self {
+        let poles = default_poles();
+        let residues = normalised_residues(&poles);
+        let mut proto = BbdProto::new(
+            poles,
+            residues,
+            poles,
+            residues,
+            device.stages,
             sample_rate,
-            stages: device.stages,
-            saturation_drive: device.saturation_drive,
-            saturation_inv_drive: if device.saturation_drive > 0.0 {
-                1.0 / device.saturation_drive
-            } else {
-                1.0
-            },
-            buckets,
-            write_idx: 0,
-            delay_samples: 0.0,
-            delay_s: 0.0,
-            input_lpf: LpChain::new(INPUT_CUTOFF_HZ, sample_rate),
-            output_lpf: LpChain::new(OUTPUT_CUTOFF_HZ, sample_rate),
-        };
+        );
+        proto.set_saturation_drive(device.saturation_drive);
+        let mut me = Self { proto, delay_s: 0.0, stages: device.stages };
         me.set_delay_seconds(0.003);
         me
     }
@@ -146,62 +102,21 @@ impl Bbd {
             return;
         }
         self.delay_s = delay;
-        // Target ring-buffer delay in host samples. BBD "stages" are
-        // represented implicitly by the clock ratio; we interpret the
-        // delay directly as a fractional sample lag, which gives the
-        // same externally-visible group delay.
-        let target = (delay * self.sample_rate).max(1.0);
-        let max = (self.buckets.len() - 2) as f32;
-        self.delay_samples = target.min(max);
+        self.proto.set_delay(delay);
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
-        // Anti-imaging filter, then bucket write with optional
-        // saturation; this is the "input stage" of a classic BBD.
-        let filtered = self.input_lpf.process(input);
-        let bucket_val = if self.saturation_drive > 0.0 {
-            fast_tanh(self.saturation_drive * filtered) * self.saturation_inv_drive
-        } else {
-            filtered
-        };
-        self.buckets[self.write_idx] = bucket_val;
-
-        // Fractional-delay read, before the write pointer advances, so
-        // the read position is `write - delay_samples`. Linear
-        // interpolation between the two nearest buckets.
-        let len = self.buckets.len();
-        let mut read_pos = self.write_idx as f32 - self.delay_samples;
-        while read_pos < 0.0 {
-            read_pos += len as f32;
-        }
-        let i0 = (read_pos as usize) % len;
-        let i1 = (i0 + 1) % len;
-        let frac = read_pos - (read_pos as usize as f32);
-        let bucket_out = self.buckets[i0] * (1.0 - frac) + self.buckets[i1] * frac;
-
-        // Advance the write pointer for next sample.
-        self.write_idx = (self.write_idx + 1) % len;
-
-        // Reconstruction filter.
-        self.output_lpf.process(bucket_out)
+        self.proto.process(input)
     }
 
     pub fn reset(&mut self) {
-        for b in self.buckets.iter_mut() {
-            *b = 0.0;
-        }
-        self.write_idx = 0;
-        self.input_lpf.reset();
-        self.output_lpf.reset();
+        self.proto.reset();
     }
 
     pub fn delay_seconds(&self) -> f32 {
         self.delay_s
     }
 
-    /// Effective number of stages (carried for API compatibility; not
-    /// used by the fractional-delay core, but consumers that want to
-    /// reason about clock rate can compute `clock = 2·stages/delay`).
     pub fn stages(&self) -> usize {
         self.stages
     }

@@ -11,6 +11,9 @@
 //! into an FFI plugin bundle per ADR 0039 / E088.
 
 pub mod bbd;
+pub mod bbd_clock;
+pub mod bbd_filter_proto;
+pub mod bbd_proto;
 pub mod compander;
 pub mod vbbd;
 pub mod vchorus;

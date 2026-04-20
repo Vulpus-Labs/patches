@@ -89,8 +89,8 @@ patch {
     filt.out               -> collapse.in
     
     module chorus : VChorus {
-        mode: two
-        variant: bright
+        mode: both
+        variant: dark
         hiss: 1.0
     }
 
@@ -98,15 +98,16 @@ patch {
 
     collapse.out -[0.12]-> limit.in
 
-    # BBD reverb — 4-line FDN of MN3007-class BBDs wrapped in a
-    # compander. Dark, hissy, short-ish tail; room-to-small-plate.
     module reverb : VReverb {
-        dry_wet: 1.0
-        size: 0.6
-        decay: 0.7
+        dry_wet: 0.5
+        size: 1.0
+        decay: 0.8
     }
 
-    limit.out -> reverb.in
+    
+    limit.out -> chorus.in_left
+    chorus.out_left  -> reverb.in_left
+    chorus.out_right -> reverb.in_right
 
     reverb.out_left  -> out.in_left
     reverb.out_right -> out.in_right
