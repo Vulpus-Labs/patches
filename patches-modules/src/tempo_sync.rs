@@ -90,7 +90,7 @@ impl Module for TempoSync {
         ModuleDescriptor::new("TempoSync", shape.clone())
             .mono_in("bpm")
             .mono_out("ms")
-            .enum_param("subdivision", Subdivision::VARIANTS, "1/4")
+            .enum_param(params::subdivision, Subdivision::Quarter)
     }
 
     fn prepare(

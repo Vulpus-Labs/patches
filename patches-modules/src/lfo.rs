@@ -109,7 +109,7 @@ impl Module for Lfo {
             .mono_out("random")
             .float_param(params::rate, 0.01, 20.0, 1.0)
             .float_param(params::phase_offset, 0.0, 1.0, 0.0)
-            .enum_param("mode", LfoMode::VARIANTS, "bipolar")
+            .enum_param(params::mode, LfoMode::Bipolar)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {

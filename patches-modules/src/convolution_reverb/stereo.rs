@@ -73,7 +73,7 @@ impl patches_core::Module for StereoConvReverb {
             .mono_out("out_left")
             .mono_out("out_right")
             .float_param(core_params::mix, 0.0, 1.0, 1.0)
-            .enum_param_typed(core_params::ir, IrVariant::Room)
+            .enum_param(core_params::ir, IrVariant::Room)
             .file_param("ir_data", IR_FILE_EXTENSIONS)
     }
 

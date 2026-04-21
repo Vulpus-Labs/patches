@@ -2,6 +2,11 @@ use std::sync::Arc;
 
 use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
 use crate::modules::parameter_map::{ParameterKey, ParameterMap, ParameterValue};
+use crate::params::EnumParamName;
+
+crate::params_enum! {
+    pub enum ModeABC { A => "a", B => "b", C => "c" }
+}
 
 use crate::param_frame::pack::{pack_into, PackError};
 use crate::param_frame::{ParamFrame, ParamView, ParamViewIndex};
@@ -16,7 +21,7 @@ fn mixed_descriptor() -> ModuleDescriptor {
         .float_param("gain", 0.0, 1.0, 0.25)
         .int_param("count", 0, 8, 3)
         .bool_param("active", true)
-        .enum_param("mode", &["a", "b", "c"], "b")
+        .enum_param(EnumParamName::<ModeABC>::new("mode"), ModeABC::B)
         .file_param("sample", &[])
 }
 

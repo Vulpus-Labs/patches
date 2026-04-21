@@ -83,8 +83,8 @@ impl Module for VChorus {
             .mono_in("depth_cv")
             .mono_out("out_left")
             .mono_out("out_right")
-            .enum_param_typed(params::variant, Variant::Bright)
-            .enum_param_typed(params::mode, Mode::One)
+            .enum_param(params::variant, Variant::Bright)
+            .enum_param(params::mode, Mode::One)
             .float_param(params::hiss, 0.0, 1.0, 1.0)
     }
 

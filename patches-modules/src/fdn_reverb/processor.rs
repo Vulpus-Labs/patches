@@ -70,7 +70,7 @@ impl Module for FdnReverb {
             .float_param(params::brightness, 0.0, 1.0, 0.5)
             .float_param(params::pre_delay,  0.0, 1.0, 0.0)
             .float_param(params::mix,        0.0, 1.0, 1.0)
-            .enum_param_typed(params::character, Character::Hall)
+            .enum_param(params::character, Character::Hall)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {

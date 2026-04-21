@@ -260,44 +260,9 @@ impl ModuleDescriptor {
         (default: bool),
         ParameterKind::Bool { default });
 
-    /// Legacy string-typed enum parameter. Accepts an explicit `variants`
-    /// slice — typically `E::VARIANTS` from a `params_enum!` type. A typed
-    /// migration target (`enum_param_typed`) is available for callers that
-    /// carry a `ParamEnum` type.
-    pub fn enum_param(
-        mut self,
-        name: &'static str,
-        variants: &'static [&'static str],
-        default: &'static str,
-    ) -> Self {
-        self.parameters.push(ParameterDescriptor {
-            name,
-            index: 0,
-            parameter_type: ParameterKind::Enum { variants, default },
-        });
-        self
-    }
-
-    pub fn enum_param_multi(
-        mut self,
-        name: &'static str,
-        count: usize,
-        variants: &'static [&'static str],
-        default: &'static str,
-    ) -> Self {
-        for i in 0..count {
-            self.parameters.push(ParameterDescriptor {
-                name,
-                index: i,
-                parameter_type: ParameterKind::Enum { variants, default },
-            });
-        }
-        self
-    }
-
     /// Typed enum parameter. Variants come from `E::VARIANTS`; default value
     /// is supplied as a Rust enum value.
-    pub fn enum_param_typed<E: crate::params::ParamEnum>(
+    pub fn enum_param<E: crate::params::ParamEnum>(
         mut self,
         name: impl Into<crate::params::EnumParamName<E>>,
         default: E,
@@ -313,7 +278,7 @@ impl ModuleDescriptor {
         self
     }
 
-    pub fn enum_param_multi_typed<E: crate::params::ParamEnum>(
+    pub fn enum_param_multi<E: crate::params::ParamEnum>(
         mut self,
         name: impl Into<crate::params::EnumParamArray<E>>,
         count: usize,
@@ -380,6 +345,22 @@ impl ModuleDescriptor {
 mod tests {
     use super::*;
     use crate::cables::CableKind;
+    use crate::params::{EnumParamArray, EnumParamName};
+
+    crate::params_enum! {
+        pub enum Wave {
+            Sine => "sine",
+            Saw => "saw",
+            Square => "square",
+        }
+    }
+
+    crate::params_enum! {
+        pub enum Wave2 {
+            Sine => "sine",
+            Saw => "saw",
+        }
+    }
 
     #[test]
     fn build_a_module_descriptor() {
@@ -478,7 +459,7 @@ mod tests {
             .float_param("gain", 0.0, 1.0, 0.5)
             .int_param("voices", 1, 8, 4)
             .bool_param("active", true)
-            .enum_param("wave", &["sine", "saw", "square"], "sine");
+            .enum_param(EnumParamName::<Wave>::new("wave"), Wave::Sine);
 
         assert_eq!(m.parameters.len(), 4);
 
@@ -509,7 +490,7 @@ mod tests {
             .float_param_multi("gain", 3, 0.0, 1.2, 1.0)
             .int_param_multi("steps", 3, 1, 32, 16)
             .bool_param_multi("mute", 3, false)
-            .enum_param_multi("wave", 3, &["sine", "saw"], "sine");
+            .enum_param_multi(EnumParamArray::<Wave2>::new("wave"), 3, Wave2::Sine);
 
         assert_eq!(m.parameters.len(), 12);
 

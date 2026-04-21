@@ -122,7 +122,7 @@ impl patches_core::Module for ConvolutionReverb {
             .mono_in("mix")
             .mono_out("out")
             .float_param(core_params::mix, 0.0, 1.0, 1.0)
-            .enum_param_typed(core_params::ir, IrVariant::Room)
+            .enum_param(core_params::ir, IrVariant::Room)
             .file_param("ir_data", IR_FILE_EXTENSIONS)
     }
 

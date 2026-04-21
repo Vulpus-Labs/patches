@@ -81,7 +81,7 @@ impl Module for Drive {
             .mono_in("in")
             .mono_in("drive_cv")
             .mono_out("out")
-            .enum_param("mode", DriveMode::VARIANTS, "saturate")
+            .enum_param(params::mode, DriveMode::Saturate)
             .float_param(params::drive, 0.1, 50.0, 1.0)
             .float_param(params::tone, 0.0, 1.0, 0.5)
             .float_param(params::bias, -1.0, 1.0, 0.0)

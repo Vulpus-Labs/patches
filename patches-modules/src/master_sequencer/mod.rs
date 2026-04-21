@@ -105,7 +105,7 @@ impl Module for MasterSequencer {
             .bool_param("loop", true)
             .bool_param(mp::autostart, true)
             .float_param(mp::swing, 0.0, 1.0, 0.5)
-            .enum_param_typed(mp::sync, SyncMode::Auto)
+            .enum_param(mp::sync, SyncMode::Auto)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {

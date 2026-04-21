@@ -36,7 +36,7 @@ fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         .mono_in("cv")
         .mono_out("out")
         .float_param("gain", 0.0, 2.0, 1.0)
-        .enum_param("mode", &["add", "mul"], "add")
+        .enum_param(params::mode, Mode::Add)
 }
 ```
 
@@ -107,7 +107,7 @@ Boilerplate — return the stored descriptor, the stored ID, and `self` respecti
 | `.float_param_multi("name", n, min, max, default)` | `n` indexed float params |
 | `.int_param("name", min, max, default)` | Integer parameter |
 | `.bool_param("name", default)` | Boolean parameter |
-| `.enum_param("name", &["a", "b"], "a")` | String enum parameter |
+| `.enum_param(params::name, E::Default)` | Typed enum parameter (variants from `params_enum!`) |
 | `.array_param("name", &[], max_length)` | Variable-length string array |
 | `.sink()` | Marks module as the audio output sink |
 

@@ -1,6 +1,20 @@
 use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
+use crate::params::EnumParamName;
 
 use super::*;
+
+crate::params_enum! {
+    pub enum ModeAB { A => "a", B => "b" }
+}
+crate::params_enum! {
+    pub enum ModeAC { A => "a", C => "c" }
+}
+crate::params_enum! {
+    pub enum ModeBA { B => "b", A => "a" }
+}
+crate::params_enum! {
+    pub enum ModeLinLog { Linear => "linear", Logarithmic => "logarithmic" }
+}
 
 fn empty_shape() -> ModuleShape {
     ModuleShape { channels: 1, length: 0, high_quality: false }
@@ -11,7 +25,7 @@ fn scalar_mixed() -> ModuleDescriptor {
         .float_param("gain", 0.0, 1.0, 0.5)
         .int_param("count", 0, 8, 1)
         .bool_param("active", true)
-        .enum_param("mode", &["a", "b"], "a")
+        .enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A)
 }
 
 // ── Layout structure ─────────────────────────────────────────────────────────
@@ -103,7 +117,7 @@ fn every_parameter_appears_exactly_once() {
     let d = ModuleDescriptor::new("Mix", empty_shape())
         .float_param_multi("gain", 4, 0.0, 1.0, 0.5)
         .int_param("count", 0, 8, 1)
-        .enum_param("mode", &["a", "b"], "a")
+        .enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A)
         .file_param("ir", &["wav"])
         .file_param_multi("sample", 2, &["wav"]);
     let l = compute_layout(&d);
@@ -163,15 +177,15 @@ fn hash_changes_with_param_kind() {
 
 #[test]
 fn hash_changes_with_variant_name() {
-    let d1 = ModuleDescriptor::new("M", empty_shape()).enum_param("mode", &["a", "b"], "a");
-    let d2 = ModuleDescriptor::new("M", empty_shape()).enum_param("mode", &["a", "c"], "a");
+    let d1 = ModuleDescriptor::new("M", empty_shape()).enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A);
+    let d2 = ModuleDescriptor::new("M", empty_shape()).enum_param(EnumParamName::<ModeAC>::new("mode"), ModeAC::A);
     assert_ne!(compute_layout(&d1).descriptor_hash, compute_layout(&d2).descriptor_hash);
 }
 
 #[test]
 fn hash_changes_with_variant_order() {
-    let d1 = ModuleDescriptor::new("M", empty_shape()).enum_param("mode", &["a", "b"], "a");
-    let d2 = ModuleDescriptor::new("M", empty_shape()).enum_param("mode", &["b", "a"], "a");
+    let d1 = ModuleDescriptor::new("M", empty_shape()).enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A);
+    let d2 = ModuleDescriptor::new("M", empty_shape()).enum_param(EnumParamName::<ModeBA>::new("mode"), ModeBA::A);
     assert_ne!(compute_layout(&d1).descriptor_hash, compute_layout(&d2).descriptor_hash);
 }
 
@@ -217,7 +231,7 @@ fn hash_regression_fixture() {
         .float_param("gain", 0.0, 1.0, 0.5)
         .int_param("count", 0, 8, 1)
         .bool_param("active", true)
-        .enum_param("mode", &["linear", "logarithmic"], "linear")
+        .enum_param(EnumParamName::<ModeLinLog>::new("mode"), ModeLinLog::Linear)
         .file_param("sample", &["wav", "aiff"])
         .mono_in("in")
         .poly_out("out");

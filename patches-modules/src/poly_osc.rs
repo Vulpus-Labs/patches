@@ -93,7 +93,7 @@ impl Module for PolyOsc {
             .poly_out("sawtooth")
             .poly_out("square")
             .float_param(params::frequency, -4.0, 12.0, 0.0)
-            .enum_param_typed(params::fm_type, OscFmType::Linear)
+            .enum_param(params::fm_type, OscFmType::Linear)
             .float_param(params::drift, 0.0, 1.0, 0.0)
     }
 
