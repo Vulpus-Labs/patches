@@ -6,7 +6,27 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PeriodicUpdate, PolyInput, PolyOutput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    PolyFilterParams {
+        cutoff:    Float,
+        resonance: Float,
+        saturate:  Bool,
+    }
+}
+
+// Bandpass uses center/bandwidth_q instead of cutoff/resonance.
+mod bp_params {
+    use patches_core::params::{BoolParamName, FloatParamName};
+    #[allow(non_upper_case_globals)]
+    pub const center: FloatParamName = FloatParamName::new("center");
+    #[allow(non_upper_case_globals)]
+    pub const bandwidth_q: FloatParamName = FloatParamName::new("bandwidth_q");
+    #[allow(non_upper_case_globals)]
+    pub const saturate: BoolParamName = BoolParamName::new("saturate");
+}
 
 // ── PolyResonantLowpass ───────────────────────────────────────────────────
 
@@ -77,9 +97,9 @@ impl Module for PolyResonantLowpass {
             .poly_in("fm")
             .poly_in("resonance_cv")
             .poly_out("out")
-            .float_param("cutoff",    -2.0, 12.0, 6.0)
-            .float_param("resonance", 0.0,  1.0,  0.0)
-            .bool_param("saturate", false)
+            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
+            .float_param(params::resonance, 0.0,  1.0,  0.0)
+            .bool_param(params::saturate, false)
     }
 
     fn prepare(
@@ -108,13 +128,10 @@ impl Module for PolyResonantLowpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("cutoff");
-        self.cutoff = v;
-        let v = params.float("resonance");
-        self.resonance = v;
-        let v = params.bool("saturate");
-        self.saturate = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.cutoff = p.get(params::cutoff);
+        self.resonance = p.get(params::resonance);
+        self.saturate = p.get(params::saturate);
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }
@@ -249,9 +266,9 @@ impl Module for PolyResonantHighpass {
             .poly_in("fm")
             .poly_in("resonance_cv")
             .poly_out("out")
-            .float_param("cutoff",    -2.0, 12.0, 6.0)
-            .float_param("resonance", 0.0,  1.0,  0.0)
-            .bool_param("saturate", false)
+            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
+            .float_param(params::resonance, 0.0,  1.0,  0.0)
+            .bool_param(params::saturate, false)
     }
 
     fn prepare(
@@ -280,13 +297,10 @@ impl Module for PolyResonantHighpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("cutoff");
-        self.cutoff = v;
-        let v = params.float("resonance");
-        self.resonance = v;
-        let v = params.bool("saturate");
-        self.saturate = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.cutoff = p.get(params::cutoff);
+        self.resonance = p.get(params::resonance);
+        self.saturate = p.get(params::saturate);
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }
@@ -421,9 +435,9 @@ impl Module for PolyResonantBandpass {
             .poly_in("fm")
             .poly_in("resonance_cv")
             .poly_out("out")
-            .float_param("center",      -2.0, 12.0, 6.0)
-            .float_param("bandwidth_q", 0.1,  20.0, 1.0)
-            .bool_param("saturate", false)
+            .float_param(bp_params::center,      -2.0, 12.0, 6.0)
+            .float_param(bp_params::bandwidth_q, 0.1,  20.0, 1.0)
+            .bool_param(bp_params::saturate, false)
     }
 
     fn prepare(
@@ -452,13 +466,10 @@ impl Module for PolyResonantBandpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("center");
-        self.center = v;
-        let v = params.float("bandwidth_q");
-        self.bandwidth_q = v;
-        let v = params.bool("saturate");
-        self.saturate = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.center = p.get(bp_params::center);
+        self.bandwidth_q = p.get(bp_params::bandwidth_q);
+        self.saturate = p.get(bp_params::saturate);
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }

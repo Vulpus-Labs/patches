@@ -31,8 +31,19 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, BurstGenerator};
 use patches_dsp::{SvfKernel, svf_f, q_to_damp, xorshift64};
+
+module_params! {
+    ClapDrum {
+        decay:  Float,
+        filter: Float,
+        q:      Float,
+        spread: Float,
+        bursts: Int,
+    }
+}
 
 pub struct ClapDrum {
     instance_id: InstanceId,
@@ -62,11 +73,11 @@ impl Module for ClapDrum {
             .mono_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("decay", 0.05, 2.0, 0.3)
-            .float_param("filter", 500.0, 8000.0, 1200.0)
-            .float_param("q", 0.0, 1.0, 0.4)
-            .float_param("spread", 0.0, 1.0, 0.5)
-            .int_param("bursts", 1, 8, 4)
+            .float_param(params::decay, 0.05, 2.0, 0.3)
+            .float_param(params::filter, 500.0, 8000.0, 1200.0)
+            .float_param(params::q, 0.0, 1.0, 0.4)
+            .float_param(params::spread, 0.0, 1.0, 0.5)
+            .int_param(params::bursts, 1, 8, 4)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -98,17 +109,17 @@ impl Module for ClapDrum {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("decay");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::decay);
         self.decay_time = v;
         self.tail_env.set_decay(self.decay_time);
-        let v = params.float("filter");
+        let v = p.get(params::filter);
         self.filter_freq = v;
-        let v = params.float("q");
+        let v = p.get(params::q);
         self.filter_q = v;
-        let v = params.float("spread");
+        let v = p.get(params::spread);
         self.spread = v;
-        let v = params.int("bursts");
+        let v = p.get(params::bursts);
         self.bursts = (v as usize).clamp(1, 8);
         let spacing_secs = self.spread * 0.01;
         self.burst_gen.set_params(self.bursts, spacing_secs, 0.7);

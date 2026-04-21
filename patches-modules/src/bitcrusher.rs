@@ -29,8 +29,17 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::BitcrusherKernel;
+
+module_params! {
+    Bitcrusher {
+        rate:    Float,
+        depth:   Float,
+        dry_wet: Float,
+    }
+}
 
 pub struct Bitcrusher {
     instance_id: InstanceId,
@@ -53,9 +62,9 @@ impl Module for Bitcrusher {
             .mono_in("rate_cv")
             .mono_in("depth_cv")
             .mono_out("out")
-            .float_param("rate", 0.0, 1.0, 1.0)
-            .float_param("depth", 1.0, 32.0, 32.0)
-            .float_param("dry_wet", 0.0, 1.0, 1.0)
+            .float_param(params::rate, 0.0, 1.0, 1.0)
+            .float_param(params::depth, 1.0, 32.0, 32.0)
+            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -77,14 +86,14 @@ impl Module for Bitcrusher {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("rate");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::rate);
         self.rate = v;
         self.kernel.set_rate(self.rate, self.sample_rate);
-        let v = params.float("depth");
+        let v = p.get(params::depth);
         self.depth = v;
         self.kernel.set_depth(self.depth);
-        let v = params.float("dry_wet");
+        let v = p.get(params::dry_wet);
         self.dry_wet = v.clamp(0.0, 1.0);
     }
 

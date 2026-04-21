@@ -2,8 +2,19 @@ use patches_core::{
     AudioEnvironment, CablePool, GateInput, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::AdsrCore;
+
+module_params! {
+    Adsr {
+        attack:  Float,
+        decay:   Float,
+        sustain: Float,
+        release: Float,
+    }
+}
+
 
 /// An ADSR envelope generator.
 ///
@@ -53,10 +64,10 @@ impl Module for Adsr {
             .mono_in("trigger")
             .mono_in("gate")
             .mono_out("out")
-            .float_param("attack",  0.001, 10.0, 0.01)
-            .float_param("decay",   0.001, 10.0, 0.1)
-            .float_param("sustain", 0.0,   1.0,  0.7)
-            .float_param("release", 0.001, 10.0, 0.3)
+            .float_param(params::attack,  0.001, 10.0, 0.01)
+            .float_param(params::decay,   0.001, 10.0, 0.1)
+            .float_param(params::sustain, 0.0,   1.0,  0.7)
+            .float_param(params::release, 0.001, 10.0, 0.3)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -74,11 +85,11 @@ impl Module for Adsr {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.attack_secs = params.float("attack");
-        self.decay_secs = params.float("decay");
-        self.sustain = params.float("sustain");
-        self.release_secs = params.float("release");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.attack_secs = p.get(params::attack);
+        self.decay_secs = p.get(params::decay);
+        self.sustain = p.get(params::sustain);
+        self.release_secs = p.get(params::release);
         self.core.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
     }
 

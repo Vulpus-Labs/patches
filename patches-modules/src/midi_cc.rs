@@ -3,6 +3,7 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 
 /// Converts a single MIDI CC number to a bipolar CV signal.
 ///
@@ -20,6 +21,12 @@ use patches_core::param_frame::ParamView;
 /// | Name | Type | Range | Default | Description |
 /// |------|------|-------|---------|-------------|
 /// | `cc` | int | 0–127 | `1` | MIDI CC number to track |
+module_params! {
+    MidiCc {
+        cc: Int,
+    }
+}
+
 pub struct MidiCc {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -34,7 +41,7 @@ impl Module for MidiCc {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("MidiCC", shape.clone())
             .mono_out("out")
-            .int_param("cc", 0, 127, 1)
+            .int_param(params::cc, 0, 127, 1)
     }
 
     fn prepare(
@@ -52,8 +59,8 @@ impl Module for MidiCc {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.int("cc");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::cc);
         self.cc_number = (v).clamp(0, 127) as u8;
     }
 

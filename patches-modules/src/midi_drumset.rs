@@ -48,6 +48,7 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 
 /// Number of drum slots in the GM mapping table.
 const NUM_DRUMS: usize = 14;
@@ -89,6 +90,12 @@ const fn build_note_to_slot() -> [u8; 128] {
 
 static NOTE_TO_SLOT: [u8; 128] = build_note_to_slot();
 
+module_params! {
+    MidiDrumset {
+        channel: Int,
+    }
+}
+
 pub struct MidiDrumset {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -109,7 +116,7 @@ impl Module for MidiDrumset {
         for &(_, trig_name, vel_name) in &DRUM_MAP {
             desc = desc.mono_out(trig_name).mono_out(vel_name);
         }
-        desc.int_param("channel", 0, 16, 0)
+        desc.int_param(params::channel, 0, 16, 0)
     }
 
     fn prepare(
@@ -128,8 +135,8 @@ impl Module for MidiDrumset {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.int("channel");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::channel);
         self.channel = (v as u8).min(16);
     }
 

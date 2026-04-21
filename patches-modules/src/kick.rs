@@ -37,8 +37,20 @@ use patches_core::{
     MonoInput, MonoOutput, OutputPort, PeriodicUpdate, TriggerInput,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
 use patches_dsp::{MonoPhaseAccumulator, fast_sine};
+
+module_params! {
+    Kick {
+        pitch:      Float,
+        sweep:      Float,
+        sweep_time: Float,
+        decay:      Float,
+        drive:      Float,
+        click:      Float,
+    }
+}
 
 pub struct Kick {
     instance_id: InstanceId,
@@ -72,12 +84,12 @@ impl Module for Kick {
             .mono_in("voct")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("pitch", 20.0, 200.0, 55.0)
-            .float_param("sweep", 0.0, 5000.0, 2500.0)
-            .float_param("sweep_time", 0.001, 0.5, 0.04)
-            .float_param("decay", 0.01, 2.0, 0.5)
-            .float_param("drive", 0.0, 1.0, 0.0)
-            .float_param("click", 0.0, 1.0, 0.3)
+            .float_param(params::pitch, 20.0, 200.0, 55.0)
+            .float_param(params::sweep, 0.0, 5000.0, 2500.0)
+            .float_param(params::sweep_time, 0.001, 0.5, 0.04)
+            .float_param(params::decay, 0.01, 2.0, 0.5)
+            .float_param(params::drive, 0.0, 1.0, 0.0)
+            .float_param(params::click, 0.0, 1.0, 0.3)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -111,19 +123,19 @@ impl Module for Kick {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("pitch");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::pitch);
         self.pitch = v;
-        let v = params.float("sweep");
+        let v = p.get(params::sweep);
         self.sweep_start = v;
-        let v = params.float("sweep_time");
+        let v = p.get(params::sweep_time);
         self.sweep_time = v;
-        let v = params.float("decay");
+        let v = p.get(params::decay);
         self.decay_time = v;
         self.amp_env.set_decay(self.decay_time);
-        let v = params.float("drive");
+        let v = p.get(params::drive);
         self.drive = v;
-        let v = params.float("click");
+        let v = p.get(params::click);
         self.click = v;
         self.pitch_sweep.set_params(self.sweep_start, self.pitch, self.sweep_time);
     }

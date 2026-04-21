@@ -4,6 +4,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 
 params_enum! {
     pub enum LfoMode {
@@ -54,6 +55,14 @@ use patches_dsp::xorshift64;
 /// | `rate` | float | 0.01 -- 20.0 | `1.0` | Oscillation rate in Hz |
 /// | `phase_offset` | float | 0.0 -- 1.0 | `0.0` | Fixed phase offset as fraction of a cycle |
 /// | `mode` | enum | bipolar, unipolar_positive, unipolar_negative | `bipolar` | Output polarity mode |
+module_params! {
+    Lfo {
+        rate:         Float,
+        phase_offset: Float,
+        mode:         Enum<LfoMode>,
+    }
+}
+
 pub struct Lfo {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -98,8 +107,8 @@ impl Module for Lfo {
             .mono_out("saw_down")
             .mono_out("square")
             .mono_out("random")
-            .float_param("rate", 0.01, 20.0, 1.0)
-            .float_param("phase_offset", 0.0, 1.0, 0.0)
+            .float_param(params::rate, 0.01, 20.0, 1.0)
+            .float_param(params::phase_offset, 0.0, 1.0, 0.0)
             .enum_param("mode", LfoMode::VARIANTS, "bipolar")
     }
 
@@ -128,16 +137,13 @@ impl Module for Lfo {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("rate");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::rate);
         self.rate = v;
         self.phase_increment = v / self.sample_rate;
-        let v = params.float("phase_offset");
+        let v = p.get(params::phase_offset);
         self.phase_offset = v;
-        let v = params.enum_variant("mode");
-        if let Ok(m) = LfoMode::try_from(v) {
-            self.mode = m;
-        }
+        self.mode = p.get(params::mode);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

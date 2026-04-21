@@ -31,8 +31,19 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
 use patches_dsp::{SvfKernel, svf_f, q_to_damp, xorshift64};
+
+module_params! {
+    Cymbal {
+        pitch:   Float,
+        decay:   Float,
+        tone:    Float,
+        filter:  Float,
+        shimmer: Float,
+    }
+}
 
 pub struct Cymbal {
     instance_id: InstanceId,
@@ -62,11 +73,11 @@ impl Module for Cymbal {
             .mono_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("pitch", 200.0, 10000.0, 600.0)
-            .float_param("decay", 0.2, 8.0, 2.0)
-            .float_param("tone", 0.0, 1.0, 0.5)
-            .float_param("filter", 2000.0, 16000.0, 6000.0)
-            .float_param("shimmer", 0.0, 1.0, 0.2)
+            .float_param(params::pitch, 200.0, 10000.0, 600.0)
+            .float_param(params::decay, 0.2, 8.0, 2.0)
+            .float_param(params::tone, 0.0, 1.0, 0.5)
+            .float_param(params::filter, 2000.0, 16000.0, 6000.0)
+            .float_param(params::shimmer, 0.0, 1.0, 0.2)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -102,21 +113,21 @@ impl Module for Cymbal {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("pitch");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::pitch);
         self.pitch = v;
         self.metallic.set_frequency(self.pitch);
-        let v = params.float("decay");
+        let v = p.get(params::decay);
         self.decay_time = v;
         self.amp_env.set_decay(self.decay_time);
-        let v = params.float("tone");
+        let v = p.get(params::tone);
         self.tone = v;
-        let v = params.float("filter");
+        let v = p.get(params::filter);
         self.filter_freq = v;
         let f = svf_f(self.filter_freq, self.sample_rate);
         let d = q_to_damp(0.3);
         self.hp_filter = SvfKernel::new_static(f, d);
-        let v = params.float("shimmer");
+        let v = p.get(params::shimmer);
         self.shimmer = v;
         self.mod_depth = self.shimmer * 20.0;
     }

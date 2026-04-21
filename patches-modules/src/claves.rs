@@ -28,8 +28,17 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::drum::DecayEnvelope;
 use patches_dsp::{SvfKernel, svf_f, q_to_damp};
+
+module_params! {
+    Claves {
+        pitch: Float,
+        decay: Float,
+        reson: Float,
+    }
+}
 
 pub struct Claves {
     instance_id: InstanceId,
@@ -53,9 +62,9 @@ impl Module for Claves {
             .mono_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("pitch", 200.0, 5000.0, 2500.0)
-            .float_param("decay", 0.01, 0.5, 0.06)
-            .float_param("reson", 0.3, 1.0, 0.85)
+            .float_param(params::pitch, 200.0, 5000.0, 2500.0)
+            .float_param(params::decay, 0.01, 0.5, 0.06)
+            .float_param(params::reson, 0.3, 1.0, 0.85)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -81,13 +90,13 @@ impl Module for Claves {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("pitch");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::pitch);
         self.pitch = v;
-        let v = params.float("decay");
+        let v = p.get(params::decay);
         self.decay_time = v;
         self.amp_env.set_decay(self.decay_time);
-        let v = params.float("reson");
+        let v = p.get(params::reson);
         self.reson = v;
         let f = svf_f(self.pitch, self.sample_rate);
         let d = q_to_damp(self.reson);

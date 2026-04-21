@@ -3,6 +3,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 
 /// A portamento (pitch glide) module.
 ///
@@ -27,6 +28,12 @@ use patches_core::param_frame::ParamView;
 /// | Name | Type | Range | Default | Description |
 /// |------|------|-------|---------|-------------|
 /// | `glide_ms` | float | 0.0--10000.0 | `100.0` | Glide time in milliseconds |
+module_params! {
+    Glide {
+        glide_ms: Float,
+    }
+}
+
 pub struct Glide {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -62,7 +69,7 @@ impl Module for Glide {
         ModuleDescriptor::new("Glide", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .float_param("glide_ms", 0.0, 10_000.0, 100.0)
+            .float_param(params::glide_ms, 0.0, 10_000.0, 100.0)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -79,8 +86,8 @@ impl Module for Glide {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("glide_ms");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::glide_ms);
         self.set_glide_ms(v);
     }
 

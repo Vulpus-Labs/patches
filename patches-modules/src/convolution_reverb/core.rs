@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use patches_core::build_error::BuildError;
+use patches_core::module_params;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::param_frame::ParamView;
 
@@ -17,8 +18,15 @@ use super::ir_loader::{
 };
 use super::params::{
     generate_stereo_variant_ir, generate_variant_ir, SharedParams, BLOCK_SIZE,
-    FILE_VARIANT_IDX, IR_VARIANTS, MAX_TIER_BLOCK_SIZE,
+    FILE_VARIANT_IDX, IR_VARIANTS, IrVariant, MAX_TIER_BLOCK_SIZE,
 };
+
+module_params! {
+    ConvReverbCoreParams {
+        mix: Float,
+        ir:  Enum<IrVariant>,
+    }
+}
 
 /// Core state machine shared by [`super::ConvolutionReverb`] and
 /// [`super::StereoConvReverb`].
@@ -228,20 +236,19 @@ impl ConvReverbCore {
     /// Handle parameter updates on the audio thread (hot reload).
     ///
     /// Must be real-time safe: no file I/O, no thread spawn/join, no blocking.
-    pub(super) fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("mix");
-        self.base_mix = v;
+    pub(super) fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.base_mix = p.get(params::mix);
 
         // TODO(E101-0599): resolve FloatBufferId via ArcTable for hot reload of
         // file-backed IRs. ParamView now exposes only a FloatBufferId; the Arc
         // resolution path is not yet wired. Until then, file IR hot-reload is
         // a no-op; initial build via update_parameters still works.
-        let _ = params.buffer("ir_data");
+        let _ = p.buffer("ir_data");
 
         let mut ir_changed = false;
 
-        let v = params.enum_variant("ir");
-        let idx = v as u8;
+        let ir: IrVariant = p.get(params::ir);
+        let idx = ir as u8;
         if (idx as usize) < IR_VARIANTS.len() && idx != self.ir_variant_idx {
             self.ir_variant_idx = idx;
             ir_changed = true;

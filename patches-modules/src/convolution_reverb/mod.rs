@@ -70,7 +70,8 @@ mod stereo;
 pub use stereo::StereoConvReverb;
 
 use core::ConvReverbCore;
-use params::{BLOCK_SIZE, IR_FILE_EXTENSIONS, IR_VARIANTS, MAX_TIER_BLOCK_SIZE};
+use core::params as core_params;
+use params::{BLOCK_SIZE, IR_FILE_EXTENSIONS, IrVariant, MAX_TIER_BLOCK_SIZE};
 
 // ---------------------------------------------------------------------------
 // Module: ConvolutionReverb (Mono)
@@ -120,8 +121,8 @@ impl patches_core::Module for ConvolutionReverb {
             .mono_in("in")
             .mono_in("mix")
             .mono_out("out")
-            .float_param("mix", 0.0, 1.0, 1.0)
-            .enum_param("ir", IR_VARIANTS, "room")
+            .float_param(core_params::mix, 0.0, 1.0, 1.0)
+            .enum_param_typed(core_params::ir, IrVariant::Room)
             .file_param("ir_data", IR_FILE_EXTENSIONS)
     }
 

@@ -56,6 +56,7 @@ use patches_core::{
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples};
 
 /// Maximum `attack_ms` value supported at construction time.
@@ -65,6 +66,14 @@ const MAX_ATTACK_MS: f32 = 50.0;
 /// Lookahead peak limiter.
 ///
 /// See [module-level documentation](self).
+module_params! {
+    Limiter {
+        threshold:  Float,
+        attack_ms:  Float,
+        release_ms: Float,
+    }
+}
+
 pub struct Limiter {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -80,9 +89,9 @@ impl Module for Limiter {
         ModuleDescriptor::new("Limiter", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .float_param("threshold", 0.0, 2.0, 0.9)
-            .float_param("attack_ms", 0.1, MAX_ATTACK_MS, 2.0)
-            .float_param("release_ms", 1.0, 5000.0, 100.0)
+            .float_param(params::threshold, 0.0, 2.0, 0.9)
+            .float_param(params::attack_ms, 0.1, MAX_ATTACK_MS, 2.0)
+            .float_param(params::release_ms, 1.0, 5000.0, 100.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -101,12 +110,12 @@ impl Module for Limiter {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("threshold");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::threshold);
         self.core.set_threshold(v);
-        let v = params.float("attack_ms");
+        let v = p.get(params::attack_ms);
         self.core.set_attack_ms(v, MAX_ATTACK_MS);
-        let v = params.float("release_ms");
+        let v = p.get(params::release_ms);
         self.core.set_release_ms(v);
     }
 

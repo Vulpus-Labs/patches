@@ -3,6 +3,7 @@ use patches_core::{
     MonoOutput, OutputPort,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 
 /// Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable BPM.
 ///
@@ -27,6 +28,14 @@ use patches_core::param_frame::ParamView;
 /// | `bpm` | float | 1.0–300.0 | `120.0` | Tempo in beats per minute |
 /// | `beats_per_bar` | int | 1–16 | `4` | Number of beats per bar |
 /// | `quavers_per_beat` | int | 1–4 | `2` | Quavers per beat (2 = simple, 3 = compound) |
+module_params! {
+    Clock {
+        bpm:             Float,
+        beats_per_bar:   Int,
+        quavers_per_beat: Int,
+    }
+}
+
 pub struct Clock {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -54,9 +63,9 @@ impl Module for Clock {
             .mono_out("beat")
             .mono_out("quaver")
             .mono_out("semiquaver")
-            .float_param("bpm", 1.0, 300.0, 120.0)
-            .int_param("beats_per_bar", 1, 16, 4)
-            .int_param("quavers_per_beat", 1, 4, 2)
+            .float_param(params::bpm, 1.0, 300.0, 120.0)
+            .int_param(params::beats_per_bar, 1, 16, 4)
+            .int_param(params::quavers_per_beat, 1, 4, 2)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -77,13 +86,13 @@ impl Module for Clock {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("bpm");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::bpm);
         self.bpm = v;
         self.beat_phase_delta = self.bpm / (60.0 * self.sample_rate);
-        let v = params.int("beats_per_bar");
+        let v = p.get(params::beats_per_bar);
         self.beats_per_bar = v as u32;
-        let v = params.int("quavers_per_beat");
+        let v = p.get(params::quavers_per_beat);
         self.quavers_per_beat = v as u32;
     }
 

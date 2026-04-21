@@ -34,6 +34,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
 use patches_dsp::{fast_tanh, fast_sine, BitcrusherKernel, DcBlocker, ToneFilter};
 
 params_enum! {
@@ -46,6 +47,16 @@ params_enum! {
 }
 
 // ─── Module ──────────────────────────────────────────────────────────────────
+
+module_params! {
+    Drive {
+        mode:  Enum<DriveMode>,
+        drive: Float,
+        tone:  Float,
+        bias:  Float,
+        mix:   Float,
+    }
+}
 
 pub struct Drive {
     instance_id: InstanceId,
@@ -71,10 +82,10 @@ impl Module for Drive {
             .mono_in("drive_cv")
             .mono_out("out")
             .enum_param("mode", DriveMode::VARIANTS, "saturate")
-            .float_param("drive", 0.1, 50.0, 1.0)
-            .float_param("tone", 0.0, 1.0, 0.5)
-            .float_param("bias", -1.0, 1.0, 0.0)
-            .float_param("mix", 0.0, 1.0, 1.0)
+            .float_param(params::drive, 0.1, 50.0, 1.0)
+            .float_param(params::tone, 0.0, 1.0, 0.5)
+            .float_param(params::bias, -1.0, 1.0, 0.0)
+            .float_param(params::mix, 0.0, 1.0, 1.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -101,19 +112,16 @@ impl Module for Drive {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.enum_variant("mode");
-        if let Ok(m) = DriveMode::try_from(v) {
-            self.mode = m;
-        }
-        let v = params.float("drive");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.mode = p.get(params::mode);
+        let v = p.get(params::drive);
         self.drive = v.clamp(0.1, 50.0);
         self.effective_drive = self.drive;
-        let v = params.float("tone");
+        let v = p.get(params::tone);
         self.tone.set_tone(v.clamp(0.0, 1.0));
-        let v = params.float("bias");
+        let v = p.get(params::bias);
         self.bias = v.clamp(-1.0, 1.0);
-        let v = params.float("mix");
+        let v = p.get(params::mix);
         self.mix = v.clamp(0.0, 1.0);
     }
 
