@@ -709,13 +709,36 @@ Deliverable: three runtime-bug classes (wrong kind, missing index,
 typo) become compile errors. Single source of truth for parameter
 name + kind per module.
 
-### Spike 6 — Growth via atomic pointer swap
+### Spike 6 — Grow-only chunked storage with RCU index swap
 
-Scope: implement table growth. Control thread allocates a
-strictly-larger slot array, copies existing slots, atomic pointer
-swap. Audio thread reloads the pointer each call. Old arrays
-retire via a quiescent-pass barrier; dropped on the control
-thread.
+Scope: implement table growth without copying or reconciling
+refcount slots. Storage is a vector of pinned 64-slot chunks
+owned by the control thread; chunk addresses never change. A
+small `ChunkIndex` (array of chunk pointers behind an
+`AtomicPtr`) is the only structure that RCU-swaps on growth:
+control allocates a new index carrying the old chunk pointers
+plus newly-appended chunks, Release-swaps, and retires the old
+index after a quiescence barrier. Audio thread reads the index
+pointer each retain/release and reaches slots via chunk+offset
+decode.
+
+**Why not copy-and-reconcile.** The earlier sketch — control
+allocates a larger slot array, copies existing slots, atomic
+pointer swap — loses refcount deltas. Audio-thread retain /
+release on the old array during the grace period mutates
+refcounts that the new array's copy doesn't see; reconciling
+those deltas back onto the new array requires tracking every
+audio-side mutation during the window (retain-trails, tagged
+release queues). The chunked scheme sidesteps this entirely:
+there is only ever one copy of each slot, so no reconciliation
+window exists. Single-buffered slots, double-buffered index.
+
+**Sizing.** 64-slot chunks (1 KiB each), 1024-chunk cap per
+table. Per-table ceiling: 65 536 slots. Grow-only within a
+session — released slots return to a free list for reuse, so
+steady-state capacity tracks peak concurrent live ids, not
+cumulative mints. Teardown frees all chunks in the control
+side's owning `Vec<Box<Chunk>>`.
 
 **Quiescence mechanism (RCU-style, specialised to one audio
 thread).** Two atomic counters per runtime:
@@ -727,44 +750,46 @@ struct Quiescence {
 }
 ```
 
-Audio-thread callback wrapper:
+Audio-thread bracket (one per retain/release op — per-op
+quiescence is cheap and needs no callback wrapper):
 
 ```rust
-let _g = quiescence.started.fetch_add(1, AcqRel);
-let tbl = refcount_table.load(Acquire);
-// ... retain/release against tbl ...
+let _gen = quiescence.started.fetch_add(1, AcqRel);
+let idx = chunk_index.load(Acquire);
+// ... decode slot from id, bump refcount on *idx ...
 quiescence.completed.fetch_add(1, Release);
 ```
 
 Control-thread retirement:
 
-1. Store new pointer with `Release`.
+1. Store new `ChunkIndex` pointer with `Release`.
 2. Sample `n = started.load(Acquire)` immediately after the swap.
-3. Queue the old table for drop, tagged with `n`.
-4. In the drain loop, drop the old table once
+3. Queue the old index for drop, tagged with `n`.
+4. In the drain loop, drop the old index once
    `completed.load(Acquire) >= n`.
 
 Why this is tight:
 
-- Any callback that could hold the old pointer incremented
+- Any audio op that could hold the old index pointer incremented
   `started` *before* step 2 — so its generation is strictly less
   than `n`.
 - When `completed >= n`, every generation less than `n` has
   finished (on a single audio thread, completion is monotonic and
   gap-free).
-- New callbacks that started after the swap read the new pointer,
-  so they never touched the old table.
+- New audio ops that started after the swap read the new pointer,
+  so they never touched the old index.
 - `Acquire` on `completed` pairs with the audio thread's `Release`
-  on the end-of-callback increment, giving happens-before on
-  anything the callback did against the old table.
+  on the end-of-op increment, giving happens-before on anything
+  the op did against the old index.
 
 Idle audio thread: `completed` stops advancing and the retired
-table sits in the queue. Memory cost is one obsolete table per
-growth event — harmless in practice. On runtime teardown the
-ArcTable drops whole and takes any queued retired tables with it.
+index sits in the queue. Memory cost per retired index is small
+(one `ChunkIndex` box — roughly `MAX_CHUNKS` pointers). On
+runtime teardown the control side force-drains the queue.
 
 Cost on the hot path: two uncontended atomic increments per
-callback (`started` at entry, `completed` at exit). Imperceptible.
+op (`started` at entry, `completed` at exit) plus one extra
+pointer deref (chunk-index → chunk → slot). Imperceptible.
 
 Alternative considered: full epoch-based reclamation
 (crossbeam_epoch). Rejected — EBR generalises to many readers and
@@ -772,21 +797,30 @@ writers; we have one audio thread and one control-thread retirer,
 so the two-counter specialisation is simpler and its invariants
 are directly inspectable.
 
+**Payload types.** One typed `ArcTable<[f32]>` per runtime for
+all heap-owned audio/frame blobs crossing the FFI boundary
+(sample files, convolution IRs, FFT frames). The earlier
+`SongData` second payload type was retired as an unnecessary
+placeholder — tracker data uses its own native
+`ReceivesTrackerData` trait and never crosses FFI. The
+`ArcTable` generic remains payload-agnostic; a second typed
+table can be added if a future FFI-crossing payload needs one.
+
 Tests:
 
-- Stress test: synthetic accretion pattern mirroring live-coding
-  (start with 4 ids of capacity, grow to 4096 over many steps),
-  audio-thread retain/release running continuously, verify no
-  corruption and no audio-thread allocation.
+- Stress test: accretion pattern mirroring live-coding (start at
+  4, grow to >= 4096 across many steps), audio-thread
+  retain/release running continuously, verify no corruption and
+  no audio-thread allocation. See `arc_table_grow_under_audio`
+  (ignored soak).
 - Id validity across growth: ids minted before growth continue to
   resolve correctly after.
-- Retire correctness: old array is dropped exactly once, after all
-  in-flight audio-thread calls that saw it have returned. Assert
-  via a drop counter on the slot array wrapper.
-- Idle-retirement: retire a table, stop the audio thread, verify
-  the queued table drops on runtime teardown.
+- Retire correctness: old index is dropped exactly once, after
+  all in-flight audio-thread ops that saw it have returned.
+- Idle-retirement: retire an index, stop the audio thread,
+  verify the queued index drops on `ArcTableControl` teardown.
 
-Deliverable: tables now adapt to in-session graph growth.
+Deliverable: tables adapt to in-session graph growth.
 `patches-player` live-coding works end-to-end on the new path.
 
 ### Spike 7 — FFI ABI redesign and first external plugin

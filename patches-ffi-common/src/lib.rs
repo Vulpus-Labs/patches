@@ -8,5 +8,5 @@ pub mod types;
 pub use patches_core::ids;
 pub use patches_core::param_frame;
 pub use patches_core::param_layout;
-pub use patches_core::ids::{FloatBufferId, SongDataId};
+pub use patches_core::ids::FloatBufferId;
 pub use types::*;
