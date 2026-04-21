@@ -9,7 +9,7 @@ use super::*;
 /// magnitude ≈ 1 / q_damp at resonance.  For lowpass and highpass the
 /// amplitude passes through a predictable level.  We allow ±1 dB error to
 /// account for the bilinear/numerical approximation.
-
+///
 /// T2-LP: Lowpass at 100 Hz drive (well below 1 kHz cutoff) should pass ≈ 1.0.
 #[test]
 fn t2_frequency_response_lowpass_passband() {

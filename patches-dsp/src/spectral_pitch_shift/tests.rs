@@ -579,11 +579,11 @@ fn envelope_peak_bin(signal: &[f32], fft_size: usize) -> usize {
     // Moving-average smoothing with the same shape the shifter uses.
     let width = (half_n / 32).max(4);
     let mut env = vec![0.0_f32; half_n];
-    for i in 0..half_n {
+    for (i, e) in env.iter_mut().enumerate() {
         let start = i.saturating_sub(width);
         let end = (i + width).min(half_n);
         let sum: f32 = mags[start..end].iter().sum();
-        env[i] = sum / (end - start) as f32;
+        *e = sum / (end - start) as f32;
     }
 
     // Skip DC / near-DC bins where the smoothing picks up broadband noise.
@@ -613,7 +613,7 @@ fn formant_preservation_anchors_envelope_peak() {
     let duration = window_size * 12;
 
     // Broadband noise filtered through a resonant peak biquad at formant_hz.
-    let noise = xorshift_noise(duration, 0x0DDBA11_CAFE_BE42u64);
+    let noise = xorshift_noise(duration, 0x00DD_BA11_CAFE_BE42_u64);
     let coeffs = peak_biquad_coeffs(formant_hz, 6.0, 24.0, sr);
     let signal = biquad_tdf2(&noise, coeffs);
 

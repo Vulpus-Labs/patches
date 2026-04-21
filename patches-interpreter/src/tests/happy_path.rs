@@ -64,7 +64,7 @@ fn poly_synth_layered_patches_file_builds() {
     let file = patches_dsl::parse(src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
     let build_result = build(&result.patch, &registry(), &env()).expect("build failed");
-    assert!(build_result.graph.node_ids().len() > 0);
+    assert!(!build_result.graph.node_ids().is_empty());
 }
 
 #[test]
@@ -73,6 +73,6 @@ fn poly_synth_patches_file_builds() {
     let file = patches_dsl::parse(src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
     let build_result = build(&result.patch, &registry(), &env()).expect("build failed");
-    assert!(build_result.graph.node_ids().len() > 0);
-    assert!(build_result.graph.edge_list().len() > 0);
+    assert!(!build_result.graph.node_ids().is_empty());
+    assert!(!build_result.graph.edge_list().is_empty());
 }

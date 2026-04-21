@@ -91,19 +91,11 @@ impl Module for TransientShaper {
     }
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let mut speed_changed = false;
-        let v = params.float("attack");
-        self.attack_amount = v.clamp(-1.0, 1.0);
-        let v = params.float("sustain");
-        self.sustain_amount = v.clamp(-1.0, 1.0);
-        let v = params.float("speed");
-        self.speed_ms = v.clamp(1.0, 100.0);
-        speed_changed = true;
-        let v = params.float("mix");
-        self.mix = v.clamp(0.0, 1.0);
-        if speed_changed {
-            self.configure_envelopes();
-        }
+        self.attack_amount = params.float("attack").clamp(-1.0, 1.0);
+        self.sustain_amount = params.float("sustain").clamp(-1.0, 1.0);
+        self.speed_ms = params.float("speed").clamp(1.0, 100.0);
+        self.mix = params.float("mix").clamp(0.0, 1.0);
+        self.configure_envelopes();
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -138,7 +130,6 @@ impl Module for TransientShaper {
 
 #[cfg(test)]
 mod tests {
-    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::{assert_nearly, ModuleHarness, params};
 

@@ -75,22 +75,11 @@ impl Module for Adsr {
     }
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let mut changed = false;
-        let v = params.float("attack");
-        self.attack_secs = v;
-        changed = true;
-        let v = params.float("decay");
-        self.decay_secs = v;
-        changed = true;
-        let v = params.float("sustain");
-        self.sustain = v;
-        changed = true;
-        let v = params.float("release");
-        self.release_secs = v;
-        changed = true;
-        if changed {
-            self.core.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
-        }
+        self.attack_secs = params.float("attack");
+        self.decay_secs = params.float("decay");
+        self.sustain = params.float("sustain");
+        self.release_secs = params.float("release");
+        self.core.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -121,7 +110,6 @@ impl Module for Adsr {
 
 #[cfg(test)]
 mod tests {
-    use patches_core::ParameterValue;
     use super::*;
     use patches_core::AudioEnvironment;
     use patches_core::test_support::{assert_within, ModuleHarness, params};

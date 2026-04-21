@@ -50,11 +50,13 @@ fn tick_without_edge_holds_previous_values() {
     let data = data_single_pattern(vec![vec![step(2.0, 0.25, true, true)]]);
     let mut core = PatternPlayerCore::new(SR, 1);
 
-    let mut frame = ClockBusFrame::default();
-    frame.tick_trigger = 1.0;
-    frame.bank_index = 0.0;
-    frame.tick_duration = 100.0 / SR;
-    frame.step_index = 0.0;
+    let mut frame = ClockBusFrame {
+        tick_trigger: 1.0,
+        bank_index: 0.0,
+        tick_duration: 100.0 / SR,
+        step_index: 0.0,
+        ..Default::default()
+    };
     core.tick(&frame, &data);
     assert!(core.trigger_pending[0]);
     let cv1_after_edge = core.cv1[0];
@@ -74,13 +76,14 @@ fn trigger_edge_detect_fires_once_per_rising_edge() {
     let data = data_single_pattern(vec![vec![step(1.0, 0.0, true, true)]]);
     let mut core = PatternPlayerCore::new(SR, 1);
 
-    let mut frame = ClockBusFrame::default();
-    frame.bank_index = 0.0;
-    frame.tick_duration = 100.0 / SR;
-    frame.step_index = 0.0;
-
+    let mut frame = ClockBusFrame {
+        bank_index: 0.0,
+        tick_duration: 100.0 / SR,
+        step_index: 0.0,
+        tick_trigger: 1.0,
+        ..Default::default()
+    };
     // Rising edge 1.
-    frame.tick_trigger = 1.0;
     core.tick(&frame, &data);
     assert!(core.trigger_pending[0]);
 
@@ -296,9 +299,11 @@ fn stop_sentinel_clears_all() {
     core.gate[0] = true;
     core.gate[1] = true;
 
-    let mut frame = ClockBusFrame::default();
-    frame.tick_trigger = 1.0;
-    frame.bank_index = -1.0;
+    let frame = ClockBusFrame {
+        tick_trigger: 1.0,
+        bank_index: -1.0,
+        ..Default::default()
+    };
     let data = TrackerData {
         patterns: PatternBank { patterns: vec![] },
         songs: SongBank { songs: vec![] },

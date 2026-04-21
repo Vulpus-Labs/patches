@@ -43,8 +43,8 @@ pub(super) fn reference_ir() -> Vec<f32> {
     let mut ir = vec![0.0_f32; 64];
     ir[0] = 1.0;
     ir[7] = -0.6;
-    for i in 1..ir.len() {
-        ir[i] += 0.9_f32 * (-0.05 * i as f32).exp() * ((i as f32) * 0.3).sin();
+    for (i, v) in ir.iter_mut().enumerate().skip(1) {
+        *v += 0.9_f32 * (-0.05 * i as f32).exp() * ((i as f32) * 0.3).sin();
     }
     ir
 }
