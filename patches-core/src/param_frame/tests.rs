@@ -194,7 +194,7 @@ fn view_perfect_hash_no_collisions_large() {
     ];
     let mut d = ModuleDescriptor::new("Big", empty_shape());
     for n in NAMES {
-        d = d.float_param(n, 0.0, 1.0, 0.0);
+        d = d.float_param(*n, 0.0, 1.0, 0.0);
     }
     let l = compute_layout(&d);
     let defaults = defaults_from(&d);

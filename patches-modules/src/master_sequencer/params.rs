@@ -13,8 +13,13 @@ module_params! {
         sync:          Enum<SyncMode>,
     }
 }
-// Note: `loop` is a Rust keyword — cannot be used as ident in module_params!.
-// The "loop" bool param remains as a string literal at its call site.
+
+// `loop` is a Rust keyword, so it cannot be a macro-generated `params::` const.
+// Declare its typed name by hand instead.
+mod params_extra {
+    use patches_core::params::BoolParamName;
+    pub const LOOP: BoolParamName = BoolParamName::new("loop");
+}
 
 params_enum! {
     pub enum SyncMode {
@@ -30,7 +35,7 @@ impl MasterSequencer {
         self.core.rows_per_beat = p.get(params::rows_per_beat);
         let song = p.int("song");
         self.core.song_index = if song < 0 { None } else { Some(song as usize) };
-        self.core.do_loop = p.bool("loop");
+        self.core.do_loop = p.get(params_extra::LOOP);
         let autostart = p.get(params::autostart);
         self.autostart = autostart;
         if autostart && !self.use_host_transport {

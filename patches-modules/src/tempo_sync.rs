@@ -28,11 +28,17 @@
 //! multiply by 2/3.
 
 use patches_core::{
-    params_enum,
+    module_params, params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    TempoSync {
+        subdivision: Enum<Subdivision>,
+    }
+}
 
 params_enum! {
     pub enum Subdivision {
@@ -101,11 +107,8 @@ impl Module for TempoSync {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.enum_variant("subdivision");
-        if let Ok(s) = Subdivision::try_from(v) {
-            self.subdivision_factor = subdivision_factor(s);
-        }
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.subdivision_factor = subdivision_factor(p.get(params::subdivision));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

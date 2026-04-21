@@ -30,8 +30,19 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
+
+module_params! {
+    Tom {
+        pitch:      Float,
+        sweep:      Float,
+        sweep_time: Float,
+        decay:      Float,
+        noise:      Float,
+    }
+}
 use patches_dsp::{MonoPhaseAccumulator, xorshift64};
 
 pub struct Tom {
@@ -63,11 +74,11 @@ impl Module for Tom {
             .mono_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("pitch", 40.0, 500.0, 120.0)
-            .float_param("sweep", 0.0, 2000.0, 400.0)
-            .float_param("sweep_time", 0.001, 0.3, 0.03)
-            .float_param("decay", 0.05, 2.0, 0.3)
-            .float_param("noise", 0.0, 1.0, 0.15)
+            .float_param(params::pitch, 40.0, 500.0, 120.0)
+            .float_param(params::sweep, 0.0, 2000.0, 400.0)
+            .float_param(params::sweep_time, 0.001, 0.3, 0.03)
+            .float_param(params::decay, 0.05, 2.0, 0.3)
+            .float_param(params::noise, 0.0, 1.0, 0.15)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -99,18 +110,13 @@ impl Module for Tom {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("pitch");
-        self.pitch = v;
-        let v = params.float("sweep");
-        self.sweep_start = v;
-        let v = params.float("sweep_time");
-        self.sweep_time = v;
-        let v = params.float("decay");
-        self.decay_time = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.pitch = p.get(params::pitch);
+        self.sweep_start = p.get(params::sweep);
+        self.sweep_time = p.get(params::sweep_time);
+        self.decay_time = p.get(params::decay);
         self.amp_env.set_decay(self.decay_time);
-        let v = params.float("noise");
-        self.noise_amt = v;
+        self.noise_amt = p.get(params::noise);
         self.pitch_sweep.set_params(self.pitch + self.sweep_start, self.pitch, self.sweep_time);
     }
 

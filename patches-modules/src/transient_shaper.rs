@@ -32,8 +32,18 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::EnvelopeFollower;
+
+module_params! {
+    TransientShaper {
+        attack:  Float,
+        sustain: Float,
+        speed:   Float,
+        mix:     Float,
+    }
+}
 
 pub struct TransientShaper {
     instance_id: InstanceId,
@@ -66,10 +76,10 @@ impl Module for TransientShaper {
         ModuleDescriptor::new("TransientShaper", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .float_param("attack", -1.0, 1.0, 0.0)
-            .float_param("sustain", -1.0, 1.0, 0.0)
-            .float_param("speed", 1.0, 100.0, 20.0)
-            .float_param("mix", 0.0, 1.0, 1.0)
+            .float_param(params::attack, -1.0, 1.0, 0.0)
+            .float_param(params::sustain, -1.0, 1.0, 0.0)
+            .float_param(params::speed, 1.0, 100.0, 20.0)
+            .float_param(params::mix, 0.0, 1.0, 1.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -90,11 +100,11 @@ impl Module for TransientShaper {
         s
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.attack_amount = params.float("attack").clamp(-1.0, 1.0);
-        self.sustain_amount = params.float("sustain").clamp(-1.0, 1.0);
-        self.speed_ms = params.float("speed").clamp(1.0, 100.0);
-        self.mix = params.float("mix").clamp(0.0, 1.0);
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.attack_amount = p.get(params::attack).clamp(-1.0, 1.0);
+        self.sustain_amount = p.get(params::sustain).clamp(-1.0, 1.0);
+        self.speed_ms = p.get(params::speed).clamp(1.0, 100.0);
+        self.mix = p.get(params::mix).clamp(0.0, 1.0);
         self.configure_envelopes();
     }
 

@@ -2,7 +2,16 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    Tuner {
+        octave: Int,
+        semi:   Int,
+        cent:   Int,
+    }
+}
 
 /// Offsets a V/OCT pitch signal by a fixed interval.
 ///
@@ -53,9 +62,9 @@ impl Module for Tuner {
         ModuleDescriptor::new("Tuner", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .int_param("octave", -8,   8,   0)
-            .int_param("semi",   -12,  12,  0)
-            .int_param("cent",   -100, 100, 0)
+            .int_param(params::octave, -8,   8,   0)
+            .int_param(params::semi,   -12,  12,  0)
+            .int_param(params::cent,   -100, 100, 0)
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -71,10 +80,10 @@ impl Module for Tuner {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.octave = params.int("octave");
-        self.semi = params.int("semi");
-        self.cent = params.int("cent");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.octave = p.get(params::octave);
+        self.semi = p.get(params::semi);
+        self.cent = p.get(params::cent);
         self.offset = Self::recompute_offset(self.octave, self.semi, self.cent);
     }
 
