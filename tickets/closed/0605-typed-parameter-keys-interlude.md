@@ -20,15 +20,16 @@ module via `module_params!`.
 - [x] Typed name / key types in `patches-core` (`FloatParamName`, `FloatParamArray`, `FloatParamKey`, …, `EnumParamName<E>`, `ParamEnum` trait).
 - [x] `ParamKey` trait; `ParamView::get<K>` added.
 - [x] `module_params!` macro emitting typed consts.
-- [ ] `ModuleDescriptor` builder takes typed names (hard switch).
-- [ ] Every in-process module migrated to `module_params!` + typed
+- [x] `ModuleDescriptor` builder takes typed names (hard switch).
+- [x] Every in-process module migrated to `module_params!` + typed
       access.
-- [ ] `params_enum!` consumers carry `ParamEnum` (done in Phase A) and
+- [x] `params_enum!` consumers carry `ParamEnum` (done in Phase A) and
       are used via `EnumParamName<E>`.
-- [ ] Legacy string-based `ParamView` getters (`float`, `int`, `bool`,
+- [x] Legacy string-based `ParamView` getters (`float`, `int`, `bool`,
       `enum_variant`, `buffer`) removed.
-- [ ] Compile-fail tests: wrong kind, scalar-vs-array mismatch, typo.
-- [ ] `cargo test` + `cargo clippy` clean.
+- [x] Compile-fail tests: wrong kind, scalar-vs-array mismatch, typo
+      (ticket 0607).
+- [x] `cargo test` + `cargo clippy` clean.
 
 ## Notes
 
