@@ -1,7 +1,20 @@
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::params_enum;
 
 use super::MasterSequencer;
+
+module_params! {
+    MasterSequencerParams {
+        bpm:           Float,
+        rows_per_beat: Int,
+        autostart:     Bool,
+        swing:         Float,
+        sync:          Enum<SyncMode>,
+    }
+}
+// Note: `loop` is a Rust keyword — cannot be used as ident in module_params!.
+// The "loop" bool param remains as a string literal at its call site.
 
 params_enum! {
     pub enum SyncMode {
@@ -12,23 +25,23 @@ params_enum! {
 }
 
 impl MasterSequencer {
-    pub(super) fn apply_params(&mut self, params: &ParamView<'_>) {
-        self.core.bpm = params.float("bpm");
-        self.core.rows_per_beat = params.int("rows_per_beat");
-        let song = params.int("song");
+    pub(super) fn apply_params(&mut self, p: &ParamView<'_>) {
+        self.core.bpm = p.get(params::bpm);
+        self.core.rows_per_beat = p.get(params::rows_per_beat);
+        let song = p.int("song");
         self.core.song_index = if song < 0 { None } else { Some(song as usize) };
-        self.core.do_loop = params.bool("loop");
-        let autostart = params.bool("autostart");
+        self.core.do_loop = p.bool("loop");
+        let autostart = p.get(params::autostart);
         self.autostart = autostart;
         if autostart && !self.use_host_transport {
             self.core.start_playback();
         }
-        self.core.swing = params.float("swing");
-        let sync = params.enum_variant("sync");
-        self.use_host_transport = match SyncMode::try_from(sync) {
-            Ok(SyncMode::Free) => false,
-            Ok(SyncMode::Host) => true,
-            _ => self.hosted,
+        self.core.swing = p.get(params::swing);
+        let sync: SyncMode = p.get(params::sync);
+        self.use_host_transport = match sync {
+            SyncMode::Free => false,
+            SyncMode::Host => true,
+            SyncMode::Auto => self.hosted,
         };
     }
 }

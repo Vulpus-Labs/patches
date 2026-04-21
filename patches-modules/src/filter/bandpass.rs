@@ -1,5 +1,6 @@
 use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -8,6 +9,14 @@ use patches_core::{
 use patches_dsp::MonoBiquad;
 
 use super::compute_biquad_bandpass;
+
+module_params! {
+    ResonantBandpassParams {
+        center:      Float,
+        bandwidth_q: Float,
+        saturate:    Bool,
+    }
+}
 
 /// Resonant bandpass filter (biquad, Transposed Direct Form II, constant 0 dB peak gain).
 ///
@@ -69,9 +78,9 @@ impl Module for ResonantBandpass {
             .mono_in("fm")
             .mono_in("resonance_cv")
             .mono_out("out")
-            .float_param("center",      -2.0, 12.0, 6.0)
-            .float_param("bandwidth_q", 0.1,  20.0, 1.0)
-            .bool_param("saturate", false)
+            .float_param(params::center,      -2.0, 12.0, 6.0)
+            .float_param(params::bandwidth_q, 0.1,  20.0, 1.0)
+            .bool_param(params::saturate, false)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -96,13 +105,10 @@ impl Module for ResonantBandpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("center");
-        self.center = v;
-        let v = params.float("bandwidth_q");
-        self.bandwidth_q = v;
-        let v = params.bool("saturate");
-        self.saturate = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.center = p.get(params::center);
+        self.bandwidth_q = p.get(params::bandwidth_q);
+        self.saturate = p.get(params::saturate);
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }

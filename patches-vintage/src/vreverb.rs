@@ -47,6 +47,7 @@
 //! | `size` | float | 0.0--1.0 | `0.5` | Room size (scales all four delays) |
 //! | `decay` | float | 0.0--0.95 | `0.7` | FDN feedback coefficient |
 
+use patches_core::module_params;
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
 use patches_core::{
@@ -56,6 +57,14 @@ use patches_core::{
 use patches_dsp::approximate::fast_tanh;
 
 use crate::bbd::{Bbd, BbdDevice};
+
+module_params! {
+    VReverb {
+        dry_wet: Float,
+        size:    Float,
+        decay:   Float,
+    }
+}
 
 const DECAY_MAX: f32 = 0.95;
 const N: usize = 8;
@@ -126,9 +135,9 @@ impl Module for VReverb {
             .mono_in("decay_cv")
             .mono_out("out_left")
             .mono_out("out_right")
-            .float_param("dry_wet", 0.0, 1.0, 0.3)
-            .float_param("size", 0.0, 1.0, 0.5)
-            .float_param("decay", 0.0, DECAY_MAX, 0.7)
+            .float_param(params::dry_wet, 0.0, 1.0, 0.3)
+            .float_param(params::size, 0.0, 1.0, 0.5)
+            .float_param(params::decay, 0.0, DECAY_MAX, 0.7)
     }
 
     fn prepare(
@@ -158,10 +167,10 @@ impl Module for VReverb {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.dry_wet = params.float("dry_wet").clamp(0.0, 1.0);
-        self.size = params.float("size").clamp(0.0, 1.0);
-        self.decay = params.float("decay").clamp(0.0, DECAY_MAX);
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
+        self.size = p.get(params::size).clamp(0.0, 1.0);
+        self.decay = p.get(params::decay).clamp(0.0, DECAY_MAX);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

@@ -10,6 +10,8 @@ use patches_core::param_frame::ParamView;
 use patches_tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
 
 mod params;
+use params::params as mp;
+use params::SyncMode;
 
 /// Drives song playback with transport controls, swing, and a poly clock bus
 /// per song channel.
@@ -97,13 +99,13 @@ impl Module for MasterSequencer {
             .mono_in("pause")
             .mono_in("resume")
             .poly_out_multi("clock", n)
-            .float_param("bpm", 1.0, 999.0, 120.0)
-            .int_param("rows_per_beat", 1, 64, 4)
+            .float_param(mp::bpm, 1.0, 999.0, 120.0)
+            .int_param(mp::rows_per_beat, 1, 64, 4)
             .song_name_param("song")
             .bool_param("loop", true)
-            .bool_param("autostart", true)
-            .float_param("swing", 0.0, 1.0, 0.5)
-            .enum_param("sync", self::params::SyncMode::VARIANTS, "auto")
+            .bool_param(mp::autostart, true)
+            .float_param(mp::swing, 0.0, 1.0, 0.5)
+            .enum_param_typed(mp::sync, SyncMode::Auto)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {

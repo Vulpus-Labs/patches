@@ -1,5 +1,6 @@
 //! Per-sample processor loop and parameter machinery for [`super::FdnReverb`].
 
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -17,6 +18,16 @@ use super::params::{
     derive_params, Character, ScaledCharacter, CHARS, MAX_LINE_SECS, MAX_PRE_DELAY_SECS,
 };
 use super::FdnReverb;
+
+module_params! {
+    FdnReverbParams {
+        size:       Float,
+        brightness: Float,
+        pre_delay:  Float,
+        mix:        Float,
+        character:  Enum<Character>,
+    }
+}
 
 impl FdnReverb {
     /// Recompute absorption coefficients for all 8 lines and ramp to new targets.
@@ -55,11 +66,11 @@ impl Module for FdnReverb {
             .mono_in("mix_cv")
             .mono_out("out_left")
             .mono_out("out_right")
-            .float_param("size",       0.0, 1.0, 0.5)
-            .float_param("brightness", 0.0, 1.0, 0.5)
-            .float_param("pre_delay",  0.0, 1.0, 0.0)
-            .float_param("mix",        0.0, 1.0, 1.0)
-            .enum_param("character", Character::VARIANTS, "hall")
+            .float_param(params::size,       0.0, 1.0, 0.5)
+            .float_param(params::brightness, 0.0, 1.0, 0.5)
+            .float_param(params::pre_delay,  0.0, 1.0, 0.0)
+            .float_param(params::mix,        0.0, 1.0, 1.0)
+            .enum_param_typed(params::character, Character::Hall)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -131,23 +142,23 @@ impl Module for FdnReverb {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("size");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let v = p.get(params::size);
         if self.size_param != v {
             self.size_param = v;
             self.absorption_dirty = true;
         }
-        let v = params.float("brightness");
+        let v = p.get(params::brightness);
         if self.bright_param != v {
             self.bright_param = v;
             self.absorption_dirty = true;
         }
-        let v = params.float("pre_delay");
+        let v = p.get(params::pre_delay);
         self.pre_delay_param = v;
-        let v = params.float("mix");
+        let v = p.get(params::mix);
         self.mix_param = v;
-        let v = params.enum_variant("character");
-        let new_char = Character::try_from(v).unwrap_or(Character::Hall) as usize;
+        let v: Character = p.get(params::character);
+        let new_char = v as usize;
         if self.character != new_char {
             self.character = new_char;
             self.sc = ScaledCharacter::new(new_char, self.sample_rate);

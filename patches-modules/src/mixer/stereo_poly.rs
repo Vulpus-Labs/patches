@@ -2,9 +2,17 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
-use crate::common::param_access::{get_bool, get_float};
+module_params! {
+    StereoPolyMixerParams {
+        level: FloatArray,
+        pan:   FloatArray,
+        mute:  BoolArray,
+        solo:  BoolArray,
+    }
+}
 
 /// Stereo poly N-channel mixer with per-channel level, pan, mute, and solo.
 ///
@@ -60,10 +68,10 @@ impl Module for StereoPolyMixer {
             .mono_in_multi("pan_cv",   n)
             .poly_out("out_left")
             .poly_out("out_right")
-            .float_param_multi("level", shape.channels, 0.0, 1.0, 1.0)
-            .float_param_multi("pan",   shape.channels, -1.0, 1.0, 0.0)
-            .bool_param_multi("mute",   shape.channels, false)
-            .bool_param_multi("solo",   shape.channels, false)
+            .float_param_multi(params::level, shape.channels, 0.0, 1.0, 1.0)
+            .float_param_multi(params::pan,   shape.channels, -1.0, 1.0, 0.0)
+            .bool_param_multi(params::mute,   shape.channels, false)
+            .bool_param_multi(params::solo,   shape.channels, false)
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -85,12 +93,13 @@ impl Module for StereoPolyMixer {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         for i in 0..self.channels {
-            self.levels[i] = get_float(params, "level", i, self.levels[i]);
-            self.pans[i]   = get_float(params, "pan",   i, self.pans[i]);
-            self.mutes[i]  = get_bool(params,  "mute",  i, self.mutes[i]);
-            self.solos[i]  = get_bool(params,  "solo",  i, self.solos[i]);
+            let idx = i as u16;
+            self.levels[i] = p.get(params::level.at(idx));
+            self.pans[i]   = p.get(params::pan.at(idx));
+            self.mutes[i]  = p.get(params::mute.at(idx));
+            self.solos[i]  = p.get(params::solo.at(idx));
         }
         self.any_solo = (0..self.channels).any(|i| self.solos[i] && !self.mutes[i]);
     }

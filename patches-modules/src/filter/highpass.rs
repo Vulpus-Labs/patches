@@ -1,5 +1,6 @@
 use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -8,6 +9,14 @@ use patches_core::{
 use patches_dsp::MonoBiquad;
 
 use super::compute_biquad_highpass;
+
+module_params! {
+    ResonantHighpassParams {
+        cutoff:    Float,
+        resonance: Float,
+        saturate:  Bool,
+    }
+}
 
 /// Resonant highpass filter (biquad, Transposed Direct Form II).
 ///
@@ -72,9 +81,9 @@ impl Module for ResonantHighpass {
             .mono_in("fm")
             .mono_in("resonance_cv")
             .mono_out("out")
-            .float_param("cutoff",    -2.0, 12.0, 6.0)
-            .float_param("resonance", 0.0,  1.0,  0.0)
-            .bool_param("saturate", false)
+            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
+            .float_param(params::resonance, 0.0,  1.0,  0.0)
+            .bool_param(params::saturate, false)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -99,13 +108,10 @@ impl Module for ResonantHighpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("cutoff");
-        self.cutoff = v;
-        let v = params.float("resonance");
-        self.resonance = v;
-        let v = params.bool("saturate");
-        self.saturate = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.cutoff = p.get(params::cutoff);
+        self.resonance = p.get(params::resonance);
+        self.saturate = p.get(params::saturate);
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }

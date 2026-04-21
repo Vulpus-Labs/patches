@@ -38,9 +38,9 @@
 //! | `gain[i]` | float | 0.0--1.0 | `1.0` | Tap gain (per tap) |
 //! | `feedback[i]` | float | 0.0--0.95 | `0.0` | Self-feedback per tap |
 
+use patches_core::module_params;
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
-use patches_core::parameter_map::ParameterKey;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
@@ -55,6 +55,15 @@ use crate::compander::{CompanderParams, Compressor, Expander};
 /// which image-folding becomes audible. The module uses
 /// [`BbdDevice::BBD_4096`] for its taps, putting vintage analog-delay
 /// territory in range.
+module_params! {
+    VBbd {
+        dry_wet:  Float,
+        delay_ms: FloatArray,
+        gain:     FloatArray,
+        feedback: FloatArray,
+    }
+}
+
 const DELAY_MS_MAX: f32 = 340.0;
 const DELAY_MS_MIN: f32 = 1.0;
 const FEEDBACK_MAX: f32 = 0.95;
@@ -100,11 +109,6 @@ pub struct VBbd {
     fb_cv: Vec<MonoInput>,
 }
 
-#[inline]
-fn get_float(params: &ParamView<'_>, name: &str, index: usize, _default: f32) -> f32 {
-    params.float(ParameterKey::new(name, index))
-}
-
 impl Module for VBbd {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         let n = shape.channels;
@@ -115,10 +119,10 @@ impl Module for VBbd {
             .mono_in_multi("gain_cv", n)
             .mono_in_multi("fb_cv", n)
             .mono_out("out")
-            .float_param("dry_wet", 0.0, 1.0, 0.5)
-            .float_param_multi("delay_ms", n, DELAY_MS_MIN, DELAY_MS_MAX, 40.0)
-            .float_param_multi("gain", n, 0.0, 1.0, 1.0)
-            .float_param_multi("feedback", n, 0.0, FEEDBACK_MAX, 0.0)
+            .float_param(params::dry_wet, 0.0, 1.0, 0.5)
+            .float_param_multi(params::delay_ms, n, DELAY_MS_MIN, DELAY_MS_MAX, 40.0)
+            .float_param_multi(params::gain, n, 0.0, 1.0, 1.0)
+            .float_param_multi(params::feedback, n, 0.0, FEEDBACK_MAX, 0.0)
     }
 
     fn prepare(
@@ -149,14 +153,13 @@ impl Module for VBbd {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.dry_wet = params.float("dry_wet").clamp(0.0, 1.0);
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
         for i in 0..self.taps {
-            self.delay_ms[i] =
-                get_float(params, "delay_ms", i, self.delay_ms[i]).clamp(DELAY_MS_MIN, DELAY_MS_MAX);
-            self.gains[i] = get_float(params, "gain", i, self.gains[i]).clamp(0.0, 1.0);
-            self.feedbacks[i] =
-                get_float(params, "feedback", i, self.feedbacks[i]).clamp(0.0, FEEDBACK_MAX);
+            let idx = i as u16;
+            self.delay_ms[i] = p.get(params::delay_ms.at(idx)).clamp(DELAY_MS_MIN, DELAY_MS_MAX);
+            self.gains[i] = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
+            self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, FEEDBACK_MAX);
         }
     }
 

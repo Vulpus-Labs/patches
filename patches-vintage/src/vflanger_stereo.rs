@@ -35,6 +35,7 @@
 //! | `mix` | float | 0.0--1.0 | `0.5` | Dry/wet on the HF path |
 //! | `lf_bypass` | bool | on/off | `on` | 150 Hz bass bypass |
 
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -44,6 +45,17 @@ use patches_core::{
 mod core;
 
 pub use self::core::VFlangerStereoCore;
+
+module_params! {
+    VFlangerStereo {
+        rate_hz:   Float,
+        depth:     Float,
+        manual_ms: Float,
+        feedback:  Float,
+        mix:       Float,
+        lf_bypass: Bool,
+    }
+}
 
 pub struct VFlangerStereo {
     instance_id: InstanceId,
@@ -71,12 +83,12 @@ impl Module for VFlangerStereo {
             .mono_in("feedback_cv")
             .mono_out("out_left")
             .mono_out("out_right")
-            .float_param("rate_hz", 0.05, 12.0, 0.5)
-            .float_param("depth", 0.0, 1.0, 0.5)
-            .float_param("manual_ms", 0.3, 8.0, 2.0)
-            .float_param("feedback", -0.93, 0.93, 0.3)
-            .float_param("mix", 0.0, 1.0, 0.5)
-            .bool_param("lf_bypass", true)
+            .float_param(params::rate_hz, 0.05, 12.0, 0.5)
+            .float_param(params::depth, 0.0, 1.0, 0.5)
+            .float_param(params::manual_ms, 0.3, 8.0, 2.0)
+            .float_param(params::feedback, -0.93, 0.93, 0.3)
+            .float_param(params::mix, 0.0, 1.0, 0.5)
+            .bool_param(params::lf_bypass, true)
     }
 
     fn prepare(
@@ -99,13 +111,13 @@ impl Module for VFlangerStereo {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.core.set_rate(params.float("rate_hz"));
-        self.core.set_depth(params.float("depth"));
-        self.core.set_manual(params.float("manual_ms"));
-        self.core.set_feedback(params.float("feedback"));
-        self.core.set_mix(params.float("mix"));
-        self.core.set_lf_bypass(params.bool("lf_bypass"));
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.core.set_rate(p.get(params::rate_hz));
+        self.core.set_depth(p.get(params::depth));
+        self.core.set_manual(p.get(params::manual_ms));
+        self.core.set_feedback(p.get(params::feedback));
+        self.core.set_mix(p.get(params::mix));
+        self.core.set_lf_bypass(p.get(params::lf_bypass));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

@@ -1,8 +1,15 @@
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
+use patches_core::module_params;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
 use patches_core::param_frame::ParamView;
 use patches_core::{AudioEnvironment, Module};
+
+module_params! {
+    Gain {
+        gain: Float,
+    }
+}
 
 pub struct Gain {
     descriptor: ModuleDescriptor,
@@ -17,7 +24,7 @@ impl Module for Gain {
         ModuleDescriptor::new("Gain", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .float_param("gain", 0.0, 2.0, 1.0)
+            .float_param(params::gain, 0.0, 2.0, 1.0)
     }
 
     fn prepare(
@@ -34,8 +41,8 @@ impl Module for Gain {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.gain = params.float("gain");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.gain = p.get(params::gain);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

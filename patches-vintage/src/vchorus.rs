@@ -38,6 +38,7 @@
 //! | `mode` | enum | `off`/`one`/`two`/`both` | `one` | Chorus mode (`both` only valid on `bright`) |
 //! | `hiss` | float | 0.0--1.0 | `1.0` | Wet-path hiss amount |
 
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -50,6 +51,14 @@ mod core;
 mod tests;
 
 pub use self::core::{Mode, VChorusCore, Variant};
+
+module_params! {
+    VChorus {
+        variant: Enum<Variant>,
+        mode:    Enum<Mode>,
+        hiss:    Float,
+    }
+}
 
 /// Vintage BBD chorus. See the module-level documentation.
 pub struct VChorus {
@@ -74,9 +83,9 @@ impl Module for VChorus {
             .mono_in("depth_cv")
             .mono_out("out_left")
             .mono_out("out_right")
-            .enum_param("variant", Variant::VARIANTS, "bright")
-            .enum_param("mode", Mode::VARIANTS, "one")
-            .float_param("hiss", 0.0, 1.0, 1.0)
+            .enum_param_typed(params::variant, Variant::Bright)
+            .enum_param_typed(params::mode, Mode::One)
+            .float_param(params::hiss, 0.0, 1.0, 1.0)
     }
 
     fn prepare(
@@ -98,14 +107,10 @@ impl Module for VChorus {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        if let Ok(variant) = Variant::try_from(params.enum_variant("variant")) {
-            self.core.set_variant(variant);
-        }
-        if let Ok(mode) = Mode::try_from(params.enum_variant("mode")) {
-            self.core.set_mode(mode);
-        }
-        self.core.set_hiss(params.float("hiss"));
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.core.set_variant(p.get(params::variant));
+        self.core.set_mode(p.get(params::mode));
+        self.core.set_hiss(p.get(params::hiss));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
