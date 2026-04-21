@@ -32,7 +32,20 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    Snare {
+        pitch:       Float,
+        tone:        Float,
+        body_decay:  Float,
+        noise_decay: Float,
+        noise_freq:  Float,
+        noise_q:     Float,
+        snap:        Float,
+    }
+}
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
 use patches_dsp::{MonoPhaseAccumulator, SvfKernel, svf_f, q_to_damp, xorshift64};
 
@@ -69,13 +82,13 @@ impl Module for Snare {
             .mono_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
-            .float_param("pitch", 80.0, 400.0, 180.0)
-            .float_param("tone", 0.0, 1.0, 0.5)
-            .float_param("body_decay", 0.01, 1.0, 0.15)
-            .float_param("noise_decay", 0.01, 1.0, 0.2)
-            .float_param("noise_freq", 500.0, 10000.0, 3000.0)
-            .float_param("noise_q", 0.0, 1.0, 0.3)
-            .float_param("snap", 0.0, 1.0, 0.5)
+            .float_param(params::pitch, 80.0, 400.0, 180.0)
+            .float_param(params::tone, 0.0, 1.0, 0.5)
+            .float_param(params::body_decay, 0.01, 1.0, 0.15)
+            .float_param(params::noise_decay, 0.01, 1.0, 0.2)
+            .float_param(params::noise_freq, 500.0, 10000.0, 3000.0)
+            .float_param(params::noise_q, 0.0, 1.0, 0.3)
+            .float_param(params::snap, 0.0, 1.0, 0.5)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -116,23 +129,16 @@ impl Module for Snare {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("pitch");
-        self.pitch = v;
-        let v = params.float("tone");
-        self.tone = v;
-        let v = params.float("body_decay");
-        self.body_decay_time = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.pitch = p.get(params::pitch);
+        self.tone = p.get(params::tone);
+        self.body_decay_time = p.get(params::body_decay);
         self.body_env.set_decay(self.body_decay_time);
-        let v = params.float("noise_decay");
-        self.noise_decay_time = v;
+        self.noise_decay_time = p.get(params::noise_decay);
         self.noise_env.set_decay(self.noise_decay_time);
-        let v = params.float("noise_freq");
-        self.noise_freq = v;
-        let v = params.float("noise_q");
-        self.noise_q = v;
-        let v = params.float("snap");
-        self.snap = v;
+        self.noise_freq = p.get(params::noise_freq);
+        self.noise_q = p.get(params::noise_q);
+        self.snap = p.get(params::snap);
         self.pitch_sweep.set_params(self.pitch * 2.0, self.pitch, 0.02);
         let f = svf_f(self.noise_freq, self.sample_rate);
         let d = q_to_damp(self.noise_q);

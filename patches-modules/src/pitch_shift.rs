@@ -31,6 +31,7 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
 
+use patches_core::module_params;
 use patches_core::cable_pool::CablePool;
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
@@ -38,6 +39,15 @@ use patches_core::{
     AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput,
     OutputPort,
 };
+
+module_params! {
+    PitchShift {
+        semitones: Float,
+        mix:       Float,
+        formants:  Bool,
+        mono:      Bool,
+    }
+}
 
 use patches_dsp::AtomicF32;
 use patches_dsp::fft::RealPackedFft;
@@ -169,10 +179,10 @@ impl patches_core::Module for PitchShift {
             .mono_in("pitch")
             .mono_in("mix")
             .mono_out("out")
-            .float_param("semitones", -24.0, 24.0, 0.0)
-            .float_param("mix", 0.0, 1.0, 1.0)
-            .bool_param("formants", false)
-            .bool_param("mono", false)
+            .float_param(params::semitones, -24.0, 24.0, 0.0)
+            .float_param(params::mix, 0.0, 1.0, 1.0)
+            .bool_param(params::formants, false)
+            .bool_param(params::mono, false)
     }
 
     fn prepare(
@@ -225,15 +235,11 @@ impl patches_core::Module for PitchShift {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("semitones");
-        self.base_semitones = v;
-        let v = params.float("mix");
-        self.base_mix = v;
-        let v = params.bool("formants");
-        self.shared.preserve_formants.store(v, Relaxed);
-        let v = params.bool("mono");
-        self.shared.mono.store(v, Relaxed);
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.base_semitones = p.get(params::semitones);
+        self.base_mix = p.get(params::mix);
+        self.shared.preserve_formants.store(p.get(params::formants), Relaxed);
+        self.shared.mono.store(p.get(params::mono), Relaxed);
         // Push current parameter values to shared atomics.
         self.update_shared_params(0.0, 0.0);
     }

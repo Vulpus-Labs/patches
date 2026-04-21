@@ -2,7 +2,14 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    RingMod {
+        drive: Float,
+    }
+}
 
 /// Analog ring modulator based on Julian Parker's diode-bridge model.
 ///
@@ -93,7 +100,7 @@ impl Module for RingMod {
             .mono_in("signal")
             .mono_in("carrier")
             .mono_out("out")
-            .float_param("drive", 0.2, 20.0, 1.0)
+            .float_param(params::drive, 0.2, 20.0, 1.0)
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -107,8 +114,8 @@ impl Module for RingMod {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let db = params.float("drive");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        let db = p.get(params::drive);
         self.gain = db_to_gain(db);
     }
 

@@ -4,7 +4,15 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PeriodicUpdate, PolyInput, PolyOutput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    PolySvf {
+        cutoff: Float,
+        q:      Float,
+    }
+}
 use patches_dsp::{PolySvfKernel, svf_f, q_to_damp};
 
 /// Polyphonic State Variable Filter (Chamberlin topology).
@@ -83,8 +91,8 @@ impl Module for PolySvf {
             .poly_out("lowpass")
             .poly_out("highpass")
             .poly_out("bandpass")
-            .float_param("cutoff", -2.0, 12.0, 6.0)
-            .float_param("q", 0.0, 1.0, 0.0)
+            .float_param(params::cutoff, -2.0, 12.0, 6.0)
+            .float_param(params::q, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -117,11 +125,9 @@ impl Module for PolySvf {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        let v = params.float("cutoff");
-        self.cutoff = v;
-        let v = params.float("q");
-        self.q = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.cutoff = p.get(params::cutoff);
+        self.q = p.get(params::q);
         self.has_cv = self.any_cv_connected();
         if !self.has_cv {
             self.recompute_static_coeffs();

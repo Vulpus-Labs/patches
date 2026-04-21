@@ -2,7 +2,17 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+module_params! {
+    PolyQuant {
+        pitch:  FloatArray,
+        centre: Float,
+        scale:  Float,
+    }
+}
+
 use crate::quant_util::{parse_pitches, quantise_note};
 
 /// Polyphonic V/OCT quantiser.
@@ -52,9 +62,9 @@ impl Module for PolyQuant {
             .poly_in("in")
             .poly_out("out")
             .poly_out("trig_out")
-            .float_param_multi("pitch", n, -8.0, 8.0, 0.0)
-            .float_param("centre", -4.0, 4.0, 0.0)
-            .float_param("scale", -4.0, 4.0, 1.0)
+            .float_param_multi(params::pitch, n, -8.0, 8.0, 0.0)
+            .float_param(params::centre, -4.0, 4.0, 0.0)
+            .float_param(params::scale, -4.0, 4.0, 1.0)
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -75,13 +85,11 @@ impl Module for PolyQuant {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let channels = self.descriptor.shape.channels.max(1);
-        parse_pitches(params, channels, &mut self.notes_buf, &mut self.notes_len);
-        let v = params.float("centre");
-        self.centre = v;
-        let v = params.float("scale");
-        self.scale = v;
+        parse_pitches(p, channels, &mut self.notes_buf, &mut self.notes_len);
+        self.centre = p.get(params::centre);
+        self.scale = p.get(params::scale);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
