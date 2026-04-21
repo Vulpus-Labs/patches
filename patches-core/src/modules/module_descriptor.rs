@@ -183,20 +183,22 @@ macro_rules! port_builder {
 //   $single(name, $args…) — appends one ParameterDescriptor with index 0
 //   $multi(name, count, $args…) — appends `count` ParameterDescriptors with indices 0..count
 macro_rules! param_builder {
-    ($single:ident, $multi:ident, ($($arg:ident : $ty:ty),*), $kind:expr) => {
-        pub fn $single(mut self, name: &'static str, $($arg: $ty),*) -> Self {
+    ($single:ident, $multi:ident, $NameTy:ty, $ArrayTy:ty, ($($arg:ident : $ty:ty),*), $kind:expr) => {
+        pub fn $single(mut self, name: impl Into<$NameTy>, $($arg: $ty),*) -> Self {
+            let name: $NameTy = name.into();
             self.parameters.push(ParameterDescriptor {
-                name,
+                name: name.as_str(),
                 index: 0,
                 parameter_type: $kind,
             });
             self
         }
 
-        pub fn $multi(mut self, name: &'static str, count: usize, $($arg: $ty),*) -> Self {
+        pub fn $multi(mut self, name: impl Into<$ArrayTy>, count: usize, $($arg: $ty),*) -> Self {
+            let name: $ArrayTy = name.into();
             for i in 0..count {
                 self.parameters.push(ParameterDescriptor {
-                    name,
+                    name: name.as_str(),
                     index: i,
                     parameter_type: $kind,
                 });
@@ -244,24 +246,122 @@ impl ModuleDescriptor {
     // ── Parameter builder methods (generated) ───────────────────────────────
 
     param_builder!(float_param, float_param_multi,
+        crate::params::FloatParamName, crate::params::FloatParamArray,
         (min: f32, max: f32, default: f32),
         ParameterKind::Float { min, max, default });
 
     param_builder!(int_param, int_param_multi,
+        crate::params::IntParamName, crate::params::IntParamArray,
         (min: i64, max: i64, default: i64),
         ParameterKind::Int { min, max, default });
 
     param_builder!(bool_param, bool_param_multi,
+        crate::params::BoolParamName, crate::params::BoolParamArray,
         (default: bool),
         ParameterKind::Bool { default });
 
-    param_builder!(enum_param, enum_param_multi,
-        (variants: &'static [&'static str], default: &'static str),
-        ParameterKind::Enum { variants, default });
+    /// Legacy string-typed enum parameter. Accepts an explicit `variants`
+    /// slice — typically `E::VARIANTS` from a `params_enum!` type. A typed
+    /// migration target (`enum_param_typed`) is available for callers that
+    /// carry a `ParamEnum` type.
+    pub fn enum_param(
+        mut self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        default: &'static str,
+    ) -> Self {
+        self.parameters.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::Enum { variants, default },
+        });
+        self
+    }
 
-    param_builder!(file_param, file_param_multi,
-        (extensions: &'static [&'static str]),
-        ParameterKind::File { extensions });
+    pub fn enum_param_multi(
+        mut self,
+        name: &'static str,
+        count: usize,
+        variants: &'static [&'static str],
+        default: &'static str,
+    ) -> Self {
+        for i in 0..count {
+            self.parameters.push(ParameterDescriptor {
+                name,
+                index: i,
+                parameter_type: ParameterKind::Enum { variants, default },
+            });
+        }
+        self
+    }
+
+    /// Typed enum parameter. Variants come from `E::VARIANTS`; default value
+    /// is supplied as a Rust enum value.
+    pub fn enum_param_typed<E: crate::params::ParamEnum>(
+        mut self,
+        name: impl Into<crate::params::EnumParamName<E>>,
+        default: E,
+    ) -> Self {
+        let name: crate::params::EnumParamName<E> = name.into();
+        let variants = E::VARIANTS;
+        let default_s = variants[default.to_variant() as usize];
+        self.parameters.push(ParameterDescriptor {
+            name: name.as_str(),
+            index: 0,
+            parameter_type: ParameterKind::Enum { variants, default: default_s },
+        });
+        self
+    }
+
+    pub fn enum_param_multi_typed<E: crate::params::ParamEnum>(
+        mut self,
+        name: impl Into<crate::params::EnumParamArray<E>>,
+        count: usize,
+        default: E,
+    ) -> Self {
+        let name: crate::params::EnumParamArray<E> = name.into();
+        let variants = E::VARIANTS;
+        let default_s = variants[default.to_variant() as usize];
+        for i in 0..count {
+            self.parameters.push(ParameterDescriptor {
+                name: name.as_str(),
+                index: i,
+                parameter_type: ParameterKind::Enum { variants, default: default_s },
+            });
+        }
+        self
+    }
+
+    /// Legacy string-typed file parameter (ADR 0046: no `ParamView::get` site,
+    /// resolved off-thread into a buffer slot).
+    pub fn file_param(
+        mut self,
+        name: &'static str,
+        extensions: &'static [&'static str],
+    ) -> Self {
+        self.parameters.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::File { extensions },
+        });
+        self
+    }
+
+    pub fn file_param_multi(
+        mut self,
+        name: &'static str,
+        count: usize,
+        extensions: &'static [&'static str],
+    ) -> Self {
+        for i in 0..count {
+            self.parameters.push(ParameterDescriptor {
+                name,
+                index: i,
+                parameter_type: ParameterKind::File { extensions },
+            });
+        }
+        self
+    }
 
     /// Declare a song-name parameter. The DSL supplies a string; the
     /// interpreter resolves it to a `ParameterValue::Int` song-bank index.

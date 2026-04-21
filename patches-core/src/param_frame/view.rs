@@ -119,10 +119,22 @@ impl ParamViewIndex {
 
     #[inline]
     fn lookup(&self, key: &ParameterKey) -> Entry {
+        self.lookup_raw(key.name.as_bytes(), key.index as u64)
+    }
+
+    /// Non-allocating lookup by static name + index. Used by the typed
+    /// `ParamKey` path (ADR 0046).
+    #[inline]
+    fn lookup_static(&self, name: &'static str, index: u16) -> Entry {
+        self.lookup_raw(name.as_bytes(), index as u64)
+    }
+
+    #[inline]
+    fn lookup_raw(&self, name_bytes: &[u8], index: u64) -> Entry {
         if self.table.is_empty() {
             return Entry::Empty;
         }
-        let h = key_hash_seed(key, self.seed);
+        let h = hash_raw(name_bytes, index, self.seed);
         let bucket = (h & self.mask) as usize;
         let entry = self.table[bucket];
         // In debug, verify the full hash matches — catches unknown keys.
@@ -130,15 +142,21 @@ impl ParamViewIndex {
             Entry::Scalar { name_hash, .. } | Entry::Buffer { name_hash, .. } => {
                 debug_assert_eq!(
                     name_hash, h,
-                    "ParamView: unknown key {:?} (bucket collision with a declared key)",
-                    key,
+                    "ParamView: unknown key (name={:?} index={}) bucket collision with a declared key",
+                    std::str::from_utf8(name_bytes).unwrap_or("<non-utf8>"),
+                    index,
                 );
                 if name_hash != h {
                     return Entry::Empty;
                 }
             }
             Entry::Empty => {
-                debug_assert!(false, "ParamView: unknown key {:?}", key);
+                debug_assert!(
+                    false,
+                    "ParamView: unknown key name={:?} index={}",
+                    std::str::from_utf8(name_bytes).unwrap_or("<non-utf8>"),
+                    index,
+                );
             }
         }
         entry
@@ -240,6 +258,90 @@ impl<'a> ParamView<'a> {
         }
     }
 
+    // ── Typed (ADR 0046) getters ─────────────────────────────────────────
+
+    /// Typed generic access. Return type is driven by the key's
+    /// [`ParamKey::Value`].
+    #[inline]
+    pub fn get<K: crate::params::ParamKey>(&self, key: K) -> K::Value {
+        key.fetch(self)
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn fetch_float_static(&self, name: &'static str, index: u16) -> f32 {
+        match self.index.lookup_static(name, index) {
+            Entry::Scalar { tag: ScalarTag::Float, offset, .. } => {
+                read_unaligned::<f32>(self.scalar_area, offset as usize)
+            }
+            _ => {
+                debug_assert!(false, "ParamView::get::<Float>: {name} idx={index} not a Float slot");
+                0.0
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn fetch_int_static(&self, name: &'static str, index: u16) -> i64 {
+        match self.index.lookup_static(name, index) {
+            Entry::Scalar { tag: ScalarTag::Int, offset, .. } => {
+                read_unaligned::<i64>(self.scalar_area, offset as usize)
+            }
+            _ => {
+                debug_assert!(false, "ParamView::get::<Int>: {name} idx={index} not an Int slot");
+                0
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn fetch_bool_static(&self, name: &'static str, index: u16) -> bool {
+        match self.index.lookup_static(name, index) {
+            Entry::Scalar { tag: ScalarTag::Bool, offset, .. } => {
+                self.scalar_area[offset as usize] != 0
+            }
+            _ => {
+                debug_assert!(false, "ParamView::get::<Bool>: {name} idx={index} not a Bool slot");
+                false
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn fetch_enum_static(&self, name: &'static str, index: u16) -> u32 {
+        match self.index.lookup_static(name, index) {
+            Entry::Scalar { tag: ScalarTag::Enum, offset, .. } => {
+                read_unaligned::<u32>(self.scalar_area, offset as usize)
+            }
+            _ => {
+                debug_assert!(false, "ParamView::get::<Enum>: {name} idx={index} not an Enum slot");
+                0
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn fetch_buffer_static(&self, name: &'static str, index: u16) -> Option<FloatBufferId> {
+        match self.index.lookup_static(name, index) {
+            Entry::Buffer { slot_index, .. } => {
+                let raw = self.buffer_slots[slot_index as usize];
+                if raw == 0 {
+                    None
+                } else {
+                    Some(FloatBufferId::from_u64_unchecked(raw))
+                }
+            }
+            _ => {
+                debug_assert!(false, "ParamView::get::<Buffer>: {name} idx={index} not a Buffer slot");
+                None
+            }
+        }
+    }
+
     #[inline]
     pub fn buffer(&self, key: impl Into<ParameterKey>) -> Option<FloatBufferId> {
         let k = key.into();
@@ -274,13 +376,18 @@ fn read_unaligned<T: Copy>(area: &[u8], offset: usize) -> T {
 /// — no allocation, no dependencies.
 #[inline]
 fn key_hash_seed(key: &ParameterKey, seed: u64) -> u64 {
+    hash_raw(key.name.as_bytes(), key.index as u64, seed)
+}
+
+#[inline]
+fn hash_raw(name: &[u8], index: u64, seed: u64) -> u64 {
     const K: u64 = 0x517c_c1b7_2722_0a95;
     let mut h = seed ^ 0xcbf2_9ce4_8422_2325;
-    for &b in key.name.as_bytes() {
+    for &b in name {
         h ^= b as u64;
         h = h.wrapping_mul(K);
     }
-    h ^= (key.index as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    h ^= index.wrapping_add(0x9e37_79b9_7f4a_7c15);
     h = h.wrapping_mul(K);
     h ^= h >> 33;
     h

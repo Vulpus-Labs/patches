@@ -26,6 +26,8 @@ pub mod graphs;
 pub mod midi;
 pub mod midi_io;
 pub mod modules;
+pub mod module_params;
+pub mod params;
 pub mod provenance;
 pub mod qname;
 pub mod tracker;

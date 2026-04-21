@@ -42,12 +42,23 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
 use crate::common::delay_buffer::DelayBuffer;
 use crate::common::{TapFeedbackFilter, ToneFilter};
 use crate::common::approximate::fast_tanh;
-use crate::common::param_access::{get_float, get_int};
+
+module_params! {
+    Delay {
+        dry_wet:  Float,
+        delay_ms: IntArray,
+        gain:     FloatArray,
+        feedback: FloatArray,
+        tone:     FloatArray,
+        drive:    FloatArray,
+    }
+}
 
 // ─── Delay ────────────────────────────────────────────────────────────────────
 
@@ -102,12 +113,12 @@ impl Module for Delay {
             .mono_in_multi("return",   n)
             .mono_out("out")
             .mono_out_multi("send", n)
-            .float_param("dry_wet", 0.0, 1.0, 1.0)
-            .int_param_multi("delay_ms", n, 0, 2000, 500)
-            .float_param_multi("gain",    n, 0.0, 1.0, 1.0)
-            .float_param_multi("feedback",n, 0.0, 1.0, 0.0)
-            .float_param_multi("tone",    n, 0.0, 1.0, 1.0)
-            .float_param_multi("drive",   n, 0.1, 10.0, 1.0)
+            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
+            .int_param_multi(params::delay_ms, n, 0, 2000, 500)
+            .float_param_multi(params::gain,     n, 0.0, 1.0, 1.0)
+            .float_param_multi(params::feedback, n, 0.0, 1.0, 0.0)
+            .float_param_multi(params::tone,     n, 0.0, 1.0, 1.0)
+            .float_param_multi(params::drive,    n, 0.1, 10.0, 1.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -162,20 +173,19 @@ impl Module for Delay {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        
-        let v = params.float("dry_wet");
-        self.dry_wet = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.dry_wet = p.get(params::dry_wet);
         for i in 0..self.taps {
-            self.delay_ms[i]  = get_int(params,   "delay_ms", i, self.delay_ms[i] as i64).clamp(0, 2000) as f32;
-            self.gains[i]     = get_float(params,  "gain",     i, self.gains[i]    ).clamp(0.0, 1.0);
-            self.feedbacks[i] = get_float(params,  "feedback", i, self.feedbacks[i]).clamp(0.0, 1.0);
-            let tone          = get_float(params,  "tone",     i, self.tones[i]    ).clamp(0.0, 1.0);
+            let idx = i as u16;
+            self.delay_ms[i]  = (p.get(params::delay_ms.at(idx))).clamp(0, 2000) as f32;
+            self.gains[i]     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
+            self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
+            let tone          = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
             if (tone - self.tones[i]).abs() > f32::EPSILON {
                 self.tones[i] = tone;
                 self.tone_filters[i].set_tone(tone);
             }
-            self.drives[i]    = get_float(params,  "drive",    i, self.drives[i]   ).clamp(0.1, 10.0);
+            self.drives[i]    = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
         }
     }
 
