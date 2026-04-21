@@ -1,0 +1,5 @@
+error[E0425]: cannot find value `not_a_real_param` in module `params`
+  --> tests/compile_fail/undefined_name.rs:10:30
+   |
+10 |     let _ = view.get(params::not_a_real_param);
+   |                              ^^^^^^^^^^^^^^^^ not found in `params`

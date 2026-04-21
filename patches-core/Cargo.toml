@@ -11,3 +11,6 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+
+[dev-dependencies]
+trybuild = "1"
