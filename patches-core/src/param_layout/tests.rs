@@ -1,4 +1,4 @@
-use patches_core::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
+use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
 
 use super::*;
 

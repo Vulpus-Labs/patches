@@ -17,7 +17,7 @@ macro_rules! impl_id {
     ($ty:ident) => {
         impl $ty {
             #[allow(dead_code)]
-            pub(crate) fn pack(generation: u32, slot: u32) -> Self {
+            pub fn pack(generation: u32, slot: u32) -> Self {
                 Self(((generation as u64) << 32) | (slot as u64))
             }
 
@@ -33,7 +33,7 @@ macro_rules! impl_id {
                 self.0
             }
 
-            pub(crate) fn from_u64_unchecked(raw: u64) -> Self {
+            pub fn from_u64_unchecked(raw: u64) -> Self {
                 Self(raw)
             }
         }

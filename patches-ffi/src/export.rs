@@ -61,13 +61,23 @@ macro_rules! export_modules {
                 params_json_len: usize,
             ) {
                 let _ = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                    // ADR 0045 Spike 5 bridge: rebuild ParamView on the plugin side
+                    // from the JSON ParameterMap until Spike 7 replaces this path.
                     let module = unsafe { &mut *(handle as *mut T) };
                     let json_slice = unsafe {
                         ::std::slice::from_raw_parts(params_json, params_json_len)
                     };
-                    let mut params = $crate::json::deserialize_parameter_map(json_slice)
+                    let map = $crate::json::deserialize_parameter_map(json_slice)
                         .expect("invalid params JSON in update_validated_parameters");
-                    $crate::__reexport::Module::update_validated_parameters(module, &mut params);
+                    let descriptor = $crate::__reexport::Module::descriptor(module);
+                    let layout = $crate::__reexport::compute_layout(descriptor);
+                    let index = $crate::__reexport::ParamViewIndex::from_layout(&layout);
+                    let mut frame = $crate::__reexport::ParamFrame::with_layout(&layout);
+                    let defaults = $crate::__reexport::defaults_from_descriptor(descriptor);
+                    $crate::__reexport::pack_into(&layout, &defaults, &map, &mut frame)
+                        .expect("pack_into failed in update_validated_parameters");
+                    let view = $crate::__reexport::ParamView::new(&index, &frame);
+                    $crate::__reexport::Module::update_validated_parameters(module, &view);
                 }));
             }
 

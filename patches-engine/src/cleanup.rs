@@ -7,7 +7,8 @@
 
 use patches_core::Module;
 
-use patches_planner::ExecutionPlan;
+use patches_ffi_common::param_frame::ParamFrame;
+use patches_planner::{ExecutionPlan, ParamState};
 
 /// Default module pool capacity: number of `Option<Box<dyn Module>>` slots
 /// pre-allocated on the audio thread.
@@ -29,4 +30,13 @@ pub enum CleanupAction {
     DropModule(Box<dyn Module>),
     /// An [`ExecutionPlan`] replaced by a newer one.
     DropPlan(Box<ExecutionPlan>),
+    /// Per-instance parameter-plane state evicted alongside a tombstoned
+    /// module. Carries the module's [`ParamLayout`], [`ParamViewIndex`], and
+    /// current [`ParamFrame`] — all of which hold owned heap allocations
+    /// that must not drop on the audio thread.
+    DropParamState(Box<ParamState>),
+    /// A `ParamFrame` displaced from a pool-resident `ParamState` when a
+    /// parameter update installs a newer frame. The old frame's `Vec<u64>`
+    /// storage drops off-thread to keep the update path allocation-free.
+    DropParamFrame(Box<ParamFrame>),
 }

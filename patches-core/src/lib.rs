@@ -14,6 +14,9 @@ pub const COEFF_UPDATE_INTERVAL: u32 = BASE_PERIODIC_UPDATE_INTERVAL;
 pub mod test_support;
 
 pub mod audio_environment;
+pub mod ids;
+pub mod param_frame;
+pub mod param_layout;
 pub mod build_error;
 pub mod cable_pool;
 pub mod diagnostics;

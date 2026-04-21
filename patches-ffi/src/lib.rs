@@ -22,4 +22,6 @@ pub mod __reexport {
         ModuleShape, OutputPort, ParameterMap,
     };
     pub use patches_core::modules::InstanceId;
+    pub use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+    pub use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
 }

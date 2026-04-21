@@ -53,6 +53,7 @@ use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 use patches_core::{
     validate_parameters, AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
@@ -144,7 +145,7 @@ impl patches_core::Module for ConvolutionReverb {
         self.core.update_parameters(params, "ConvReverb")
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         self.core.update_validated_parameters(params);
     }
 

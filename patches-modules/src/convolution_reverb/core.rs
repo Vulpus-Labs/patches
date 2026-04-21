@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use patches_core::build_error::BuildError;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
 use patches_dsp::slot_deck::OverlapBuffer;
@@ -227,33 +228,23 @@ impl ConvReverbCore {
     /// Handle parameter updates on the audio thread (hot reload).
     ///
     /// Must be real-time safe: no file I/O, no thread spawn/join, no blocking.
-    pub(super) fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
+    pub(super) fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("mix");
+        self.base_mix = v;
 
-        // Handle pre-processed file data — FloatBuffer from planner.
-        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
-            self.ir_variant_idx = FILE_VARIANT_IDX;
-            self.send_load_request(IrLoadRequest {
-                stereo: self.stereo,
-                variant_idx: FILE_VARIANT_IDX,
-                sample_rate: self.sample_rate,
-                base_mix: self.base_mix,
-                pre_fft_data: Some(Arc::clone(data)),
-            });
-            self.update_shared_mix(0.0);
-            return;
-        }
+        // TODO(E101-0599): resolve FloatBufferId via ArcTable for hot reload of
+        // file-backed IRs. ParamView now exposes only a FloatBufferId; the Arc
+        // resolution path is not yet wired. Until then, file IR hot-reload is
+        // a no-op; initial build via update_parameters still works.
+        let _ = params.buffer("ir_data");
 
         let mut ir_changed = false;
 
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("ir") {
-            let idx = v as u8;
-            if (idx as usize) < IR_VARIANTS.len() && idx != self.ir_variant_idx {
-                self.ir_variant_idx = idx;
-                ir_changed = true;
-            }
+        let v = params.enum_variant("ir");
+        let idx = v as u8;
+        if (idx as usize) < IR_VARIANTS.len() && idx != self.ir_variant_idx {
+            self.ir_variant_idx = idx;
+            ir_changed = true;
         }
 
         if ir_changed && self.ir_variant_idx != FILE_VARIANT_IDX {

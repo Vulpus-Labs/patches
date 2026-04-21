@@ -33,7 +33,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::{fast_tanh, fast_sine, BitcrusherKernel, DcBlocker, ToneFilter};
 
 params_enum! {
@@ -101,25 +101,20 @@ impl Module for Drive {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("mode") {
-            if let Ok(m) = DriveMode::try_from(v) {
-                self.mode = m;
-            }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.enum_variant("mode");
+        if let Ok(m) = DriveMode::try_from(v) {
+            self.mode = m;
         }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("drive") {
-            self.drive = v.clamp(0.1, 50.0);
-            self.effective_drive = self.drive;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("tone") {
-            self.tone.set_tone(v.clamp(0.0, 1.0));
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("bias") {
-            self.bias = v.clamp(-1.0, 1.0);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.mix = v.clamp(0.0, 1.0);
-        }
+        let v = params.float("drive");
+        self.drive = v.clamp(0.1, 50.0);
+        self.effective_drive = self.drive;
+        let v = params.float("tone");
+        self.tone.set_tone(v.clamp(0.0, 1.0));
+        let v = params.float("bias");
+        self.bias = v.clamp(-1.0, 1.0);
+        let v = params.float("mix");
+        self.mix = v.clamp(0.0, 1.0);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

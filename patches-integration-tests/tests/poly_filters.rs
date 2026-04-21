@@ -14,6 +14,7 @@ use patches_core::{
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_engine::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator, PolyResonantLowpass};
 
@@ -71,10 +72,8 @@ impl Module for PolySineSource {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(f)) = params.get_scalar("frequency") {
-            self.frequency = *f;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.frequency = params.float("frequency");
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

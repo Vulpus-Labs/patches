@@ -13,6 +13,8 @@ use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
+use patches_core::modules::parameter_map::ParameterValue;
+use patches_core::param_frame::ParamView;
 use patches_core::{AudioEnvironment, Module};
 use patches_registry::ModuleBuilder;
 
@@ -67,8 +69,28 @@ impl Module for DylibModule {
         unreachable!("DylibModule::prepare is not callable directly; use DylibModuleBuilder")
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        let json = json::serialize_parameter_map(params);
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        // ADR 0045 Spike 5 bridge: rebuild map from ParamView for the JSON FFI path until Spike 7.
+        use patches_core::modules::module_descriptor::ParameterKind;
+        use patches_core::modules::parameter_map::ParameterKey;
+        let mut map = ParameterMap::new();
+        for p in &self.descriptor.parameters {
+            let key = ParameterKey::new(p.name, p.index);
+            let val = match &p.parameter_type {
+                ParameterKind::Float { .. } => ParameterValue::Float(params.float(key.clone())),
+                ParameterKind::Int { .. } | ParameterKind::SongName => {
+                    ParameterValue::Int(params.int(key.clone()))
+                }
+                ParameterKind::Bool { .. } => ParameterValue::Bool(params.bool(key.clone())),
+                ParameterKind::Enum { .. } => ParameterValue::Enum(params.enum_variant(key.clone())),
+                ParameterKind::File { .. } => {
+                    // Skip File in JSON bridge until Spike 7; plugin sees it as absent.
+                    continue;
+                }
+            };
+            map.insert_param(p.name.to_string(), p.index, val);
+        }
+        let json = json::serialize_parameter_map(&map);
         unsafe {
             (self.vtable.update_validated_parameters)(
                 self.handle,

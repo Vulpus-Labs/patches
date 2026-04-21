@@ -14,6 +14,19 @@
 use super::*;
 use patches_core::{AudioEnvironment, ModuleShape};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
+
+fn apply_params_to(seq: &mut MasterSequencer, params: &ParameterMap) {
+    let desc = seq.descriptor().clone();
+    let layout = compute_layout(&desc);
+    let index = ParamViewIndex::from_layout(&layout);
+    let mut frame = ParamFrame::with_layout(&layout);
+    let defaults = defaults_from_descriptor(&desc);
+    pack_into(&layout, &defaults, params, &mut frame).expect("test pack_into failed");
+    let view = ParamView::new(&index, &frame);
+    seq.update_validated_parameters(&view);
+}
 use patches_core::{
     PatternBank, SongBank, Song, Pattern, TrackerStep,
 };
@@ -71,7 +84,7 @@ fn sync_free_overrides_hosted() {
     let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Free as u32));
-    seq.update_validated_parameters(&mut params);
+    apply_params_to(&mut seq, &params);
     assert!(!seq.use_host_transport, "sync=free should override hosted");
 }
 
@@ -82,7 +95,7 @@ fn sync_host_overrides_standalone() {
     let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Host as u32));
-    seq.update_validated_parameters(&mut params);
+    apply_params_to(&mut seq, &params);
     assert!(seq.use_host_transport, "sync=host should override standalone");
 }
 

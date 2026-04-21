@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyGateInput, PolyOutput, PolyTriggerInput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::AdsrCore;
 
 /// Polyphonic ADSR envelope generator.
@@ -74,24 +74,20 @@ impl Module for PolyAdsr {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         let mut changed = false;
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("attack") {
-            self.attack_secs = *v;
-            changed = true;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
-            self.decay_secs = *v;
-            changed = true;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("sustain") {
-            self.sustain = *v;
-            changed = true;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("release") {
-            self.release_secs = *v;
-            changed = true;
-        }
+        let v = params.float("attack");
+        self.attack_secs = v;
+        changed = true;
+        let v = params.float("decay");
+        self.decay_secs = v;
+        changed = true;
+        let v = params.float("sustain");
+        self.sustain = v;
+        changed = true;
+        let v = params.float("release");
+        self.release_secs = v;
+        changed = true;
         if changed {
             for voice in &mut self.voices {
                 voice.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
@@ -126,6 +122,7 @@ impl Module for PolyAdsr {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::AudioEnvironment;
     use patches_core::test_support::{assert_within, ModuleHarness, params};

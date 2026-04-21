@@ -5,6 +5,8 @@ use crate::cables::{InputPort, OutputPort};
 use super::instance_id::InstanceId;
 use super::module_descriptor::{ModuleDescriptor, ModuleShape, ParameterKind};
 use super::parameter_map::{ParameterMap, ParameterValue};
+use crate::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+use crate::param_layout::{compute_layout, defaults_from_descriptor};
 
 /// Trait for modules that need periodic coefficient recalculation.
 ///
@@ -212,22 +214,30 @@ pub trait Module: Send {
     /// validation passes. All keys are guaranteed to be declared in the descriptor and their
     /// values are guaranteed to be correctly typed and within bounds.
     ///
-    /// Takes `&ParameterMap` (read-only). After E096 / ADR 0045 Spike 0 every
-    /// remaining `ParameterValue` variant is `Copy` or a refcounted handle
-    /// (`FloatBuffer(Arc<[f32]>)`), so destructive take is no longer needed —
-    /// a `get_scalar` + `Arc::clone` has the same O(1) cost on the audio
-    /// thread. This alignment with the `ParamView` shape of Spike 5 is
-    /// intentional.
-    fn update_validated_parameters(&mut self, params: &ParameterMap);
+    /// Reads values from the packed, read-only `ParamView` borrowed over the
+    /// pre-packed `ParamFrame` that the engine installed during plan
+    /// adoption (ADR 0045 §4, Spike 5).
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>);
 
     /// Validate `params` against the module's descriptor, then apply them.
     ///
-    /// The default implementation calls [`validate_parameters`] and, on success, forwards
-    /// to [`update_validated_parameters`](Module::update_validated_parameters). Override only
-    /// if custom validation beyond what [`validate_parameters`] provides is needed.
+    /// Default implementation packs `params` into a fresh `ParamFrame` on
+    /// the control thread, builds a `ParamView`, and dispatches. Used by
+    /// [`Module::build`]'s first-time parameter application; the audio
+    /// thread uses pool-owned frames directly.
     fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
         validate_parameters(params, self.descriptor())?;
-        self.update_validated_parameters(params);
+        let layout = compute_layout(self.descriptor());
+        let index = ParamViewIndex::from_layout(&layout);
+        let mut frame = ParamFrame::with_layout(&layout);
+        let defaults = defaults_from_descriptor(self.descriptor());
+        pack_into(&layout, &defaults, params, &mut frame).map_err(|e| BuildError::Custom {
+            module: self.descriptor().module_name,
+            message: format!("pack_into failed: {e:?}"),
+            origin: None,
+        })?;
+        let view = ParamView::new(&index, &frame);
+        self.update_validated_parameters(&view);
         Ok(())
     }
 

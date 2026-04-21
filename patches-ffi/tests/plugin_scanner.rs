@@ -86,10 +86,7 @@ fn scanner_same_version_is_skipped_on_rescan() {
     // Second pass: same version → skipped as LowerVersion (v == existing).
     assert!(second.loaded.is_empty());
     assert!(second.replaced.is_empty());
-    assert!(matches!(
-        second.skipped.iter().find(|s| matches!(s, SkipReason::LowerVersion { name, .. } if name == "Gain")),
-        Some(_),
-    ));
+    assert!(second.skipped.iter().find(|s| matches!(s, SkipReason::LowerVersion { name, .. } if name == "Gain")).is_some());
 }
 
 #[test]

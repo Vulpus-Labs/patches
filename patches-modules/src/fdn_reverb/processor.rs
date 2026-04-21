@@ -1,6 +1,6 @@
 //! Per-sample processor loop and parameter machinery for [`super::FdnReverb`].
 
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
@@ -131,35 +131,30 @@ impl Module for FdnReverb {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("size") {
-            if self.size_param != *v {
-                self.size_param = *v;
-                self.absorption_dirty = true;
-            }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("size");
+        if self.size_param != v {
+            self.size_param = v;
+            self.absorption_dirty = true;
         }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("brightness") {
-            if self.bright_param != *v {
-                self.bright_param = *v;
-                self.absorption_dirty = true;
-            }
+        let v = params.float("brightness");
+        if self.bright_param != v {
+            self.bright_param = v;
+            self.absorption_dirty = true;
         }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("pre_delay") {
-            self.pre_delay_param = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.mix_param = *v;
-        }
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("character") {
-            let new_char = Character::try_from(v).unwrap_or(Character::Hall) as usize;
-            if self.character != new_char {
-                self.character = new_char;
-                self.sc = ScaledCharacter::new(new_char, self.sample_rate);
-                self.absorption_dirty = true;
-                let new_inc = CHARS[new_char].lfo_rate_hz / self.sample_rate;
-                for acc in &mut self.lfo_phases {
-                    acc.phase_increment = new_inc;
-                }
+        let v = params.float("pre_delay");
+        self.pre_delay_param = v;
+        let v = params.float("mix");
+        self.mix_param = v;
+        let v = params.enum_variant("character");
+        let new_char = Character::try_from(v).unwrap_or(Character::Hall) as usize;
+        if self.character != new_char {
+            self.character = new_char;
+            self.sc = ScaledCharacter::new(new_char, self.sample_rate);
+            self.absorption_dirty = true;
+            let new_inc = CHARS[new_char].lfo_rate_hz / self.sample_rate;
+            for acc in &mut self.lfo_phases {
+                acc.phase_increment = new_inc;
             }
         }
     }

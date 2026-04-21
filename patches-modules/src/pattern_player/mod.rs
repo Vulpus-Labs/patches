@@ -5,7 +5,7 @@ use patches_core::{
     MonoOutput, PolyInput, ModuleShape, OutputPort,
     TrackerData, ReceivesTrackerData,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 use patches_tracker_core::{ClockBusFrame, PatternPlayerCore};
 
 /// A generic multi-channel step sequencer that reads a poly clock bus, steps
@@ -80,7 +80,7 @@ impl Module for PatternPlayer {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {
         // PatternPlayer has no parameters — all data comes from tracker data
         // and the clock bus.
     }

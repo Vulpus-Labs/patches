@@ -64,7 +64,8 @@ fn apply_plan(
     let pool = stale.module_pool_mut();
 
     for &idx in &plan.tombstones {
-        if let Some(module) = pool.tombstone(idx) {
+        let (module, param_state) = pool.tombstone(idx);
+        if let Some(module) = module {
             if let Err(rtrb::PushError::Full(action)) =
                 cleanup_tx.push(CleanupAction::DropModule(module))
             {
@@ -74,12 +75,29 @@ fn apply_plan(
                 drop(action);
             }
         }
+        if let Some(ps) = param_state {
+            if let Err(rtrb::PushError::Full(action)) =
+                cleanup_tx.push(CleanupAction::DropParamState(Box::new(ps)))
+            {
+                drop(action);
+            }
+        }
     }
-    for (idx, m) in plan.new_modules.drain(..) {
-        pool.install(idx, m);
+    let states = std::mem::take(&mut plan.new_module_param_state);
+    for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+        pool.install(idx, m, ps);
     }
-    for (idx, params) in &mut plan.parameter_updates {
-        pool.update_parameters(*idx, params);
+    let frames = std::mem::take(&mut plan.param_frames);
+    let mut frames_iter = frames.into_iter();
+    for (idx, _params) in &mut plan.parameter_updates {
+        let (_, frame) = frames_iter.next().expect("param_frames parallel to parameter_updates");
+        if let Some(old) = pool.update_parameters(*idx, frame) {
+            if let Err(rtrb::PushError::Full(action)) =
+                cleanup_tx.push(CleanupAction::DropParamFrame(Box::new(old)))
+            {
+                drop(action);
+            }
+        }
     }
     for (idx, inputs, outputs) in &plan.port_updates {
         pool.set_ports(*idx, inputs, outputs);
@@ -113,12 +131,25 @@ mod tests {
     };
     use patches_core::parameter_map::ParameterMap;
 
-    use patches_planner::ExecutionPlan;
+    use patches_planner::{ExecutionPlan, ParamState};
     use crate::cleanup::CleanupAction;
     use crate::execution_state::ReadyState;
     use crate::pool::ModulePool;
 
     use super::{apply_plan, init_buffer_pool, spawn_cleanup_thread};
+
+    fn empty_param_state() -> ParamState {
+        ParamState::new_for_descriptor(
+            &ModuleDescriptor {
+                module_name: "Stub",
+                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                inputs: vec![],
+                outputs: vec![],
+                parameters: vec![],
+            },
+            &ParameterMap::new(),
+        )
+    }
 
     // ── Minimal module stub ───────────────────────────────────────────────────
 
@@ -155,7 +186,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor }
         }
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, _pool: &mut CablePool<'_>) {}
@@ -238,13 +269,14 @@ mod tests {
         let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS, 4);
         let mut plan = ExecutionPlan::empty();
         plan.new_modules.push((2, Box::new(Stub::new())));
+        plan.new_module_param_state.push(empty_param_state());
 
         let ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         // Verify by transitioning to stale and tombstoning
         let mut stale = ready.make_stale();
-        assert!(stale.module_pool_mut().tombstone(2).is_some(), "module should be installed at slot 2");
-        assert!(stale.module_pool_mut().tombstone(0).is_none(), "unmentioned slot 0 should remain empty");
+        assert!(stale.module_pool_mut().tombstone(2).0.is_some(), "module should be installed at slot 2");
+        assert!(stale.module_pool_mut().tombstone(0).0.is_none(), "unmentioned slot 0 should remain empty");
     }
 
     /// Tombstoned modules are removed from the pool and sent to the cleanup ring buffer.
@@ -255,6 +287,7 @@ mod tests {
         // First install a module via a plan.
         let mut install_plan = ExecutionPlan::empty();
         install_plan.new_modules.push((1, Box::new(Stub::new())));
+        install_plan.new_module_param_state.push(empty_param_state());
         let state = apply_plan(install_plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         let mut plan = ExecutionPlan::empty();
@@ -263,7 +296,7 @@ mod tests {
         let ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         let mut stale = ready.make_stale();
-        assert!(stale.module_pool_mut().tombstone(1).is_none(), "slot 1 should be empty after tombstoning");
+        assert!(stale.module_pool_mut().tombstone(1).0.is_none(), "slot 1 should be empty after tombstoning");
         // Drain past any DropPlan actions to find our DropModule
         let mut found_drop_module = false;
         while let Ok(action) = rx.pop() {
@@ -356,6 +389,12 @@ mod tests {
         match rx.pop() {
             Ok(CleanupAction::DropPlan(_)) => {}
             Ok(CleanupAction::DropModule(_)) => panic!("expected DropPlan, got DropModule"),
+            Ok(CleanupAction::DropParamState(_)) => {
+                panic!("expected DropPlan, got DropParamState")
+            }
+            Ok(CleanupAction::DropParamFrame(_)) => {
+                panic!("expected DropPlan, got DropParamFrame")
+            }
             Err(_) => panic!("expected a DropPlan action on the cleanup ring buffer"),
         }
     }

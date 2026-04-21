@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoOutput, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable BPM.
 ///
@@ -77,17 +77,14 @@ impl Module for Clock {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("bpm") {
-            self.bpm = *v;
-            self.beat_phase_delta = self.bpm / (60.0 * self.sample_rate);
-        }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("beats_per_bar") {
-            self.beats_per_bar = *v as u32;
-        }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("quavers_per_beat") {
-            self.quavers_per_beat = *v as u32;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("bpm");
+        self.bpm = v;
+        self.beat_phase_delta = self.bpm / (60.0 * self.sample_rate);
+        let v = params.int("beats_per_bar");
+        self.beats_per_bar = v as u32;
+        let v = params.int("quavers_per_beat");
+        self.quavers_per_beat = v as u32;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

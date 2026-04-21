@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use patches_core::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
-use patches_core::modules::parameter_map::{ParameterKey, ParameterMap, ParameterValue};
+use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
+use crate::modules::parameter_map::{ParameterKey, ParameterMap, ParameterValue};
 
 use crate::param_frame::pack::{pack_into, PackError};
 use crate::param_frame::shadow::assert_view_matches_map;
@@ -24,7 +24,7 @@ fn mixed_descriptor() -> ModuleDescriptor {
 fn defaults_from(desc: &ModuleDescriptor) -> ParameterMap {
     let mut m = ParameterMap::new();
     for p in &desc.parameters {
-        use patches_core::modules::module_descriptor::ParameterKind;
+        use crate::modules::module_descriptor::ParameterKind;
         let v = match &p.parameter_type {
             ParameterKind::Float { default, .. } => ParameterValue::Float(*default),
             ParameterKind::Int { default, .. } => ParameterValue::Int(*default),
@@ -265,5 +265,48 @@ fn shadow_detects_divergence_when_frame_corrupt() {
     let mut observed = defaults.clone();
     observed.insert("gain".into(), ParameterValue::Float(0.9));
     assert_view_matches_map(&idx, &view, &observed);
+}
+
+// ── File rejection at pack boundary (ticket 0599) ─────────────────────────
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "pack_into: File")]
+fn pack_rejects_file_in_buffer_slot_debug() {
+    let d = mixed_descriptor();
+    let l = compute_layout(&d);
+    let defaults = defaults_from(&d);
+    let mut overrides = ParameterMap::new();
+    overrides.insert("sample".into(), ParameterValue::File("/tmp/x".into()));
+    let mut f = ParamFrame::with_layout(&l);
+    let _ = pack_into(&l, &defaults, &overrides, &mut f);
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn pack_rejects_file_in_buffer_slot_release() {
+    let d = mixed_descriptor();
+    let l = compute_layout(&d);
+    let defaults = defaults_from(&d);
+    let mut overrides = ParameterMap::new();
+    overrides.insert("sample".into(), ParameterValue::File("/tmp/x".into()));
+    let mut f = ParamFrame::with_layout(&l);
+    let r = pack_into(&l, &defaults, &overrides, &mut f);
+    assert!(matches!(r, Err(PackError::UnsupportedVariant)));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "pack_into: File")]
+fn pack_rejects_file_in_scalar_slot_debug() {
+    let d = ModuleDescriptor::new("M", empty_shape())
+        .float_param("gain", 0.0, 1.0, 0.5);
+    let l = compute_layout(&d);
+    let mut defaults = ParameterMap::new();
+    defaults.insert("gain".into(), ParameterValue::Float(0.5));
+    let mut overrides = ParameterMap::new();
+    overrides.insert("gain".into(), ParameterValue::File("/tmp/x".into()));
+    let mut f = ParamFrame::with_layout(&l);
+    let _ = pack_into(&l, &defaults, &overrides, &mut f);
 }
 

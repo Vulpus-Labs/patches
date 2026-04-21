@@ -136,7 +136,8 @@ impl PatchProcessor {
         let pool = stale.module_pool_mut();
 
         for &idx in &plan.tombstones {
-            if let Some(module) = pool.tombstone(idx) {
+            let (module, param_state) = pool.tombstone(idx);
+            if let Some(module) = module {
                 if let Err(rtrb::PushError::Full(action)) =
                     self.cleanup_tx.push(CleanupAction::DropModule(module))
                 {
@@ -144,12 +145,55 @@ impl PatchProcessor {
                     drop(action);
                 }
             }
+            if let Some(ps) = param_state {
+                if let Err(rtrb::PushError::Full(action)) =
+                    self.cleanup_tx.push(CleanupAction::DropParamState(Box::new(ps)))
+                {
+                    self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
+                    drop(action);
+                }
+            }
         }
-        for (idx, m) in plan.new_modules.drain(..) {
-            pool.install(idx, m);
+        // Installs ship a module + its prepare-time `ParamState` in lockstep
+        // (parallel vectors built by the planner; same length, same order).
+        debug_assert_eq!(
+            plan.new_modules.len(),
+            plan.new_module_param_state.len(),
+            "adopt_plan: new_modules / new_module_param_state length mismatch",
+        );
+        for ((idx, m), ps) in plan
+            .new_modules
+            .drain(..)
+            .zip(plan.new_module_param_state.drain(..))
+        {
+            pool.install(idx, m, ps);
         }
-        for (idx, params) in &mut plan.parameter_updates {
-            pool.update_parameters(*idx, params);
+        // Surviving-module parameter updates ship the diff map in lockstep
+        // with a freshly packed full-state `ParamFrame`. Pool swap returns
+        // the displaced frame, which we route to the cleanup ring.
+        debug_assert_eq!(
+            plan.parameter_updates.len(),
+            plan.param_frames.len(),
+            "adopt_plan: parameter_updates / param_frames length mismatch",
+        );
+        let mut frames_iter = std::mem::take(&mut plan.param_frames).into_iter();
+        for (idx, _params) in &mut plan.parameter_updates {
+            let (frame_idx, new_frame) = frames_iter.next().expect(
+                "adopt_plan: param_frames shorter than parameter_updates (planner bug)",
+            );
+            debug_assert_eq!(
+                frame_idx, *idx,
+                "adopt_plan: param_frames out of order vs parameter_updates",
+            );
+            if let Some(old_frame) = pool.update_parameters(*idx, new_frame) {
+                if let Err(rtrb::PushError::Full(action)) = self
+                    .cleanup_tx
+                    .push(CleanupAction::DropParamFrame(Box::new(old_frame)))
+                {
+                    self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
+                    drop(action);
+                }
+            }
         }
         for (idx, inputs, outputs) in &plan.port_updates {
             pool.set_ports(*idx, inputs, outputs);

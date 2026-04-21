@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// Converts a single MIDI CC number to a bipolar CV signal.
 ///
@@ -52,10 +52,9 @@ impl Module for MidiCc {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("cc") {
-            self.cc_number = (*v).clamp(0, 127) as u8;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.int("cc");
+        self.cc_number = (v).clamp(0, 127) as u8;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

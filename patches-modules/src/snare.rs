@@ -32,7 +32,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
 use patches_dsp::{MonoPhaseAccumulator, SvfKernel, svf_f, q_to_damp, xorshift64};
 
@@ -116,30 +116,23 @@ impl Module for Snare {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("pitch") {
-            self.pitch = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("tone") {
-            self.tone = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("body_decay") {
-            self.body_decay_time = *v;
-            self.body_env.set_decay(self.body_decay_time);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("noise_decay") {
-            self.noise_decay_time = *v;
-            self.noise_env.set_decay(self.noise_decay_time);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("noise_freq") {
-            self.noise_freq = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("noise_q") {
-            self.noise_q = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("snap") {
-            self.snap = *v;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("pitch");
+        self.pitch = v;
+        let v = params.float("tone");
+        self.tone = v;
+        let v = params.float("body_decay");
+        self.body_decay_time = v;
+        self.body_env.set_decay(self.body_decay_time);
+        let v = params.float("noise_decay");
+        self.noise_decay_time = v;
+        self.noise_env.set_decay(self.noise_decay_time);
+        let v = params.float("noise_freq");
+        self.noise_freq = v;
+        let v = params.float("noise_q");
+        self.noise_q = v;
+        let v = params.float("snap");
+        self.snap = v;
         self.pitch_sweep.set_params(self.pitch * 2.0, self.pitch, 0.02);
         let f = svf_f(self.noise_freq, self.sample_rate);
         let d = q_to_damp(self.noise_q);
@@ -199,6 +192,7 @@ impl Module for Snare {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::ModuleHarness;
 

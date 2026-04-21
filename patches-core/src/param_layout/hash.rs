@@ -10,7 +10,7 @@
 //! bar ever rises, the algorithm can be swapped without changing the
 //! canonical byte encoding feeding it.
 
-use patches_core::modules::module_descriptor::{
+use crate::modules::module_descriptor::{
     ModuleDescriptor, ParameterDescriptor, ParameterKind, PortDescriptor,
 };
 

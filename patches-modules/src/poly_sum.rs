@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 
 /// Polyphonic sum: sums N poly inputs into one poly output, per-voice.
 ///
@@ -47,7 +47,7 @@ impl Module for PolySum {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.instance_id }

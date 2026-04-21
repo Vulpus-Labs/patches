@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// Offsets a V/OCT pitch signal by a fixed interval.
 ///
@@ -71,10 +71,10 @@ impl Module for Tuner {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("octave") { self.octave = *v; }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("semi")   { self.semi = *v; }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("cent")   { self.cent = *v; }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.octave = params.int("octave");
+        self.semi = params.int("semi");
+        self.cent = params.int("cent");
         self.offset = Self::recompute_offset(self.octave, self.semi, self.cent);
     }
 
@@ -152,13 +152,18 @@ mod tests {
     }
 
     #[test]
-    fn partial_update_preserves_unchanged_params() {
-        // Simulates the planner sending only the changed key on hot-reload.
+    fn full_update_applies_all_params() {
+        // Post-ADR-0045-Spike-5 the planner always ships full-state frames;
+        // partial updates are not a thing the module sees. This test confirms
+        // a full update with the new values takes effect.
         let mut h = make_tuner(1, 7, 12);
-        h.update_validated_parameters(params!["cent" => 0_i64]);
+        h.update_validated_parameters(params![
+            "octave" => 1_i64,
+            "semi" => 7_i64,
+            "cent" => 0_i64,
+        ]);
         h.set_mono("in", 4.0);
         h.tick();
-        // octave=1, semi=7, cent=0 — octave and semi must be retained from initial build.
         let expected = 4.0 + 1.0 + 7.0 / 12.0;
         assert_within!(expected, h.read_mono("out"), 1e-5_f32);
     }

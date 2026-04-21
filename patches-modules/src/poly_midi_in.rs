@@ -4,7 +4,7 @@ use patches_core::{
     GLOBAL_MIDI,
 };
 use patches_core::{CableKind, PolyLayout};
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 
 const VOCT_SCALING: f32 = 1.0 / 12.0;
 
@@ -148,7 +148,7 @@ impl Module for PolyMidiIn {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
 

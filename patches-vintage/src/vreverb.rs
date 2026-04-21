@@ -48,7 +48,7 @@
 //! | `decay` | float | 0.0--0.95 | `0.7` | FDN feedback coefficient |
 
 use patches_core::modules::module::PeriodicUpdate;
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
@@ -158,16 +158,10 @@ impl Module for VReverb {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("dry_wet") {
-            self.dry_wet = (*v).clamp(0.0, 1.0);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("size") {
-            self.size = (*v).clamp(0.0, 1.0);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
-            self.decay = (*v).clamp(0.0, DECAY_MAX);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.dry_wet = params.float("dry_wet").clamp(0.0, 1.0);
+        self.size = params.float("size").clamp(0.0, 1.0);
+        self.decay = params.float("decay").clamp(0.0, DECAY_MAX);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

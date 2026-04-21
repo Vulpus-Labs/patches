@@ -39,7 +39,8 @@
 //! | `feedback[i]` | float | 0.0--0.95 | `0.0` | Self-feedback per tap |
 
 use patches_core::modules::module::PeriodicUpdate;
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
+use patches_core::parameter_map::ParameterKey;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
@@ -100,11 +101,8 @@ pub struct VBbd {
 }
 
 #[inline]
-fn get_float(params: &ParameterMap, name: &str, index: usize, default: f32) -> f32 {
-    match params.get(name, index) {
-        Some(ParameterValue::Float(v)) => *v,
-        _ => default,
-    }
+fn get_float(params: &ParamView<'_>, name: &str, index: usize, _default: f32) -> f32 {
+    params.float(ParameterKey::new(name, index))
 }
 
 impl Module for VBbd {
@@ -151,10 +149,8 @@ impl Module for VBbd {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("dry_wet") {
-            self.dry_wet = (*v).clamp(0.0, 1.0);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.dry_wet = params.float("dry_wet").clamp(0.0, 1.0);
         for i in 0..self.taps {
             self.delay_ms[i] =
                 get_float(params, "delay_ms", i, self.delay_ms[i]).clamp(DELAY_MS_MIN, DELAY_MS_MAX);

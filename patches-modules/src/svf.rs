@@ -4,7 +4,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::{SvfKernel, svf_f, q_to_damp};
 
 /// State Variable Filter (Chamberlin topology) with simultaneous LP, HP, and BP outputs.
@@ -115,13 +115,11 @@ impl Module for Svf {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("cutoff") {
-            self.cutoff = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("q") {
-            self.q = *v;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("cutoff");
+        self.cutoff = v;
+        let v = params.float("q");
+        self.q = v;
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }

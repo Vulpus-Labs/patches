@@ -1,0 +1,229 @@
+# poly_synth_layered.patches — two-layer polyphonic synth
+#
+# lo layer: warm sine/square oscillator voice at keyboard pitch
+# hi layer: pitched noise voice one octave above keyboard pitch
+#           (white noise filtered by a resonant PolySvf bandpass, cutoff tracks
+#            played note via V/oct, giving an airy, pitched transient character)
+#
+# Patch architecture:
+#   kbd        — PolyMidiIn: shared keyboard / LIFO voice allocation
+#   vibrato    — Lfo: slow sine for phase modulation on the lo layer
+#   pm_spread  — MonoToPoly: broadcasts vibrato to lo poly voices
+#   tuner      — PolyTuner(octave: 1): shifts kbd.voct up by one octave for the hi layer
+#   lo         — voice instance: warm sine/square layer at keyboard pitch
+#   hi         — noise_voice instance: pitched noise, one octave higher
+#   sum        — StereoMixer(channels: [lo, hi]): panned stereo mix
+#   out        — AudioOut: stereo output
+#
+# voice template internals:
+#   osc      — PolyOsc:                    oscillator, sine + square blend
+#   mix      — PolySum(channels: [body, edge]): weighted sine/square sum
+#   amp_env  — PolyAdsr:                   per-voice amplitude envelope
+#   vca      — PolyVca:                    amplitude shaping
+#   filt_env — PolyAdsr:                   per-voice filter cutoff envelope
+#   filt     — PolyLowpass:                resonant lowpass, swept by filt_env
+#   collapse — PolyToMono:                 sums all voices to a single mono signal
+#
+# noise_voice template internals:
+#   noise    — PolyNoise:       white noise source
+#   filt     — PolySvf:         high-Q bandpass; voct input tracks the played note
+#   amp_env  — PolyAdsr:        per-voice amplitude envelope
+#   vca      — PolyVca:         amplitude shaping
+#   collapse — PolyToMono:      sums all voices to a single mono signal
+#
+# Signal flow:
+#
+#   vibrato.sine -[0.1]-> pm_spread -> lo.phase_mod
+#
+#   kbd.voct -> tuner.in -> hi.voct  (one octave up, per voice)
+#
+#   kbd ──voct───────────────► lo.voct
+#   kbd ──trigger/gate──────► lo.trigger / lo.gate
+#   tuner.out ───────────────► hi.voct
+#   kbd ──trigger/gate──────► hi.trigger / hi.gate
+#
+#   lo.audio -[1.0]-> sum.in[lo]
+#   hi.audio -[1.0]-> sum.in[hi]
+#   sum -> out (stereo, panned ±0.5)
+#   sum.send_a (hi) -> verb (FdnReverb) -> sum.return_a
+#   sum.send_b (lo) -> tap_dly (Delay 2-tap) -> sum.return_b
+#
+# Hot-reload tips:
+#   lo layer (warm, foundational):
+#     - Lower lo amp_decay / amp_sustain for a more plucked character
+#     - Raise lo filt_cutoff (try 600–900) to open up the low layer
+#     - Increase lo fenv_decay (try 0.5–1.0) for a slower, deeper filter sweep
+#   hi layer (airy, pitched noise, upper octave):
+#     - Raise hi filt_q (try 0.98–0.99) for a more pitched, pure tone
+#     - Shorten hi amp_decay (try 0.05–0.08) for a crisper transient
+#     - Raise hi amp_sustain (try 0.3–0.5) to extend the noise body
+#   Mix balance:
+#     - Adjust the 0.7/0.5 scales on sum.in[lo]/[hi] to shift weight between layers
+#     - Widen vibrato depth (try 0.05–0.15) for more pronounced lo phase movement
+
+template voice(
+    amp_attack:   float = 0.005, amp_decay:    float = 0.12,
+    amp_sustain:  float = 0.65,  amp_release:  float = 0.4,
+    filt_cutoff:  float = 600.0Hz, filt_res:     float = 0.7,
+    fenv_attack:  float = 0.2,   fenv_decay:   float = 0.25,
+    fenv_sustain: float = 0.3,   fenv_release: float = 0.4
+) {
+    in:  voct, trigger, gate, phase_mod
+    out: audio
+
+    module lfo : Lfo { rate: 6.0, mode: unipolar_positive }
+    module osc      : PolyOsc { drift: 0.1, fm_type: logarithmic }
+    module mix      : PolySum(channels: [body, edge])
+    module amp_env  : PolyAdsr   { attack: <amp_attack>,  decay: <amp_decay>,
+                                   sustain: <amp_sustain>, release: <amp_release> }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr   { attack: <fenv_attack>,  decay: <fenv_decay>,
+                                   sustain: <fenv_sustain>, release: <fenv_release> }
+    module filt     : PolyLowpass { cutoff: <filt_cutoff>, resonance: <filt_res>, saturate: true }
+    module collapse : PolyToMono
+
+    $.voct             -> osc.voct
+    $.phase_mod        -> osc.phase_mod
+
+    module m2p : MonoToPoly
+    lfo.triangle -[0.01]-> m2p.in
+    m2p.out -> osc.fm
+
+    osc.sine   -[0.6]-> mix.in[body]   # body
+    osc.square -[0.4]-> mix.in[edge]   # edge
+
+    $.trigger          -> amp_env.trigger
+    $.gate             -> amp_env.gate
+    mix.out            -> vca.in
+    amp_env.out        -> vca.cv
+
+    $.trigger          -> filt_env.trigger
+    $.gate             -> filt_env.gate
+    filt_env.out -[0.7]-> filt.voct
+    vca.out            -> filt.in
+    filt.out           -> collapse.in
+
+    $.audio <- collapse.out
+}
+
+template noise_voice(
+    amp_attack:  float = 0.005, amp_decay:   float = 0.12,
+    amp_sustain: float = 0.8,  amp_release: float = 0.4,
+    filt_q:      float = 0.97
+) {
+    in:  voct, trigger, gate
+    out: audio
+
+    module sine : PolyOsc
+    module noise    : PolyNoise
+    module sine_noise_mix : PolySum(channels: [noise, sine])
+    module highpass   : PolyHighpass { cutoff : 0.5 }
+    module filt     : PolySvf { cutoff: 0.0, q: <filt_q> }
+    module amp_env  : PolyAdsr { attack: <amp_attack>, decay: <amp_decay>,
+                                  sustain: <amp_sustain>, release: <amp_release> }
+    module vca      : PolyVca
+    module collapse : PolyToMono
+
+    # SVF bandpass tracks the played note; high Q gives a resonant pitched tone
+    $.voct          -> filt.voct
+    $.voct          -> sine.voct
+    noise.white     -> highpass.in
+    $.voct -> highpass.voct
+    highpass.out -[0.3]-> sine_noise_mix.in[noise]
+    sine.sine -[0.1]-> sine_noise_mix.in[sine]
+    sine_noise_mix.out -> filt.in
+    filt.bandpass   -> vca.in
+
+    $.trigger       -> amp_env.trigger
+    $.gate          -> amp_env.gate
+    amp_env.out     -> vca.cv
+
+    vca.out         -> collapse.in
+
+    $.audio <- collapse.out
+}
+
+patch {
+    # ── Shared keyboard and modulation ─────────────────────────────────────────
+    module kbd       : PolyMidiIn
+    module vibrato   : Lfo        { rate: 4.0 }
+    module pm_spread : MonoToPoly
+
+    # ── Octave offset for hi layer ──────────────────────────────────────────────
+    module tuner     : PolyTuner  { octave: 1, cent: 10 }
+
+    # ── Voice layers ────────────────────────────────────────────────────────────
+    module lo : voice(
+        amp_attack:   0.008, amp_decay:    0.15,
+        amp_sustain:  0.7,   amp_release:  0.5,
+        filt_cutoff:  450.0Hz, filt_res:     0.2,
+        fenv_attack:  0.02,   fenv_decay:   0.4,
+        fenv_sustain: 0.2,   fenv_release: 0.5
+    )
+
+    module hi : noise_voice(
+        amp_attack:  0.5, amp_decay:   0.1,
+        amp_sustain: 0.3,  amp_release: 0.5,
+        filt_q:      0.97
+    )
+
+    # ── Output ──────────────────────────────────────────────────────────────────
+    module sum : StereoMixer(channels: [lo, hi]) {
+        level[lo]: 1.0,
+        level[hi]: 0.5,
+        pan[lo]: -0.5,
+        pan[hi]: 0.5,
+        send_a[hi]: 0.6,
+        send_b[lo]: 0.4,
+        send_b[hi]: 0.4
+    }
+    module verb: FdnReverb {
+        character: hall,
+        size: 0.2
+    }
+
+    # send B: two-tap multitap delay on the lo layer
+    module tap_dly : StereoDelay(channels: [tap1, tap2]) {
+        @tap1: { delay_ms: 700, feedback: 0.3, gain: 1.0, tone: 0.7, pingpong: true }
+        @tap2: { delay_ms: 450, feedback: 0.3, gain: 1.0, tone: 0.7, pingpong: true }
+    }
+    module out : AudioOut
+
+    # Vibrato LFO → phase modulation on lo layer only
+    vibrato.sine -[0.1]-> pm_spread.in
+
+    # Build the upper-octave V/oct signal: tuner shifts kbd.voct up by one octave
+    kbd.voct       -> tuner.in
+
+    # lo layer — normal pitch, with phase modulation
+    kbd.voct      -> lo.voct
+    kbd.trigger    -> lo.trigger
+    kbd.gate       -> lo.gate
+    pm_spread.out  -> lo.phase_mod
+
+    # hi layer — pitched noise, one octave above kbd
+    tuner.out      -> hi.voct
+    kbd.trigger    -> hi.trigger
+    kbd.gate       -> hi.gate
+
+    # Mix layers and send to stereo output
+    lo.audio -[0.1]-> sum.in[lo]
+    hi.audio -[0.1]-> sum.in[hi]
+
+    sum.send_a_left  -> verb.in_left
+    sum.send_a_right -> verb.in_right
+    sum.return_a_left  <- verb.out_left
+    sum.return_a_right <- verb.out_right
+
+    sum.send_b_left -> tap_dly.in_left
+    sum.send_b_right -> tap_dly.in_right
+    tap_dly.out_left -> sum.return_b_left
+    tap_dly.out_right -> sum.return_b_right
+
+    module lim_l : Limiter { threshold: -3db, attack_ms: 2.0 }
+    module lim_r : Limiter { threshold: -3db, attack_ms: 2.0 }
+    sum.out_left  -> lim_l.in
+    sum.out_right -> lim_r.in
+    lim_l.out -> out.in_left
+    lim_r.out -> out.in_right
+}

@@ -55,7 +55,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples};
 
 /// Maximum `attack_ms` value supported at construction time.
@@ -101,16 +101,13 @@ impl Module for Limiter {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("threshold") {
-            self.core.set_threshold(*v);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("attack_ms") {
-            self.core.set_attack_ms(*v, MAX_ATTACK_MS);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("release_ms") {
-            self.core.set_release_ms(*v);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("threshold");
+        self.core.set_threshold(v);
+        let v = params.float("attack_ms");
+        self.core.set_attack_ms(v, MAX_ATTACK_MS);
+        let v = params.float("release_ms");
+        self.core.set_release_ms(v);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

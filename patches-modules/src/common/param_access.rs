@@ -1,31 +1,30 @@
-//! Shared accessors for `ParameterMap` with typed fallback.
+//! Shared accessors for `ParamView` with typed fallback signature.
 //!
-//! Modules with per-channel parameters repeatedly need to pull a typed value
-//! by `(name, index)` with a sensible default when the slot is missing or has
-//! the wrong variant. These helpers centralise that pattern.
+//! Post-Spike-5 the underlying frame is always fully packed (defaults already
+//! filled on the control thread), so the `default` argument is no longer
+//! used at runtime — the accessor just forwards to the typed `ParamView`
+//! method. The signature is preserved so call sites don't need mechanical
+//! rewrites beyond the trait flip.
 
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
+use patches_core::parameter_map::ParameterKey;
 
 #[inline]
-pub fn get_float(params: &ParameterMap, name: &str, index: usize, default: f32) -> f32 {
-    match params.get(name, index) {
-        Some(ParameterValue::Float(v)) => *v,
-        _ => default,
-    }
+pub fn get_float(params: &ParamView<'_>, name: &str, index: usize, _default: f32) -> f32 {
+    params.float(ParameterKey::new(name, index))
 }
 
 #[inline]
-pub fn get_int(params: &ParameterMap, name: &str, index: usize, default: i64) -> i64 {
-    match params.get(name, index) {
-        Some(ParameterValue::Int(v)) => *v,
-        _ => default,
-    }
+pub fn get_int(params: &ParamView<'_>, name: &str, index: usize, _default: i64) -> i64 {
+    params.int(ParameterKey::new(name, index))
 }
 
 #[inline]
-pub fn get_bool(params: &ParameterMap, name: &str, index: usize, default: bool) -> bool {
-    match params.get(name, index) {
-        Some(ParameterValue::Bool(v)) => *v,
-        _ => default,
-    }
+pub fn get_bool(params: &ParamView<'_>, name: &str, index: usize, _default: bool) -> bool {
+    params.bool(ParameterKey::new(name, index))
+}
+
+#[inline]
+pub fn get_enum(params: &ParamView<'_>, name: &str, index: usize) -> u32 {
+    params.enum_variant(ParameterKey::new(name, index))
 }

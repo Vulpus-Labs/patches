@@ -233,10 +233,23 @@ mod tests {
     };
     use patches_core::parameter_map::ParameterMap;
 
-    use patches_planner::ExecutionPlan;
+    use patches_planner::{ExecutionPlan, ParamState};
     use crate::pool::ModulePool;
 
     use super::*;
+
+    fn empty_param_state() -> ParamState {
+        ParamState::new_for_descriptor(
+            &ModuleDescriptor {
+                module_name: "Stub",
+                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                inputs: vec![],
+                outputs: vec![],
+                parameters: vec![],
+            },
+            &ParameterMap::new(),
+        )
+    }
 
     // ── Stub modules ─────────────────────────────────────────────────────────
 
@@ -273,7 +286,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor }
         }
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, _pool: &mut CablePool<'_>) {}
@@ -316,7 +329,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor, count: Arc::new(AtomicUsize::new(0)) }
         }
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, _pool: &mut CablePool<'_>) {
@@ -363,7 +376,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true }, value: 0.0 }
         }
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -396,7 +409,7 @@ mod tests {
     fn make_stale_then_rebuild_preserves_vec_capacity() {
         let mut pool = ModulePool::new(8);
         for i in 0..4 {
-            pool.install(i, Box::new(Stub::new()));
+            pool.install(i, Box::new(Stub::new()), empty_param_state());
         }
         let stale = ReadyState::new_stale(pool);
 
@@ -427,8 +440,8 @@ mod tests {
         let count_b = Arc::new(AtomicUsize::new(0));
 
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(CountingModule::new(count_a.clone())));
-        pool.install(1, Box::new(CountingModule::new(count_b.clone())));
+        pool.install(0, Box::new(CountingModule::new(count_a.clone())), empty_param_state());
+        pool.install(1, Box::new(CountingModule::new(count_b.clone())), empty_param_state());
 
         let stale = ReadyState::new_stale(pool);
 
@@ -447,7 +460,7 @@ mod tests {
     #[test]
     fn pointer_arrays_populated_after_rebuild() {
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(WriterModule::new(0.5, RESERVED_SLOTS)));
+        pool.install(0, Box::new(WriterModule::new(0.5, RESERVED_SLOTS)), empty_param_state());
 
         let stale = ReadyState::new_stale(pool);
         let mut plan = ExecutionPlan::empty();
@@ -469,7 +482,7 @@ mod tests {
     #[test]
     fn tombstone_install_through_typestate() {
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(WriterModule::new(1.0, RESERVED_SLOTS)));
+        pool.install(0, Box::new(WriterModule::new(1.0, RESERVED_SLOTS)), empty_param_state());
 
         let stale = ReadyState::new_stale(pool);
         let mut plan = ExecutionPlan::empty();
@@ -479,7 +492,7 @@ mod tests {
         // Transition to stale, tombstone old module, install new one.
         let mut stale = ready.make_stale();
         let _old = stale.module_pool_mut().tombstone(0);
-        stale.module_pool_mut().install(0, Box::new(WriterModule::new(2.0, RESERVED_SLOTS)));
+        stale.module_pool_mut().install(0, Box::new(WriterModule::new(2.0, RESERVED_SLOTS)), empty_param_state());
 
         let mut plan2 = ExecutionPlan::empty();
         plan2.active_indices = vec![0];

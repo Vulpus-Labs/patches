@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use patches_core::modules::parameter_map::{ParameterMap, ParameterValue};
+use crate::modules::parameter_map::{ParameterMap, ParameterValue};
 
 use crate::param_layout::{ParamLayout, ScalarTag};
 

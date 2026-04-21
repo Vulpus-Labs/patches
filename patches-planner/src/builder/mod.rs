@@ -9,6 +9,8 @@ use patches_core::{
 };
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_ffi_common::param_frame::{pack_into, ParamFrame, ParamViewIndex};
+use patches_ffi_common::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
 
 use crate::state::{
     make_decisions, BufferAllocState, ModuleAllocState, NodeDecision, NodeState, PlanDecisions,
@@ -86,6 +88,37 @@ impl From<PlanError> for BuildError {
     }
 }
 
+/// Per-instance parameter-plane state carried through plan adoption.
+///
+/// Built on the control thread from the module's descriptor. `layout` and
+/// `view_index` are prepare-time constants for the life of the instance;
+/// `frame` is repacked per plan from the instance's current `ParameterMap`.
+pub struct ParamState {
+    pub layout: ParamLayout,
+    pub view_index: ParamViewIndex,
+    pub frame: ParamFrame,
+}
+
+impl ParamState {
+    /// Build a fresh [`ParamState`] for a module descriptor and parameter
+    /// map. Computes the layout + view index, allocates a frame, and packs
+    /// `params` into it. Intended for test harnesses that construct pool
+    /// slots outside the planner; production call sites build the pieces
+    /// inline for better control over allocation ordering.
+    pub fn new_for_descriptor(
+        descriptor: &patches_core::modules::module_descriptor::ModuleDescriptor,
+        params: &ParameterMap,
+    ) -> Self {
+        let layout = compute_layout(descriptor);
+        let view_index = ParamViewIndex::from_layout(&layout);
+        let mut frame = ParamFrame::with_layout(&layout);
+        let defaults = defaults_from_descriptor(descriptor);
+        pack_into(&layout, &defaults, params, &mut frame)
+            .expect("new_for_descriptor: pack_into failed");
+        Self { layout, view_index, frame }
+    }
+}
+
 /// One entry in the execution plan: a module pool reference together with its pre-resolved
 /// input and output buffer indices.
 pub struct ModuleSlot {
@@ -133,6 +166,11 @@ pub struct ExecutionPlan {
     ///
     /// The audio callback drains this vec into the pool on plan adoption.
     pub new_modules: Vec<(usize, Box<dyn Module>)>,
+    /// Parameter-plane state for each entry in `new_modules`, in the same
+    /// order. The audio thread stores this alongside the installed module so
+    /// subsequent `param_frames` updates can swap the frame in place without
+    /// rebuilding the layout or view index.
+    pub new_module_param_state: Vec<ParamState>,
     /// Pool indices of modules removed from the graph.
     ///
     /// The audio callback calls `pool[idx].take()` for each entry, dropping the
@@ -147,6 +185,14 @@ pub struct ExecutionPlan {
     /// New modules (in `new_modules`) do not appear here; their parameters are
     /// set during construction. Empty when no surviving module changed parameters.
     pub parameter_updates: Vec<(usize, ParameterMap)>,
+    /// Repacked `ParamFrame` per surviving-module parameter update. Parallel
+    /// to `parameter_updates` by position — every entry carries the same
+    /// `pool_index` as the corresponding `parameter_updates` entry. The audio
+    /// thread swaps the frame into the pool's `ParamState` and builds a
+    /// `ParamView` over it; the map is retained in 0595 only so the existing
+    /// `&ParameterMap`-based trait signature keeps working until 0596 flips
+    /// it.
+    pub param_frames: Vec<(usize, ParamFrame)>,
     /// Pool indices of modules that implement [`PeriodicUpdate`].
     ///
     /// Populated during plan activation (not at build time) by calling
@@ -187,8 +233,10 @@ impl ExecutionPlan {
             to_zero: vec![],
             to_zero_poly: vec![],
             new_modules: vec![],
+            new_module_param_state: vec![],
             tombstones: vec![],
             parameter_updates: vec![],
+            param_frames: vec![],
             periodic_indices: vec![],
             active_indices: vec![],
             port_updates: vec![],
@@ -267,6 +315,8 @@ impl PatchBuilder {
             HashMap::with_capacity(decisions.len());
         let mut fresh_modules: HashMap<NodeId, Box<dyn Module>> =
             HashMap::with_capacity(decisions.len());
+        let mut fresh_param_state: HashMap<NodeId, ParamState> =
+            HashMap::with_capacity(decisions.len());
 
         for (id, decision) in &mut decisions {
             match decision {
@@ -276,6 +326,26 @@ impl PatchBuilder {
                     let m = registry
                         .create(module_name, env, shape, &resolved_params, new_id)
                         .map_err(|e| BuildErrorKind::ModuleCreationError(e.to_string()))?;
+                    // Compute the packed-parameter layout + view index for
+                    // this instance from the module's descriptor, and pack
+                    // the initial frame from the resolved parameters. Layout
+                    // and view index are prepare-time constants for the life
+                    // of the instance (ADR 0045 §3 / ticket 0595); the pool
+                    // stores them once at install and reuses them across
+                    // subsequent frame updates.
+                    let descriptor = m.descriptor();
+                    let layout = compute_layout(descriptor);
+                    let view_index = ParamViewIndex::from_layout(&layout);
+                    let mut frame = ParamFrame::with_layout(&layout);
+                    let defaults = defaults_from_descriptor(descriptor);
+                    pack_into(&layout, &defaults, &resolved_params, &mut frame)
+                        .map_err(|e| BuildError::new(BuildErrorKind::InternalError(
+                            format!("pack_into failed for install {id:?}: {e:?}"),
+                        )))?;
+                    fresh_param_state.insert(
+                        id.clone(),
+                        ParamState { layout, view_index, frame },
+                    );
                     instance_ids.insert(id.clone(), new_id);
                     fresh_modules.insert(id.clone(), m);
                 }
@@ -310,7 +380,9 @@ impl PatchBuilder {
 
         let mut slots: Vec<ModuleSlot> = Vec::with_capacity(order.len());
         let mut new_modules: Vec<(usize, Box<dyn Module>)> = Vec::new();
+        let mut new_module_param_state: Vec<ParamState> = Vec::new();
         let mut parameter_updates: Vec<(usize, ParameterMap)> = Vec::new();
+        let mut param_frames: Vec<(usize, ParamFrame)> = Vec::new();
         let mut port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)> = Vec::new();
         let mut node_states: HashMap<NodeId, NodeState> = HashMap::with_capacity(order.len());
         let mut to_zero_poly: Vec<usize> = Vec::new();
@@ -388,32 +460,60 @@ impl PatchBuilder {
             // `Update` move directly into the corresponding diff collections
             // — matches the destructive-read convention used downstream by
             // `Module::update_validated_parameters(&mut ParameterMap)`.
-            let is_periodic = match decision {
+            let (is_periodic, node_layout, node_view_index) = match decision {
                 NodeDecision::Install { .. } => {
                     let mut fresh = fresh_modules.remove(&id).ok_or_else(|| {
                         BuildErrorKind::InternalError(format!(
                             "fresh module for install node {id:?} is missing"
                         ))
                     })?;
+                    let param_state = fresh_param_state.remove(&id).ok_or_else(|| {
+                        BuildErrorKind::InternalError(format!(
+                            "fresh param state for install node {id:?} is missing"
+                        ))
+                    })?;
                     let periodic = fresh.as_periodic().is_some();
                     if periodic { periodic_indices.push(pool_index); }
                     fresh.set_ports(&input_ports, &output_ports);
                     new_modules.push((pool_index, fresh));
-                    periodic
+                    let layout = param_state.layout.clone();
+                    let view_index = param_state.view_index.clone();
+                    new_module_param_state.push(param_state);
+                    (periodic, layout, view_index)
                 }
                 NodeDecision::Update { param_diff, .. } => {
                     let prev_ns = &prev_state.nodes[&id];
                     let ports_changed = prev_ns.input_ports != input_ports
                         || prev_ns.output_ports != output_ports;
                     let is_periodic = prev_ns.is_periodic;
+                    let layout = prev_ns.layout.clone();
+                    let view_index = prev_ns.view_index.clone();
                     if !param_diff.is_empty() {
+                        // Pack a fresh frame from the node's *full* current
+                        // parameter state (node.parameter_map already reflects
+                        // prev_state + diff, produced by the interpreter).
+                        // The audio thread swaps this frame into the module's
+                        // pool-side `ParamState` during `adopt_plan` and
+                        // builds a `ParamView` over it.
+                        let mut frame = ParamFrame::with_layout(&layout);
+                        let defaults = defaults_from_descriptor(desc);
+                        pack_into(
+                            &layout,
+                            &defaults,
+                            &node.parameter_map,
+                            &mut frame,
+                        )
+                        .map_err(|e| BuildError::new(BuildErrorKind::InternalError(
+                            format!("pack_into failed for update {id:?}: {e:?}"),
+                        )))?;
                         parameter_updates.push((pool_index, param_diff));
+                        param_frames.push((pool_index, frame));
                     }
                     if ports_changed {
                         port_updates.push((pool_index, input_ports.clone(), output_ports.clone()));
                     }
                     if is_periodic { periodic_indices.push(pool_index); }
-                    is_periodic
+                    (is_periodic, layout, view_index)
                 }
             };
 
@@ -430,6 +530,8 @@ impl PatchBuilder {
                     input_ports,
                     output_ports,
                     is_periodic,
+                    layout: node_layout,
+                    view_index: node_view_index,
                 },
             );
 
@@ -450,8 +552,10 @@ impl PatchBuilder {
                 to_zero: buf_alloc.to_zero,
                 to_zero_poly,
                 new_modules,
+                new_module_param_state,
                 tombstones,
                 parameter_updates,
+                param_frames,
                 periodic_indices,
                 active_indices,
                 port_updates,

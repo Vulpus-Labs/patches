@@ -191,7 +191,7 @@ impl ModuleHarness {
         for (k, v) in params {
             map.insert((*k).into(), v.clone());
         }
-        self.module.update_validated_parameters(&mut map);
+        self.update_params_map(&map);
     }
 
     /// Apply a `ParameterMap` (which may contain indexed parameters) directly to the module.
@@ -199,7 +199,17 @@ impl ModuleHarness {
     /// Useful for modules whose parameters are indexed (e.g. `level/0`, `solo/1`)
     /// where `update_validated_parameters` cannot express multi-index entries.
     pub fn update_params_map(&mut self, params: &ParameterMap) {
-        self.module.update_validated_parameters(&mut params.clone());
+        use crate::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+        use crate::param_layout::{compute_layout, defaults_from_descriptor};
+        let desc = self.module.descriptor();
+        let layout = compute_layout(desc);
+        let index = ParamViewIndex::from_layout(&layout);
+        let mut frame = ParamFrame::with_layout(&layout);
+        let defaults = defaults_from_descriptor(desc);
+        pack_into(&layout, &defaults, params, &mut frame)
+            .expect("test harness pack_into failed");
+        let view = ParamView::new(&index, &frame);
+        self.module.update_validated_parameters(&view);
     }
 
     // ── Connectivity ─────────────────────────────────────────────────────────

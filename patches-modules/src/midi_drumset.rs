@@ -47,7 +47,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// Number of drum slots in the GM mapping table.
 const NUM_DRUMS: usize = 14;
@@ -128,10 +128,9 @@ impl Module for MidiDrumset {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("channel") {
-            self.channel = (*v as u8).min(16);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.int("channel");
+        self.channel = (v as u8).min(16);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -190,6 +189,7 @@ impl Module for MidiDrumset {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::MidiEvent;
     use patches_core::test_support::{ModuleHarness, note_on, send_midi};

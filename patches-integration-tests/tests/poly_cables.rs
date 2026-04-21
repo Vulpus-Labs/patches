@@ -61,7 +61,7 @@ impl Module for PolyProbe {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor
@@ -134,7 +134,7 @@ impl Module for PolySource {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor

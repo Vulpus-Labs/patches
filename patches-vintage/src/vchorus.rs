@@ -38,7 +38,7 @@
 //! | `mode` | enum | `off`/`one`/`two`/`both` | `one` | Chorus mode (`both` only valid on `bright`) |
 //! | `hiss` | float | 0.0--1.0 | `1.0` | Wet-path hiss amount |
 
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort,
@@ -98,20 +98,14 @@ impl Module for VChorus {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("variant") {
-            if let Ok(variant) = Variant::try_from(v) {
-                self.core.set_variant(variant);
-            }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        if let Ok(variant) = Variant::try_from(params.enum_variant("variant")) {
+            self.core.set_variant(variant);
         }
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("mode") {
-            if let Ok(mode) = Mode::try_from(v) {
-                self.core.set_mode(mode);
-            }
+        if let Ok(mode) = Mode::try_from(params.enum_variant("mode")) {
+            self.core.set_mode(mode);
         }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("hiss") {
-            self.core.set_hiss(*v);
-        }
+        self.core.set_hiss(params.float("hiss"));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

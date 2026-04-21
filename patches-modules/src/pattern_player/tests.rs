@@ -57,7 +57,20 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     let s = shape(1);
     let desc = PatternPlayer::describe(&s);
     let mut player = PatternPlayer::prepare(&ENV, desc, InstanceId::next());
-    player.update_validated_parameters(&mut ParameterMap::new());
+    {
+        use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+        use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
+        use patches_core::parameter_map::ParameterMap;
+        let desc = player.descriptor().clone();
+        let layout = compute_layout(&desc);
+        let index = ParamViewIndex::from_layout(&layout);
+        let mut frame = ParamFrame::with_layout(&layout);
+        let defaults = defaults_from_descriptor(&desc);
+        let map = ParameterMap::new();
+        pack_into(&layout, &defaults, &map, &mut frame).expect("pack_into failed");
+        let view = ParamView::new(&index, &frame);
+        player.update_validated_parameters(&view);
+    }
     player.receive_tracker_data(data);
 
     // Pool layout: reserved(16) + 1 poly input (clock) + 4 mono outputs

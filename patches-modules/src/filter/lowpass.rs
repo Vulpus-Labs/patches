@@ -1,6 +1,6 @@
 use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
@@ -108,16 +108,13 @@ impl Module for ResonantLowpass {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("cutoff") {
-            self.cutoff = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("resonance") {
-            self.resonance = *v;
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get_scalar("saturate") {
-            self.saturate = *v;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("cutoff");
+        self.cutoff = v;
+        let v = params.float("resonance");
+        self.resonance = v;
+        let v = params.bool("saturate");
+        self.saturate = v;
         if !self.any_cv_connected() {
             self.recompute_static_coeffs();
         }

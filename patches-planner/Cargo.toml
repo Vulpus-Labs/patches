@@ -12,6 +12,7 @@ doctest = false
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-registry = { path = "../patches-registry" }
+patches-ffi-common = { path = "../patches-ffi-common" }
 
 [dev-dependencies]
 patches-modules = { path = "../patches-modules" }

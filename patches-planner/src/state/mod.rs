@@ -76,6 +76,13 @@ pub struct NodeState {
     /// Cached at build time from `Module::as_periodic()` so that `periodic_indices`
     /// can be populated by the builder without access to the live module pool.
     pub is_periodic: bool,
+    /// Parameter-plane layout for this instance. Computed once from the
+    /// descriptor at install and reused across subsequent plans (deterministic
+    /// from the descriptor, so re-cloning here is cheap and matches the
+    /// instance's pool-side layout by construction).
+    pub layout: patches_ffi_common::param_layout::ParamLayout,
+    /// Perfect-hash view index for this instance, computed from `layout`.
+    pub view_index: patches_ffi_common::param_frame::ParamViewIndex,
 }
 
 // ── PlannerState ──────────────────────────────────────────────────────────────

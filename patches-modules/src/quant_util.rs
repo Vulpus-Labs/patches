@@ -1,4 +1,5 @@
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
+use patches_core::parameter_map::ParameterKey;
 
 /// Finds the nearest pitch in `notes` (sorted v/oct fractions in `[0.0, 1.0)`)
 /// to `voct_frac` using circular distance (wraps at 1.0).
@@ -51,7 +52,7 @@ pub(crate) fn quantise_note(voct_frac: f32, notes: &[f32]) -> (f32, i32) {
 /// microtonal or non-Western scale can be declared simply by supplying the
 /// desired v/oct fractions via `pitch[i]` parameters.
 pub(crate) fn parse_pitches(
-    params: &ParameterMap,
+    params: &ParamView<'_>,
     channels: usize,
     buf: &mut [f32; 12],
     len: &mut usize,
@@ -59,11 +60,10 @@ pub(crate) fn parse_pitches(
     let cap = channels.min(12);
     let mut count = 0usize;
     for i in 0..cap {
-        if let Some(ParameterValue::Float(v)) = params.get("pitch", i) {
-            let frac = v.rem_euclid(1.0);
-            buf[count] = frac;
-            count += 1;
-        }
+        let v = params.float(ParameterKey::new("pitch", i));
+        let frac = v.rem_euclid(1.0);
+        buf[count] = frac;
+        count += 1;
     }
     if count == 0 {
         buf[0] = 0.0;

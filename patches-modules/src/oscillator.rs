@@ -4,7 +4,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
     OSCILLATOR_DRIFT_STEP,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 params_enum! {
     pub enum OscFmType {
@@ -122,24 +122,21 @@ impl Module for Oscillator {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("frequency") {
-            self.freq_tracker.set_voct_offset(*v);
-            let inc = self.freq_converter.to_increment(self.freq_tracker.base_frequency());
-            self.phase_acc.set_increment(inc);
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("frequency");
+        self.freq_tracker.set_voct_offset(v);
+        let inc = self.freq_converter.to_increment(self.freq_tracker.base_frequency());
+        self.phase_acc.set_increment(inc);
+        let v = params.enum_variant("fm_type");
+        if let Ok(t) = OscFmType::try_from(v) {
+            let fm_mode = match t {
+                OscFmType::Linear => FMMode::Linear,
+                OscFmType::Logarithmic => FMMode::Exponential,
+            };
+            self.freq_tracker.set_fm_mode(fm_mode);
         }
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("fm_type") {
-            if let Ok(t) = OscFmType::try_from(v) {
-                let fm_mode = match t {
-                    OscFmType::Linear => FMMode::Linear,
-                    OscFmType::Logarithmic => FMMode::Exponential,
-                };
-                self.freq_tracker.set_fm_mode(fm_mode);
-            }
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("drift") {
-            self.drift = *v;
-        }
+        let v = params.float("drift");
+        self.drift = v;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

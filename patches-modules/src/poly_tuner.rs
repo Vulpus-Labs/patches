@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// Polyphonic V/OCT pitch offset: applies the same fixed interval to all voices.
 ///
@@ -70,10 +70,10 @@ impl Module for PolyTuner {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("octave") { self.octave = *v; }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("semi")   { self.semi = *v; }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("cent")   { self.cent = *v; }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.octave = params.int("octave");
+        self.semi = params.int("semi");
+        self.cent = params.int("cent");
         self.offset = Self::recompute_offset(self.octave, self.semi, self.cent);
     }
 

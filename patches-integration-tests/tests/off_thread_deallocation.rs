@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use patches_core::{AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_engine::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator};
 use patches_integration_tests::HeadlessEngine;
@@ -57,7 +58,7 @@ impl Module for ThreadIdDropSpy {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor
@@ -152,7 +153,12 @@ fn tombstoned_module_dropped_on_cleanup_thread() {
     let spy: Box<dyn Module> = Box::new(ThreadIdDropSpy::new(Arc::clone(&drop_thread)));
     let (mut plan_2, _) =
         build_patch(&graph, &registry, &ENV, &state_1, POOL_CAP, MODULE_CAP).unwrap();
+    let spy_param_state = patches_planner::ParamState::new_for_descriptor(
+        spy.descriptor(),
+        &ParameterMap::new(),
+    );
     plan_2.new_modules.push((spy_slot, spy));
+    plan_2.new_module_param_state.push(spy_param_state);
     engine.adopt_plan(plan_2);
 
     // Plan 3: same execution order, spy tombstoned.
@@ -206,7 +212,21 @@ fn evicted_plan_freed_on_cleanup_thread() {
     let weak = Arc::downgrade(&sentinel);
     let mut sentinel_params = ParameterMap::new();
     sentinel_params.insert("_sentinel".to_owned(), ParameterValue::FloatBuffer(Arc::clone(&sentinel)));
-    plan_1.parameter_updates.push((0, sentinel_params));
+    // Inject at a definitely-empty pool slot so pool.update_parameters short-
+    // circuits (no view build, no hash check) — we only care that the
+    // ParameterMap and its Arc ride along in the plan and get dropped on the
+    // cleanup thread when the plan is evicted.
+    let empty_slot = MODULE_CAP - 1;
+    plan_1.parameter_updates.push((empty_slot, sentinel_params));
+    let empty_layout = patches_ffi_common::param_layout::ParamLayout {
+        scalar_size: 0,
+        scalars: Vec::new(),
+        buffer_slots: Vec::new(),
+        descriptor_hash: 0,
+    };
+    plan_1
+        .param_frames
+        .push((empty_slot, patches_ffi_common::param_frame::ParamFrame::with_layout(&empty_layout)));
     drop(sentinel); // engine.plan is now the sole strong owner
 
     let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, patches_engine::OversamplingFactor::None);

@@ -79,8 +79,10 @@ fn main() {
         process::exit(1);
     });
 
-    // Drain new_modules; keep pool indices for later re-wrap.
+    // Drain new_modules + parallel param state; keep pool indices for later re-wrap.
     let raw_modules: Vec<(usize, Box<dyn Module>)> = plan.new_modules.drain(..).collect();
+    let mut raw_param_state: Vec<patches_planner::ParamState> =
+        plan.new_module_param_state.drain(..).collect();
     let pool_indices: Vec<usize> = raw_modules.iter().map(|&(idx, _)| idx).collect();
 
     let mut buffer_pool: Box<[[CableValue; 2]]> = (0..POOL_CAPACITY)
@@ -98,8 +100,8 @@ fn main() {
     }
 
     let mut module_pool = ModulePool::new(MODULE_POOL_CAPACITY);
-    for (idx, m) in raw_modules {
-        module_pool.install(idx, m);
+    for ((idx, m), ps) in raw_modules.into_iter().zip(raw_param_state.drain(..)) {
+        module_pool.install(idx, m, ps);
     }
     let stale = ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, env.periodic_update_interval);
@@ -121,9 +123,10 @@ fn main() {
     {
         let pool = stale.module_pool_mut();
         for &idx in &pool_indices {
-            if let Some(raw) = pool.tombstone(idx) {
+            let (raw, param_state) = pool.tombstone(idx);
+            if let (Some(raw), Some(ps)) = (raw, param_state) {
                 let shim = Box::new(TimingShim::new(raw, Arc::clone(&collector)));
-                pool.install(idx, shim);
+                pool.install(idx, shim, ps);
             }
         }
     }

@@ -5,6 +5,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     OutputPort, ParameterMap, PeriodicUpdate,
 };
+use patches_core::param_frame::ParamView;
 use patches_core::build_error::BuildError;
 
 use crate::timing_collector::TimingCollector;
@@ -44,7 +45,7 @@ impl Module for TimingShim {
         unimplemented!("TimingShim is a wrapper; construct via TimingShim::new")
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         self.inner.update_validated_parameters(params);
     }
 

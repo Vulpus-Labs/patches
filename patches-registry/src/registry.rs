@@ -197,7 +197,7 @@ mod tests {
             }
         }
 
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {
+        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {
         }
 
         fn descriptor(&self) -> &ModuleDescriptor {
@@ -221,7 +221,7 @@ mod tests {
             ModuleDescriptor { module_name: "TestModule", shape: shape.clone(), inputs: vec![], outputs: vec![], parameters: vec![] }
         }
         fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self { Self { instance_id, descriptor } }
-        fn update_validated_parameters(&mut self, _p: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.instance_id }
         fn process(&mut self, _p: &mut patches_core::CablePool<'_>) {}

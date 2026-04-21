@@ -221,6 +221,45 @@ of preparing an `ExecutionPlan` and travels inside the plan's
 Evicted frames follow the plan's owned state to the existing cleanup
 ring (ADR 0010) for off-thread drop.
 
+**Selective distribution, complete frames.** Two independent
+decisions:
+
+1. *Who gets a frame?* Only modules whose parameter set changed
+   since the previous plan. This is the existing behaviour: the
+   planner computes a diff against `prev_state` and pushes a
+   `parameter_updates` entry only when `!param_diff.is_empty()`
+   ([patches-planner/src/builder/mod.rs:491](../patches-planner/src/builder/mod.rs#L491)).
+   Unchanged surviving modules receive no frame.
+2. *What does a frame contain?* Every declared parameter at its
+   current value — a complete snapshot, not a diff. The planner
+   already holds prior values (it produced the diff from them), so
+   composing a complete frame costs nothing extra on the control
+   thread.
+
+Rationale: the wire format above is fixed-layout and offset-indexed.
+A diff frame would require presence tags or a bitmap, adding decode
+work on the audio thread and defeating the O(1) direct-offset read.
+Complete frames are the shape the ABI already assumes. The payload
+cost is bounded — post-§1 every parameter is a scalar or an
+`Arc`-handle id, 4–8 bytes each; even a module with 50 parameters
+ships a few hundred bytes per adopt. Live-coding cadence, not audio
+rate.
+
+Consequence for `ParamView`: every key declared in the descriptor
+is guaranteed present in every frame the module receives. `get`
+returns bare values, not `Option`. Modules no longer cache raw
+scalar parameter values as fields — they read the frame at adopt
+time, derive whatever state they need (filter coefficients, LUTs,
+etc.), and keep only the derived state. For modules that want the
+raw scalar available between adopts, caching it themselves is
+unchanged from today.
+
+The planner's internal `param_diff` ceases to be a frame payload;
+it is purely a control-thread predicate ("ship this module a
+frame?"). The plan's `parameter_updates` field carries
+`(pool_index, ParamFrame)` pairs where `ParamFrame` is always a
+complete snapshot.
+
 This is a deliberate departure from earlier drafts of this ADR.
 Parameter updates are **not part of the audio-rate performance
 surface**: the parameter space is a property of the patch definition,
@@ -580,6 +619,9 @@ lookup via a perfect hash built at `prepare`. Verify transport
 equivalence against the live `ParameterMap` via an
 `assert_view_matches_map` oracle exercised in unit tests.
 
+Typed-key retrofit is deferred to the Spike 5 ↔ 6 interlude (see
+below). Spike 3 ships untyped getters; the interlude tightens them.
+
 **Excluded from this spike:** the three-SPSC frame shuttle (dispatch
 / cleanup / free-list) and the per-key coalescing slot table. §3
 above explains: parameter updates are plan-rate only, so they ride
@@ -639,6 +681,33 @@ Tests:
 
 Deliverable: the in-process path is now wholly on the new data
 plane. FFI still uses JSON at this point; that's the next spike.
+
+### Interlude 5↔6 — Typed parameter keys (ADR 0046)
+
+Scope: retrofit the `ParamView` getters and `ModuleDescriptor`
+builder to take kind-typed `*ParamName` / `*ParamArray` values.
+Introduce the `module_params!` macro. Migrate every in-process
+module's `describe` and `update_validated_parameters` to the typed
+form. Retire the `params_enum!` placeholder from Spike 0 in favour
+of `EnumParamName<E>` + `#[derive(ParamEnum)]`.
+
+Consult ADR 0046 for the full design. It lands here rather than
+inside Spike 3 because Spike 3 and Spike 5 are already done with
+untyped getters; doing this now is one migration, not two, and it
+completes before Spike 6 touches growth mechanics (which have no
+interaction with key typing).
+
+Tests:
+
+- Compile-fail tests covering: wrong kind (`p.float` on an int
+  name), scalar-vs-array mismatch, typo (undefined ident).
+- Full test suite passes unchanged after the migration.
+- Descriptor builder round-trip: `module_params!` output agrees
+  with hand-written descriptor strings for every module.
+
+Deliverable: three runtime-bug classes (wrong kind, missing index,
+typo) become compile errors. Single source of truth for parameter
+name + kind per module.
 
 ### Spike 6 — Growth via atomic pointer swap
 

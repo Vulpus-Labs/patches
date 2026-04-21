@@ -56,7 +56,7 @@ impl Module for Counter {
         Self { instance_id, descriptor, count: 0 }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor
@@ -93,10 +93,11 @@ fn make_buffer_pool(capacity: usize) -> Vec<[CableValue; 2]> {
 fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
     let pool = stale.module_pool_mut();
     for &idx in &plan.tombstones {
-        pool.tombstone(idx);
+        let _ = pool.tombstone(idx);
     }
-    for (idx, m) in plan.new_modules.drain(..) {
-        pool.install(idx, m);
+    let states = std::mem::take(&mut plan.new_module_param_state);
+    for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+        pool.install(idx, m, ps);
     }
 }
 

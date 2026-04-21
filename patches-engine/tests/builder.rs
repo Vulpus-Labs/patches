@@ -76,8 +76,9 @@ mod builder {
             .build_patch(graph, &registry, &env, &PlannerState::empty())
             .expect("build should succeed");
         let mut module_pool = ModulePool::new(256);
-        for (idx, m) in plan.new_modules.drain(..) {
-            module_pool.install(idx, m);
+        let states = std::mem::take(&mut plan.new_module_param_state);
+        for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+            module_pool.install(idx, m, ps);
         }
         (plan, state, module_pool)
     }

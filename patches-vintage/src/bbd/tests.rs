@@ -199,7 +199,7 @@ fn sustained_sine_shows_no_slow_amplitude_drift() {
         let y = bbd.process(x);
         if i >= warmup {
             cur_peak = cur_peak.max(y.abs());
-            if (i - warmup + 1) % win == 0 {
+            if (i - warmup + 1).is_multiple_of(win) {
                 win_peaks.push(cur_peak);
                 cur_peak = 0.0;
             }

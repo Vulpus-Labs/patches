@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use crate::quant_util::{parse_pitches, quantise_note};
 
 /// Mono V/OCT quantiser.
@@ -83,15 +83,13 @@ impl Module for Quant {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         let channels = self.descriptor.shape.channels.max(1);
         parse_pitches(params, channels, &mut self.notes_buf, &mut self.notes_len);
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("centre") {
-            self.centre = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("scale") {
-            self.scale = *v;
-        }
+        let v = params.float("centre");
+        self.centre = v;
+        let v = params.float("scale");
+        self.scale = v;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

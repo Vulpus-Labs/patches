@@ -32,7 +32,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 params_enum! {
     pub enum Subdivision {
@@ -101,11 +101,10 @@ impl Module for TempoSync {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("subdivision") {
-            if let Ok(s) = Subdivision::try_from(v) {
-                self.subdivision_factor = subdivision_factor(s);
-            }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.enum_variant("subdivision");
+        if let Ok(s) = Subdivision::try_from(v) {
+            self.subdivision_factor = subdivision_factor(s);
         }
     }
 

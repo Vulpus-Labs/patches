@@ -29,7 +29,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::BitcrusherKernel;
 
 pub struct Bitcrusher {
@@ -77,18 +77,15 @@ impl Module for Bitcrusher {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("rate") {
-            self.rate = *v;
-            self.kernel.set_rate(self.rate, self.sample_rate);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("depth") {
-            self.depth = *v;
-            self.kernel.set_depth(self.depth);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("dry_wet") {
-            self.dry_wet = v.clamp(0.0, 1.0);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("rate");
+        self.rate = v;
+        self.kernel.set_rate(self.rate, self.sample_rate);
+        let v = params.float("depth");
+        self.depth = v;
+        self.kernel.set_depth(self.depth);
+        let v = params.float("dry_wet");
+        self.dry_wet = v.clamp(0.0, 1.0);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

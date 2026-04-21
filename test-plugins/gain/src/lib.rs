@@ -1,6 +1,7 @@
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap, ParameterValue};
+use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
+use patches_core::param_frame::ParamView;
 use patches_core::{AudioEnvironment, Module};
 
 pub struct Gain {
@@ -33,10 +34,8 @@ impl Module for Gain {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(g)) = params.get_scalar("gain") {
-            self.gain = *g;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.gain = params.float("gain");
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

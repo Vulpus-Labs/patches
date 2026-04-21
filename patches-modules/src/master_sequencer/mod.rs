@@ -6,7 +6,7 @@ use patches_core::{
     TrackerData, ReceivesTrackerData, TransportFrame,
     GLOBAL_TRANSPORT,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 use patches_tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
 
 mod params;
@@ -129,7 +129,7 @@ impl Module for MasterSequencer {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         self.apply_params(params);
     }
 

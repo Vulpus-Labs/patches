@@ -30,7 +30,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::drum::{DecayEnvelope, BurstGenerator};
 use patches_dsp::{SvfKernel, svf_f, q_to_damp, xorshift64};
 
@@ -98,23 +98,18 @@ impl Module for ClapDrum {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
-            self.decay_time = *v;
-            self.tail_env.set_decay(self.decay_time);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("filter") {
-            self.filter_freq = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("q") {
-            self.filter_q = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("spread") {
-            self.spread = *v;
-        }
-        if let Some(ParameterValue::Int(v)) = params.get_scalar("bursts") {
-            self.bursts = (*v as usize).clamp(1, 8);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("decay");
+        self.decay_time = v;
+        self.tail_env.set_decay(self.decay_time);
+        let v = params.float("filter");
+        self.filter_freq = v;
+        let v = params.float("q");
+        self.filter_q = v;
+        let v = params.float("spread");
+        self.spread = v;
+        let v = params.int("bursts");
+        self.bursts = (v as usize).clamp(1, 8);
         let spacing_secs = self.spread * 0.01;
         self.burst_gen.set_params(self.bursts, spacing_secs, 0.7);
         let f = svf_f(self.filter_freq, self.sample_rate);
@@ -162,6 +157,7 @@ impl Module for ClapDrum {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::ModuleHarness;
 

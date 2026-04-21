@@ -4,7 +4,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PeriodicUpdate, PolyInput, PolyOutput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::{PolySvfKernel, svf_f, q_to_damp};
 
 /// Polyphonic State Variable Filter (Chamberlin topology).
@@ -117,13 +117,11 @@ impl Module for PolySvf {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("cutoff") {
-            self.cutoff = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("q") {
-            self.q = *v;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("cutoff");
+        self.cutoff = v;
+        let v = params.float("q");
+        self.q = v;
         self.has_cv = self.any_cv_connected();
         if !self.has_cv {
             self.recompute_static_coeffs();
@@ -202,6 +200,7 @@ impl PeriodicUpdate for PolySvf {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::ModuleHarness;
 

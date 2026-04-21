@@ -33,8 +33,7 @@ use std::sync::Arc;
 
 use patches_core::cable_pool::CablePool;
 use patches_core::modules::module::PeriodicUpdate;
-use patches_core::parameter_map::ParameterValue;
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput,
     OutputPort,
@@ -226,19 +225,15 @@ impl patches_core::Module for PitchShift {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("semitones") {
-            self.base_semitones = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.base_mix = *v;
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get_scalar("formants") {
-            self.shared.preserve_formants.store(*v, Relaxed);
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get_scalar("mono") {
-            self.shared.mono.store(*v, Relaxed);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("semitones");
+        self.base_semitones = v;
+        let v = params.float("mix");
+        self.base_mix = v;
+        let v = params.bool("formants");
+        self.shared.preserve_formants.store(v, Relaxed);
+        let v = params.bool("mono");
+        self.shared.mono.store(v, Relaxed);
         // Push current parameter values to shared atomics.
         self.update_shared_params(0.0, 0.0);
     }

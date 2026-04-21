@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use patches_core::{CablePool, InputPort, Module, OutputPort, PeriodicUpdate, TrackerData};
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::{ParamFrame, ParamView};
+use patches_planner::ParamState;
 
 /// Audio-thread-owned pool of module instances.
 ///
@@ -10,8 +11,14 @@ use patches_core::parameter_map::ParameterMap;
 /// the pool — `AudioOut` writes directly to the `AUDIO_OUT_L` / `AUDIO_OUT_R`
 /// backplane slots in the cable buffer pool, and the audio callback reads
 /// those slots after each `tick()`.
+///
+/// A parallel `Box<[Option<ParamState>]>` holds each module's parameter-plane
+/// layout, view index, and current frame (ADR 0045 §3 / ticket 0595). Both
+/// slices have identical lengths; a slot's `Some(module)` implies `Some(
+/// param_state)` and vice versa.
 pub struct ModulePool {
     modules: Box<[Option<Box<dyn Module>>]>,
+    param_state: Box<[Option<ParamState>]>,
 }
 
 impl ModulePool {
@@ -19,6 +26,7 @@ impl ModulePool {
     pub fn new(capacity: usize) -> Self {
         Self {
             modules: (0..capacity).map(|_| None).collect::<Vec<_>>().into_boxed_slice(),
+            param_state: (0..capacity).map(|_| None).collect::<Vec<_>>().into_boxed_slice(),
         }
     }
 
@@ -60,16 +68,30 @@ impl ModulePool {
         })
     }
 
-    /// Remove the module at `idx`, leaving the slot empty, and return it.
+    /// Remove the module at `idx`, leaving the slot empty, and return it
+    /// together with the parallel [`ParamState`]. Both halves drop on the
+    /// cleanup worker — never on the audio thread.
     ///
-    /// Returns `None` if the slot was already empty.
-    pub fn tombstone(&mut self, idx: usize) -> Option<Box<dyn Module>> {
-        self.modules[idx].take()
+    /// Returns `(None, None)` if the slot was already empty.
+    pub fn tombstone(
+        &mut self,
+        idx: usize,
+    ) -> (Option<Box<dyn Module>>, Option<ParamState>) {
+        (self.modules[idx].take(), self.param_state[idx].take())
     }
 
-    /// Install `module` at `idx`, replacing any previous occupant.
-    pub fn install(&mut self, idx: usize, module: Box<dyn Module>) {
+    /// Install `module` and its prepare-time [`ParamState`] at `idx`,
+    /// replacing any previous occupant. Callers must route displaced state
+    /// through the cleanup ring; installing over a live slot here would leak
+    /// the previous [`ParamState`]'s heap allocations onto the audio thread.
+    pub fn install(
+        &mut self,
+        idx: usize,
+        module: Box<dyn Module>,
+        param_state: ParamState,
+    ) {
         self.modules[idx] = Some(module);
+        self.param_state[idx] = Some(param_state);
     }
 
     /// Call [`Module::process`] on the module at `idx` with the ping-pong cable pool.
@@ -87,13 +109,31 @@ impl ModulePool {
         m.process(cable_pool);
     }
 
-    /// Apply pre-validated parameter updates to the module at `idx`.
+    /// Apply pre-validated parameter updates to the module at `idx` and swap
+    /// in the freshly packed `ParamFrame`. Returns the displaced frame so the
+    /// caller can route it to the cleanup ring (its `Vec<u64>` must not drop
+    /// on the audio thread).
     ///
-    /// Does nothing if the slot is empty.
-    pub fn update_parameters(&mut self, idx: usize, params: &mut ParameterMap) {
-        if let Some(m) = self.modules[idx].as_mut() {
-            m.update_validated_parameters(params);
-        }
+    /// A `ParamView` is constructed over the freshly installed frame for
+    /// shape validation (debug asserts on layout-hash / size) and will feed
+    /// the trait call site once the signature flip in 0596 lands. In this
+    /// plumbing ticket the module still consumes `&ParameterMap` unchanged.
+    ///
+    /// Returns `None` if the slot is empty (no-op).
+    pub fn update_parameters(
+        &mut self,
+        idx: usize,
+        new_frame: ParamFrame,
+    ) -> Option<ParamFrame> {
+        let (Some(m), Some(ps)) =
+            (self.modules[idx].as_mut(), self.param_state[idx].as_mut())
+        else {
+            return None;
+        };
+        let old_frame = std::mem::replace(&mut ps.frame, new_frame);
+        let view = ParamView::new(&ps.view_index, &ps.frame);
+        m.update_validated_parameters(&view);
+        Some(old_frame)
     }
 
     /// Deliver pre-resolved port objects to the module at `idx`.
@@ -139,6 +179,7 @@ mod tests {
         ModuleShape, MonoOutput, PolyLayout, PortDescriptor, RESERVED_SLOTS,
     };
     use patches_core::parameter_map::ParameterMap;
+    use patches_core::param_frame::ParamView;
 
     use super::*;
 
@@ -182,7 +223,7 @@ mod tests {
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
             Self { id: instance_id, value: 0.0, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true } }
         }
-        fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+        fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }
         fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -195,12 +236,23 @@ mod tests {
         vec![[CableValue::Mono(0.0); 2]; size]
     }
 
+    fn empty_param_state() -> ParamState {
+        let desc = ModuleDescriptor {
+            module_name: "TestStub",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: vec![],
+            outputs: vec![],
+            parameters: vec![],
+        };
+        ParamState::new_for_descriptor(&desc, &ParameterMap::new())
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     #[test]
     fn process_writes_to_cable_pool() {
         let mut pool = ModulePool::new(4);
-        pool.install(2, Box::new(ConstSource::new(0.75)));
+        pool.install(2, Box::new(ConstSource::new(0.75)), empty_param_state());
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
         {
             let mut cp = CablePool::new(&mut bufs, 0);
@@ -212,8 +264,8 @@ mod tests {
     #[test]
     fn install_replaces_previous_occupant() {
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(ConstSource::new(1.0)));
-        pool.install(0, Box::new(ConstSource::new(2.0)));
+        pool.install(0, Box::new(ConstSource::new(1.0)), empty_param_state());
+        pool.install(0, Box::new(ConstSource::new(2.0)), empty_param_state());
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
         {
             let mut cp = CablePool::new(&mut bufs, 0);
@@ -226,11 +278,11 @@ mod tests {
     #[test]
     fn tombstone_returns_module() {
         let mut pool = ModulePool::new(4);
-        pool.install(1, Box::new(ConstSource::new(0.0)));
-        let evicted = pool.tombstone(1);
-        assert!(evicted.is_some(), "tombstone must return the evicted module");
-        let evicted2 = pool.tombstone(1);
-        assert!(evicted2.is_none(), "tombstone on empty slot must return None");
+        pool.install(1, Box::new(ConstSource::new(0.0)), empty_param_state());
+        let (module, _ps) = pool.tombstone(1);
+        assert!(module.is_some(), "tombstone must return the evicted module");
+        let (module2, ps2) = pool.tombstone(1);
+        assert!(module2.is_none() && ps2.is_none(), "tombstone on empty slot must return None");
     }
 
     #[test]

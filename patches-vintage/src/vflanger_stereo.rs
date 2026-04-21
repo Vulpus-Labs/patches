@@ -35,7 +35,7 @@
 //! | `mix` | float | 0.0--1.0 | `0.5` | Dry/wet on the HF path |
 //! | `lf_bypass` | bool | on/off | `on` | 150 Hz bass bypass |
 
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
@@ -99,25 +99,13 @@ impl Module for VFlangerStereo {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("rate_hz") {
-            self.core.set_rate(*v);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("depth") {
-            self.core.set_depth(*v);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("manual_ms") {
-            self.core.set_manual(*v);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("feedback") {
-            self.core.set_feedback(*v);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.core.set_mix(*v);
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get_scalar("lf_bypass") {
-            self.core.set_lf_bypass(*v);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.core.set_rate(params.float("rate_hz"));
+        self.core.set_depth(params.float("depth"));
+        self.core.set_manual(params.float("manual_ms"));
+        self.core.set_feedback(params.float("feedback"));
+        self.core.set_mix(params.float("mix"));
+        self.core.set_lf_bypass(params.bool("lf_bypass"));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

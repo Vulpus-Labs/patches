@@ -49,13 +49,17 @@ fn sum_out_graph() -> ModuleGraph {
 fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
     let pool = stale.module_pool_mut();
     for &idx in &plan.tombstones {
-        pool.tombstone(idx);
+        let _ = pool.tombstone(idx);
     }
-    for (idx, m) in plan.new_modules.drain(..) {
-        pool.install(idx, m);
+    let states = std::mem::take(&mut plan.new_module_param_state);
+    for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+        pool.install(idx, m, ps);
     }
-    for (idx, params) in &mut plan.parameter_updates {
-        pool.update_parameters(*idx, params);
+    let frames = std::mem::take(&mut plan.param_frames);
+    let mut frames_iter = frames.into_iter();
+    for (idx, _params) in &mut plan.parameter_updates {
+        let (_, frame) = frames_iter.next().expect("param_frames parallel to parameter_updates");
+        let _ = pool.update_parameters(*idx, frame);
     }
 }
 

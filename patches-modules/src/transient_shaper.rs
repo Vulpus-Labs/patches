@@ -32,7 +32,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::EnvelopeFollower;
 
 pub struct TransientShaper {
@@ -90,21 +90,17 @@ impl Module for TransientShaper {
         s
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         let mut speed_changed = false;
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("attack") {
-            self.attack_amount = v.clamp(-1.0, 1.0);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("sustain") {
-            self.sustain_amount = v.clamp(-1.0, 1.0);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("speed") {
-            self.speed_ms = v.clamp(1.0, 100.0);
-            speed_changed = true;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
-            self.mix = v.clamp(0.0, 1.0);
-        }
+        let v = params.float("attack");
+        self.attack_amount = v.clamp(-1.0, 1.0);
+        let v = params.float("sustain");
+        self.sustain_amount = v.clamp(-1.0, 1.0);
+        let v = params.float("speed");
+        self.speed_ms = v.clamp(1.0, 100.0);
+        speed_changed = true;
+        let v = params.float("mix");
+        self.mix = v.clamp(0.0, 1.0);
         if speed_changed {
             self.configure_envelopes();
         }
@@ -142,6 +138,7 @@ impl Module for TransientShaper {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::{assert_nearly, ModuleHarness, params};
 

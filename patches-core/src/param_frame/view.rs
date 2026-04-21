@@ -9,7 +9,7 @@
 //! table of size `next_power_of_two(keys.len()) * 2`. Key sets are small
 //! (tens, rarely >100) so the search converges quickly.
 
-use patches_core::modules::parameter_map::ParameterKey;
+use crate::modules::parameter_map::ParameterKey;
 
 use crate::ids::FloatBufferId;
 use crate::param_layout::{ParamLayout, ScalarTag};

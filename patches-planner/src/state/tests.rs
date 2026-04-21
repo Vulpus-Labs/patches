@@ -60,6 +60,20 @@ fn prev_with_node(
             input_ports: Vec::new(),
             output_ports: Vec::new(),
             is_periodic: false,
+            layout: patches_ffi_common::param_layout::ParamLayout {
+                scalar_size: 0,
+                scalars: Vec::new(),
+                buffer_slots: Vec::new(),
+                descriptor_hash: 0,
+            },
+            view_index: patches_ffi_common::param_frame::ParamViewIndex::from_layout(
+                &patches_ffi_common::param_layout::ParamLayout {
+                    scalar_size: 0,
+                    scalars: Vec::new(),
+                    buffer_slots: Vec::new(),
+                    descriptor_hash: 0,
+                },
+            ),
         },
     );
     state

@@ -49,7 +49,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 use crate::common::delay_buffer::DelayBuffer;
 use crate::common::{TapFeedbackFilter, ToneFilter};
@@ -197,11 +197,10 @@ impl Module for StereoDelay {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("dry_wet") {
-            self.dry_wet = *v;
-        }
+        let v = params.float("dry_wet");
+        self.dry_wet = v;
         for i in 0..self.taps {
             self.delay_ms[i]  = get_int(params,   "delay_ms", i, self.delay_ms[i] as i64).clamp(0, 2000) as f32;
             self.gains[i]     = get_float(params,  "gain",     i, self.gains[i]    ).clamp(0.0, 1.0);

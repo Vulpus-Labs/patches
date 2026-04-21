@@ -4,7 +4,7 @@
 
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
+use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
 use patches_core::{AudioEnvironment, Module};
 
 struct Alpha {
@@ -19,7 +19,7 @@ impl Module for Alpha {
     fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, id: InstanceId) -> Self {
         Self { id, descriptor }
     }
-    fn update_validated_parameters(&mut self, _p: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.id }
     fn set_ports(&mut self, _i: &[InputPort], _o: &[OutputPort]) {}
@@ -39,7 +39,7 @@ impl Module for Beta {
     fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, id: InstanceId) -> Self {
         Self { id, descriptor }
     }
-    fn update_validated_parameters(&mut self, _p: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.id }
     fn set_ports(&mut self, _i: &[InputPort], _o: &[OutputPort]) {}

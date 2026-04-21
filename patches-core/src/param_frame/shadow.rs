@@ -16,7 +16,7 @@
 //! punted to Spike 5; the in-crate tests call this helper directly,
 //! proving the transport at the same granularity.
 
-use patches_core::modules::parameter_map::{ParameterMap, ParameterValue};
+use crate::modules::parameter_map::{ParameterMap, ParameterValue};
 
 use super::pack::arc_stub_id;
 use super::{ParamView, ParamViewIndex};
@@ -31,7 +31,7 @@ pub fn assert_view_matches_map(
     map: &ParameterMap,
 ) {
     for (name, index_n, value) in map.iter() {
-        let key = patches_core::modules::parameter_map::ParameterKey::new(name.to_string(), index_n);
+        let key = crate::modules::parameter_map::ParameterKey::new(name.to_string(), index_n);
         match value {
             ParameterValue::Float(f) => {
                 let got = view.float(key.clone());

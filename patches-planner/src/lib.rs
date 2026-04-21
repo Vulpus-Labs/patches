@@ -7,5 +7,5 @@ pub use state::{
     BufferAllocState, BufferAllocation, GraphIndex, ModuleAllocState, NodeDecision, NodeState,
     PlanDecisions, PlanError, PlannerState, ResolvedGraph,
 };
-pub use builder::{build_patch, BuildError, BuildErrorKind, ExecutionPlan, ModuleSlot, PatchBuilder};
+pub use builder::{build_patch, BuildError, BuildErrorKind, ExecutionPlan, ModuleSlot, ParamState, PatchBuilder};
 pub use planner::Planner;

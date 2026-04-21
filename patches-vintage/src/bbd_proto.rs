@@ -478,7 +478,7 @@ mod tests {
         // DC gain of Σ r_k/(s - p_k) evaluated at s=0: Σ -r_k/p_k.
         let mut sum = Complex32::new(0.0, 0.0);
         for (p, r) in poles.iter().zip(residues.iter()) {
-            sum = sum + (-*r / *p);
+            sum += -*r / *p;
         }
         sum.re
     }
@@ -554,7 +554,7 @@ mod tests {
             let y = b.process(x);
             if i >= warmup {
                 cur = cur.max(y.abs());
-                if (i - warmup + 1) % win == 0 {
+                if (i - warmup + 1).is_multiple_of(win) {
                     wins.push(cur);
                     cur = 0.0;
                 }

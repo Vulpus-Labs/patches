@@ -3,7 +3,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 params_enum! {
     pub enum LfoMode {
@@ -128,18 +128,15 @@ impl Module for Lfo {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("rate") {
-            self.rate = *v;
-            self.phase_increment = v / self.sample_rate;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("phase_offset") {
-            self.phase_offset = *v;
-        }
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("mode") {
-            if let Ok(m) = LfoMode::try_from(v) {
-                self.mode = m;
-            }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("rate");
+        self.rate = v;
+        self.phase_increment = v / self.sample_rate;
+        let v = params.float("phase_offset");
+        self.phase_offset = v;
+        let v = params.enum_variant("mode");
+        if let Ok(m) = LfoMode::try_from(v) {
+            self.mode = m;
         }
     }
 

@@ -28,7 +28,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
 use patches_dsp::{SvfKernel, svf_f, q_to_damp, xorshift64};
 
@@ -89,24 +89,20 @@ impl Module for ClosedHiHat {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("pitch") {
-            self.pitch = *v;
-            self.metallic.set_frequency(self.pitch);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
-            self.decay_time = *v;
-            self.amp_env.set_decay(self.decay_time);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("tone") {
-            self.tone = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("filter") {
-            self.filter_freq = *v;
-            let f = svf_f(self.filter_freq, self.sample_rate);
-            let d = q_to_damp(0.3);
-            self.hp_filter = SvfKernel::new_static(f, d);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("pitch");
+        self.pitch = v;
+        self.metallic.set_frequency(self.pitch);
+        let v = params.float("decay");
+        self.decay_time = v;
+        self.amp_env.set_decay(self.decay_time);
+        let v = params.float("tone");
+        self.tone = v;
+        let v = params.float("filter");
+        self.filter_freq = v;
+        let f = svf_f(self.filter_freq, self.sample_rate);
+        let d = q_to_damp(0.3);
+        self.hp_filter = SvfKernel::new_static(f, d);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -232,24 +228,20 @@ impl Module for OpenHiHat {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("pitch") {
-            self.pitch = *v;
-            self.metallic.set_frequency(self.pitch);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("decay") {
-            self.decay_time = *v;
-            self.amp_env.set_decay(self.decay_time);
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("tone") {
-            self.tone = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("filter") {
-            self.filter_freq = *v;
-            let f = svf_f(self.filter_freq, self.sample_rate);
-            let d = q_to_damp(0.3);
-            self.hp_filter = SvfKernel::new_static(f, d);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("pitch");
+        self.pitch = v;
+        self.metallic.set_frequency(self.pitch);
+        let v = params.float("decay");
+        self.decay_time = v;
+        self.amp_env.set_decay(self.decay_time);
+        let v = params.float("tone");
+        self.tone = v;
+        let v = params.float("filter");
+        self.filter_freq = v;
+        let f = svf_f(self.filter_freq, self.sample_rate);
+        let d = q_to_damp(0.3);
+        self.hp_filter = SvfKernel::new_static(f, d);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -296,6 +288,7 @@ impl Module for OpenHiHat {
 
 #[cfg(test)]
 mod tests {
+    use patches_core::ParameterValue;
     use super::*;
     use patches_core::test_support::ModuleHarness;
 

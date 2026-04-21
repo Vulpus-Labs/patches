@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 
 /// Semitones per octave, used to convert MIDI note numbers to V/oct.
 const VOCT_SCALING: f32 = 1.0 / 12.0;
@@ -171,7 +171,7 @@ impl Module for MonoMidiIn {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor

@@ -3,7 +3,7 @@ use patches_core::{
     MonoOutput, ModuleShape, OutputPort, PolyInput, TransportFrame,
     GLOBAL_TRANSPORT,
 };
-use patches_core::parameter_map::ParameterMap;
+use patches_core::param_frame::ParamView;
 
 /// Unpacks host transport state from the `GLOBAL_TRANSPORT` backplane into
 /// named mono outputs.
@@ -80,7 +80,7 @@ impl Module for HostTransport {
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor

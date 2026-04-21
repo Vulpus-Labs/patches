@@ -81,8 +81,9 @@ fn main() {
     buffer_pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
 
     let mut module_pool = ModulePool::new(MODULE_POOL_CAPACITY);
-    for (idx, m) in plan.new_modules.drain(..) {
-        module_pool.install(idx, m);
+    let module_state_iter = plan.new_module_param_state.drain(..);
+    for ((idx, m), ps) in plan.new_modules.drain(..).zip(module_state_iter) {
+        module_pool.install(idx, m, ps);
     }
     let stale = ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, patches_core::BASE_PERIODIC_UPDATE_INTERVAL);

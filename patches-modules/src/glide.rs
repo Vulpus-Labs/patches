@@ -2,7 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 
 /// A portamento (pitch glide) module.
 ///
@@ -79,10 +79,9 @@ impl Module for Glide {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("glide_ms") {
-            self.set_glide_ms(*v);
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        let v = params.float("glide_ms");
+        self.set_glide_ms(v);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

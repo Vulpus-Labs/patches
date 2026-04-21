@@ -1,7 +1,7 @@
 //! Fixed-layout scratch-buffer descriptor (ADR 0045 §3, Spike 1).
 //!
 //! Computes a deterministic [`ParamLayout`] from a
-//! [`patches_core::ModuleDescriptor`]: ordered scalar slots with natural
+//! [`crate::ModuleDescriptor`]: ordered scalar slots with natural
 //! alignment, an indexed buffer-slot table for Arc-handle parameters, and a
 //! stable 64-bit `descriptor_hash` used by the host/plugin load-time drift
 //! check (Spike 7).
@@ -10,9 +10,9 @@
 //! entry points; later spikes consume the layout and build the packer / view
 //! on top.
 
-use patches_core::cables::CableKind;
-use patches_core::modules::module_descriptor::{ModuleDescriptor, ParameterKind};
-use patches_core::modules::parameter_map::ParameterKey;
+use crate::cables::CableKind;
+use crate::modules::module_descriptor::{ModuleDescriptor, ParameterKind};
+use crate::modules::parameter_map::ParameterKey;
 
 mod hash;
 #[cfg(test)]
@@ -124,6 +124,39 @@ pub fn compute_layout(descriptor: &ModuleDescriptor) -> ParamLayout {
     let descriptor_hash = hash::descriptor_hash(descriptor);
 
     ParamLayout { scalar_size, scalars, buffer_slots, descriptor_hash }
+}
+
+/// Construct a [`ParameterMap`] pre-filled with the descriptor's declared
+/// defaults for every declared parameter. Used by the planner to satisfy
+/// [`pack_into`](crate::param_frame::pack::pack_into)'s completeness
+/// requirement when the user-supplied map doesn't cover every slot.
+///
+/// `File` parameters are represented as an empty [`FloatBuffer`] stand-in;
+/// the planner is expected to resolve real file contents before frame build
+/// (ticket 0599). `SongName` is represented as `Int(0)`.
+pub fn defaults_from_descriptor(
+    desc: &crate::modules::module_descriptor::ModuleDescriptor,
+) -> crate::modules::parameter_map::ParameterMap {
+    use crate::modules::module_descriptor::ParameterKind;
+    use crate::modules::parameter_map::{ParameterMap, ParameterValue};
+    let mut m = ParameterMap::new();
+    for p in &desc.parameters {
+        let v = match &p.parameter_type {
+            ParameterKind::Float { default, .. } => ParameterValue::Float(*default),
+            ParameterKind::Int { default, .. } => ParameterValue::Int(*default),
+            ParameterKind::Bool { default } => ParameterValue::Bool(*default),
+            ParameterKind::Enum { variants, default, .. } => {
+                let idx = variants.iter().position(|v| v == default).unwrap_or(0);
+                ParameterValue::Enum(idx as u32)
+            }
+            ParameterKind::File { .. } => ParameterValue::FloatBuffer(
+                std::sync::Arc::<[f32]>::from(Vec::<f32>::new().into_boxed_slice()),
+            ),
+            ParameterKind::SongName => ParameterValue::Int(0),
+        };
+        m.insert_param(p.name.to_string(), p.index, v);
+    }
+    m
 }
 
 fn align_up(offset: u32, align: u32) -> u32 {

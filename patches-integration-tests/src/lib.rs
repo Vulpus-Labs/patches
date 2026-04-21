@@ -7,7 +7,7 @@ use patches_core::{
 };
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::param_frame::ParamView;
 use patches_engine::{
     CleanupAction, ExecutionPlan, OversamplingFactor,
     PatchProcessor, PlannerState, build_patch,
@@ -109,7 +109,7 @@ impl Module for ImpulseSource {
         Self { id, descriptor: d, out: MonoOutput::default(), fired: false }
     }
 
-    fn update_validated_parameters(&mut self, _: &ParameterMap) {}
+    fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
     fn instance_id(&self) -> InstanceId { self.id }
 
@@ -145,10 +145,8 @@ impl Module for ConstSource {
         Self { id, descriptor: d, out: MonoOutput::default(), value: 1.0 }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("amplitude") {
-            self.value = *v;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.value = params.float("amplitude");
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -196,13 +194,9 @@ impl Module for SineSource {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("amplitude") {
-            self.amplitude = *v;
-        }
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("freq_hz") {
-            self.inc = *v / self.sample_rate;
-        }
+    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
+        self.amplitude = params.float("amplitude");
+        self.inc = params.float("freq_hz") / self.sample_rate;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
