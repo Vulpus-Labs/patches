@@ -7,6 +7,10 @@ edition = "2021"
 name = "patches_ffi_common"
 path = "src/lib.rs"
 
+[[bin]]
+name = "descriptor-hash-probe"
+path = "src/bin/descriptor_hash_probe.rs"
+
 [dependencies]
 patches-core = { path = "../patches-core" }
 rtrb = "0.3"

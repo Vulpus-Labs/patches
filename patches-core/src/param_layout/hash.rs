@@ -53,7 +53,11 @@ impl Fnv1a64 {
     }
 }
 
-pub(crate) fn descriptor_hash(d: &ModuleDescriptor) -> u64 {
+/// Deterministic 64-bit hash over the shape of a [`ModuleDescriptor`].
+///
+/// Stable across runs, machines, and compiler versions. Used by the FFI
+/// load-time descriptor-hash drift check (ADR 0045 Spike 7).
+pub fn descriptor_hash(d: &ModuleDescriptor) -> u64 {
     let mut h = Fnv1a64::new();
 
     // Module name first so two modules sharing parameter/port shape still hash

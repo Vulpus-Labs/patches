@@ -18,6 +18,8 @@ mod hash;
 #[cfg(test)]
 mod tests;
 
+pub use hash::descriptor_hash;
+
 /// Fixed wire tag for a scalar parameter slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarTag {
