@@ -19,7 +19,4 @@ mod tests;
 
 pub use frame::{ParamFrame, U64_SIZE};
 pub use pack::{pack_into, PackError};
-pub use shadow::assert_view_matches_map;
 pub use view::{ParamView, ParamViewIndex};
-
-mod shadow;

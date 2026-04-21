@@ -4,7 +4,6 @@ use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
 use crate::modules::parameter_map::{ParameterKey, ParameterMap, ParameterValue};
 
 use crate::param_frame::pack::{pack_into, PackError};
-use crate::param_frame::shadow::assert_view_matches_map;
 use crate::param_frame::{ParamFrame, ParamView, ParamViewIndex};
 use crate::param_layout::compute_layout;
 
@@ -210,61 +209,6 @@ fn view_perfect_hash_no_collisions_large() {
     for (i, n) in NAMES.iter().enumerate() {
         assert_eq!(v.float(ParameterKey::new((*n).to_string(), 0)), i as f32);
     }
-}
-
-// ── Shadow equality ───────────────────────────────────────────────────────
-
-#[test]
-fn shadow_equality_all_variants() {
-    let d = mixed_descriptor();
-    let l = compute_layout(&d);
-    let defaults = defaults_from(&d);
-
-    let mut overrides = ParameterMap::new();
-    overrides.insert("gain".into(), ParameterValue::Float(0.125));
-    overrides.insert("count".into(), ParameterValue::Int(-7));
-    overrides.insert("active".into(), ParameterValue::Bool(false));
-    overrides.insert("mode".into(), ParameterValue::Enum(1));
-    let arc: Arc<[f32]> = Arc::from(vec![1.0f32, 2.0, 3.0].into_boxed_slice());
-    overrides.insert("sample".into(), ParameterValue::FloatBuffer(arc));
-
-    // Build the observed map that would be passed to the module.
-    let mut observed = defaults.clone();
-    for (n, i, v) in overrides.iter() {
-        observed.insert_param(n.to_string(), i, v.clone());
-    }
-
-    let mut f = ParamFrame::with_layout(&l);
-    pack_into(&l, &defaults, &overrides, &mut f).unwrap();
-    let idx = ParamViewIndex::from_layout(&l);
-    let view = ParamView::new(&idx, &f);
-    assert_view_matches_map(&idx, &view, &observed);
-}
-
-#[test]
-#[should_panic(expected = "shadow divergence")]
-fn shadow_detects_divergence_when_frame_corrupt() {
-    let d = ModuleDescriptor::new("M", empty_shape())
-        .float_param("gain", 0.0, 1.0, 0.5);
-    let l = compute_layout(&d);
-    let defaults = {
-        let mut m = ParameterMap::new();
-        m.insert("gain".into(), ParameterValue::Float(0.5));
-        m
-    };
-    let mut overrides = ParameterMap::new();
-    overrides.insert("gain".into(), ParameterValue::Float(0.9));
-    let mut f = ParamFrame::with_layout(&l);
-    pack_into(&l, &defaults, &overrides, &mut f).unwrap();
-    // Corrupt the scalar area so the view disagrees with the observed map.
-    for b in f.scalar_area_mut() {
-        *b = 0xa5;
-    }
-    let idx = ParamViewIndex::from_layout(&l);
-    let view = ParamView::new(&idx, &f);
-    let mut observed = defaults.clone();
-    observed.insert("gain".into(), ParameterValue::Float(0.9));
-    assert_view_matches_map(&idx, &view, &observed);
 }
 
 // ── File rejection at pack boundary (ticket 0599) ─────────────────────────

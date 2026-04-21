@@ -259,17 +259,6 @@ impl<'a> ParamView<'a> {
         }
     }
 
-    /// Read a raw buffer-slot id (for shadow-path equality checks).
-    #[inline]
-    pub(crate) fn buffer_raw(&self, key: &ParameterKey) -> Option<u64> {
-        match self.index.lookup(key) {
-            Entry::Buffer { slot_index, .. } => {
-                let raw = self.buffer_slots[slot_index as usize];
-                Some(raw)
-            }
-            _ => None,
-        }
-    }
 }
 
 #[inline]

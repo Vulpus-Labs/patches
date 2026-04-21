@@ -114,10 +114,8 @@ impl ModulePool {
     /// caller can route it to the cleanup ring (its `Vec<u64>` must not drop
     /// on the audio thread).
     ///
-    /// A `ParamView` is constructed over the freshly installed frame for
-    /// shape validation (debug asserts on layout-hash / size) and will feed
-    /// the trait call site once the signature flip in 0596 lands. In this
-    /// plumbing ticket the module still consumes `&ParameterMap` unchanged.
+    /// A `ParamView` is constructed over the freshly installed frame and
+    /// passed to `update_validated_parameters`.
     ///
     /// Returns `None` if the slot is empty (no-op).
     pub fn update_parameters(
