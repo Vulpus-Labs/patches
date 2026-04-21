@@ -243,7 +243,7 @@ impl ConvReverbCore {
         // file-backed IRs. ParamView now exposes only a FloatBufferId; the Arc
         // resolution path is not yet wired. Until then, file IR hot-reload is
         // a no-op; initial build via update_parameters still works.
-        let _ = p.buffer("ir_data");
+        let _ = p.fetch_buffer_static("ir_data", 0);
 
         let mut ir_changed = false;
 

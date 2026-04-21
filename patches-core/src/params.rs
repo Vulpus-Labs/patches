@@ -43,18 +43,20 @@ macro_rules! scalar_name {
     };
 }
 
-scalar_name!(FloatParamName,  "Typed name for a scalar `Float` parameter.");
-scalar_name!(IntParamName,    "Typed name for a scalar `Int` parameter.");
-scalar_name!(BoolParamName,   "Typed name for a scalar `Bool` parameter.");
-scalar_name!(BufferParamName, "Typed name for a scalar buffer parameter (`FloatBufferId`).");
+scalar_name!(FloatParamName,    "Typed name for a scalar `Float` parameter.");
+scalar_name!(IntParamName,      "Typed name for a scalar `Int` parameter.");
+scalar_name!(BoolParamName,     "Typed name for a scalar `Bool` parameter.");
+scalar_name!(BufferParamName,   "Typed name for a scalar buffer parameter (`FloatBufferId`).");
+scalar_name!(SongNameParamName, "Typed name for a `SongName` parameter. Reads as `i64` (resolved song index).");
 
 // Migration bridge (ADR 0046 Phase B): accept `&'static str` in descriptor
 // builder positions until every site has switched to `module_params!`
 // consts. Remove these impls once migration lands.
-impl From<&'static str> for FloatParamName  { fn from(s: &'static str) -> Self { Self(s) } }
-impl From<&'static str> for IntParamName    { fn from(s: &'static str) -> Self { Self(s) } }
-impl From<&'static str> for BoolParamName   { fn from(s: &'static str) -> Self { Self(s) } }
-impl From<&'static str> for BufferParamName { fn from(s: &'static str) -> Self { Self(s) } }
+impl From<&'static str> for FloatParamName    { fn from(s: &'static str) -> Self { Self(s) } }
+impl From<&'static str> for IntParamName      { fn from(s: &'static str) -> Self { Self(s) } }
+impl From<&'static str> for BoolParamName     { fn from(s: &'static str) -> Self { Self(s) } }
+impl From<&'static str> for BufferParamName   { fn from(s: &'static str) -> Self { Self(s) } }
+impl From<&'static str> for SongNameParamName { fn from(s: &'static str) -> Self { Self(s) } }
 
 /// Typed name for a scalar enum parameter, tagged with the Rust enum `E`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +227,13 @@ impl ParamKey for BufferParamName {
     #[inline]
     fn fetch(self, v: &ParamView<'_>) -> Option<FloatBufferId> {
         BufferParamKey { name: self.0, index: 0 }.fetch(v)
+    }
+}
+impl ParamKey for SongNameParamName {
+    type Value = i64;
+    #[inline]
+    fn fetch(self, v: &ParamView<'_>) -> i64 {
+        IntParamKey { name: self.0, index: 0 }.fetch(v)
     }
 }
 impl<E: ParamEnum> ParamKey for EnumParamName<E> {

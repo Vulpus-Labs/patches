@@ -11,6 +11,7 @@ module_params! {
         autostart:     Bool,
         swing:         Float,
         sync:          Enum<SyncMode>,
+        song:          SongName,
     }
 }
 
@@ -33,7 +34,7 @@ impl MasterSequencer {
     pub(super) fn apply_params(&mut self, p: &ParamView<'_>) {
         self.core.bpm = p.get(params::bpm);
         self.core.rows_per_beat = p.get(params::rows_per_beat);
-        let song = p.int("song");
+        let song = p.get(params::song);
         self.core.song_index = if song < 0 { None } else { Some(song as usize) };
         self.core.do_loop = p.get(params_extra::LOOP);
         let autostart = p.get(params::autostart);

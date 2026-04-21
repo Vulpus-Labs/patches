@@ -95,12 +95,12 @@ fn pack_round_trip_all_scalar_tags() {
 
     let idx = ParamViewIndex::from_layout(&l);
     let view = ParamView::new(&idx, &f);
-    assert_eq!(view.float("gain"), 0.75);
-    assert_eq!(view.int("count"), 5);
-    assert!(!view.bool("active"));
-    assert_eq!(view.enum_variant("mode"), 2);
+    assert_eq!(view.fetch_float_static("gain", 0), 0.75);
+    assert_eq!(view.fetch_int_static("count", 0), 5);
+    assert!(!view.fetch_bool_static("active", 0));
+    assert_eq!(view.fetch_enum_static("mode", 0), 2);
     // Buffer slot: default arc stub id non-zero.
-    let b = view.buffer("sample");
+    let b = view.fetch_buffer_static("sample", 0);
     assert!(b.is_some());
 }
 
@@ -114,8 +114,8 @@ fn pack_override_beats_default() {
     pack_into(&l, &defaults, &overrides, &mut f).expect("pack ok");
     let idx = ParamViewIndex::from_layout(&l);
     let view = ParamView::new(&idx, &f);
-    assert_eq!(view.float("gain"), 0.25); // default
-    assert_eq!(view.int("count"), 3);
+    assert_eq!(view.fetch_float_static("gain", 0), 0.25); // default
+    assert_eq!(view.fetch_int_static("count", 0), 3);
 }
 
 #[test]
@@ -152,10 +152,10 @@ fn view_index_deterministic() {
     pack_into(&l, &defaults, &overrides, &mut f).unwrap();
     let va = ParamView::new(&a, &f);
     let vb = ParamView::new(&b, &f);
-    assert_eq!(va.float("gain"), vb.float("gain"));
-    assert_eq!(va.int("count"), vb.int("count"));
-    assert_eq!(va.bool("active"), vb.bool("active"));
-    assert_eq!(va.enum_variant("mode"), vb.enum_variant("mode"));
+    assert_eq!(va.fetch_float_static("gain", 0), vb.fetch_float_static("gain", 0));
+    assert_eq!(va.fetch_int_static("count", 0), vb.fetch_int_static("count", 0));
+    assert_eq!(va.fetch_bool_static("active", 0), vb.fetch_bool_static("active", 0));
+    assert_eq!(va.fetch_enum_static("mode", 0), vb.fetch_enum_static("mode", 0));
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn view_unknown_key_release_returns_zero() {
         let idx = ParamViewIndex::from_layout(&l);
         let f = ParamFrame::with_layout(&l);
         let v = ParamView::new(&idx, &f);
-        assert_eq!(v.float("nonexistent"), 0.0);
+        assert_eq!(v.fetch_float_static("nonexistent", 0), 0.0);
     }
 }
 
@@ -207,7 +207,7 @@ fn view_perfect_hash_no_collisions_large() {
     let idx = ParamViewIndex::from_layout(&l);
     let v = ParamView::new(&idx, &f);
     for (i, n) in NAMES.iter().enumerate() {
-        assert_eq!(v.float(ParameterKey::new((*n).to_string(), 0)), i as f32);
+        assert_eq!(v.fetch_float_static(*n, 0), i as f32);
     }
 }
 

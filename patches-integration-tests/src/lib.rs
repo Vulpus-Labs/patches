@@ -8,6 +8,7 @@ use patches_core::{
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::param_frame::ParamView;
+use patches_core::params::FloatParamName;
 use patches_engine::{
     CleanupAction, ExecutionPlan, OversamplingFactor,
     PatchProcessor, PlannerState, build_patch,
@@ -134,19 +135,21 @@ pub struct ConstSource {
     value: f32,
 }
 
+const CONST_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
+
 impl Module for ConstSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("ConstSource", ModuleShape { channels: 0, length: 0, ..Default::default() })
             .mono_out("out")
-            .float_param("amplitude", 0.0, 100.0, 1.0)
+            .float_param(CONST_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
     }
 
     fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
         Self { id, descriptor: d, out: MonoOutput::default(), value: 1.0 }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.value = params.float("amplitude");
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.value = p.get(CONST_SOURCE_AMPLITUDE);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -174,12 +177,15 @@ pub struct SineSource {
     sample_rate: f32,
 }
 
+const SINE_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
+const SINE_SOURCE_FREQ_HZ:   FloatParamName = FloatParamName::new("freq_hz");
+
 impl Module for SineSource {
     fn describe(_: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("SineSource", ModuleShape { channels: 0, length: 0, ..Default::default() })
             .mono_out("out")
-            .float_param("amplitude", 0.0, 100.0, 1.0)
-            .float_param("freq_hz", 0.0, 24_000.0, 1_000.0)
+            .float_param(SINE_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
+            .float_param(SINE_SOURCE_FREQ_HZ, 0.0, 24_000.0, 1_000.0)
     }
 
     fn prepare(env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
@@ -194,9 +200,9 @@ impl Module for SineSource {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        self.amplitude = params.float("amplitude");
-        self.inc = params.float("freq_hz") / self.sample_rate;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.amplitude = p.get(SINE_SOURCE_AMPLITUDE);
+        self.inc = p.get(SINE_SOURCE_FREQ_HZ) / self.sample_rate;
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

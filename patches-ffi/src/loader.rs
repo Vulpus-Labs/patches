@@ -72,17 +72,21 @@ impl Module for DylibModule {
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         // ADR 0045 Spike 5 bridge: rebuild map from ParamView for the JSON FFI path until Spike 7.
         use patches_core::modules::module_descriptor::ParameterKind;
-        use patches_core::modules::parameter_map::ParameterKey;
         let mut map = ParameterMap::new();
         for p in &self.descriptor.parameters {
-            let key = ParameterKey::new(p.name, p.index);
             let val = match &p.parameter_type {
-                ParameterKind::Float { .. } => ParameterValue::Float(params.float(key.clone())),
-                ParameterKind::Int { .. } | ParameterKind::SongName => {
-                    ParameterValue::Int(params.int(key.clone()))
+                ParameterKind::Float { .. } => {
+                    ParameterValue::Float(params.fetch_float_static(p.name, p.index as u16))
                 }
-                ParameterKind::Bool { .. } => ParameterValue::Bool(params.bool(key.clone())),
-                ParameterKind::Enum { .. } => ParameterValue::Enum(params.enum_variant(key.clone())),
+                ParameterKind::Int { .. } | ParameterKind::SongName => {
+                    ParameterValue::Int(params.fetch_int_static(p.name, p.index as u16))
+                }
+                ParameterKind::Bool { .. } => {
+                    ParameterValue::Bool(params.fetch_bool_static(p.name, p.index as u16))
+                }
+                ParameterKind::Enum { .. } => {
+                    ParameterValue::Enum(params.fetch_enum_static(p.name, p.index as u16))
+                }
                 ParameterKind::File { .. } => {
                     // Skip File in JSON bridge until Spike 7; plugin sees it as absent.
                     continue;

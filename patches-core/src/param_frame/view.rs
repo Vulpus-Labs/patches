@@ -202,62 +202,6 @@ impl<'a> ParamView<'a> {
         }
     }
 
-    #[inline]
-    pub fn float(&self, key: impl Into<ParameterKey>) -> f32 {
-        let k = key.into();
-        match self.index.lookup(&k) {
-            Entry::Scalar { tag: ScalarTag::Float, offset, .. } => {
-                read_unaligned::<f32>(self.scalar_area, offset as usize)
-            }
-            _ => {
-                debug_assert!(false, "ParamView::float: key {:?} not a Float slot", k);
-                0.0
-            }
-        }
-    }
-
-    #[inline]
-    pub fn int(&self, key: impl Into<ParameterKey>) -> i64 {
-        let k = key.into();
-        match self.index.lookup(&k) {
-            Entry::Scalar { tag: ScalarTag::Int, offset, .. } => {
-                read_unaligned::<i64>(self.scalar_area, offset as usize)
-            }
-            _ => {
-                debug_assert!(false, "ParamView::int: key {:?} not an Int slot", k);
-                0
-            }
-        }
-    }
-
-    #[inline]
-    pub fn bool(&self, key: impl Into<ParameterKey>) -> bool {
-        let k = key.into();
-        match self.index.lookup(&k) {
-            Entry::Scalar { tag: ScalarTag::Bool, offset, .. } => {
-                self.scalar_area[offset as usize] != 0
-            }
-            _ => {
-                debug_assert!(false, "ParamView::bool: key {:?} not a Bool slot", k);
-                false
-            }
-        }
-    }
-
-    #[inline]
-    pub fn enum_variant(&self, key: impl Into<ParameterKey>) -> u32 {
-        let k = key.into();
-        match self.index.lookup(&k) {
-            Entry::Scalar { tag: ScalarTag::Enum, offset, .. } => {
-                read_unaligned::<u32>(self.scalar_area, offset as usize)
-            }
-            _ => {
-                debug_assert!(false, "ParamView::enum_variant: key {:?} not an Enum slot", k);
-                0
-            }
-        }
-    }
-
     // ── Typed (ADR 0046) getters ─────────────────────────────────────────
 
     /// Typed generic access. Return type is driven by the key's
@@ -337,25 +281,6 @@ impl<'a> ParamView<'a> {
             }
             _ => {
                 debug_assert!(false, "ParamView::get::<Buffer>: {name} idx={index} not a Buffer slot");
-                None
-            }
-        }
-    }
-
-    #[inline]
-    pub fn buffer(&self, key: impl Into<ParameterKey>) -> Option<FloatBufferId> {
-        let k = key.into();
-        match self.index.lookup(&k) {
-            Entry::Buffer { slot_index, .. } => {
-                let raw = self.buffer_slots[slot_index as usize];
-                if raw == 0 {
-                    None
-                } else {
-                    Some(FloatBufferId::from_u64_unchecked(raw))
-                }
-            }
-            _ => {
-                debug_assert!(false, "ParamView::buffer: key {:?} not a Buffer slot", k);
                 None
             }
         }

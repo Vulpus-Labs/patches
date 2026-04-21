@@ -365,9 +365,9 @@ impl ModuleDescriptor {
 
     /// Declare a song-name parameter. The DSL supplies a string; the
     /// interpreter resolves it to a `ParameterValue::Int` song-bank index.
-    pub fn song_name_param(mut self, name: &'static str) -> Self {
+    pub fn song_name_param(mut self, name: impl Into<crate::params::SongNameParamName>) -> Self {
         self.parameters.push(ParameterDescriptor {
-            name,
+            name: name.into().as_str(),
             index: 0,
             parameter_type: ParameterKind::SongName,
         });

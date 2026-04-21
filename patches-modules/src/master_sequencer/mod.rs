@@ -101,7 +101,7 @@ impl Module for MasterSequencer {
             .poly_out_multi("clock", n)
             .float_param(mp::bpm, 1.0, 999.0, 120.0)
             .int_param(mp::rows_per_beat, 1, 64, 4)
-            .song_name_param("song")
+            .song_name_param(mp::song)
             .bool_param("loop", true)
             .bool_param(mp::autostart, true)
             .float_param(mp::swing, 0.0, 1.0, 0.5)

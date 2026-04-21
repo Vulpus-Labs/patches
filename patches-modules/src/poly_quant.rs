@@ -86,8 +86,12 @@ impl Module for PolyQuant {
     }
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
-        let channels = self.descriptor.shape.channels.max(1);
-        parse_pitches(p, channels, &mut self.notes_buf, &mut self.notes_len);
+        let channels = self.descriptor.shape.channels.max(1).min(12);
+        let mut pitches = [0.0_f32; 12];
+        for i in 0..channels {
+            pitches[i] = p.get(params::pitch.at(i as u16));
+        }
+        parse_pitches(&pitches[..channels], &mut self.notes_buf, &mut self.notes_len);
         self.centre = p.get(params::centre);
         self.scale = p.get(params::scale);
     }

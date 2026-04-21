@@ -73,6 +73,9 @@ macro_rules! __module_params_one {
     ($field:ident : Buffer) => {
         pub const $field: BufferParamName = BufferParamName::new(stringify!($field));
     };
+    ($field:ident : SongName) => {
+        pub const $field: SongNameParamName = SongNameParamName::new(stringify!($field));
+    };
     ($field:ident : BufferArray) => {
         pub const $field: BufferParamArray = BufferParamArray::new(stringify!($field));
     };
