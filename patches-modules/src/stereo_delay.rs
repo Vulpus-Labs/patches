@@ -49,12 +49,25 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
 use crate::common::delay_buffer::DelayBuffer;
 use crate::common::{TapFeedbackFilter, ToneFilter};
 use crate::common::approximate::fast_tanh;
-use crate::common::param_access::{get_bool, get_float, get_int};
+
+module_params! {
+    StereoDelay {
+        dry_wet:  Float,
+        delay_ms: IntArray,
+        gain:     FloatArray,
+        feedback: FloatArray,
+        tone:     FloatArray,
+        drive:    FloatArray,
+        pan:      FloatArray,
+        pingpong: BoolArray,
+    }
+}
 
 // ─── StereoDelay ──────────────────────────────────────────────────────────────
 
@@ -125,14 +138,14 @@ impl Module for StereoDelay {
             .mono_out("out_right")
             .mono_out_multi("send_left", n)
             .mono_out_multi("send_right", n)
-            .float_param("dry_wet", 0.0, 1.0, 1.0)
-            .int_param_multi("delay_ms", shape.channels, 0, 2000, 500)
-            .float_param_multi("gain",     shape.channels, 0.0,  1.0,  1.0)
-            .float_param_multi("feedback", shape.channels, 0.0,  1.0,  0.0)
-            .float_param_multi("tone",     shape.channels, 0.0,  1.0,  1.0)
-            .float_param_multi("drive",    shape.channels, 0.1, 10.0,  1.0)
-            .float_param_multi("pan",      shape.channels, -1.0, 1.0,  0.0)
-            .bool_param_multi("pingpong",  shape.channels, false)
+            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
+            .int_param_multi(params::delay_ms, n, 0, 2000, 500)
+            .float_param_multi(params::gain,     n, 0.0,  1.0,  1.0)
+            .float_param_multi(params::feedback, n, 0.0,  1.0,  0.0)
+            .float_param_multi(params::tone,     n, 0.0,  1.0,  1.0)
+            .float_param_multi(params::drive,    n, 0.1, 10.0,  1.0)
+            .float_param_multi(params::pan,      n, -1.0, 1.0,  0.0)
+            .bool_param_multi(params::pingpong,  n, false)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -197,23 +210,22 @@ impl Module for StereoDelay {
         }
     }
 
-    fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        
-        let v = params.float("dry_wet");
-        self.dry_wet = v;
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.dry_wet = p.get(params::dry_wet);
         for i in 0..self.taps {
-            self.delay_ms[i]  = get_int(params,   "delay_ms", i, self.delay_ms[i] as i64).clamp(0, 2000) as f32;
-            self.gains[i]     = get_float(params,  "gain",     i, self.gains[i]    ).clamp(0.0, 1.0);
-            self.feedbacks[i] = get_float(params,  "feedback", i, self.feedbacks[i]).clamp(0.0, 1.0);
-            let tone          = get_float(params,  "tone",     i, self.tones[i]    ).clamp(0.0, 1.0);
+            let idx = i as u16;
+            self.delay_ms[i]  = p.get(params::delay_ms.at(idx)).clamp(0, 2000) as f32;
+            self.gains[i]     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
+            self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
+            let tone          = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
             if (tone - self.tones[i]).abs() > f32::EPSILON {
                 self.tones[i] = tone;
                 self.tone_filters_l[i].set_tone(tone);
                 self.tone_filters_r[i].set_tone(tone);
             }
-            self.drives[i]   = get_float(params,  "drive",    i, self.drives[i]   ).clamp(0.1, 10.0);
-            self.pans[i]     = get_float(params,  "pan",      i, self.pans[i]     ).clamp(-1.0, 1.0);
-            self.pingpong[i] = get_bool(params,   "pingpong", i, self.pingpong[i] );
+            self.drives[i]   = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
+            self.pans[i]     = p.get(params::pan.at(idx)).clamp(-1.0, 1.0);
+            self.pingpong[i] = p.get(params::pingpong.at(idx));
         }
     }
 
