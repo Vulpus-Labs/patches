@@ -20,6 +20,9 @@ jobs:
       - name: System audio deps
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
+      - name: Build patches-vintage dylib
+        run: cargo build -p patches-vintage
+
       - name: Build with trap feature
         run: |
           cargo build -p patches-integration-tests \

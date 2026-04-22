@@ -138,17 +138,6 @@ impl DocumentWorkspace {
         report
     }
 
-    /// List the URIs of every currently-open document. Used by the server
-    /// to refresh diagnostics after a rescan.
-    pub fn open_uris(&self) -> Vec<Url> {
-        self.state
-            .lock()
-            .expect("state lock poisoned")
-            .documents
-            .keys()
-            .cloned()
-            .collect()
-    }
 }
 
 #[cfg(test)]

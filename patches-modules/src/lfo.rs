@@ -1,3 +1,43 @@
+//! A low-frequency oscillator with six waveform outputs.
+//!
+//! Outputs sine, triangle, saw_up, saw_down, square, and random waveforms.
+//! Rate is in Hz; phase_offset shifts all waveforms by a fixed fraction of a cycle.
+//! Mode controls polarity: bipolar ([-1, 1]), unipolar_positive ([0, 1]),
+//! or unipolar_negative ([-1, 0]).
+//!
+//! The `sync` input resets the phase to 0 on each rising edge (transition from <= 0 to > 0).
+//! The `rate_cv` input adds an offset in Hz to the base `rate` parameter; the result is
+//! clamped to [0.001, 40.0] Hz before use.
+//! The `sync_ms` input, when connected, fully overrides the rate parameter by treating
+//! the value as a period in milliseconds (converted to Hz internally).
+//!
+//! # Inputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `sync` | mono | Rising-edge sync resets phase to 0 |
+//! | `rate_cv` | mono | Additive rate offset in Hz |
+//! | `sync_ms` | mono | When connected, overrides rate with period in ms |
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `sine` | mono | Sine waveform |
+//! | `triangle` | mono | Triangle waveform |
+//! | `saw_up` | mono | Rising sawtooth waveform |
+//! | `saw_down` | mono | Falling sawtooth waveform |
+//! | `square` | mono | Square waveform (50% duty) |
+//! | `random` | mono | Sample-and-hold random value (updates once per cycle) |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `rate` | float | 0.01 -- 20.0 | `1.0` | Oscillation rate in Hz |
+//! | `phase_offset` | float | 0.0 -- 1.0 | `0.0` | Fixed phase offset as fraction of a cycle |
+//! | `mode` | enum | bipolar, unipolar_positive, unipolar_negative | `bipolar` | Output polarity mode |
+
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -16,45 +56,6 @@ params_enum! {
 use crate::common::approximate::lookup_sine;
 use patches_dsp::xorshift64;
 
-/// A low-frequency oscillator with six waveform outputs.
-///
-/// Outputs sine, triangle, saw_up, saw_down, square, and random waveforms.
-/// Rate is in Hz; phase_offset shifts all waveforms by a fixed fraction of a cycle.
-/// Mode controls polarity: bipolar ([-1, 1]), unipolar_positive ([0, 1]),
-/// or unipolar_negative ([-1, 0]).
-///
-/// The `sync` input resets the phase to 0 on each rising edge (transition from <= 0 to > 0).
-/// The `rate_cv` input adds an offset in Hz to the base `rate` parameter; the result is
-/// clamped to [0.001, 40.0] Hz before use.
-/// The `sync_ms` input, when connected, fully overrides the rate parameter by treating
-/// the value as a period in milliseconds (converted to Hz internally).
-///
-/// # Inputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `sync` | mono | Rising-edge sync resets phase to 0 |
-/// | `rate_cv` | mono | Additive rate offset in Hz |
-/// | `sync_ms` | mono | When connected, overrides rate with period in ms |
-///
-/// # Outputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `sine` | mono | Sine waveform |
-/// | `triangle` | mono | Triangle waveform |
-/// | `saw_up` | mono | Rising sawtooth waveform |
-/// | `saw_down` | mono | Falling sawtooth waveform |
-/// | `square` | mono | Square waveform (50% duty) |
-/// | `random` | mono | Sample-and-hold random value (updates once per cycle) |
-///
-/// # Parameters
-///
-/// | Name | Type | Range | Default | Description |
-/// |------|------|-------|---------|-------------|
-/// | `rate` | float | 0.01 -- 20.0 | `1.0` | Oscillation rate in Hz |
-/// | `phase_offset` | float | 0.0 -- 1.0 | `0.0` | Fixed phase offset as fraction of a cycle |
-/// | `mode` | enum | bipolar, unipolar_positive, unipolar_negative | `bipolar` | Output polarity mode |
 module_params! {
     Lfo {
         rate:         Float,

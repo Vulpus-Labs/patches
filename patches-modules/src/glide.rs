@@ -1,3 +1,27 @@
+//! A portamento (pitch glide) module.
+//!
+//! Smooths V/OCT pitch values using a one-pole low-pass filter. Because V/OCT
+//! is a log-frequency scale (1 V/OCT = 1 octave), interpolating linearly in
+//! V/OCT space gives perceptually linear (constant-ratio) glide.
+//!
+//! # Inputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `in` | mono | V/OCT pitch signal |
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out` | mono | Smoothed V/OCT pitch |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `glide_ms` | float | 0.0--10000.0 | `100.0` | Glide time in milliseconds |
+
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
@@ -5,29 +29,6 @@ use patches_core::{
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
-/// A portamento (pitch glide) module.
-///
-/// Smooths V/OCT pitch values using a one-pole low-pass filter. Because V/OCT
-/// is a log-frequency scale (1 V/OCT = 1 octave), interpolating linearly in
-/// V/OCT space gives perceptually linear (constant-ratio) glide.
-///
-/// # Inputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `in` | mono | V/OCT pitch signal |
-///
-/// # Outputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `out` | mono | Smoothed V/OCT pitch |
-///
-/// # Parameters
-///
-/// | Name | Type | Range | Default | Description |
-/// |------|------|-------|---------|-------------|
-/// | `glide_ms` | float | 0.0--10000.0 | `100.0` | Glide time in milliseconds |
 module_params! {
     Glide {
         glide_ms: Float,

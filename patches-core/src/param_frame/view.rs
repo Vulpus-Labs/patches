@@ -117,11 +117,6 @@ impl ParamViewIndex {
         self.descriptor_hash
     }
 
-    #[inline]
-    fn lookup(&self, key: &ParameterKey) -> Entry {
-        self.lookup_raw(key.name.as_bytes(), key.index as u64)
-    }
-
     /// Non-allocating lookup by static name + index. Used by the typed
     /// `ParamKey` path (ADR 0046).
     #[inline]

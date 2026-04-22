@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
-use crate::modules::parameter_map::{ParameterKey, ParameterMap, ParameterValue};
+use crate::modules::parameter_map::{ParameterMap, ParameterValue};
 use crate::params::EnumParamName;
 
 crate::params_enum! {

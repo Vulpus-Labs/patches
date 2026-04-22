@@ -5,5 +5,6 @@ fn main() {
         .include(src_dir)
         .file(format!("{src_dir}/parser.c"))
         .warnings(false)
+        .cargo_warnings(false)
         .compile("tree_sitter_patches");
 }

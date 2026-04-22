@@ -1,3 +1,27 @@
+//! Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable BPM.
+//!
+//! All four outputs are derived from a single beat-phase accumulator, keeping them
+//! perfectly phase-locked. Outputs are 1.0 on the one sample at each boundary and
+//! 0.0 on all other samples. Supports both simple time signatures
+//! (quavers_per_beat=2) and compound (quavers_per_beat=3).
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `bar` | mono | 1.0 trigger pulse at each bar boundary |
+//! | `beat` | mono | 1.0 trigger pulse at each beat boundary |
+//! | `quaver` | mono | 1.0 trigger pulse at each quaver (eighth-note) boundary |
+//! | `semiquaver` | mono | 1.0 trigger pulse at each semiquaver (sixteenth-note) boundary |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `bpm` | float | 1.0–300.0 | `120.0` | Tempo in beats per minute |
+//! | `beats_per_bar` | int | 1–16 | `4` | Number of beats per bar |
+//! | `quavers_per_beat` | int | 1–4 | `2` | Quavers per beat (2 = simple, 3 = compound) |
+
 use patches_core::{
     AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoOutput, OutputPort,
@@ -5,29 +29,6 @@ use patches_core::{
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
-/// Generates bar, beat, quaver, and semiquaver trigger pulses from a configurable BPM.
-///
-/// All four outputs are derived from a single beat-phase accumulator, keeping them
-/// perfectly phase-locked. Outputs are 1.0 on the one sample at each boundary and
-/// 0.0 on all other samples. Supports both simple time signatures
-/// (quavers_per_beat=2) and compound (quavers_per_beat=3).
-///
-/// # Outputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `bar` | mono | 1.0 trigger pulse at each bar boundary |
-/// | `beat` | mono | 1.0 trigger pulse at each beat boundary |
-/// | `quaver` | mono | 1.0 trigger pulse at each quaver (eighth-note) boundary |
-/// | `semiquaver` | mono | 1.0 trigger pulse at each semiquaver (sixteenth-note) boundary |
-///
-/// # Parameters
-///
-/// | Name | Type | Range | Default | Description |
-/// |------|------|-------|---------|-------------|
-/// | `bpm` | float | 1.0–300.0 | `120.0` | Tempo in beats per minute |
-/// | `beats_per_bar` | int | 1–16 | `4` | Number of beats per bar |
-/// | `quavers_per_beat` | int | 1–4 | `2` | Quavers per beat (2 = simple, 3 = compound) |
 module_params! {
     Clock {
         bpm:             Float,

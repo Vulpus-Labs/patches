@@ -1,3 +1,20 @@
+//! Converts a single MIDI CC number to a bipolar CV signal.
+//!
+//! Instantiate one per CC you want to map. The `cc` parameter selects which
+//! controller number (0–127) to listen to.
+//!
+//! # Outputs
+//!
+//! | Port | Kind | Description |
+//! |------|------|-------------|
+//! | `out` | mono | CC value mapped linearly to \[-1.0, 1.0\] |
+//!
+//! # Parameters
+//!
+//! | Name | Type | Range | Default | Description |
+//! |------|------|-------|---------|-------------|
+//! | `cc` | int | 0–127 | `1` | MIDI CC number to track |
+
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
@@ -5,22 +22,6 @@ use patches_core::{
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
-/// Converts a single MIDI CC number to a bipolar CV signal.
-///
-/// Instantiate one per CC you want to map. The `cc` parameter selects which
-/// controller number (0–127) to listen to.
-///
-/// # Outputs
-///
-/// | Port | Kind | Description |
-/// |------|------|-------------|
-/// | `out` | mono | CC value mapped linearly to \[-1.0, 1.0\] |
-///
-/// # Parameters
-///
-/// | Name | Type | Range | Default | Description |
-/// |------|------|-------|---------|-------------|
-/// | `cc` | int | 0–127 | `1` | MIDI CC number to track |
 module_params! {
     MidiCc {
         cc: Int,

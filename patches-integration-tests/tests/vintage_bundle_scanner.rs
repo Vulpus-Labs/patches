@@ -24,9 +24,15 @@ use std::sync::Arc;
 const EXPECTED_MODULES: &[&str] = &[
     "VChorus",
     "VBbd",
+    "VDco",
+    "VPolyDco",
     "VFlanger",
     "VFlangerStereo",
     "VReverb",
+    "VLadder",
+    "VPolyLadder",
+    "VOtaVcf",
+    "VOtaPolyVcf",
 ];
 
 fn env() -> AudioEnvironment {

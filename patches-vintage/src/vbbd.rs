@@ -51,10 +51,6 @@ use crate::bbd::{Bbd, BbdDevice};
 
 use crate::compander::{CompanderParams, Compressor, Expander};
 
-/// Honest ceiling for a 4096-stage BBD: ~340 ms at ~6 kHz clock, past
-/// which image-folding becomes audible. The module uses
-/// [`BbdDevice::BBD_4096`] for its taps, putting vintage analog-delay
-/// territory in range.
 module_params! {
     VBbd {
         dry_wet:  Float,
@@ -65,6 +61,10 @@ module_params! {
     }
 }
 
+/// Honest ceiling for a 4096-stage BBD: ~340 ms at ~6 kHz clock, past
+/// which image-folding becomes audible. The module uses
+/// [`BbdDevice::BBD_4096`] for its taps, putting vintage analog-delay
+/// territory in range.
 const DELAY_MS_MAX: f32 = 340.0;
 const DELAY_MS_MIN: f32 = 1.0;
 const FEEDBACK_MAX: f32 = 0.95;

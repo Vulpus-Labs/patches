@@ -63,9 +63,6 @@ use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples}
 /// Must match the upper bound of the `attack_ms` float_param.
 const MAX_ATTACK_MS: f32 = 50.0;
 
-/// Lookahead peak limiter.
-///
-/// See [module-level documentation](self).
 module_params! {
     Limiter {
         threshold:  Float,
