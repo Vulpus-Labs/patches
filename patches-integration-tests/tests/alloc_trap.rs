@@ -14,8 +14,26 @@
 static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAllocator;
 
 use patches_alloc_trap::{trap_hits, NoAllocGuard};
-use patches_integration_tests::{build_engine, env, run_n_stereo};
+use patches_ffi::scanner::PluginScanner;
+use patches_integration_tests::{build_engine, dylib_path, env, run_n_stereo};
 use patches_modules::default_registry;
+
+/// Registry that also carries the `patches-vintage` bundle when the dylib is
+/// available. Used by example patches that reference vintage modules
+/// (ADR 0045 Spike 8 Phase C moved vintage out of `default_registry()`).
+fn registry_with_vintage() -> patches_registry::Registry {
+    let mut registry = default_registry();
+    let dylib = dylib_path("patches-vintage");
+    if dylib.exists() {
+        let report = PluginScanner::new([dylib]).scan(&mut registry);
+        assert!(
+            report.errors.is_empty(),
+            "vintage bundle scan errors: {:?}",
+            report.errors
+        );
+    }
+    registry
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +47,7 @@ fn build_engine_from(path_rel: &str) -> patches_integration_tests::HeadlessEngin
     let src = load(path_rel);
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
-    let registry = default_registry();
+    let registry = registry_with_vintage();
     let graph = patches_interpreter::build(&result.patch, &registry, &env())
         .expect("build failed")
         .graph;

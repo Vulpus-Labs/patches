@@ -223,6 +223,23 @@ impl DocumentWorkspace {
         out
     }
 
+    /// Re-analyse every currently open editor document against the current
+    /// registry + template env, returning publish-ready diagnostics. Used
+    /// after `patches/rescanModules` to clear stale "unknown module"
+    /// diagnostics once the registry contains the newly-loaded bundle.
+    pub fn reanalyse_open(&self) -> Vec<(Url, Vec<Diagnostic>)> {
+        let mut state = self.state.lock().expect("lock workspace state");
+        let open: Vec<Url> = state.documents.keys().cloned().collect();
+        let mut out: Vec<(Url, Vec<Diagnostic>)> = Vec::new();
+        for uri in open {
+            if let Some(buckets) = self.reanalyse_cached(&mut state, &uri) {
+                out.extend(buckets);
+            }
+        }
+        rebuild_nav(&mut state);
+        out
+    }
+
     /// Re-analyse every ancestor that transitively includes `uri`, using
     /// each ancestor's cached source. Intended for cascading editor edits to
     /// a child document whose parents are also open.

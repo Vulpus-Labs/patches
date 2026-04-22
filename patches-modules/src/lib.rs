@@ -183,7 +183,8 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<HostTransport>();
     r.register::<TempoSync>();
     r.register::<MsTicker>();
-    patches_vintage::register(&mut r);
+    // `patches-vintage` is no longer in the default registry (ADR 0045 Spike 8
+    // Phase C / ticket 0570). Load its cdylib via `PluginScanner`.
     r
 }
 

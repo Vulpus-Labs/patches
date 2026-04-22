@@ -27,6 +27,7 @@ test-gain-plugin = { path = "../test-plugins/gain" }
 test-gain-bad-hash-plugin = { path = "../test-plugins/gain-bad-hash" }
 test-all-tags-plugin = { path = "../test-plugins/all-tags" }
 test-release-on-update-plugin = { path = "../test-plugins/release-on-update" }
+sha2 = "0.10"
 
 [features]
 default = []

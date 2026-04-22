@@ -20,6 +20,11 @@
         "command": "patches.showPatchGraph",
         "title": "Patches: Show Patch Graph",
         "category": "Patches"
+      },
+      {
+        "command": "patches.rescanModules",
+        "title": "Patches: Rescan Module Bundles",
+        "category": "Patches"
       }
     ],
     "menus": {
@@ -58,6 +63,14 @@
           "type": "string",
           "default": "",
           "description": "Path to the patches-lsp binary. Leave empty to use the bundled binary or PATH lookup."
+        },
+        "patches.modulePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Directories or dylib files scanned at LSP start-up for FFI module bundles (.dylib/.so/.dll). Resolves external modules such as patches-vintage's VChorus/VBbd/VFlanger/VReverb so hover and diagnostics work in .patches files that reference them."
         }
       }
     }

@@ -282,6 +282,32 @@ function ensurePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
 
 function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
+    vscode.commands.registerCommand("patches.rescanModules", async () => {
+      if (!client) {
+        void vscode.window.showWarningMessage("patches-lsp not running.");
+        return;
+      }
+      try {
+        const report = await client.sendRequest<{
+          loaded: string[];
+          replaced: string[];
+          skipped: string[];
+          errors: string[];
+        }>("patches/rescanModules", {});
+        void vscode.window.showInformationMessage(
+          `Patches: rescan — ${report.loaded.length} loaded, ` +
+            `${report.replaced.length} replaced, ${report.skipped.length} skipped, ` +
+            `${report.errors.length} errors`,
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Patches rescan failed: ${(err as Error).message}`,
+        );
+      }
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("patches.showPatchGraph", async () => {
       const doc = vscode.window.activeTextEditor?.document;
       if (!isPatchesDoc(doc)) {
@@ -338,6 +364,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "patches" }],
+    traceOutputChannel: vscode.window.createOutputChannel(
+      "Patches LSP Trace",
+    ),
   };
 
   client = new LanguageClient(

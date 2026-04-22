@@ -294,7 +294,12 @@ macro_rules! export_plugin {
             $crate::types::FfiPluginVTable {
                 abi_version: $crate::types::ABI_VERSION,
                 module_version: 0,
-                supports_periodic: 0,
+                // Always 1: the plugin-side `periodic_update` wrapper consults
+                // `Module::as_periodic` at runtime and returns 0 for modules
+                // that don't need it. Setting this to 0 at compile time would
+                // prevent the host from *ever* calling `periodic_update`, which
+                // silently freezes LFOs and any other periodic state.
+                supports_periodic: 1,
                 describe: __patches_describe,
                 prepare: __patches_prepare,
                 update_validated_parameters: __patches_update_validated_parameters,
@@ -431,6 +436,258 @@ macro_rules! export_plugin_with_hash_override {
             // Silence unused warning in plugins that never need $module.
             let _ = ::std::marker::PhantomData::<$module>;
             $hash
+        }
+    };
+}
+
+/// Emit the eight ABI entry points for *each* module in a multi-module
+/// bundle (ADR 0039), plus a single `patches_plugin_init` whose manifest
+/// lists every vtable. Each module also gets its own
+/// `patches_plugin_descriptor_hash_<name>` symbol, read by the host
+/// loader to detect ABI/descriptor drift per module.
+///
+/// Each entry is `(ident, Type, "Name", version)`:
+/// - `ident` — unique identifier used to name the per-module private
+///   submodule that holds the vtable's Rust-internal extern "C" fns.
+///   No symbol is published under this name; only the Rust path matters.
+/// - `Type` — the `patches_core::Module`-implementing type.
+/// - `"Name"` — bare module name (string literal); used to build the
+///   `patches_plugin_descriptor_hash_<Name>` export symbol.
+/// - `version` — `u32`, packed semver per ADR 0039.
+///
+/// ```ignore
+/// patches_ffi_common::export_modules! {
+///     (chorus,  MyChorus,  "MyChorus",  0),
+///     (flanger, MyFlanger, "MyFlanger", 0),
+/// }
+/// ```
+#[macro_export]
+macro_rules! export_modules {
+    (
+        $(
+            ( $ident:ident, $module:ty, $name:literal, $version:expr )
+        ),+ $(,)?
+    ) => {
+        $(
+            #[doc(hidden)]
+            mod $ident {
+                #[allow(unused_imports)]
+                use super::*;
+
+                pub extern "C" fn describe(
+                    shape: $crate::types::FfiModuleShape,
+                ) -> $crate::types::FfiBytes {
+                    let core_shape: ::patches_core::ModuleShape = shape.into();
+                    let desc = <$module as ::patches_core::Module>::describe(&core_shape);
+                    $crate::types::FfiBytes::from_vec(
+                        $crate::json::serialize_module_descriptor(&desc),
+                    )
+                }
+
+                pub extern "C" fn prepare(
+                    descriptor_json: *const u8,
+                    descriptor_json_len: usize,
+                    env: $crate::types::FfiAudioEnvironment,
+                    instance_id: u64,
+                ) -> *mut ::std::ffi::c_void {
+                    // SAFETY: host guarantees a valid descriptor-JSON slice
+                    // for the duration of the call (ADR 0045 §4).
+                    let slice = unsafe {
+                        ::std::slice::from_raw_parts(descriptor_json, descriptor_json_len)
+                    };
+                    let descriptor = match $crate::json::deserialize_module_descriptor(slice)
+                    {
+                        Ok(d) => d,
+                        Err(_) => return ::std::ptr::null_mut(),
+                    };
+                    let layout = $crate::param_layout::compute_layout(&descriptor);
+                    let param_index =
+                        $crate::param_frame::ParamViewIndex::from_layout(&layout);
+                    let port_layout = $crate::port_frame::PortLayout::new(
+                        descriptor.inputs.len() as u32,
+                        descriptor.outputs.len() as u32,
+                    );
+                    let input_buf = ::std::vec::Vec::with_capacity(descriptor.inputs.len());
+                    let output_buf =
+                        ::std::vec::Vec::with_capacity(descriptor.outputs.len());
+                    let audio_env: ::patches_core::AudioEnvironment = env.into();
+                    let id = ::patches_core::modules::InstanceId::from_raw(instance_id);
+                    let module = <$module as ::patches_core::Module>::prepare(
+                        &audio_env,
+                        descriptor,
+                        id,
+                    );
+                    let instance = ::std::boxed::Box::new(
+                        $crate::sdk::PluginInstance::<$module> {
+                            module,
+                            param_index,
+                            port_layout,
+                            input_buf,
+                            output_buf,
+                        },
+                    );
+                    ::std::boxed::Box::into_raw(instance) as *mut ::std::ffi::c_void
+                }
+
+                pub extern "C" fn update_validated_parameters(
+                    handle: $crate::abi::Handle,
+                    bytes: *const u8,
+                    len: usize,
+                    _env: *const $crate::abi::HostEnv,
+                ) {
+                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr.
+                    let inst = unsafe {
+                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
+                    };
+                    // SAFETY: host promises bytes/len is a valid slice.
+                    let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
+                    if let ::std::result::Result::Ok(view) =
+                        $crate::sdk::decode_param_frame(slice, &inst.param_index)
+                    {
+                        ::patches_core::Module::update_validated_parameters(
+                            &mut inst.module,
+                            &view,
+                        );
+                    }
+                }
+
+                pub extern "C" fn set_ports(
+                    handle: $crate::abi::Handle,
+                    bytes: *const u8,
+                    len: usize,
+                    _env: *const $crate::abi::HostEnv,
+                ) {
+                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr.
+                    let inst = unsafe {
+                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
+                    };
+                    // SAFETY: valid slice for the call.
+                    let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
+                    let view =
+                        match $crate::sdk::decode_port_frame(slice, &inst.port_layout) {
+                            ::std::result::Result::Ok(v) => v,
+                            ::std::result::Result::Err(_) => return,
+                        };
+                    inst.input_buf.clear();
+                    inst.output_buf.clear();
+                    for i in 0..view.input_count() {
+                        inst.input_buf.push(view.input(i).into());
+                    }
+                    for i in 0..view.output_count() {
+                        inst.output_buf.push(view.output(i).into());
+                    }
+                    ::patches_core::Module::set_ports(
+                        &mut inst.module,
+                        &inst.input_buf,
+                        &inst.output_buf,
+                    );
+                }
+
+                pub extern "C" fn process(
+                    handle: *mut ::std::ffi::c_void,
+                    pool_ptr: *mut [::patches_core::cables::CableValue; 2],
+                    pool_len: usize,
+                    write_index: usize,
+                ) {
+                    // SAFETY: see the module docs on `export_modules!`; host
+                    // supplies a valid exclusive cable-pool slice.
+                    let inst = unsafe {
+                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
+                    };
+                    let slice = unsafe {
+                        ::std::slice::from_raw_parts_mut(pool_ptr, pool_len)
+                    };
+                    let mut pool =
+                        ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                    ::patches_core::Module::process(&mut inst.module, &mut pool);
+                }
+
+                pub extern "C" fn periodic_update(
+                    handle: *mut ::std::ffi::c_void,
+                    pool_ptr: *const [::patches_core::cables::CableValue; 2],
+                    pool_len: usize,
+                    write_index: usize,
+                ) -> i32 {
+                    // SAFETY: same contract as process; read-only use.
+                    let inst = unsafe {
+                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
+                    };
+                    let slice = unsafe {
+                        ::std::slice::from_raw_parts_mut(
+                            pool_ptr as *mut [::patches_core::cables::CableValue; 2],
+                            pool_len,
+                        )
+                    };
+                    let pool =
+                        ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                    match ::patches_core::Module::as_periodic(&mut inst.module) {
+                        ::std::option::Option::Some(p) => {
+                            p.periodic_update(&pool);
+                            1
+                        }
+                        ::std::option::Option::None => 0,
+                    }
+                }
+
+                pub extern "C" fn drop_handle(handle: *mut ::std::ffi::c_void) {
+                    if handle.is_null() {
+                        return;
+                    }
+                    // SAFETY: handle came from Box::into_raw in prepare.
+                    let _ = unsafe {
+                        ::std::boxed::Box::from_raw(
+                            handle as *mut $crate::sdk::PluginInstance<$module>,
+                        )
+                    };
+                }
+
+                pub extern "C" fn free_bytes(bytes: $crate::types::FfiBytes) {
+                    // SAFETY: bytes came from FfiBytes::from_vec on this side.
+                    let _ = unsafe { bytes.reclaim() };
+                }
+
+                pub const VTABLE: $crate::types::FfiPluginVTable =
+                    $crate::types::FfiPluginVTable {
+                        abi_version: $crate::types::ABI_VERSION,
+                        module_version: $version,
+                        // Always 1: the plugin-side `periodic_update` wrapper
+                        // consults `Module::as_periodic` at runtime and returns
+                        // 0 for modules that don't need it. Setting this to 0
+                        // at compile time would prevent the host from *ever*
+                        // calling `periodic_update` on any module in the
+                        // bundle — silently freezes LFOs, e.g. VBbd/VReverb.
+                        supports_periodic: 1,
+                        describe,
+                        prepare,
+                        update_validated_parameters,
+                        process,
+                        set_ports,
+                        periodic_update,
+                        drop: drop_handle,
+                        free_bytes,
+                    };
+
+                #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
+                pub extern "C" fn descriptor_hash() -> u64 {
+                    let shape = ::patches_core::ModuleShape::default();
+                    let desc = <$module as ::patches_core::Module>::describe(&shape);
+                    $crate::descriptor_hash(&desc)
+                }
+            }
+        )+
+
+        #[doc(hidden)]
+        pub static __PATCHES_VTABLES: &[$crate::types::FfiPluginVTable] = &[
+            $( $ident::VTABLE ),+
+        ];
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn patches_plugin_init() -> $crate::types::FfiPluginManifest {
+            $crate::types::FfiPluginManifest {
+                abi_version: $crate::types::ABI_VERSION,
+                count: __PATCHES_VTABLES.len(),
+                vtables: __PATCHES_VTABLES.as_ptr(),
+            }
         }
     };
 }

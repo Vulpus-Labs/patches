@@ -300,6 +300,11 @@ fn extract_module_paths(value: &serde_json::Value) -> Option<Vec<PathBuf>> {
     )
 }
 
+/// Params payload for `patches/rescanModules` (empty; all required inputs are
+/// in the workspace's current module-path configuration).
+#[derive(Debug, Default, Deserialize)]
+pub struct RescanModulesParams {}
+
 /// Result payload for `patches/rescanModules`.
 #[derive(Debug, Serialize)]
 pub struct RescanModulesResult {
@@ -351,16 +356,13 @@ impl PatchesLanguageServer {
 
     /// Handle `patches/rescanModules` — rebuilds the registry and refreshes
     /// diagnostics for every open document. Returns the scan report.
-    pub async fn rescan_modules(&self, _: serde_json::Value) -> Result<RescanModulesResult> {
+    pub async fn rescan_modules(&self, _: RescanModulesParams) -> Result<RescanModulesResult> {
         let report = self.workspace.rescan_modules();
         // Re-analyse every open document so diagnostics reflect the new
         // registry. `refresh_from_disk` forces a reanalysis from the
         // current in-memory source.
-        for uri in self.workspace.open_uris() {
-            let affected = self.workspace.refresh_from_disk(&uri);
-            for (u, d) in affected {
-                self.client.publish_diagnostics(u, d, None).await;
-            }
+        for (u, d) in self.workspace.reanalyse_open() {
+            self.client.publish_diagnostics(u, d, None).await;
         }
         Ok(report.into())
     }

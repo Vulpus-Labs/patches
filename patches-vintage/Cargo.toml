@@ -7,6 +7,7 @@ edition = "2021"
 patches-core = { path = "../patches-core" }
 patches-registry = { path = "../patches-registry" }
 patches-dsp = { path = "../patches-dsp" }
+patches-ffi-common = { path = "../patches-ffi-common" }
 
 [dev-dependencies]
 patches-core = { path = "../patches-core", features = ["test-support"] }
@@ -14,4 +15,5 @@ patches-core = { path = "../patches-core", features = ["test-support"] }
 [lib]
 name = "patches_vintage"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 doctest = false
