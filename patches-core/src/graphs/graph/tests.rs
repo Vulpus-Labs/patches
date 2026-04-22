@@ -317,6 +317,67 @@ fn connect_poly_output_to_mono_input_returns_kind_mismatch() {
     ));
 }
 
+// ── Trigger / PolyTrigger validation (ADR 0047) ─────────────────────
+
+fn stub_desc_kind(
+    inputs: &[&'static str],
+    outputs: &[&'static str],
+    kind: CableKind,
+) -> ModuleDescriptor {
+    ModuleDescriptor {
+        module_name: "stub_trigger",
+        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        inputs: inputs.iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: kind.clone(), poly_layout: PolyLayout::Audio })
+            .collect(),
+        outputs: outputs.iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: kind.clone(), poly_layout: PolyLayout::Audio })
+            .collect(),
+        parameters: vec![],
+    }
+}
+
+#[test]
+fn connect_trigger_to_trigger_succeeds() {
+    let mut g = ModuleGraph::new();
+    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc_kind(&["in"], &[], CableKind::Trigger), &no_params()).unwrap();
+    assert!(g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0).is_ok());
+}
+
+#[test]
+fn connect_trigger_to_mono_is_kind_mismatch() {
+    let mut g = ModuleGraph::new();
+    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc(&["in"], &[]), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
+#[test]
+fn connect_poly_trigger_to_poly_is_kind_mismatch() {
+    let mut g = ModuleGraph::new();
+    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::PolyTrigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc_poly(&["in"], &[]), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
+#[test]
+fn connect_trigger_to_poly_trigger_is_kind_mismatch() {
+    let mut g = ModuleGraph::new();
+    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc_kind(&["in"], &[], CableKind::PolyTrigger), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
 // ── Poly layout validation (ADR 0033, ticket 0368) ──────────────────
 
 fn poly_desc_layout(

@@ -259,7 +259,10 @@ impl ModuleGraph {
         // Reject connections that cross cable arities.
         let kinds_match = matches!(
             (&output_kind, &input_kind),
-            (CableKind::Mono, CableKind::Mono) | (CableKind::Poly, CableKind::Poly)
+            (CableKind::Mono, CableKind::Mono)
+                | (CableKind::Poly, CableKind::Poly)
+                | (CableKind::Trigger, CableKind::Trigger)
+                | (CableKind::PolyTrigger, CableKind::PolyTrigger)
         );
         if !kinds_match {
             return Err(GraphError::CableKindMismatch {

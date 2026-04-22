@@ -50,10 +50,12 @@ patch {
     module kbd : PolyMidiIn
 
     module dco : VPolyDco {
-        saw_on: true
-        pulse_on: false
-        sub_level: 0.4
-        noise_level: 0.1
+        saw_gain: 0.3
+        pulse_gain: 0.5
+        triangle_gain: 1.0
+        sub_gain: 0.4
+        noise_gain: 0.1
+        curve: 0.9
     }
 
     # ── Shared modulation ──────────────────────────────────────────────────

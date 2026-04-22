@@ -128,6 +128,8 @@ impl From<FfiModuleShape> for patches_core::ModuleShape {
 /// Tag values for port kind discrimination across the C ABI.
 pub const PORT_TAG_MONO: u8 = 0;
 pub const PORT_TAG_POLY: u8 = 1;
+pub const PORT_TAG_TRIGGER: u8 = 2;
+pub const PORT_TAG_POLY_TRIGGER: u8 = 3;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -153,24 +155,39 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: p.scale,
                 connected: p.connected as u8,
             },
+            patches_core::InputPort::Trigger(m) => Self {
+                tag: PORT_TAG_TRIGGER,
+                cable_idx: m.cable_idx,
+                scale: m.scale,
+                connected: m.connected as u8,
+            },
+            patches_core::InputPort::PolyTrigger(p) => Self {
+                tag: PORT_TAG_POLY_TRIGGER,
+                cable_idx: p.cable_idx,
+                scale: p.scale,
+                connected: p.connected as u8,
+            },
         }
     }
 }
 
 impl From<FfiInputPort> for patches_core::InputPort {
     fn from(ffi: FfiInputPort) -> Self {
-        if ffi.tag == PORT_TAG_POLY {
-            patches_core::InputPort::Poly(patches_core::PolyInput {
-                cable_idx: ffi.cable_idx,
-                scale: ffi.scale,
-                connected: ffi.connected != 0,
-            })
-        } else {
-            patches_core::InputPort::Mono(patches_core::MonoInput {
-                cable_idx: ffi.cable_idx,
-                scale: ffi.scale,
-                connected: ffi.connected != 0,
-            })
+        let mono = patches_core::MonoInput {
+            cable_idx: ffi.cable_idx,
+            scale: ffi.scale,
+            connected: ffi.connected != 0,
+        };
+        let poly = patches_core::PolyInput {
+            cable_idx: ffi.cable_idx,
+            scale: ffi.scale,
+            connected: ffi.connected != 0,
+        };
+        match ffi.tag {
+            PORT_TAG_POLY => patches_core::InputPort::Poly(poly),
+            PORT_TAG_TRIGGER => patches_core::InputPort::Trigger(mono),
+            PORT_TAG_POLY_TRIGGER => patches_core::InputPort::PolyTrigger(poly),
+            _ => patches_core::InputPort::Mono(mono),
         }
     }
 }
@@ -196,22 +213,35 @@ impl From<&patches_core::OutputPort> for FfiOutputPort {
                 cable_idx: p.cable_idx,
                 connected: p.connected as u8,
             },
+            patches_core::OutputPort::Trigger(m) => Self {
+                tag: PORT_TAG_TRIGGER,
+                cable_idx: m.cable_idx,
+                connected: m.connected as u8,
+            },
+            patches_core::OutputPort::PolyTrigger(p) => Self {
+                tag: PORT_TAG_POLY_TRIGGER,
+                cable_idx: p.cable_idx,
+                connected: p.connected as u8,
+            },
         }
     }
 }
 
 impl From<FfiOutputPort> for patches_core::OutputPort {
     fn from(ffi: FfiOutputPort) -> Self {
-        if ffi.tag == PORT_TAG_POLY {
-            patches_core::OutputPort::Poly(patches_core::PolyOutput {
-                cable_idx: ffi.cable_idx,
-                connected: ffi.connected != 0,
-            })
-        } else {
-            patches_core::OutputPort::Mono(patches_core::MonoOutput {
-                cable_idx: ffi.cable_idx,
-                connected: ffi.connected != 0,
-            })
+        let mono = patches_core::MonoOutput {
+            cable_idx: ffi.cable_idx,
+            connected: ffi.connected != 0,
+        };
+        let poly = patches_core::PolyOutput {
+            cable_idx: ffi.cable_idx,
+            connected: ffi.connected != 0,
+        };
+        match ffi.tag {
+            PORT_TAG_POLY => patches_core::OutputPort::Poly(poly),
+            PORT_TAG_TRIGGER => patches_core::OutputPort::Trigger(mono),
+            PORT_TAG_POLY_TRIGGER => patches_core::OutputPort::PolyTrigger(poly),
+            _ => patches_core::OutputPort::Mono(mono),
         }
     }
 }

@@ -237,6 +237,69 @@ fn gate_rising_and_falling_edges() {
     }
 }
 
+// ── SubTriggerInput / PolySubTriggerInput (ADR 0047) ─────────────────
+
+#[test]
+fn sub_trigger_zero_is_no_event() {
+    let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+    let cp = CablePool::new(&mut pool, 0);
+    let t = SubTriggerInput {
+        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+    };
+    assert_eq!(t.tick(&cp), None);
+}
+
+#[test]
+fn sub_trigger_positive_is_event_with_frac() {
+    let mut pool = make_cable_pool(&[CableValue::Mono(0.37)]);
+    let cp = CablePool::new(&mut pool, 0);
+    let t = SubTriggerInput {
+        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+    };
+    assert_eq!(t.tick(&cp), Some(0.37));
+}
+
+#[test]
+fn sub_trigger_one_is_boundary_event() {
+    let mut pool = make_cable_pool(&[CableValue::Mono(1.0)]);
+    let cp = CablePool::new(&mut pool, 0);
+    let t = SubTriggerInput {
+        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+    };
+    assert_eq!(t.tick(&cp), Some(1.0));
+}
+
+#[test]
+fn poly_sub_trigger_per_voice() {
+    let mut channels = [0.0f32; 16];
+    channels[0] = 0.25;
+    channels[5] = 0.9;
+    let mut pool = make_cable_pool(&[CableValue::Poly(channels)]);
+    let cp = CablePool::new(&mut pool, 0);
+    let t = PolySubTriggerInput {
+        inner: PolyInput { cable_idx: 0, scale: 1.0, connected: true },
+    };
+    let out = t.tick(&cp);
+    assert_eq!(out[0], Some(0.25));
+    assert_eq!(out[1], None);
+    assert_eq!(out[5], Some(0.9));
+}
+
+// ── CableKind connection compatibility (ADR 0047) ────────────────────
+
+#[test]
+fn cable_kind_helpers() {
+    assert!(!CableKind::Mono.is_poly());
+    assert!(CableKind::Poly.is_poly());
+    assert!(!CableKind::Trigger.is_poly());
+    assert!(CableKind::PolyTrigger.is_poly());
+
+    assert!(!CableKind::Mono.is_trigger());
+    assert!(!CableKind::Poly.is_trigger());
+    assert!(CableKind::Trigger.is_trigger());
+    assert!(CableKind::PolyTrigger.is_trigger());
+}
+
 // ── PolyGateInput ────────────────────────────────────────────────────
 
 #[test]

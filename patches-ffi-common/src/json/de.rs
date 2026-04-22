@@ -272,6 +272,8 @@ fn deserialize_port_descriptor(val: &JsonValue) -> Result<PortDescriptor, String
     let index = val.get("index").and_then(|v| v.as_usize()).unwrap_or(0);
     let kind = match val.get("kind").and_then(|v| v.as_str()) {
         Some("poly") => CableKind::Poly,
+        Some("trigger") => CableKind::Trigger,
+        Some("poly_trigger") => CableKind::PolyTrigger,
         _ => CableKind::Mono,
     };
     let poly_layout = match val.get("poly_layout").and_then(|v| v.as_str()) {

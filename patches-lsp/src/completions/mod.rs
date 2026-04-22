@@ -39,7 +39,8 @@ use crate::tree_nav::{
 use backward_scan::{scan_backward_for_context, BackwardContext};
 use module_types::complete_module_types;
 use params::{
-    complete_parameters, complete_pattern_names, complete_song_names, is_after_param_colon,
+    complete_enum_values, complete_parameters, complete_pattern_names, complete_song_names,
+    is_after_param_colon, preceding_param_name,
 };
 use ports::{complete_port_ref, complete_ports, complete_template_ports};
 use shape::{
@@ -110,7 +111,15 @@ fn complete_param_block(
     {
         return complete_song_names(model);
     }
-    complete_parameters(module_instance_name(module_decl, source), model)
+    let module_name = module_instance_name(module_decl, source);
+    if let Some(param_name) = preceding_param_name(source, byte_offset) {
+        let values = complete_enum_values(module_name, &param_name, model);
+        if !values.is_empty() {
+            return values;
+        }
+        return vec![];
+    }
+    complete_parameters(module_name, model)
 }
 
 // ─── Formatting helpers (shared with hover) ──────────────────────────────
@@ -142,6 +151,8 @@ pub(crate) fn cable_kind_str(kind: &patches_core::CableKind) -> &'static str {
     match kind {
         patches_core::CableKind::Mono => "mono",
         patches_core::CableKind::Poly => "poly",
+        patches_core::CableKind::Trigger => "trigger",
+        patches_core::CableKind::PolyTrigger => "poly_trigger",
     }
 }
 
@@ -288,6 +299,19 @@ mod tests {
         assert!(
             labels.contains(&"drums"),
             "expected drums in completions, got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn completions_for_enum_values_after_param_colon() {
+        let source = "patch {\n    module o : Osc {\n        fm_type: \n    }\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find("fm_type: \n").unwrap() + "fm_type: ".len();
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            !labels.is_empty() && items.iter().all(|i| i.kind == Some(CompletionItemKind::ENUM_MEMBER)),
+            "expected enum-member completions, got: {labels:?}"
         );
     }
 

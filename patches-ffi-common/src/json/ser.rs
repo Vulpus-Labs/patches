@@ -92,6 +92,8 @@ fn write_port_descriptor(out: &mut String, port: &PortDescriptor) {
     match port.kind {
         CableKind::Mono => write_string(out, "mono"),
         CableKind::Poly => write_string(out, "poly"),
+        CableKind::Trigger => write_string(out, "trigger"),
+        CableKind::PolyTrigger => write_string(out, "poly_trigger"),
     }
     out.push('}');
 }

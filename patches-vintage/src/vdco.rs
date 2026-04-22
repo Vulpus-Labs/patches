@@ -1,33 +1,42 @@
 //! Juno-style vintage DCO — mono ([`VDco`]) and poly ([`poly::VPolyDco`]).
 //!
-//! One phase accumulator (per voice) drives saw, variable-width pulse, and a
-//! ÷2 sub square, all phase-locked. An internal white-noise source and mixer
-//! are folded in; the output is a single pre-mixed signal intended to feed a
-//! downstream HPF → VCF chain. Gains are biased (not equal-loudness): worst-
-//! case sum ≈ 3.5× a single source, sent hot on purpose — character belongs
-//! to the downstream filter, not here.
+//! One phase accumulator (per voice) drives saw, variable-width pulse, a ÷2
+//! sub square, and a wavefolded triangle, all phase-locked. An internal
+//! white-noise source and mixer are folded in; the output is a single
+//! pre-mixed signal intended to feed a downstream HPF → VCF chain. Gains are
+//! biased (not equal-loudness): worst-case sum is sent hot on purpose —
+//! character belongs to the downstream filter, not here.
+//!
+//! Triangle is the Jupiter trick: `tri = 1 - 2*|2*phase - 1|`
+//! (absolute-value triangle at the fundamental). No separate phasor — a
+//! single phase drives all four waveforms.
 //!
 //! # Inputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `voct` | mono | Pitch CV (1 V/oct, relative to C0) |
+//! | `voct` | mono | Pitch CV (1 V/oct, added to `frequency`) |
+//! | `fm` | mono | Frequency modulation (linear Hz or exponential V/oct, per `fm_type`) |
 //! | `pwm` | mono | Pulse width (0..1; clamped to `[0.02, 0.98]`) |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out` | mono | Pre-mixed signal (saw + pulse + sub + noise) |
+//! | `out` | mono | Pre-mixed signal (saw + pulse + triangle + sub + noise) |
 //!
 //! # Parameters
 //!
 //! | Name | Type | Range | Default | Description |
 //! |------|------|-------|---------|-------------|
-//! | `saw_on` | bool | — | `true` | Enable saw in the mix |
-//! | `pulse_on` | bool | — | `false` | Enable pulse in the mix |
-//! | `sub_level` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
-//! | `noise_level` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
+//! | `frequency` | float | -4.0--12.0 | `0.0` | Baseline pitch (V/oct offset from C0 ≈ 16.35 Hz) |
+//! | `fm_type` | enum | `linear` / `logarithmic` | `linear` | FM input interpretation |
+//! | `saw_gain` | float | 0.0--1.0 | `1.0` | Saw level in the mix |
+//! | `pulse_gain` | float | 0.0--1.0 | `0.0` | Pulse level in the mix |
+//! | `triangle_gain` | float | 0.0--1.0 | `0.0` | Wavefolded triangle level |
+//! | `sub_gain` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
+//! | `noise_gain` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
+//! | `curve` | float | 0.0--1.0 | `0.1` | Analog cap-charge curvature applied to the phase read (always-on vintage colour) |
 
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -41,15 +50,19 @@ pub mod poly;
 #[cfg(test)]
 mod tests;
 
-pub use self::core::{VDcoMix, VDcoVoice};
+pub use self::core::{VDcoFmType, VDcoMix, VDcoVoice};
 pub use self::poly::VPolyDco;
 
 module_params! {
     VDco {
-        saw_on:      Bool,
-        pulse_on:    Bool,
-        sub_level:   Float,
-        noise_level: Float,
+        frequency:        Float,
+        fm_type:          Enum<VDcoFmType>,
+        saw_gain:         Float,
+        pulse_gain:       Float,
+        triangle_gain:    Float,
+        sub_gain:        Float,
+        noise_gain:      Float,
+        curve: Float,
     }
 }
 
@@ -59,7 +72,10 @@ pub struct VDco {
     voice: VDcoVoice,
     sample_rate: f32,
     mix: VDcoMix,
+    frequency: f32,
+    fm_type: VDcoFmType,
     in_voct: MonoInput,
+    in_fm: MonoInput,
     in_pwm: MonoInput,
     out: MonoOutput,
 }
@@ -68,12 +84,17 @@ impl Module for VDco {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("VDco", shape.clone())
             .mono_in("voct")
+            .mono_in("fm")
             .mono_in("pwm")
             .mono_out("out")
-            .bool_param(params::saw_on, true)
-            .bool_param(params::pulse_on, false)
-            .float_param(params::sub_level, 0.0, 1.0, 0.0)
-            .float_param(params::noise_level, 0.0, 1.0, 0.0)
+            .float_param(params::frequency, -4.0, 12.0, 0.0)
+            .enum_param(params::fm_type, VDcoFmType::Linear)
+            .float_param(params::saw_gain, 0.0, 1.0, 1.0)
+            .float_param(params::pulse_gain, 0.0, 1.0, 0.0)
+            .float_param(params::triangle_gain, 0.0, 1.0, 0.0)
+            .float_param(params::sub_gain, 0.0, 1.0, 0.0)
+            .float_param(params::noise_gain, 0.0, 1.0, 0.0)
+            .float_param(params::curve, 0.0, 1.0, 0.1)
     }
 
     fn prepare(
@@ -89,17 +110,24 @@ impl Module for VDco {
             voice,
             sample_rate: env.sample_rate,
             mix: VDcoMix::DEFAULT,
+            frequency: 0.0,
+            fm_type: VDcoFmType::Linear,
             in_voct: MonoInput::default(),
+            in_fm: MonoInput::default(),
             in_pwm: MonoInput::default(),
             out: MonoOutput::default(),
         }
     }
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
-        self.mix.saw_on = p.get(params::saw_on);
-        self.mix.pulse_on = p.get(params::pulse_on);
-        self.mix.sub_level = p.get(params::sub_level);
-        self.mix.noise_level = p.get(params::noise_level);
+        self.frequency = p.get(params::frequency);
+        self.fm_type = p.get(params::fm_type);
+        self.mix.saw_gain = p.get(params::saw_gain);
+        self.mix.pulse_gain = p.get(params::pulse_gain);
+        self.mix.triangle_gain = p.get(params::triangle_gain);
+        self.mix.sub_gain = p.get(params::sub_gain);
+        self.mix.noise_gain = p.get(params::noise_gain);
+        self.mix.curve = p.get(params::curve);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -112,15 +140,26 @@ impl Module for VDco {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_voct = inputs[0].expect_mono();
-        self.in_pwm = inputs[1].expect_mono();
+        self.in_fm = inputs[1].expect_mono();
+        self.in_pwm = inputs[2].expect_mono();
         self.out = outputs[0].expect_mono();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        if self.in_voct.is_connected() {
-            let voct = pool.read_mono(&self.in_voct);
-            self.voice.phase_increment = self::core::voct_to_increment(voct, self.sample_rate);
-        }
+        let voct_cv = if self.in_voct.is_connected() {
+            pool.read_mono(&self.in_voct)
+        } else {
+            0.0
+        };
+        let fm_connected = self.in_fm.is_connected();
+        let fm_cv = if fm_connected { pool.read_mono(&self.in_fm) } else { 0.0 };
+        self.voice.phase_increment = self::core::compute_increment(
+            self.frequency + voct_cv,
+            fm_cv,
+            self.fm_type,
+            fm_connected,
+            self.sample_rate,
+        );
 
         if !self.out.is_connected() {
             self::core::advance(&mut self.voice);

@@ -13,7 +13,7 @@ pub use gate::{GateEdge, GateInput, PolyGateInput};
 pub use mono::{MonoInput, MonoOutput};
 pub use poly::{PolyInput, PolyLayout, PolyOutput};
 pub use ports::{InputPort, OutputPort};
-pub use trigger::{PolyTriggerInput, TriggerInput};
+pub use trigger::{PolySubTriggerInput, PolyTriggerInput, SubTriggerInput, TriggerInput};
 
 /// Buffer pool index of the permanent mono read-null slot.
 ///
@@ -101,11 +101,32 @@ pub const RESERVED_SLOTS: usize = 16;
 /// `< TRIGGER_THRESHOLD`.
 pub const TRIGGER_THRESHOLD: f32 = 0.5;
 
-/// The arity of a cable: mono (single f32) or poly (16-channel f32 array).
+/// The arity and semantics of a cable.
+///
+/// `Mono` / `Poly` carry per-sample audio/CV values (single `f32` or
+/// `[f32; 16]`). `Trigger` / `PolyTrigger` use the same buffer layout but
+/// carry sub-sample event encodings: `0.0` means "no event on this sample"
+/// and a value in `(0.0, 1.0]` is the fractional sub-sample position of an
+/// event (see ADR 0047). The type tag is enforced by the graph connection
+/// validator; no implicit coercion is permitted.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CableKind {
     Mono,
     Poly,
+    Trigger,
+    PolyTrigger,
+}
+
+impl CableKind {
+    /// Returns `true` for poly-arity cables (`Poly`, `PolyTrigger`).
+    pub fn is_poly(&self) -> bool {
+        matches!(self, CableKind::Poly | CableKind::PolyTrigger)
+    }
+
+    /// Returns `true` for trigger-semantic cables (`Trigger`, `PolyTrigger`).
+    pub fn is_trigger(&self) -> bool {
+        matches!(self, CableKind::Trigger | CableKind::PolyTrigger)
+    }
 }
 
 /// A value carried by a cable. `Poly` holds exactly 16 channels; no heap

@@ -130,5 +130,7 @@ fn cable_class(kind: patches_core::cables::CableKind, layout: patches_core::cabl
         (CableKind::Poly, PolyLayout::Audio) => "cable-poly-audio",
         (CableKind::Poly, PolyLayout::Transport) => "cable-poly-transport",
         (CableKind::Poly, PolyLayout::Midi) => "cable-poly-midi",
+        (CableKind::Trigger, _) => "cable-trigger",
+        (CableKind::PolyTrigger, _) => "cable-poly-trigger",
     }
 }

@@ -54,6 +54,7 @@ pub mod transient_shaper;
 pub mod host_transport;
 pub mod tempo_sync;
 pub mod ms_ticker;
+pub mod trigger_sync_conv;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -114,6 +115,7 @@ pub use transient_shaper::TransientShaper;
 pub use host_transport::HostTransport;
 pub use tempo_sync::TempoSync;
 pub use ms_ticker::MsTicker;
+pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
 
 pub fn default_registry() -> patches_registry::Registry {
     let mut r = patches_registry::Registry::new();
@@ -183,6 +185,8 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<HostTransport>();
     r.register::<TempoSync>();
     r.register::<MsTicker>();
+    r.register::<TriggerToSync>();
+    r.register::<SyncToTrigger>();
     // `patches-vintage` is no longer in the default registry (ADR 0045 Spike 8
     // Phase C / ticket 0570). Load its cdylib via `PluginScanner`.
     r

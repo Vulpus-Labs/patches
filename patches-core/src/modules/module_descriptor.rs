@@ -222,10 +222,14 @@ impl ModuleDescriptor {
 
     // ── Port builder methods (generated) ────────────────────────────────────
 
-    port_builder!(mono_in,  mono_in_multi,  inputs,  crate::cables::CableKind::Mono);
-    port_builder!(poly_in,  poly_in_multi,  inputs,  crate::cables::CableKind::Poly);
-    port_builder!(mono_out, mono_out_multi, outputs, crate::cables::CableKind::Mono);
-    port_builder!(poly_out, poly_out_multi, outputs, crate::cables::CableKind::Poly);
+    port_builder!(mono_in,         mono_in_multi,         inputs,  crate::cables::CableKind::Mono);
+    port_builder!(poly_in,         poly_in_multi,         inputs,  crate::cables::CableKind::Poly);
+    port_builder!(mono_out,        mono_out_multi,        outputs, crate::cables::CableKind::Mono);
+    port_builder!(poly_out,        poly_out_multi,        outputs, crate::cables::CableKind::Poly);
+    port_builder!(trigger_in,      trigger_in_multi,      inputs,  crate::cables::CableKind::Trigger);
+    port_builder!(trigger_out,     trigger_out_multi,     outputs, crate::cables::CableKind::Trigger);
+    port_builder!(poly_trigger_in, poly_trigger_in_multi, inputs,  crate::cables::CableKind::PolyTrigger);
+    port_builder!(poly_trigger_out,poly_trigger_out_multi,outputs, crate::cables::CableKind::PolyTrigger);
 
     /// Declare a poly input port with a specific [`PolyLayout`].
     pub fn poly_in_layout(mut self, name: &'static str, layout: PolyLayout) -> Self {

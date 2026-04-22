@@ -51,7 +51,6 @@ impl LanguageServer for PatchesLanguageServer {
                     trigger_characters: Some(vec![
                         ":".to_string(),
                         ".".to_string(),
-                        "{".to_string(),
                         "(".to_string(),
                         "$".to_string(),
                         "@".to_string(),

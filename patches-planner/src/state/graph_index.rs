@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use patches_core::cables::{CableKind, MONO_READ_SINK, POLY_READ_SINK};
+use patches_core::cables::{MONO_READ_SINK, POLY_READ_SINK};
 use patches_core::modules::{ModuleDescriptor, PortConnectivity};
 use patches_core::graphs::graph::{ModuleGraph, Node, NodeId};
 use super::PlanError;
@@ -104,7 +104,7 @@ impl<'a> ResolvedGraph<'a> {
                     .get(&(node_id.clone(), port.name, port.index))
                     .copied()
                     .unwrap_or_else(|| {
-                        let null_slot = if port.kind == CableKind::Poly {
+                        let null_slot = if port.kind.is_poly() {
                             POLY_READ_SINK
                         } else {
                             MONO_READ_SINK

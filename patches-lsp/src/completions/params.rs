@@ -36,6 +36,112 @@ pub(super) fn complete_parameters(
     }
 }
 
+/// Find the parameter name whose `name:` precedes the cursor, if the cursor
+/// is positioned in the value slot (only whitespace / partial identifier
+/// between the colon and the cursor, on the same line).
+pub(super) fn preceding_param_name(source: &str, byte_offset: usize) -> Option<String> {
+    let before = &source[..byte_offset];
+    let bytes = before.as_bytes();
+    let mut i = bytes.len();
+    // Skip partial value identifier chars.
+    while i > 0 {
+        let c = bytes[i - 1] as char;
+        if c.is_alphanumeric() || c == '_' || c == '-' {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    // Skip spaces/tabs (but not newlines — value must be on same line as `:`).
+    while i > 0 {
+        let c = bytes[i - 1] as char;
+        if c == ' ' || c == '\t' {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    if i == 0 || bytes[i - 1] != b':' {
+        return None;
+    }
+    i -= 1;
+    // Skip whitespace between name and colon.
+    while i > 0 {
+        let c = bytes[i - 1] as char;
+        if c == ' ' || c == '\t' {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    let end = i;
+    while i > 0 {
+        let c = bytes[i - 1] as char;
+        if c.is_alphanumeric() || c == '_' {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    if i == end {
+        return None;
+    }
+    Some(before[i..end].to_string())
+}
+
+/// Complete with enum variants if `param_name` on `module_name` is an enum.
+pub(super) fn complete_enum_values(
+    module_name: Option<&str>,
+    param_name: &str,
+    model: &SemanticModel,
+) -> Vec<CompletionItem> {
+    let module_name = match module_name {
+        Some(n) => n,
+        None => return vec![],
+    };
+    let desc = match model.get_descriptor(module_name) {
+        Some(d) => d,
+        None => return vec![],
+    };
+    let md = match desc {
+        ResolvedDescriptor::Module { desc: md, .. } => md,
+        ResolvedDescriptor::Template { .. } => return vec![],
+    };
+    let param = match md.parameters.iter().find(|p| p.name == param_name) {
+        Some(p) => p,
+        None => return vec![],
+    };
+    match &param.parameter_type {
+        patches_core::ParameterKind::Enum { variants, default } => variants
+            .iter()
+            .map(|v| CompletionItem {
+                label: v.to_string(),
+                kind: Some(CompletionItemKind::ENUM_MEMBER),
+                detail: if v == default {
+                    Some("default".to_string())
+                } else {
+                    None
+                },
+                ..Default::default()
+            })
+            .collect(),
+        patches_core::ParameterKind::Bool { default } => ["true", "false"]
+            .iter()
+            .map(|v| CompletionItem {
+                label: (*v).to_string(),
+                kind: Some(CompletionItemKind::VALUE),
+                detail: if *v == default.to_string() {
+                    Some("default".to_string())
+                } else {
+                    None
+                },
+                ..Default::default()
+            })
+            .collect(),
+        _ => vec![],
+    }
+}
+
 /// Check if cursor is positioned after `param_name:` in a param block.
 pub(super) fn is_after_param_colon(source: &str, byte_offset: usize, param_name: &str) -> bool {
     let before = &source[..byte_offset];

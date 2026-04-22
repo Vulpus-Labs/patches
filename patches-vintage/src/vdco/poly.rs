@@ -5,23 +5,28 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `voct` | poly | Pitch CV per voice (1 V/oct, relative to C0) |
+//! | `voct` | poly | Pitch CV per voice (1 V/oct, added to `frequency`) |
+//! | `fm` | poly | FM CV per voice (linear Hz or exponential V/oct, per `fm_type`) |
 //! | `pwm` | poly | Pulse width per voice (0..1; clamped to `[0.02, 0.98]`) |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out` | poly | Pre-mixed signal (saw + pulse + sub + noise) per voice |
+//! | `out` | poly | Pre-mixed signal (saw + pulse + triangle + sub + noise) per voice |
 //!
 //! # Parameters
 //!
 //! | Name | Type | Range | Default | Description |
 //! |------|------|-------|---------|-------------|
-//! | `saw_on` | bool | — | `true` | Enable saw in the mix |
-//! | `pulse_on` | bool | — | `false` | Enable pulse in the mix |
-//! | `sub_level` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
-//! | `noise_level` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
+//! | `frequency` | float | -4.0--12.0 | `0.0` | Baseline pitch (V/oct offset from C0 ≈ 16.35 Hz) |
+//! | `fm_type` | enum | `linear` / `logarithmic` | `linear` | FM input interpretation |
+//! | `saw_gain` | float | 0.0--1.0 | `1.0` | Saw level in the mix |
+//! | `pulse_gain` | float | 0.0--1.0 | `0.0` | Pulse level in the mix |
+//! | `triangle_gain` | float | 0.0--1.0 | `0.0` | Wavefolded triangle level |
+//! | `sub_gain` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
+//! | `noise_gain` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
+//! | `curve` | float | 0.0--1.0 | `0.1` | Analog cap-charge curvature applied to the phase read (always-on vintage colour) |
 
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -30,14 +35,21 @@ use patches_core::{
     OutputPort, PolyInput, PolyOutput,
 };
 
-use super::core::{advance, render_and_advance, voct_to_increment, VDcoMix, VDcoVoice};
+use super::core::{
+    advance, compute_increment, render_and_advance, voct_to_increment, VDcoFmType, VDcoMix,
+    VDcoVoice,
+};
 
 module_params! {
     VPolyDco {
-        saw_on:      Bool,
-        pulse_on:    Bool,
-        sub_level:   Float,
-        noise_level: Float,
+        frequency:        Float,
+        fm_type:          Enum<VDcoFmType>,
+        saw_gain:         Float,
+        pulse_gain:       Float,
+        triangle_gain:    Float,
+        sub_gain:        Float,
+        noise_gain:      Float,
+        curve: Float,
     }
 }
 
@@ -47,7 +59,10 @@ pub struct VPolyDco {
     voices: [VDcoVoice; 16],
     sample_rate: f32,
     mix: VDcoMix,
+    frequency: f32,
+    fm_type: VDcoFmType,
     in_voct: PolyInput,
+    in_fm: PolyInput,
     in_pwm: PolyInput,
     out: PolyOutput,
 }
@@ -56,12 +71,17 @@ impl Module for VPolyDco {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("VPolyDco", shape.clone())
             .poly_in("voct")
+            .poly_in("fm")
             .poly_in("pwm")
             .poly_out("out")
-            .bool_param(params::saw_on, true)
-            .bool_param(params::pulse_on, false)
-            .float_param(params::sub_level, 0.0, 1.0, 0.0)
-            .float_param(params::noise_level, 0.0, 1.0, 0.0)
+            .float_param(params::frequency, -4.0, 12.0, 0.0)
+            .enum_param(params::fm_type, VDcoFmType::Linear)
+            .float_param(params::saw_gain, 0.0, 1.0, 1.0)
+            .float_param(params::pulse_gain, 0.0, 1.0, 0.0)
+            .float_param(params::triangle_gain, 0.0, 1.0, 0.0)
+            .float_param(params::sub_gain, 0.0, 1.0, 0.0)
+            .float_param(params::noise_gain, 0.0, 1.0, 0.0)
+            .float_param(params::curve, 0.0, 1.0, 0.1)
     }
 
     fn prepare(
@@ -85,17 +105,24 @@ impl Module for VPolyDco {
             voices,
             sample_rate: env.sample_rate,
             mix: VDcoMix::DEFAULT,
+            frequency: 0.0,
+            fm_type: VDcoFmType::Linear,
             in_voct: PolyInput::default(),
+            in_fm: PolyInput::default(),
             in_pwm: PolyInput::default(),
             out: PolyOutput::default(),
         }
     }
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
-        self.mix.saw_on = p.get(params::saw_on);
-        self.mix.pulse_on = p.get(params::pulse_on);
-        self.mix.sub_level = p.get(params::sub_level);
-        self.mix.noise_level = p.get(params::noise_level);
+        self.frequency = p.get(params::frequency);
+        self.fm_type = p.get(params::fm_type);
+        self.mix.saw_gain = p.get(params::saw_gain);
+        self.mix.pulse_gain = p.get(params::pulse_gain);
+        self.mix.triangle_gain = p.get(params::triangle_gain);
+        self.mix.sub_gain = p.get(params::sub_gain);
+        self.mix.noise_gain = p.get(params::noise_gain);
+        self.mix.curve = p.get(params::curve);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -108,21 +135,27 @@ impl Module for VPolyDco {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_voct = PolyInput::from_ports(inputs, 0);
-        self.in_pwm = PolyInput::from_ports(inputs, 1);
+        self.in_fm = PolyInput::from_ports(inputs, 1);
+        self.in_pwm = PolyInput::from_ports(inputs, 2);
         self.out = PolyOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let voct_connected = self.in_voct.is_connected();
-        let voct = if voct_connected {
+        let voct = if self.in_voct.is_connected() {
             pool.read_poly(&self.in_voct)
         } else {
             [0.0; 16]
         };
-        if voct_connected {
-            for (v, vo) in self.voices.iter_mut().zip(voct.iter()) {
-                v.phase_increment = voct_to_increment(*vo, self.sample_rate);
-            }
+        let fm_connected = self.in_fm.is_connected();
+        let fm = if fm_connected { pool.read_poly(&self.in_fm) } else { [0.0; 16] };
+        for (i, v) in self.voices.iter_mut().enumerate() {
+            v.phase_increment = compute_increment(
+                self.frequency + voct[i],
+                fm[i],
+                self.fm_type,
+                fm_connected,
+                self.sample_rate,
+            );
         }
 
         if !self.out.is_connected() {
