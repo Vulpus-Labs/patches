@@ -17,15 +17,21 @@ pub mod bbd_proto;
 pub mod compander;
 pub mod vbbd;
 pub mod vchorus;
+pub mod vdco;
 pub mod vflanger;
 pub mod vflanger_stereo;
+pub mod vpoly_vcf;
 pub mod vreverb;
+pub mod vvcf;
 
 pub use vbbd::VBbd;
 pub use vchorus::VChorus;
+pub use vdco::{VDco, VPolyDco};
 pub use vflanger::VFlanger;
 pub use vflanger_stereo::VFlangerStereo;
+pub use vpoly_vcf::VPolyVcf;
 pub use vreverb::VReverb;
+pub use vvcf::VVcf;
 
 /// Register every module in this crate with the supplied registry.
 ///
@@ -35,9 +41,13 @@ pub use vreverb::VReverb;
 pub fn register(r: &mut patches_registry::Registry) {
     r.register::<VChorus>();
     r.register::<VBbd>();
+    r.register::<VDco>();
+    r.register::<VPolyDco>();
     r.register::<VFlanger>();
     r.register::<VFlangerStereo>();
     r.register::<VReverb>();
+    r.register::<VVcf>();
+    r.register::<VPolyVcf>();
 }
 
 // ── FFI bundle export ────────────────────────────────────────────────────────
@@ -48,9 +58,13 @@ pub fn register(r: &mut patches_registry::Registry) {
 patches_ffi_common::export_modules! {
     (ffi_vchorus,         VChorus,        "VChorus",        1),
     (ffi_vbbd,            VBbd,           "VBbd",           1),
+    (ffi_vdco,            VDco,           "VDco",           1),
+    (ffi_vpolydco,        VPolyDco,       "VPolyDco",       1),
     (ffi_vflanger,        VFlanger,       "VFlanger",       1),
     (ffi_vflanger_stereo, VFlangerStereo, "VFlangerStereo", 1),
     (ffi_vreverb,         VReverb,        "VReverb",        1),
+    (ffi_vvcf,            VVcf,           "VVcf",           1),
+    (ffi_vpolyvcf,        VPolyVcf,       "VPolyVcf",       1),
 }
 
 #[cfg(test)]
@@ -66,9 +80,13 @@ mod ffi_bundle_tests {
     const EXPECTED_NAMES: &[&str] = &[
         "VChorus",
         "VBbd",
+        "VDco",
+        "VPolyDco",
         "VFlanger",
         "VFlangerStereo",
         "VReverb",
+        "VVcf",
+        "VPolyVcf",
     ];
 
     #[test]
