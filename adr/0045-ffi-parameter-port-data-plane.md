@@ -1,7 +1,20 @@
 # ADR 0045 — FFI parameter and port data plane
 
-**Date:** 2026-04-19
-**Status:** Proposed
+**Date:** 2026-04-19 (accepted 2026-04-22)
+**Status:** Accepted
+
+> **Implementation status (2026-04-22):** Spikes 0–8 landed on main.
+> In-process and FFI paths both run on the new data plane;
+> `patches-vintage` ships as an external bundle. Spike 9 (fuzzing,
+> 10 000-cycle integration, observability counters) is not yet
+> closed — the "verified against adversarial inputs" claim in
+> *Consequences* is aspirational until that work completes. The
+> text below has been reconciled against what actually shipped:
+> notably, §3 supersedes the earlier three-SPSC shuttle sketch,
+> Spike 6 (chunked storage + RCU index swap) supersedes the
+> copy-reconcile growth mechanism once referenced in *Resolved
+> design points*, and `SongData` has been retired as a payload
+> type (the `ArcTable` generic remains payload-agnostic).
 
 ---
 
@@ -93,6 +106,14 @@ into descriptor metadata. Any attempt to send a `String` or `File`
 value through an update frame is a planner bug and is rejected with
 an assertion at frame-build time.
 
+`File` resolution (load + decode → `Arc<[f32]>` → mint into the
+`ArcTable`) runs on a dedicated resolver thread pool driven by the
+planner, not on the DSL parse loop. A patch file change triggers
+parse → interpret → plan build, with file-param resolution fanned
+out as soon as the DSL yields paths and awaited before the plan is
+shipped to the audio thread. A content/path cache keeps repeat
+resolves cheap. See ticket 0599 for the concrete pipeline.
+
 Rationale: every remaining variant is `Copy` or a refcounted handle.
 No variant requires allocation to clone, so the "destructive take"
 discipline used by the in-process path becomes unnecessary — clone
@@ -156,10 +177,27 @@ never locks it; it communicates exclusively through the lock-free
    new id for the same logical slot, the plugin stores the new id
    and calls `arc_release` on the old one. Refcount eventually
    reaches zero and the `Arc` drops on the control thread.
-7. *Shutdown:* when a plugin is destroyed, the host enumerates any
-   ids still attributed to it in the refcount map and releases them
-   on the plugin's behalf. A non-empty set at this point is a plugin
-   leak and is logged.
+7. *Shutdown:* when a plugin is destroyed, the host drops the
+   plugin's frame history, which releases every id the host ever
+   dispatched to the plugin (one release per frame per id, cancelling
+   the corresponding mint-time retain). Ids the plugin still holds
+   privately leak their retains; when the runtime itself tears down
+   shortly after, its owning `Vec<Box<Chunk>>` drops all remaining
+   `Arc`s in one shot, so the leak is bounded by runtime lifetime.
+   Per-plugin id attribution on the audio-thread path is deliberately
+   not tracked — it would require tagging every `retain`/`release`
+   with a plugin id, which the refcount-map fast path has no room
+   for. A debug-build audit can still spot plugins that fail to call
+   `arc_release` by watching their release count vs. dispatch count
+   in the observability counters (spike 9).
+
+**Plugin mental model.** The plugin never calls `arc_retain`. Every
+frame it receives carries a fresh, host-paid retain per id that
+survives until the frame retires via the cleanup ring. To keep a
+buffer alive across frames, the plugin simply stores the id — no
+action required. To replace a stored id with a new one, it stores
+the new id and calls `arc_release` on the old. To discard a stored
+id, it calls `arc_release` once. That is the entire contract.
 
 **Sharing:** multiple modules can hold the same `FloatBufferId`.
 Each holder retains independently. Content deduplication (same file
@@ -200,6 +238,23 @@ Layout is deterministic: sort by `(name, index)`, assign offsets
 greedily with natural alignment. Both sides compute the same layout
 from the same descriptor; host verifies plugin agreement by
 comparing descriptor hashes at load. Mismatch = refuse to load.
+
+**Descriptor hash canonicalisation.** The hash covers only
+structural fields that define the wire format: module name, then
+each parameter's `{name, index, kind, kind-payload (variants for
+enums, array length for arrays, numeric bounds)}` in
+`(name, index)`-sorted order, then each port's `{name, kind}` in
+**declared order** (declared order is the slice index passed to
+`Module::process`; reordering would break that contract). Human-
+readable metadata (doc strings, display names, unit labels) is
+**excluded** — cosmetic documentation edits must not force a plugin
+recompile. The encoding is fixed: length-prefixed UTF-8 strings,
+little-endian fixed-width integers, single-byte kind tags. The
+hash function is FNV-1a 64-bit ([param_layout/hash.rs](../patches-core/src/param_layout/hash.rs));
+the threat model is accidental drift, not adversarial collisions —
+the algorithm can be swapped without changing the canonical byte
+encoding feeding it. Spike 1's property tests lock the
+canonicalisation in.
 
 The buffer wire format is:
 
@@ -353,7 +408,9 @@ on the audio path. JSON is retained only for:
 - Human-readable error reporting (control thread, error path only).
 
 The audio-thread ABI surface consists of three functions plus the
-host environment vtable:
+host environment vtable. Instance lifecycle (`prepare`, `destroy`,
+discovery, manifest, ABI versioning) is the control plane's
+concern and is defined in ADR 0044 — not repeated here.
 
 ```c
 void update_validated_parameters(
@@ -529,7 +586,12 @@ The rules above are enforced through a layered strategy:
   to the audio-thread type for a use case that has no real
   consumers. Cleaner to exclude.
 
-## Suggested spike sequence
+## Spike sequence (historical)
+
+> Spikes 0–8 landed on main by 2026-04-22 (commits `3534ad1` …
+> `fbe2f45`). Spike 9 is not yet closed. The sequence is retained
+> below as historical record and as the source of the interlocking
+> constraints the design depends on.
 
 The design has many interlocking parts. Building them in the wrong
 order risks landing an unstable intermediate where audio breaks
@@ -912,12 +974,22 @@ population at once.
 
 ## Resolved design points
 
-1. **Per-type ArcTables, per runtime.** Each payload type
-   (`Arc<[f32]>`, `Arc<SongData>`, `Arc<PatternBlock>`, …) gets its
-   own `ArcTable` and its own id space. Buffer ids and song ids are
-   not interchangeable, and the type system reflects this via
-   distinct newtypes (`FloatBufferId`, `SongDataId`, …). Each table
-   has its own refcount map and its own capacity budget.
+1. **Per-type ArcTables, per runtime.** Each payload type gets
+   its own `ArcTable` and its own id space. Buffer ids and
+   other-payload ids are not interchangeable, and the type system
+   reflects this via distinct newtypes. Each table has its own
+   refcount map and its own capacity budget.
+
+   As shipped, there is one payload type: `Arc<[f32]>`, keyed by
+   `FloatBufferId`, covering all heap-owned audio/frame blobs that
+   cross the FFI boundary (sample files, convolution IRs, FFT
+   frames). `SongData` was retired as an unnecessary placeholder
+   during Spike 6 — tracker data uses the native
+   `ReceivesTrackerData` trait and never crosses FFI. The
+   `ArcTable` generic remains payload-agnostic so a second typed
+   table can be added cheaply if a future FFI-crossing payload
+   needs one. `HostEnv::song_data_release` survives in the vtable
+   as dead surface and should be removed on the next ABI bump.
 
    The full set of tables is owned by the runtime (the object that
    owns the `ExecutionPlan`), not the process. Each runtime has its
@@ -951,6 +1023,12 @@ population at once.
        + headroom
    ```
 
+   where `frame_depth` is the number of parameter frames the
+   runtime keeps simultaneously live — one for the current plan,
+   one for any in-flight adoption, plus a small reload margin
+   (typically 2–3 in practice). `headroom` covers transient
+   sharing during hot-reload.
+
    Each runtime's tables are sized accordingly. A small patch gets
    small tables; a 128-voice sampler gets a large one. Exhaustion
    is a control-thread error (frame refused) and observable in
@@ -958,14 +1036,28 @@ population at once.
 
    On hot-reload, the planner recomputes the bound. If the new
    graph fits the existing capacity, tables are reused. If it
-   exceeds, tables grow via atomic pointer swap: control thread
-   allocates a strictly-larger slot array, copies existing slots at
-   their original indices (ids remain valid because they encode
-   slot index and generation), atomically stores the new pointer.
-   Audio thread loads the pointer on entry to each retain/release
-   and operates on whichever array it sees; old arrays retire after
-   one quiescent audio-thread pass and are dropped on the control
-   thread.
+   exceeds, tables grow as specified in Spike 6: storage is a
+   vector of pinned 64-slot chunks owned by the control thread
+   (chunk addresses never change), and a small `ChunkIndex`
+   RCU-swaps on growth. Audio thread reads the index pointer on
+   entry to each retain/release and reaches slots via chunk+offset
+   decode. Retired indices drop on the control thread once the
+   two-counter quiescence barrier confirms all in-flight ops have
+   completed. This **supersedes** the earlier copy-and-reconcile
+   sketch: copying live slots into a new array during concurrent
+   audio-thread mutation loses refcount deltas unless every
+   mutation is tracked and replayed, which is precisely the
+   complexity Spike 6 avoids by keeping slots single-buffered and
+   double-buffering only the index.
+
+   **Hot-reload capacity window.** Peak live ids during a reload
+   adoption window = `prev_plan_ids + new_plan_ids`, because both
+   plans' ids are live until the old plan retires through the
+   cleanup ring. The planner sizes the capacity envelope against
+   this peak, not steady-state. Released slots return to a
+   per-table free list for reuse, so a patch that sequentially
+   loads and discards 100 files needs ~1 slot of steady-state
+   capacity, not 100.
 
    Growth is on the critical path, not a future optimisation. The
    primary workflow in both hosts is live-coding: `patches-player`
@@ -976,11 +1068,6 @@ population at once.
    live-codes inside a DAW session. Initial table capacity is
    therefore sized small (the starting graph may be near-empty),
    and the growth mechanism ships in the first milestone.
-
-   `DashMap` was rejected: its sharded `RwLock`s are not strictly
-   audio-safe under writer/reader contention. Third-party lock-free
-   hashmaps were rejected because their memory reclamation schemes
-   (e.g. epoch-based) can defer drops onto the audio thread.
 
    `DashMap` was rejected: its sharded `RwLock`s are not strictly
    audio-safe under writer/reader contention, and "usually
