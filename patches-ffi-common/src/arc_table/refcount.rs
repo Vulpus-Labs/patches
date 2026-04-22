@@ -183,6 +183,13 @@ impl Slots {
             "refcount release on stale/forged id"
         );
         let prev = s.refcount.fetch_sub(1, Ordering::AcqRel);
+        if cfg!(debug_assertions) && prev == 0 {
+            // Restore invariant so Drop-time cleanup does not fire a
+            // secondary panic, then surface the double-release.
+            s.refcount.fetch_add(1, Ordering::AcqRel);
+            self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
+            panic!("refcount release underflow (double-release) for id {id_and_gen:#x}");
+        }
         self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
         prev == 1
     }

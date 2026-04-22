@@ -101,6 +101,17 @@ impl ParamFrame {
         &mut self.storage[self.scalar_words as usize..]
     }
 
+    /// Entire backing storage as bytes (padded scalar area immediately
+    /// followed by tail `u64` slot table). This is the wire layout pushed
+    /// across the FFI boundary in `update_validated_parameters` (ADR 0045
+    /// §6 / E104 ticket 0612).
+    #[inline]
+    pub fn storage_bytes(&self) -> &[u8] {
+        let len = self.storage.len() * U64_SIZE;
+        // SAFETY: u64 is POD; cast to u8 slice of equal byte length is sound.
+        unsafe { std::slice::from_raw_parts(self.storage.as_ptr() as *const u8, len) }
+    }
+
     /// Zero all bytes. No reallocation, no capacity change.
     pub fn reset(&mut self) {
         for w in &mut self.storage {

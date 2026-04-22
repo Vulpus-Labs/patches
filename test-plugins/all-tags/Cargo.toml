@@ -1,5 +1,5 @@
 [package]
-name = "test-conv-reverb-plugin"
+name = "test-all-tags-plugin"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,5 +9,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../../patches-core" }
-patches-ffi = { path = "../../patches-ffi" }
-patches-modules = { path = "../../patches-modules" }
+patches-ffi-common = { path = "../../patches-ffi-common" }

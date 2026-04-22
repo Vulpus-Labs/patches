@@ -20,8 +20,13 @@ patches-modules = { path = "../patches-modules" }
 patches-dsl = { path = "../patches-dsl" }
 patches-interpreter = { path = "../patches-interpreter" }
 patches-ffi = { path = "../patches-ffi" }
-test-drums-bundle = { path = "../test-plugins/drums-bundle" }
+patches-ffi-common = { path = "../patches-ffi-common" }
 patches-alloc-trap = { path = "../patches-alloc-trap" }
+libloading = "0.8"
+test-gain-plugin = { path = "../test-plugins/gain" }
+test-gain-bad-hash-plugin = { path = "../test-plugins/gain-bad-hash" }
+test-all-tags-plugin = { path = "../test-plugins/all-tags" }
+test-release-on-update-plugin = { path = "../test-plugins/release-on-update" }
 
 [features]
 default = []

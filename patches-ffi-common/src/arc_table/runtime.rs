@@ -73,7 +73,8 @@ impl RuntimeArcTables {
         self.float_buffers.capacity()
     }
 
-    #[cfg(test)]
+    /// Number of live ids currently held by the control half. Exposed
+    /// for teardown assertions in integration tests (E107 ticket 0625).
     pub fn float_buffer_live_count(&self) -> usize {
         self.float_buffers.live_count()
     }

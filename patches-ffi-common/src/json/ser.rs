@@ -1,6 +1,6 @@
 use patches_core::{
     CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind,
-    ParameterMap, ParameterValue, PortDescriptor,
+    PortDescriptor,
 };
 
 // ── JSON writing helpers ─────────────────────────────────────────────────────
@@ -149,60 +149,3 @@ fn write_parameter_kind(out: &mut String, kind: &ParameterKind) {
     }
 }
 
-// ── ParameterMap serialization ───────────────────────────────────────────────
-
-pub fn serialize_parameter_map(params: &ParameterMap) -> Vec<u8> {
-    let mut out = String::with_capacity(256);
-    out.push('[');
-    let mut first = true;
-    for (name, index, value) in params.iter() {
-        if !first { out.push(','); }
-        first = false;
-        out.push('{');
-        out.push_str("\"name\":");
-        write_string(&mut out, name);
-        out.push_str(&format!(",\"index\":{index}"));
-        out.push_str(",\"value\":");
-        write_parameter_value(&mut out, value);
-        out.push('}');
-    }
-    out.push(']');
-    out.into_bytes()
-}
-
-fn write_parameter_value(out: &mut String, value: &ParameterValue) {
-    match value {
-        ParameterValue::Float(v) => {
-            out.push_str("{\"type\":\"float\",\"v\":");
-            write_f32(out, *v);
-            out.push('}');
-        }
-        ParameterValue::Int(v) => {
-            out.push_str(&format!("{{\"type\":\"int\",\"v\":{v}}}"));
-        }
-        ParameterValue::Bool(v) => {
-            out.push_str(&format!("{{\"type\":\"bool\",\"v\":{v}}}"));
-        }
-        ParameterValue::Enum(v) => {
-            // ADR 0045 Spike 0: emit variant index (u32) not name. Decoders are
-            // all in-tree and match the audio-thread representation.
-            out.push_str(&format!("{{\"type\":\"enum\",\"v\":{v}}}"));
-        }
-        ParameterValue::File(v) => {
-            out.push_str("{\"type\":\"file\",\"v\":");
-            write_string(out, v);
-            out.push('}');
-        }
-        ParameterValue::FloatBuffer(_) => {
-            // FloatBuffer is not serialized via JSON; it uses a binary sideband.
-            // Write a placeholder so the JSON is valid.
-            out.push_str("{\"type\":\"float_buffer\",\"v\":null}");
-        }
-    }
-}
-
-// ── BuildError serialization ─────────────────────────────────────────────────
-
-pub fn serialize_error(msg: &str) -> Vec<u8> {
-    msg.as_bytes().to_vec()
-}

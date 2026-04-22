@@ -335,3 +335,24 @@ impl Drop for HeadlessEngine {
         self.stop();
     }
 }
+
+// ── FFI test-dylib path helpers ─────────────────────────────────────────────
+
+/// Build the path to a cdylib artifact in `target/<profile>/`.
+/// Stem is the cargo package name with hyphens (Rust strips them for the
+/// dylib: e.g. `test-gain-plugin` → `libtest_gain_plugin.dylib`).
+pub fn dylib_path(stem: &str) -> std::path::PathBuf {
+    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop(); // workspace root
+    path.push("target");
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    path.push(profile);
+    let under = stem.replace('-', "_");
+    #[cfg(target_os = "macos")]
+    path.push(format!("lib{under}.dylib"));
+    #[cfg(target_os = "linux")]
+    path.push(format!("lib{under}.so"));
+    #[cfg(target_os = "windows")]
+    path.push(format!("{under}.dll"));
+    path
+}

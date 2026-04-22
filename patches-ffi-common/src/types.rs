@@ -5,7 +5,7 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 // ── FfiBytes ─────────────────────────────────────────────────────────────────
 
@@ -241,18 +241,8 @@ pub struct FfiPluginVTable {
         instance_id: u64,
     ) -> *mut c_void,
 
-    pub update_validated_parameters: unsafe extern "C" fn(
-        handle: *mut c_void,
-        params_json: *const u8,
-        params_json_len: usize,
-    ),
-
-    pub update_parameters: unsafe extern "C" fn(
-        handle: *mut c_void,
-        params_json: *const u8,
-        params_json_len: usize,
-        error_out: *mut FfiBytes,
-    ) -> i32,
+    /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
+    pub update_validated_parameters: crate::abi::UpdateValidatedParametersFn,
 
     pub process: unsafe extern "C" fn(
         handle: *mut c_void,
@@ -261,13 +251,8 @@ pub struct FfiPluginVTable {
         write_index: usize,
     ),
 
-    pub set_ports: unsafe extern "C" fn(
-        handle: *mut c_void,
-        inputs: *const FfiInputPort,
-        inputs_len: usize,
-        outputs: *const FfiOutputPort,
-        outputs_len: usize,
-    ),
+    /// Audio-thread: packed `PortFrame` wire bytes (see ADR 0045 §5).
+    pub set_ports: crate::abi::SetPortsFn,
 
     pub periodic_update: unsafe extern "C" fn(
         handle: *mut c_void,
@@ -275,10 +260,6 @@ pub struct FfiPluginVTable {
         pool_len: usize,
         write_index: usize,
     ) -> i32,
-
-    pub descriptor: unsafe extern "C" fn(handle: *mut c_void) -> FfiBytes,
-
-    pub instance_id: unsafe extern "C" fn(handle: *mut c_void) -> u64,
 
     pub drop: unsafe extern "C" fn(handle: *mut c_void),
 
@@ -407,22 +388,18 @@ mod tests {
     unsafe extern "C" fn stub_prepare(
         _p: *const u8, _l: usize, _e: FfiAudioEnvironment, _i: u64,
     ) -> *mut c_void { std::ptr::null_mut() }
-    unsafe extern "C" fn stub_uvp(_h: *mut c_void, _p: *const u8, _l: usize) {}
-    unsafe extern "C" fn stub_up(
-        _h: *mut c_void, _p: *const u8, _l: usize, _e: *mut FfiBytes,
-    ) -> i32 { 0 }
+    unsafe extern "C" fn stub_uvp(
+        _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
+    ) {}
     unsafe extern "C" fn stub_process(
         _h: *mut c_void, _p: *mut [CableValue; 2], _l: usize, _w: usize,
     ) {}
     unsafe extern "C" fn stub_set_ports(
-        _h: *mut c_void, _i: *const FfiInputPort, _il: usize,
-        _o: *const FfiOutputPort, _ol: usize,
+        _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
     ) {}
     unsafe extern "C" fn stub_periodic(
         _h: *mut c_void, _p: *const [CableValue; 2], _l: usize, _w: usize,
     ) -> i32 { 0 }
-    unsafe extern "C" fn stub_descriptor(_h: *mut c_void) -> FfiBytes { FfiBytes::empty() }
-    unsafe extern "C" fn stub_iid(_h: *mut c_void) -> u64 { 0 }
     unsafe extern "C" fn stub_drop(_h: *mut c_void) {}
     unsafe extern "C" fn stub_free_bytes(_b: FfiBytes) {}
 
@@ -434,12 +411,9 @@ mod tests {
             describe: stub_describe,
             prepare: stub_prepare,
             update_validated_parameters: stub_uvp,
-            update_parameters: stub_up,
             process: stub_process,
             set_ports: stub_set_ports,
             periodic_update: stub_periodic,
-            descriptor: stub_descriptor,
-            instance_id: stub_iid,
             drop: stub_drop,
             free_bytes: stub_free_bytes,
         }

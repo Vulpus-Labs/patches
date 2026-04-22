@@ -2,6 +2,7 @@ pub mod abi;
 pub mod arc_table;
 pub mod json;
 pub mod port_frame;
+pub mod sdk;
 pub mod types;
 
 // Re-exports of the audio-thread parameter data plane, now owned by

@@ -1,6 +1,6 @@
 use patches_core::{
     CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind,
-    ParameterMap, ParameterValue, PortDescriptor,
+    PortDescriptor,
 };
 
 // ── JSON parsing (minimal, hand-rolled) ──────────────────────────────────────
@@ -340,57 +340,3 @@ fn deserialize_parameter_kind(val: &JsonValue) -> Result<ParameterKind, String> 
     }
 }
 
-// ── ParameterMap deserialization ─────────────────────────────────────────────
-
-pub fn deserialize_parameter_map(data: &[u8]) -> Result<ParameterMap, String> {
-    let root = parse_json(data)?;
-    let entries = root.as_array().ok_or("expected JSON array for ParameterMap")?;
-    let mut map = ParameterMap::new();
-    for entry in entries {
-        let name = entry.get("name").and_then(|v| v.as_str()).ok_or("entry missing name")?;
-        let index = entry.get("index").and_then(|v| v.as_usize()).unwrap_or(0);
-        let value_obj = entry.get("value").ok_or("entry missing value")?;
-        let value = deserialize_parameter_value(value_obj)?;
-        map.insert_param(name.to_string(), index, value);
-    }
-    Ok(map)
-}
-
-fn deserialize_parameter_value(val: &JsonValue) -> Result<ParameterValue, String> {
-    let ty = val.get("type").and_then(|v| v.as_str()).ok_or("value missing type")?;
-    match ty {
-        "float" => {
-            let v = val.get("v").and_then(|v| v.as_f64()).ok_or("float missing v")? as f32;
-            Ok(ParameterValue::Float(v))
-        }
-        "int" => {
-            let v = val.get("v").and_then(|v| v.as_i64()).ok_or("int missing v")?;
-            Ok(ParameterValue::Int(v))
-        }
-        "bool" => {
-            let v = val.get("v").and_then(|v| v.as_bool()).ok_or("bool missing v")?;
-            Ok(ParameterValue::Bool(v))
-        }
-        "enum" => {
-            let v = val
-                .get("v")
-                .and_then(|v| v.as_i64())
-                .ok_or("enum missing numeric v (ADR 0045 Spike 0: u32 variant index)")?;
-            if v < 0 {
-                return Err(format!("enum index must be non-negative, got {v}"));
-            }
-            Ok(ParameterValue::Enum(v as u32))
-        }
-        "file" => {
-            let v = val.get("v").and_then(|v| v.as_str()).ok_or("file missing v")?.to_string();
-            Ok(ParameterValue::File(v))
-        }
-        other => Err(format!("unknown value type: {other}")),
-    }
-}
-
-// ── BuildError deserialization ───────────────────────────────────────────────
-
-pub fn deserialize_error(data: &[u8]) -> String {
-    String::from_utf8_lossy(data).into_owned()
-}

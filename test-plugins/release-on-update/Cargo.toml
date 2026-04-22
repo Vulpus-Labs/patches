@@ -1,5 +1,5 @@
 [package]
-name = "test-gain-wasm-plugin"
+name = "test-release-on-update-plugin"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,4 +9,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../../patches-core" }
-patches-wasm-sdk = { path = "../../patches-wasm-sdk" }
+patches-ffi-common = { path = "../../patches-ffi-common" }

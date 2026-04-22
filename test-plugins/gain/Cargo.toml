@@ -9,4 +9,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../../patches-core" }
-patches-ffi = { path = "../../patches-ffi" }
+patches-ffi-common = { path = "../../patches-ffi-common" }

@@ -3,23 +3,48 @@
 //! `DylibModule` wraps a plugin instance loaded from a shared library and
 //! implements the `Module` trait by delegating to the plugin's vtable.
 //! `DylibModuleBuilder` implements `ModuleBuilder` for registry integration.
+//!
+//! ADR 0045 Spike 7 Phase B (E104): audio-thread entry points take packed
+//! `ParamFrame` / `PortFrame` wire bytes plus a shared `HostEnv`. JSON is
+//! gone from the hot path; descriptor-hash is checked at load.
 
 use std::ffi::c_void;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::modules::module::PeriodicUpdate;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
-use patches_core::modules::parameter_map::ParameterValue;
-use patches_core::param_frame::ParamView;
+use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+use patches_core::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
 use patches_core::{AudioEnvironment, Module};
+use patches_ffi_common::abi::{Handle, HostEnv};
+use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
 use patches_registry::ModuleBuilder;
 
 use crate::json;
-use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiInputPort, FfiModuleShape, FfiOutputPort, FfiPluginManifest, FfiPluginVTable};
+use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiModuleShape, FfiPluginManifest, FfiPluginVTable};
+
+// ── Host environment ─────────────────────────────────────────────────────────
+
+extern "C" fn host_float_buffer_release(_id: u64) {
+    // Placeholder for ArcTable wiring; release is a no-op until E107 lands
+    // the allocator-trap audit path that exercises the real retain/release.
+}
+
+extern "C" fn host_song_data_release(_id: u64) {
+    // See note above — song-data buffers do not yet cross the FFI boundary.
+}
+
+fn host_env() -> &'static HostEnv {
+    static HOST_ENV: OnceLock<HostEnv> = OnceLock::new();
+    HOST_ENV.get_or_init(|| HostEnv {
+        float_buffer_release: host_float_buffer_release,
+        song_data_release: host_song_data_release,
+    })
+}
 
 // ── DylibModule ──────────────────────────────────────────────────────────────
 
@@ -33,18 +58,16 @@ pub struct DylibModule {
     vtable: FfiPluginVTable,
     descriptor: ModuleDescriptor,
     instance_id: InstanceId,
+    port_frame: PortFrame,
     _lib: Arc<libloading::Library>,
 }
 
-// Safety: the plugin's Module impl must be Send. This is the same contract
-// as VST3/CLAP/AU/LV2 hosts — documented in ADR 0025.
+// Safety: the plugin's Module impl must be Send. Same contract as
+// VST3/CLAP/AU/LV2 hosts — documented in ADR 0025.
 unsafe impl Send for DylibModule {}
 
 impl Drop for DylibModule {
     fn drop(&mut self) {
-        // Calls the plugin's drop, which joins any spawned threads.
-        // This must complete before Arc<Library> decrements (guaranteed by
-        // Rust's field drop order: handle is declared before _lib).
         unsafe { (self.vtable.drop)(self.handle) };
     }
 }
@@ -54,7 +77,6 @@ impl Module for DylibModule {
     where
         Self: Sized,
     {
-        // Not callable on the type itself — use DylibModuleBuilder::describe.
         unreachable!("DylibModule::describe is not callable directly; use DylibModuleBuilder")
     }
 
@@ -70,61 +92,32 @@ impl Module for DylibModule {
     }
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
-        // ADR 0045 Spike 5 bridge: rebuild map from ParamView for the JSON FFI path until Spike 7.
-        use patches_core::modules::module_descriptor::ParameterKind;
-        let mut map = ParameterMap::new();
-        for p in &self.descriptor.parameters {
-            let val = match &p.parameter_type {
-                ParameterKind::Float { .. } => {
-                    ParameterValue::Float(params.fetch_float_static(p.name, p.index as u16))
-                }
-                ParameterKind::Int { .. } | ParameterKind::SongName => {
-                    ParameterValue::Int(params.fetch_int_static(p.name, p.index as u16))
-                }
-                ParameterKind::Bool { .. } => {
-                    ParameterValue::Bool(params.fetch_bool_static(p.name, p.index as u16))
-                }
-                ParameterKind::Enum { .. } => {
-                    ParameterValue::Enum(params.fetch_enum_static(p.name, p.index as u16))
-                }
-                ParameterKind::File { .. } => {
-                    // Skip File in JSON bridge until Spike 7; plugin sees it as absent.
-                    continue;
-                }
-            };
-            map.insert_param(p.name.to_string(), p.index, val);
-        }
-        let json = json::serialize_parameter_map(&map);
+        let bytes = params.wire_bytes();
         unsafe {
             (self.vtable.update_validated_parameters)(
-                self.handle,
-                json.as_ptr(),
-                json.len(),
+                self.handle as Handle,
+                bytes.as_ptr(),
+                bytes.len(),
+                host_env() as *const HostEnv,
             );
         }
     }
 
     fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        let json = json::serialize_parameter_map(params);
-        let mut error_out = FfiBytes::empty();
-        let result = unsafe {
-            (self.vtable.update_parameters)(
-                self.handle,
-                json.as_ptr(),
-                json.len(),
-                &mut error_out,
-            )
-        };
-        if result != 0 {
-            let msg = unsafe { json::deserialize_error(error_out.as_slice()) };
-            unsafe { (self.vtable.free_bytes)(error_out) };
-            Err(BuildError::Custom {
-                module: self.descriptor.module_name,
-                message: msg, origin: None,
-            })
-        } else {
-            Ok(())
-        }
+        // New ABI: control-thread validation happens host-side via the layout.
+        // Pack defaults + overrides, then dispatch as a validated frame.
+        let layout = compute_layout(&self.descriptor);
+        let defaults = defaults_from_descriptor(&self.descriptor);
+        let mut frame = ParamFrame::with_layout(&layout);
+        pack_into(&layout, &defaults, params, &mut frame).map_err(|e| BuildError::Custom {
+            module: self.descriptor.module_name,
+            message: format!("{e:?}"),
+            origin: None,
+        })?;
+        let index = ParamViewIndex::from_layout(&layout);
+        let view = ParamView::new(&index, &frame);
+        self.update_validated_parameters(&view);
+        Ok(())
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -141,15 +134,17 @@ impl Module for DylibModule {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        let ffi_inputs: Vec<FfiInputPort> = inputs.iter().map(FfiInputPort::from).collect();
-        let ffi_outputs: Vec<FfiOutputPort> = outputs.iter().map(FfiOutputPort::from).collect();
+        // Pack into the preallocated per-instance `PortFrame` — no audio-
+        // thread allocation (E104 ticket 0613).
+        pack_ports_into(0, inputs, outputs, &mut self.port_frame)
+            .expect("DylibModule::set_ports: shape mismatch vs. prepared PortLayout");
+        let bytes = self.port_frame.bytes();
         unsafe {
             (self.vtable.set_ports)(
-                self.handle,
-                ffi_inputs.as_ptr(),
-                ffi_inputs.len(),
-                ffi_outputs.as_ptr(),
-                ffi_outputs.len(),
+                self.handle as Handle,
+                bytes.as_ptr(),
+                bytes.len(),
+                host_env() as *const HostEnv,
             );
         }
     }
@@ -182,28 +177,24 @@ pub struct DylibModuleBuilder {
     lib: Arc<libloading::Library>,
 }
 
-// Safety: FfiPluginVTable contains only function pointers (which are Send+Sync)
-// and the Arc<Library> is Send+Sync.
+// Safety: FfiPluginVTable contains only function pointers (Send+Sync) and
+// Arc<Library> is Send+Sync.
 unsafe impl Send for DylibModuleBuilder {}
 unsafe impl Sync for DylibModuleBuilder {}
 
 impl DylibModuleBuilder {
-    /// Get the vtable for use in tests or advanced scenarios.
     pub fn vtable(&self) -> &FfiPluginVTable {
         &self.vtable
     }
 
-    /// Access the shared library handle. Test/diagnostic use only.
     pub fn library_arc(&self) -> Arc<libloading::Library> {
         Arc::clone(&self.lib)
     }
 
-    /// Strong count of the shared library `Arc`. Test/diagnostic use only.
     pub fn library_strong_count(&self) -> usize {
         Arc::strong_count(&self.lib)
     }
 
-    /// Per-module semver-packed version declared by the plugin.
     pub fn module_version(&self) -> u32 {
         self.vtable.module_version
     }
@@ -213,8 +204,8 @@ impl ModuleBuilder for DylibModuleBuilder {
     fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor {
         let ffi_shape = FfiModuleShape::from(shape);
         let bytes = unsafe { (self.vtable.describe)(ffi_shape) };
-        let json = unsafe { bytes.as_slice() };
-        let desc = json::deserialize_module_descriptor(json)
+        let slice = unsafe { bytes.as_slice() };
+        let desc = json::deserialize_module_descriptor(slice)
             .expect("plugin describe returned invalid JSON");
         unsafe { (self.vtable.free_bytes)(bytes) };
         desc
@@ -227,14 +218,11 @@ impl ModuleBuilder for DylibModuleBuilder {
         params: &ParameterMap,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
-        // 1. Describe
         let descriptor = self.describe(shape);
 
-        // 2. Serialize descriptor for prepare
         let desc_json = json::serialize_module_descriptor(&descriptor);
         let ffi_env = FfiAudioEnvironment::from(audio_environment);
 
-        // 3. Prepare (create instance)
         let handle = unsafe {
             (self.vtable.prepare)(
                 desc_json.as_ptr(),
@@ -247,19 +235,26 @@ impl ModuleBuilder for DylibModuleBuilder {
         if handle.is_null() {
             return Err(BuildError::Custom {
                 module: descriptor.module_name,
-                message: "plugin prepare returned null".to_string(), origin: None,
+                message: "plugin prepare returned null".to_string(),
+                origin: None,
             });
         }
+
+        let port_layout = PortLayout::new(
+            descriptor.inputs.len() as u32,
+            descriptor.outputs.len() as u32,
+        );
+        let port_frame = PortFrame::with_layout(port_layout);
 
         let mut module = DylibModule {
             handle,
             vtable: self.vtable,
             descriptor,
             instance_id,
+            port_frame,
             _lib: Arc::clone(&self.lib),
         };
 
-        // 4. Fill defaults and validate+apply parameters
         let mut filled = params.clone();
         for param_desc in module.descriptor.parameters.iter() {
             filled.get_or_insert(param_desc.name, param_desc.index, || {
@@ -277,13 +272,9 @@ impl ModuleBuilder for DylibModuleBuilder {
 /// Load a plugin bundle from a shared library at `path`.
 ///
 /// Returns one `DylibModuleBuilder` per vtable in the plugin's manifest; all
-/// builders share a single `Arc<libloading::Library>`, so the DSP the plugin
-/// carries is linked once and shared across every module it exposes.
-///
-/// # Errors
-/// Returns an error if the library cannot be opened, the init symbol is
-/// missing, the ABI version does not match, or the manifest has no vtables
-/// or duplicate module names.
+/// builders share a single `Arc<libloading::Library>`. On ABI or descriptor-
+/// hash mismatch the library is dropped before any plugin entry point is
+/// called (E104 ticket 0614).
 pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| format!("failed to load library {}: {e}", path.display()))?;
@@ -310,6 +301,10 @@ pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
         ));
     }
 
+    // Resolve the plugin's descriptor-hash symbol once; the exported fn is
+    // stateless and returns the hash for the *first* vtable in the bundle.
+    // Bundles with multiple modules each export `patches_plugin_descriptor_hash_<name>`;
+    // we look those up per-entry below.
     let vtables: &[FfiPluginVTable] = unsafe {
         std::slice::from_raw_parts(manifest.vtables, manifest.count)
     };
@@ -332,11 +327,30 @@ pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
             vtable: *vt,
             lib: Arc::clone(&lib_arc),
         };
-        let name = builder.describe(&default_shape).module_name.to_string();
+        let descriptor = builder.describe(&default_shape);
+        let name = descriptor.module_name.to_string();
+
+        let host_hash = patches_ffi_common::descriptor_hash(&descriptor);
+        let plugin_hash = read_plugin_descriptor_hash(&lib_arc, &name).map_err(|e| {
+            format!(
+                "module {name:?} in {}: descriptor_hash symbol not found: {e}",
+                path.display(),
+            )
+        })?;
+        if plugin_hash != host_hash {
+            return Err(format!(
+                "descriptor_hash mismatch for module {name:?} in {}: host {host_hash:#x}, plugin {plugin_hash:#x}",
+                path.display(),
+            ));
+        }
+
+        // Also sanity-check packed layout hash matches.
+        let layout: ParamLayout = compute_layout(&descriptor);
+        debug_assert_eq!(layout.descriptor_hash, host_hash);
+
         if names.iter().any(|n| n == &name) {
             return Err(format!(
-                "duplicate module_name {:?} within bundle {}",
-                name,
+                "duplicate module_name {name:?} within bundle {}",
                 path.display(),
             ));
         }
@@ -345,4 +359,15 @@ pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
     }
 
     Ok(builders)
+}
+
+/// Look up the plugin's `patches_plugin_descriptor_hash_<module>` symbol.
+fn read_plugin_descriptor_hash(
+    lib: &libloading::Library,
+    module_name: &str,
+) -> Result<u64, libloading::Error> {
+    let sym = format!("patches_plugin_descriptor_hash_{module_name}");
+    let f: libloading::Symbol<unsafe extern "C" fn() -> u64> =
+        unsafe { lib.get(sym.as_bytes()) }?;
+    Ok(unsafe { f() })
 }

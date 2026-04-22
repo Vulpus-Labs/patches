@@ -15,5 +15,4 @@ libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-test-drums-bundle = { path = "../test-plugins/drums-bundle" }
-test-old-abi-plugin = { path = "../test-plugins/old-abi" }
+test-gain-plugin = { path = "../test-plugins/gain" }

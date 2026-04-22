@@ -175,9 +175,54 @@ pub struct ParamView<'a> {
     index: &'a ParamViewIndex,
     scalar_area: &'a [u8],
     buffer_slots: &'a [u64],
+    wire_bytes: &'a [u8],
 }
 
 impl<'a> ParamView<'a> {
+    /// Borrow a view over raw wire bytes with the same on-the-wire layout as
+    /// `ParamFrame::storage_bytes()`: padded scalar area (`scalar_size`
+    /// rounded up to multiple of 8) followed by `buffer_slot_count` `u64`
+    /// slots. Plugin-side counterpart of `ParamView::new` (ADR 0045 §6).
+    ///
+    /// `bytes.as_ptr()` must be 8-byte aligned — satisfied when bytes come
+    /// from a `Vec<u64>`-backed `ParamFrame` across FFI, which is the only
+    /// supported producer.
+    pub fn from_wire_bytes(index: &'a ParamViewIndex, bytes: &'a [u8]) -> Self {
+        use super::U64_SIZE;
+        let scalar_words = (index.scalar_size as usize).div_ceil(U64_SIZE);
+        let scalar_padded = scalar_words * U64_SIZE;
+        let total = scalar_padded + (index.buffer_slot_count as usize) * U64_SIZE;
+        debug_assert_eq!(
+            bytes.len(),
+            total,
+            "ParamView::from_wire_bytes: byte length mismatch",
+        );
+        debug_assert_eq!(
+            bytes.as_ptr() as usize & (U64_SIZE - 1),
+            0,
+            "ParamView::from_wire_bytes: bytes must be 8-byte aligned",
+        );
+        let scalar_area = &bytes[..index.scalar_size as usize];
+        let tail = &bytes[scalar_padded..];
+        // SAFETY: aligned (debug-asserted), u64 is POD, slice covers
+        // buffer_slot_count * 8 bytes of the input buffer.
+        let buffer_slots = unsafe {
+            std::slice::from_raw_parts(
+                tail.as_ptr() as *const u64,
+                index.buffer_slot_count as usize,
+            )
+        };
+        Self { index, scalar_area, buffer_slots, wire_bytes: bytes }
+    }
+
+    /// Expected wire-byte length for the given index: padded scalar area +
+    /// tail slot bytes. Used by decode helpers for length checks.
+    pub fn wire_size_for(index: &ParamViewIndex) -> usize {
+        use super::U64_SIZE;
+        let scalar_words = (index.scalar_size as usize).div_ceil(U64_SIZE);
+        scalar_words * U64_SIZE + (index.buffer_slot_count as usize) * U64_SIZE
+    }
+
     /// Borrow the frame. Asserts shape consistency with the index.
     pub fn new(index: &'a ParamViewIndex, frame: &'a ParamFrame) -> Self {
         debug_assert_eq!(
@@ -199,7 +244,17 @@ impl<'a> ParamView<'a> {
             index,
             scalar_area: frame.scalar_area(),
             buffer_slots: frame.buffer_slots(),
+            wire_bytes: frame.storage_bytes(),
         }
+    }
+
+    /// Borrowed wire-format bytes of the underlying frame (padded scalar
+    /// area + tail slot table). Used by FFI dispatch on the audio thread;
+    /// plugin-side reconstructs a matching `ParamView` from these bytes and
+    /// its own layout (ADR 0045 §6).
+    #[inline]
+    pub fn wire_bytes(&self) -> &'a [u8] {
+        self.wire_bytes
     }
 
     // ── Typed (ADR 0046) getters ─────────────────────────────────────────

@@ -115,7 +115,6 @@ impl<T: ?Sized> ArcTableControl<T> {
         self.refcount.capacity()
     }
 
-    #[cfg(test)]
     pub fn live_count(&self) -> usize {
         self.entries.len()
     }

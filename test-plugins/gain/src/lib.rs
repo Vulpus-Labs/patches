@@ -19,12 +19,16 @@ pub struct Gain {
     output: MonoOutput,
 }
 
+fn describe(shape: &ModuleShape) -> ModuleDescriptor {
+    ModuleDescriptor::new("Gain", shape.clone())
+        .mono_in("in")
+        .mono_out("out")
+        .float_param(params::gain, 0.0, 2.0, 1.0)
+}
+
 impl Module for Gain {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Gain", shape.clone())
-            .mono_in("in")
-            .mono_out("out")
-            .float_param(params::gain, 0.0, 2.0, 1.0)
+        describe(shape)
     }
 
     fn prepare(
@@ -68,4 +72,4 @@ impl Module for Gain {
     }
 }
 
-patches_ffi::export_module!(Gain);
+patches_ffi_common::export_plugin!(Gain, describe, "Gain");

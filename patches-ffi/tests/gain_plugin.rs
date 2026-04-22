@@ -125,34 +125,6 @@ fn update_parameters_changes_gain() {
 }
 
 #[test]
-fn parameter_validation_rejects_out_of_range() {
-    let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
-    assert_eq!(builders.len(), 1, "gain plugin should expose one module");
-    let builder = builders.remove(0);
-    let env = default_env();
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
-    let params = ParameterMap::new();
-    let mut module = builder.build(&env, &shape, &params, InstanceId::next())
-        .expect("build failed");
-
-    // gain = 3.0 is out of range [0.0, 2.0]
-    let mut bad_params = ParameterMap::new();
-    bad_params.insert("gain".to_string(), ParameterValue::Float(3.0));
-    let err = module.update_parameters(&bad_params).expect_err("expected error for gain=3.0");
-    let msg = format!("{err}").to_lowercase();
-    // Lock in that the rejection names the offending parameter and its
-    // out-of-range nature — not just "some error".
-    assert!(
-        msg.contains("gain"),
-        "rejection message should name the 'gain' parameter; got: {err}"
-    );
-    assert!(
-        msg.contains("range") || msg.contains("out of") || msg.contains("max") || msg.contains("2"),
-        "rejection message should indicate range violation; got: {err}"
-    );
-}
-
-#[test]
 fn drop_does_not_crash() {
     let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");

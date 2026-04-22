@@ -24,14 +24,13 @@ members = [
     "patches-ffi-common",
     "patches-alloc-trap",
     "test-plugins/gain",
-    "test-plugins/conv-reverb",
-    "test-plugins/drums-bundle",
-    "test-plugins/old-abi",
+    "test-plugins/gain-bad-hash",
+    "test-plugins/all-tags",
+    "test-plugins/release-on-update",
 ]
 # Shelved WASM crates — excluded from build. See adr/0027-wasm-module-loading.md.
 # "patches-wasm-sdk",
 # "patches-wasm",
-# "test-plugins/gain-wasm",
 # "examples-wasm/wavefolder-rs",
 resolver = "2"
 

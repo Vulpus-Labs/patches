@@ -8,15 +8,15 @@
 mod ser;
 mod de;
 
-pub use ser::{serialize_module_descriptor, serialize_parameter_map, serialize_error};
-pub use de::{deserialize_module_descriptor, deserialize_parameter_map, deserialize_error};
+pub use ser::serialize_module_descriptor;
+pub use de::deserialize_module_descriptor;
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterMap, ParameterValue, PolyLayout, PortDescriptor};
+    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, PolyLayout, PortDescriptor};
 
     #[test]
     fn module_descriptor_round_trip() {
@@ -93,38 +93,4 @@ mod tests {
 
     }
 
-    #[test]
-    fn parameter_map_round_trip() {
-        let mut params = ParameterMap::new();
-        params.insert("gain".to_string(), ParameterValue::Float(0.75));
-        params.insert_param("pan".to_string(), 1, ParameterValue::Float(-0.5));
-        params.insert("active".to_string(), ParameterValue::Bool(true));
-        params.insert("voices".to_string(), ParameterValue::Int(6));
-        params.insert("mode".to_string(), ParameterValue::Enum(1));
-
-        let json = serialize_parameter_map(&params);
-        let back = deserialize_parameter_map(&json).expect("deserialize failed");
-
-        assert_eq!(back.get_scalar("gain"), Some(&ParameterValue::Float(0.75)));
-        assert_eq!(back.get("pan", 1), Some(&ParameterValue::Float(-0.5)));
-        assert_eq!(back.get_scalar("active"), Some(&ParameterValue::Bool(true)));
-        assert_eq!(back.get_scalar("voices"), Some(&ParameterValue::Int(6)));
-        assert_eq!(back.get_scalar("mode"), Some(&ParameterValue::Enum(1)));
-    }
-
-    #[test]
-    fn empty_parameter_map_round_trip() {
-        let params = ParameterMap::new();
-        let json = serialize_parameter_map(&params);
-        let back = deserialize_parameter_map(&json).expect("deserialize failed");
-        assert!(back.is_empty());
-    }
-
-    #[test]
-    fn error_round_trip() {
-        let msg = "parameter 'gain' out of range";
-        let bytes = serialize_error(msg);
-        let back = deserialize_error(&bytes);
-        assert_eq!(back, msg);
-    }
 }

@@ -1,14 +1,12 @@
 [package]
-name = "test-drums-bundle"
+name = "test-gain-bad-hash-plugin"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-name = "test_drums_bundle"
 crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../../patches-core" }
-patches-ffi = { path = "../../patches-ffi" }
-patches-modules = { path = "../../patches-modules" }
+patches-ffi-common = { path = "../../patches-ffi-common" }
