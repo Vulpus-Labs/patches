@@ -1,4 +1,4 @@
-//! `VPolyVcf` — 16-voice polyphonic sibling of [`crate::vvcf::VVcf`].
+//! `VPolyLadder` — 16-voice polyphonic sibling of [`crate::vladder::VLadder`].
 //!
 //! Shares the ladder kernel with the mono version; wrapper differs
 //! only in port kind and per-voice state fan-out.
@@ -20,7 +20,7 @@
 //!
 //! | Name        | Type  | Range              | Default   | Description                      |
 //! |-------------|-------|--------------------|-----------|----------------------------------|
-//! | `variant`   | enum  | `juno60`/`juno106` | `juno106` | Filter voicing (shared)          |
+//! | `variant`   | enum  | `sharp`/`smooth`   | `smooth`  | Filter voicing (shared)          |
 //! | `cutoff`    | float | 20.0 -- 20000.0    | `1000.0`  | Base cutoff in Hz                |
 //! | `resonance` | float | 0.0 -- 1.0         | `0.0`     | Feedback amount; self-osc near 1 |
 //! | `drive`     | float | 0.0 -- 4.0         | `1.0`     | Input gain into the tanh stage   |
@@ -33,11 +33,11 @@ use patches_core::{
 };
 use patches_dsp::{LadderCoeffs, LadderVariant, PolyLadderKernel};
 
-use crate::vvcf::VVcfVariant;
+use crate::vladder::VLadderVariant;
 
 module_params! {
-    VPolyVcfParams {
-        variant:   Enum<VVcfVariant>,
+    VPolyLadderParams {
+        variant:   Enum<VLadderVariant>,
         cutoff:    Float,
         resonance: Float,
         drive:     Float,
@@ -48,12 +48,12 @@ const CUTOFF_MIN: f32 = 20.0;
 const CUTOFF_MAX: f32 = 20_000.0;
 const DRIVE_MAX: f32 = 4.0;
 
-pub struct VPolyVcf {
+pub struct VPolyLadder {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     sample_rate: f32,
     interval_recip: f32,
-    variant: VVcfVariant,
+    variant: VLadderVariant,
     cutoff: f32,
     resonance: f32,
     drive: f32,
@@ -63,7 +63,7 @@ pub struct VPolyVcf {
     out_audio: PolyOutput,
 }
 
-impl VPolyVcf {
+impl VPolyLadder {
     fn coeffs_for(&self, cv_voct: f32) -> LadderCoeffs {
         let eff = (self.cutoff * (2.0f32).powf(cv_voct)).clamp(CUTOFF_MIN, self.sample_rate * 0.45);
         let lv: LadderVariant = self.variant.into();
@@ -76,20 +76,20 @@ impl VPolyVcf {
     }
 }
 
-impl Module for VPolyVcf {
+impl Module for VPolyLadder {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VPolyVcf", shape.clone())
+        ModuleDescriptor::new("VPolyLadder", shape.clone())
             .poly_in("in")
             .poly_in("cutoff_cv")
             .poly_out("out")
-            .enum_param(params::variant, VVcfVariant::Juno106)
+            .enum_param(params::variant, VLadderVariant::Smooth)
             .float_param(params::cutoff, CUTOFF_MIN, CUTOFF_MAX, 1_000.0)
             .float_param(params::resonance, 0.0, 1.0, 0.0)
             .float_param(params::drive, 0.0, DRIVE_MAX, 1.0)
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
-        let variant = VVcfVariant::Juno106;
+        let variant = VLadderVariant::Smooth;
         let cutoff = 1_000.0;
         let resonance = 0.0;
         let drive = 1.0;
@@ -161,7 +161,7 @@ impl Module for VPolyVcf {
     }
 }
 
-impl PeriodicUpdate for VPolyVcf {
+impl PeriodicUpdate for VPolyLadder {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.in_cutoff_cv.is_connected() {
             return;
@@ -181,17 +181,17 @@ mod tests {
 
     #[test]
     fn descriptor_shape() {
-        let h = ModuleHarness::build::<VPolyVcf>(&[]);
+        let h = ModuleHarness::build::<VPolyLadder>(&[]);
         let d = h.descriptor();
-        assert_eq!(d.module_name, "VPolyVcf");
+        assert_eq!(d.module_name, "VPolyLadder");
         assert_eq!(d.inputs.len(), 2);
         assert_eq!(d.outputs.len(), 1);
     }
 
     #[test]
     fn stable_under_max_drive_and_resonance() {
-        let mut h = ModuleHarness::build::<VPolyVcf>(params![
-            "variant" => VVcfVariant::Juno60,
+        let mut h = ModuleHarness::build::<VPolyLadder>(params![
+            "variant" => VLadderVariant::Sharp,
             "cutoff" => 2_000.0_f32,
             "resonance" => 1.0_f32,
             "drive" => DRIVE_MAX,

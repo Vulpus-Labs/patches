@@ -168,6 +168,16 @@ impl VChorusCore {
         self.hiss_amount = h.clamp(0.0, 1.0);
     }
 
+    pub fn set_jitter(&mut self, amount: f32) {
+        self.bbd_l.set_jitter_amount(amount);
+        self.bbd_r.set_jitter_amount(amount);
+    }
+
+    pub fn set_jitter_seed_base(&mut self, base: u32) {
+        self.bbd_l.set_jitter_seed(base);
+        self.bbd_r.set_jitter_seed(base.wrapping_add(1));
+    }
+
     #[inline]
     fn reconstruction_cutoff(variant: Variant) -> f32 {
         match variant {

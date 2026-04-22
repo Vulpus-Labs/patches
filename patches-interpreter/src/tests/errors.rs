@@ -164,7 +164,7 @@ fn scale_out_of_range_is_error() {
         to_module: "mix".into(),
         to_port: "in".to_string(),
         to_index: 0,
-        scale: 2.5,
+        scale: 11.0,
         provenance: prov.clone(),
         from_provenance: prov.clone(),
         to_provenance: prov,

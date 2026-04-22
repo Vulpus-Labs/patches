@@ -58,6 +58,7 @@ use crate::compander::{CompanderParams, Compressor, Expander};
 module_params! {
     VBbd {
         dry_wet:  Float,
+        jitter:   Float,
         delay_ms: FloatArray,
         gain:     FloatArray,
         feedback: FloatArray,
@@ -120,6 +121,7 @@ impl Module for VBbd {
             .mono_in_multi("fb_cv", n)
             .mono_out("out")
             .float_param(params::dry_wet, 0.0, 1.0, 0.5)
+            .float_param(params::jitter, 0.0, 1.0, 0.0)
             .float_param_multi(params::delay_ms, n, DELAY_MS_MIN, DELAY_MS_MAX, 40.0)
             .float_param_multi(params::gain, n, 0.0, 1.0, 1.0)
             .float_param_multi(params::feedback, n, 0.0, FEEDBACK_MAX, 0.0)
@@ -133,7 +135,14 @@ impl Module for VBbd {
         let sr = env.sample_rate;
         let interval = env.periodic_update_interval;
         let taps = descriptor.shape.channels;
-        let tap_state = (0..taps).map(|_| Tap::new(sr, interval)).collect();
+        let seed_base = (instance_id.as_u64() ^ 0xBBD0_0001) as u32;
+        let tap_state: Vec<Tap> = (0..taps)
+            .map(|i| {
+                let mut t = Tap::new(sr, interval);
+                t.bbd.set_jitter_seed(seed_base.wrapping_add(i as u32));
+                t
+            })
+            .collect();
 
         Self {
             instance_id,
@@ -155,11 +164,13 @@ impl Module for VBbd {
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
+        let jitter = p.get(params::jitter).clamp(0.0, 1.0);
         for i in 0..self.taps {
             let idx = i as u16;
             self.delay_ms[i] = p.get(params::delay_ms.at(idx)).clamp(DELAY_MS_MIN, DELAY_MS_MAX);
             self.gains[i] = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
             self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, FEEDBACK_MAX);
+            self.tap_state[i].bbd.set_jitter_amount(jitter);
         }
     }
 

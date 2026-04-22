@@ -208,11 +208,11 @@ fn connect_scale_out_of_range_errors() {
     g.add_module(dst.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
 
     assert!(matches!(
-        g.connect(&src, pref("out"), &dst, pref("in"), 1.5),
+        g.connect(&src, pref("out"), &dst, pref("in"), 10.5),
         Err(GraphError::ScaleOutOfRange(_))
     ));
     assert!(matches!(
-        g.connect(&src, pref("out"), &dst, pref("in"), -2.0),
+        g.connect(&src, pref("out"), &dst, pref("in"), -11.0),
         Err(GraphError::ScaleOutOfRange(_))
     ));
     assert!(matches!(
@@ -224,7 +224,7 @@ fn connect_scale_out_of_range_errors() {
         Err(GraphError::ScaleOutOfRange(_))
     ));
     // Boundary values are valid.
-    assert!(g.connect(&src, pref("out"), &dst, pref("in"), -1.0).is_ok());
+    assert!(g.connect(&src, pref("out"), &dst, pref("in"), -10.0).is_ok());
 }
 
 #[test]
@@ -236,8 +236,8 @@ fn connect_scale_boundary_values_are_valid() {
     g.add_module(src.clone(), stub_desc(&[], &["out"]), &no_params()).unwrap();
     g.add_module(dst1.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
     g.add_module(dst2.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
-    assert!(g.connect(&src, pref("out"), &dst1, pref("in"), 1.0).is_ok());
-    assert!(g.connect(&src, pref("out"), &dst2, pref("in"), -1.0).is_ok());
+    assert!(g.connect(&src, pref("out"), &dst1, pref("in"), 10.0).is_ok());
+    assert!(g.connect(&src, pref("out"), &dst2, pref("in"), -10.0).is_ok());
 }
 
 #[test]

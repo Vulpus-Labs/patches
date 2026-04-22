@@ -4,13 +4,12 @@
 //! saturation on the feedback path and a one-sample-delayed feedback
 //! term (Huovilainen simplification) so the stages remain explicit.
 //!
-//! Two coefficient presets model Juno-60 (IR3109-ish) and Juno-106
-//! (80017A-ish) character:
+//! Two coefficient presets model different vintage ladder character:
 //!
-//! * `Juno60` — unmodified cutoff, unity input scale, sharp resonance.
-//! * `Juno106` — slight HF loss (stage gain ×0.95) and a resonance-
-//!   dependent bass trim on the input (`1 − 0.0875 · k`) that
-//!   reproduces the 80017A's bass compression at high resonance.
+//! * `Sharp` — unmodified cutoff, unity input scale, sharp resonance peak.
+//! * `Smooth` — slight HF loss (stage gain ×0.95) and a resonance-
+//!   dependent bass trim on the input (`1 − 0.0875 · k`) for softer top
+//!   and bass compression at high resonance.
 //!
 //! Self-oscillates when `resonance = 1.0` (feedback factor `k = 4`).
 //!
@@ -29,10 +28,10 @@ use std::f32::consts::PI;
 /// Coefficient preset for the ladder kernel.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum LadderVariant {
-    /// Juno-60 voicing (IR3109-ish, sharp resonance peak).
-    Juno60,
-    /// Juno-106 voicing (80017A-ish, softer, bass compresses with resonance).
-    Juno106,
+    /// Sharp resonance peak, unity input scale, unmodified cutoff.
+    Sharp,
+    /// Softer top (HF loss) and bass compression under resonance.
+    Smooth,
 }
 
 #[inline]
@@ -48,10 +47,10 @@ fn compute_g(cutoff_hz: f32, sample_rate: f32, variant: LadderVariant) -> f32 {
     let wd = (PI * fc / sample_rate).tan();
     let g_raw = wd / (1.0 + wd);
     let g = match variant {
-        LadderVariant::Juno60 => g_raw,
+        LadderVariant::Sharp => g_raw,
         // Slight HF loss: scale stage gain down a few percent so the ladder's
         // effective cutoff sits a touch below the knob. Audibly softer top.
-        LadderVariant::Juno106 => g_raw * 0.95,
+        LadderVariant::Smooth => g_raw * 0.95,
     };
     // Stage gain is strictly in (0, 1); clamp away from 1.0 for safety.
     g.clamp(1.0e-5, 0.999)
@@ -66,10 +65,10 @@ fn compute_k(resonance: f32) -> f32 {
 #[inline]
 fn input_scale(variant: LadderVariant, k: f32) -> f32 {
     match variant {
-        LadderVariant::Juno60 => 1.0,
+        LadderVariant::Sharp => 1.0,
         // Bass compression under resonance: trim the input amplitude by up to
-        // ~35 % as k sweeps 0 → 4, the 80017A's signature behaviour.
-        LadderVariant::Juno106 => 1.0 - 0.0875 * k,
+        // ~35 % as k sweeps 0 → 4.
+        LadderVariant::Smooth => 1.0 - 0.0875 * k,
     }
 }
 

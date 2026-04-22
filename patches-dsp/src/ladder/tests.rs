@@ -8,7 +8,7 @@ fn fresh(cutoff: f32, res: f32, variant: LadderVariant) -> LadderKernel {
 
 #[test]
 fn impulse_response_is_bounded() {
-    let mut k = fresh(1_000.0, 0.0, LadderVariant::Juno60);
+    let mut k = fresh(1_000.0, 0.0, LadderVariant::Sharp);
     let mut peak = 0.0f32;
     for n in 0..4096 {
         let x = if n == 0 { 1.0 } else { 0.0 };
@@ -28,7 +28,7 @@ fn stable_under_max_resonance_and_drive() {
             SR,
             1.0,
             4.0,
-            LadderVariant::Juno60,
+            LadderVariant::Sharp,
         ));
         let mut peak = 0.0f32;
         for n in 0..SR as usize {
@@ -51,7 +51,7 @@ fn self_oscillates_at_max_resonance() {
         SR,
         1.0,
         1.0,
-        LadderVariant::Juno60,
+        LadderVariant::Sharp,
     ));
     // Kick: one sample of input energy.
     for _ in 0..16 {
@@ -69,8 +69,8 @@ fn self_oscillates_at_max_resonance() {
 }
 
 #[test]
-fn variant_106_has_less_hf_than_60() {
-    // Drive a near-Nyquist signal through both variants at high cutoff; 106
+fn smooth_has_less_hf_than_sharp() {
+    // Drive a near-Nyquist signal through both variants at high cutoff; smooth
     // should deliver less energy thanks to the stage-gain HF trim.
     let run = |variant: LadderVariant| -> f32 {
         let mut k = LadderKernel::new_static(LadderCoeffs::new(
@@ -90,18 +90,18 @@ fn variant_106_has_less_hf_than_60() {
         }
         (sq / n as f64).sqrt() as f32
     };
-    let rms_60 = run(LadderVariant::Juno60);
-    let rms_106 = run(LadderVariant::Juno106);
+    let rms_sharp = run(LadderVariant::Sharp);
+    let rms_smooth = run(LadderVariant::Smooth);
     assert!(
-        rms_106 < rms_60,
-        "106 should show more HF loss than 60: 60={rms_60}, 106={rms_106}"
+        rms_smooth < rms_sharp,
+        "smooth should show more HF loss than sharp: sharp={rms_sharp}, smooth={rms_smooth}"
     );
 }
 
 #[test]
-fn variant_106_bass_compresses_with_resonance() {
-    // At high resonance the 106 trims the input; RMS of a low tone should
-    // drop relative to the 60 variant at the same resonance.
+fn smooth_bass_compresses_with_resonance() {
+    // At high resonance the smooth variant trims the input; RMS of a low tone
+    // should drop relative to the sharp variant at the same resonance.
     let rms = |variant: LadderVariant, res: f32| -> f32 {
         let mut k = LadderKernel::new_static(LadderCoeffs::new(
             2_000.0,
@@ -124,23 +124,23 @@ fn variant_106_bass_compresses_with_resonance() {
         }
         (sq / n as f64).sqrt() as f32
     };
-    let ratio_60 = rms(LadderVariant::Juno60, 0.9) / rms(LadderVariant::Juno60, 0.0);
-    let ratio_106 = rms(LadderVariant::Juno106, 0.9) / rms(LadderVariant::Juno106, 0.0);
+    let ratio_sharp = rms(LadderVariant::Sharp, 0.9) / rms(LadderVariant::Sharp, 0.0);
+    let ratio_smooth = rms(LadderVariant::Smooth, 0.9) / rms(LadderVariant::Smooth, 0.0);
     assert!(
-        ratio_106 < ratio_60,
-        "106 bass should compress more with resonance: 60 ratio={ratio_60}, 106 ratio={ratio_106}"
+        ratio_smooth < ratio_sharp,
+        "smooth bass should compress more with resonance: sharp ratio={ratio_sharp}, smooth ratio={ratio_smooth}"
     );
 }
 
 #[test]
 fn poly_matches_mono_for_same_voice() {
-    let mut mono = fresh(800.0, 0.5, LadderVariant::Juno60);
+    let mut mono = fresh(800.0, 0.5, LadderVariant::Sharp);
     let mut poly = PolyLadderKernel::new_static(LadderCoeffs::new(
         800.0,
         SR,
         0.5,
         1.0,
-        LadderVariant::Juno60,
+        LadderVariant::Sharp,
     ));
     for i in 0..512 {
         let x = (2.0 * PI * 220.0 * i as f32 / SR).sin();

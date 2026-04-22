@@ -22,6 +22,19 @@
 
 use crate::bbd_clock::{BbdClock, TickPhase};
 use crate::bbd_filter_proto::{Complex32, ConjPairPoleBankSoa, ContinuousPoleBank};
+use patches_core::BoundedRandomWalk;
+
+/// Max multiplicative swing applied to `bbd_ts` at `jitter_amount = 1.0`.
+/// Matches ≈ ±17 cents of pitch wobble on the delayed signal.
+const JITTER_MAX_DEPTH: f32 = 0.03;
+
+/// Samples between random-walk advances for BBD clock jitter. ~1.3 ms at
+/// 48 kHz, giving a characteristic wander in the low-Hz range.
+const JITTER_WALK_INTERVAL: u32 = 64;
+
+/// Walk step size tuned so the walk traverses a meaningful fraction of
+/// its [-1, 1] range at audio-musical rates.
+const JITTER_WALK_STEP: f32 = 0.03;
 use patches_dsp::approximate::fast_tanh;
 
 /// Placeholder smoothing interval for the legacy AoS constructor,
@@ -98,6 +111,17 @@ pub struct BbdProto {
     /// Set to true after the first `set_delay` so subsequent calls
     /// know to schedule a ramp rather than snap.
     has_delay_set: bool,
+
+    /// Clock-jitter amount in `[0, 1]`. Scales an internal random walk
+    /// into a multiplicative perturbation of `bbd_ts` fed to the clock.
+    /// `0.0` disables the jitter path entirely — the walk is not
+    /// advanced and the clock sees the unperturbed `bbd_ts_cur`.
+    jitter_amount: f32,
+    jitter_walk: BoundedRandomWalk,
+    jitter_counter: u32,
+    /// Held walk value between advances (the walk steps every
+    /// `JITTER_WALK_INTERVAL` samples, not every sample).
+    jitter_value: f32,
 }
 
 impl BbdProto {
@@ -132,6 +156,10 @@ impl BbdProto {
             bbd_ts_step: 0.0,
             ramp_samples_remaining: 0,
             has_delay_set: false,
+            jitter_amount: 0.0,
+            jitter_walk: BoundedRandomWalk::new(0x1BBD_0001, JITTER_WALK_STEP),
+            jitter_counter: 0,
+            jitter_value: 0.0,
         }
     }
 
@@ -193,6 +221,10 @@ impl BbdProto {
             bbd_ts_step: 0.0,
             ramp_samples_remaining: 0,
             has_delay_set: false,
+            jitter_amount: 0.0,
+            jitter_walk: BoundedRandomWalk::new(0x1BBD_0001, JITTER_WALK_STEP),
+            jitter_counter: 0,
+            jitter_value: 0.0,
         }
     }
 
@@ -209,6 +241,29 @@ impl BbdProto {
 
     pub fn smoothing_interval(&self) -> u32 {
         self.smoothing_interval
+    }
+
+    /// Clock-jitter amount in `[0, 1]`. `0.0` is bit-identical to a
+    /// non-jittered build — the random walk is not advanced and the
+    /// clock sees the clean ramped `bbd_ts`.
+    pub fn set_jitter_amount(&mut self, amount: f32) {
+        let new_amount = amount.clamp(0.0, 1.0);
+        if new_amount == 0.0 && self.jitter_amount > 0.0 && self.has_delay_set {
+            // Realign the clock to the un-jittered `bbd_ts_cur` so the
+            // tail of this session doesn't run at a permanently skewed
+            // rate.
+            self.clock.set_bbd_ts(self.bbd_ts_cur);
+        }
+        self.jitter_amount = new_amount;
+    }
+
+    /// Seed the jitter random walk. Call once at construction time (or
+    /// whenever a module wants its BBDs to decorrelate) so per-instance
+    /// BBDs wander independently.
+    pub fn set_jitter_seed(&mut self, seed: u32) {
+        self.jitter_walk = BoundedRandomWalk::new(seed, JITTER_WALK_STEP);
+        self.jitter_counter = 0;
+        self.jitter_value = 0.0;
     }
 
     /// Set the target delay. On the SoA path, the first call snaps
@@ -297,6 +352,18 @@ impl BbdProto {
         match &mut self.banks {
             Banks::Aos { input: input_bank, output: output_bank } => {
                 let ib = &*input_bank;
+                // Apply jitter after any ramp adjustment (AoS path snaps
+                // the clock in `set_delay`, so no ramp work happens in
+                // process — jitter just overwrites the static clock).
+                if self.jitter_amount > 0.0 {
+                    if self.jitter_counter == 0 {
+                        self.jitter_value = self.jitter_walk.advance();
+                    }
+                    self.jitter_counter = (self.jitter_counter + 1) % JITTER_WALK_INTERVAL;
+                    let factor =
+                        1.0 + self.jitter_value * self.jitter_amount * JITTER_MAX_DEPTH;
+                    self.clock.set_bbd_ts(self.bbd_ts_cur * factor);
+                }
                 self.clock.step(|tick| match tick.phase {
                     TickPhase::Write => {
                         let raw = ib.evaluate(tick.tau, input);
@@ -354,6 +421,19 @@ impl BbdProto {
                         output_bank.snap_alpha_to_target();
                     }
                     self.clock.set_bbd_ts(self.bbd_ts_cur);
+                }
+
+                // Clock-jitter perturbation on top of the ramp. When
+                // amount=0 this block is skipped entirely, preserving
+                // bit-for-bit equivalence to a non-jittered build.
+                if self.jitter_amount > 0.0 {
+                    if self.jitter_counter == 0 {
+                        self.jitter_value = self.jitter_walk.advance();
+                    }
+                    self.jitter_counter = (self.jitter_counter + 1) % JITTER_WALK_INTERVAL;
+                    let factor =
+                        1.0 + self.jitter_value * self.jitter_amount * JITTER_MAX_DEPTH;
+                    self.clock.set_bbd_ts(self.bbd_ts_cur * factor);
                 }
 
                 // Incremental-phasor state for Writes within this
@@ -757,5 +837,128 @@ mod tests {
         let mag_a = (sum_a_re * sum_a_re + sum_a_im * sum_a_im).sqrt() / n;
         let mag_b = (sum_b_re * sum_b_re + sum_b_im * sum_b_im).sqrt() / n;
         (mag_a, mag_b)
+    }
+
+    // ── Clock-jitter tests ────────────────────────────────────────────────
+
+    #[test]
+    fn jitter_zero_is_bit_identical() {
+        // jitter_amount = 0 must not touch the clock, so the sequence is
+        // identical to a BbdProto that never saw the jitter API at all.
+        let mut a = build(256);
+        let mut b = build(256);
+        a.set_delay(0.004);
+        b.set_delay(0.004);
+        b.set_jitter_seed(0xDEAD_BEEF);
+        b.set_jitter_amount(0.0);
+
+        let mut rng: u32 = 12345;
+        for _ in 0..(SR as usize / 10) {
+            rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let x = (rng as i32 as f32) * (1.0 / 2_147_483_648.0);
+            let ya = a.process(x);
+            let yb = b.process(x);
+            assert_eq!(
+                ya.to_bits(),
+                yb.to_bits(),
+                "jitter=0 diverged from baseline: {ya} vs {yb}",
+            );
+        }
+    }
+
+    #[test]
+    fn jitter_changes_output_trajectory() {
+        // Jittered and clean runs with otherwise identical setup should
+        // diverge audibly. RMS of the difference is a crude but reliable
+        // "something happened" check that doesn't depend on getting a
+        // spectral measurement right.
+        let sr = SR;
+        let f_in = 1_000.0_f32;
+        let n = 8_192;
+
+        let capture = |jitter: f32| -> Vec<f32> {
+            let mut b = build(1024);
+            b.set_delay(0.010);
+            b.set_jitter_seed(0xCAFE_BABE);
+            b.set_jitter_amount(jitter);
+            for i in 0..n {
+                let t = i as f32 / sr;
+                b.process((2.0 * std::f32::consts::PI * f_in * t).sin());
+            }
+            let mut out = Vec::with_capacity(n);
+            for i in 0..n {
+                let t = (i + n) as f32 / sr;
+                out.push(b.process((2.0 * std::f32::consts::PI * f_in * t).sin()));
+            }
+            out
+        };
+
+        let clean = capture(0.0);
+        let jittered = capture(1.0);
+
+        let mut sq_diff = 0.0_f64;
+        let mut sq_clean = 0.0_f64;
+        for (c, j) in clean.iter().zip(jittered.iter()) {
+            sq_diff += ((c - j) as f64).powi(2);
+            sq_clean += (*c as f64).powi(2);
+        }
+        let rms_diff = (sq_diff / clean.len() as f64).sqrt();
+        let rms_clean = (sq_clean / clean.len() as f64).sqrt();
+        let ratio = rms_diff / rms_clean.max(1e-9);
+        // Expect jitter to move the output by at least a few percent of
+        // the signal RMS. A clean sine through a fixed delay has a
+        // constant-amplitude output; any meaningful delay wobble shows
+        // up as non-trivial sample-by-sample divergence.
+        assert!(
+            ratio > 0.02,
+            "jitter barely perturbed output: rms_diff/rms_clean = {ratio}",
+        );
+    }
+
+    #[test]
+    fn jitter_output_stays_bounded() {
+        let mut b = build(1024);
+        b.set_delay(0.020);
+        b.set_jitter_seed(0x1234_5678);
+        b.set_jitter_amount(1.0);
+        let mut peak = 0.0_f32;
+        for n in 0..(2 * SR as usize) {
+            let x = if (n / 64) % 2 == 0 { 0.8 } else { -0.8 };
+            let y = b.process(x);
+            assert!(y.is_finite(), "non-finite at n={n}");
+            peak = peak.max(y.abs());
+        }
+        assert!(peak < 4.0, "jittered output blew up: peak={peak}");
+    }
+
+    #[test]
+    fn jitter_seeds_decorrelate() {
+        // Two BBDs with the same delay but different jitter seeds should
+        // produce different outputs under identical input (their clocks
+        // wander independently).
+        let mut a = build(512);
+        let mut b = build(512);
+        a.set_delay(0.006);
+        b.set_delay(0.006);
+        a.set_jitter_seed(0x1111_1111);
+        b.set_jitter_seed(0x2222_2222);
+        a.set_jitter_amount(1.0);
+        b.set_jitter_amount(1.0);
+
+        let sr = SR;
+        let mut differ = 0;
+        for i in 0..(sr as usize / 2) {
+            let t = i as f32 / sr;
+            let x = (2.0 * std::f32::consts::PI * 440.0 * t).sin();
+            let ya = a.process(x);
+            let yb = b.process(x);
+            if (ya - yb).abs() > 1.0e-4 {
+                differ += 1;
+            }
+        }
+        assert!(
+            differ > (sr as usize / 2) / 10,
+            "jitter seeds did not decorrelate (only {differ} differing samples)",
+        );
     }
 }

@@ -54,6 +54,7 @@ module_params! {
         feedback:  Float,
         mix:       Float,
         lf_bypass: Bool,
+        jitter:    Float,
     }
 }
 
@@ -89,6 +90,7 @@ impl Module for VFlangerStereo {
             .float_param(params::feedback, -0.93, 0.93, 0.3)
             .float_param(params::mix, 0.0, 1.0, 0.5)
             .bool_param(params::lf_bypass, true)
+            .float_param(params::jitter, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -99,7 +101,11 @@ impl Module for VFlangerStereo {
         Self {
             instance_id,
             descriptor,
-            core: VFlangerStereoCore::new(env.sample_rate),
+            core: {
+                let mut c = VFlangerStereoCore::new(env.sample_rate);
+                c.set_jitter_seed_base((instance_id.as_u64() ^ 0xBBD0_0030) as u32);
+                c
+            },
             in_l: MonoInput::default(),
             in_r: MonoInput::default(),
             rate_cv: MonoInput::default(),
@@ -118,6 +124,7 @@ impl Module for VFlangerStereo {
         self.core.set_feedback(p.get(params::feedback));
         self.core.set_mix(p.get(params::mix));
         self.core.set_lf_bypass(p.get(params::lf_bypass));
+        self.core.set_jitter(p.get(params::jitter));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

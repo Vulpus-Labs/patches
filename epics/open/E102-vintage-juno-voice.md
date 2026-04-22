@@ -22,7 +22,7 @@ a demo patch finish the set.
    Noise summed in the same module via an internal mixer stage. All
    waveshapes phase-locked to a single phasor — the Juno DCO's
    defining feature.
-2. **VVcf / VPolyVcf** — 4-pole ZDF ladder LPF, mono and poly
+2. **VLadder / VPolyLadder** — 4-pole ZDF ladder LPF, mono and poly
    variants over a shared kernel, with per-stage tanh saturation,
    self-oscillation, and a `variant: Juno60 | Juno106` switch
    selecting between crisper (IR3109) and softer (80017A) behaviour.
@@ -31,7 +31,7 @@ a demo patch finish the set.
    the `PolyADSR` modules. RC-style segment updates with
    attack-overshoot clamp, matching analog envelope character.
 4. **`vintage_synth.patches`** — example patch wiring the full Juno
-   signal path: `VDco → PolyHighpass → VVcf → PolyVCA → PolyToMono →
+   signal path: `VDco → PolyHighpass → VLadder → PolyVCA → PolyToMono →
    VChorus → out`, with `PolyADSR` (exponential) modulating VCF
    cutoff and VCA gain, and a `PolyLFO` for PWM / cutoff mod. Serves
    as the integration test that everything composes.
@@ -50,7 +50,7 @@ a demo patch finish the set.
 
 ## Trademark / naming policy
 
-Same as E090: module names are generic (`VDco`, `VVcf`), not Roland
+Same as E090: module names are generic (`VDco`, `VLadder`), not Roland
 trademarks. Documentation may cite Juno-60 / Juno-106 as hardware
 references under nominative fair use.
 
@@ -61,7 +61,7 @@ references under nominative fair use.
 ```text
 VPolyDco (saw + pulse + sub + noise, mixed internally)
   → PolyHighpass (stepped 4-position, shared control)
-  → VPolyVcf (per-stage tanh ladder, 60/106 variant)
+  → VPolyLadder (per-stage tanh ladder, 60/106 variant)
   → PolyVCA
   → (poly-to-mono mix bus)
   → VChorus
@@ -69,7 +69,7 @@ VPolyDco (saw + pulse + sub + noise, mixed internally)
 ```
 
 The vintage-synth patch uses the poly variants; the mono `VDco` and
-`VVcf` are there for non-polyphonic uses (drones, mono leads,
+`VLadder` are there for non-polyphonic uses (drones, mono leads,
 modulation sources).
 
 ### VDco / VPolyDco
@@ -87,7 +87,7 @@ modulation sources).
   noise max ≈ 0.5. Worst-case sum ≈ 3.5× single source — sent hot into
   VCF on purpose. No saturator in the mixer.
 
-### VVcf / VPolyVcf
+### VLadder / VPolyLadder
 
 - 4-pole ZDF ladder kernel in new `patches-dsp::ladder`.
 - Per-stage tanh; self-oscillation at full resonance.
@@ -122,14 +122,14 @@ modulation sources).
 
 ## Acceptance criteria
 
-- [ ] `VDco`, `VPolyDco`, `VVcf`, `VPolyVcf` registered via
+- [ ] `VDco`, `VPolyDco`, `VLadder`, `VPolyLadder` registered via
       `patches-vintage`.
 - [ ] `ADSR` and `PolyADSR` both have `shape` parameter with `Linear`
       (default) and `Exponential` modes, round-tripping through DSL.
 - [ ] `vintage_synth.patches` loads, plays, and hot-reloads in
       `patches-player`.
-- [ ] Audio sanity: self-oscillating VVcf tracks pitch; mixing all
-      four DCO sources hot into VVcf with resonance high produces
+- [ ] Audio sanity: self-oscillating VLadder tracks pitch; mixing all
+      four DCO sources hot into VLadder with resonance high produces
       clean OTA-style saturation, no hard-clip artefacts.
 - [ ] Polyphony: 6 simultaneous voices run without allocation on
       audio thread (covered by existing allocator trap once Spike 4

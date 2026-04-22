@@ -113,6 +113,14 @@ impl VFlangerCore {
         self.lf_bypass = on;
     }
 
+    pub fn set_jitter(&mut self, amount: f32) {
+        self.bbd.set_jitter_amount(amount);
+    }
+
+    pub fn set_jitter_seed(&mut self, seed: u32) {
+        self.bbd.set_jitter_seed(seed);
+    }
+
     pub fn process(
         &mut self,
         x: f32,

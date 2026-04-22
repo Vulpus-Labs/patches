@@ -63,6 +63,7 @@ module_params! {
         dry_wet: Float,
         size:    Float,
         decay:   Float,
+        jitter:  Float,
     }
 }
 
@@ -138,6 +139,7 @@ impl Module for VReverb {
             .float_param(params::dry_wet, 0.0, 1.0, 0.3)
             .float_param(params::size, 0.0, 1.0, 0.5)
             .float_param(params::decay, 0.0, DECAY_MAX, 0.7)
+            .float_param(params::jitter, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -150,9 +152,16 @@ impl Module for VReverb {
         Self {
             instance_id,
             descriptor,
-            bbds: std::array::from_fn(|_| {
-                Bbd::new_with_smoothing_interval(&BbdDevice::BBD_1024, sr, interval)
-            }),
+            bbds: {
+                let seed_base = (instance_id.as_u64() ^ 0xBBD0_0040) as u32;
+                std::array::from_fn(|i| {
+                    let mut b = Bbd::new_with_smoothing_interval(
+                        &BbdDevice::BBD_1024, sr, interval,
+                    );
+                    b.set_jitter_seed(seed_base.wrapping_add(i as u32));
+                    b
+                })
+            },
             y_prev: [0.0; N],
             dry_wet: 0.3,
             size: 0.5,
@@ -171,6 +180,10 @@ impl Module for VReverb {
         self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
         self.size = p.get(params::size).clamp(0.0, 1.0);
         self.decay = p.get(params::decay).clamp(0.0, DECAY_MAX);
+        let jitter = p.get(params::jitter).clamp(0.0, 1.0);
+        for b in self.bbds.iter_mut() {
+            b.set_jitter_amount(jitter);
+        }
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

@@ -66,6 +66,7 @@ module_params! {
         feedback:  Float,
         mix:       Float,
         lf_bypass: Bool,
+        jitter:    Float,
     }
 }
 
@@ -97,6 +98,7 @@ impl Module for VFlanger {
             .float_param(params::feedback, -0.93, 0.93, 0.3)
             .float_param(params::mix, 0.0, 1.0, 0.5)
             .bool_param(params::lf_bypass, true)
+            .float_param(params::jitter, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -107,7 +109,11 @@ impl Module for VFlanger {
         Self {
             instance_id,
             descriptor,
-            core: VFlangerCore::new(env.sample_rate),
+            core: {
+                let mut c = VFlangerCore::new(env.sample_rate);
+                c.set_jitter_seed((instance_id.as_u64() ^ 0xBBD0_0020) as u32);
+                c
+            },
             in_port: MonoInput::default(),
             rate_cv: MonoInput::default(),
             depth_cv: MonoInput::default(),
@@ -124,6 +130,7 @@ impl Module for VFlanger {
         self.core.set_feedback(p.get(params::feedback));
         self.core.set_mix(p.get(params::mix));
         self.core.set_lf_bypass(p.get(params::lf_bypass));
+        self.core.set_jitter(p.get(params::jitter));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

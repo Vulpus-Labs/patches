@@ -32,6 +32,9 @@ pub use svf::{SvfCoeffs, SvfKernel, SvfState, PolySvfKernel, svf_f, q_to_damp, s
 pub mod ladder;
 pub use ladder::{LadderCoeffs, LadderKernel, LadderVariant, PolyLadderKernel};
 
+pub mod ota_ladder;
+pub use ota_ladder::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles, PolyOtaLadderKernel};
+
 pub mod oscillator;
 pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep};
 

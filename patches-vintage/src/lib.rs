@@ -20,18 +20,22 @@ pub mod vchorus;
 pub mod vdco;
 pub mod vflanger;
 pub mod vflanger_stereo;
-pub mod vpoly_vcf;
+pub mod vota_poly_vcf;
+pub mod vota_vcf;
+pub mod vpoly_ladder;
 pub mod vreverb;
-pub mod vvcf;
+pub mod vladder;
 
 pub use vbbd::VBbd;
 pub use vchorus::VChorus;
 pub use vdco::{VDco, VPolyDco};
 pub use vflanger::VFlanger;
 pub use vflanger_stereo::VFlangerStereo;
-pub use vpoly_vcf::VPolyVcf;
+pub use vota_poly_vcf::VOtaPolyVcf;
+pub use vota_vcf::VOtaVcf;
+pub use vpoly_ladder::VPolyLadder;
 pub use vreverb::VReverb;
-pub use vvcf::VVcf;
+pub use vladder::VLadder;
 
 /// Register every module in this crate with the supplied registry.
 ///
@@ -46,8 +50,10 @@ pub fn register(r: &mut patches_registry::Registry) {
     r.register::<VFlanger>();
     r.register::<VFlangerStereo>();
     r.register::<VReverb>();
-    r.register::<VVcf>();
-    r.register::<VPolyVcf>();
+    r.register::<VLadder>();
+    r.register::<VPolyLadder>();
+    r.register::<VOtaVcf>();
+    r.register::<VOtaPolyVcf>();
 }
 
 // ── FFI bundle export ────────────────────────────────────────────────────────
@@ -63,8 +69,10 @@ patches_ffi_common::export_modules! {
     (ffi_vflanger,        VFlanger,       "VFlanger",       1),
     (ffi_vflanger_stereo, VFlangerStereo, "VFlangerStereo", 1),
     (ffi_vreverb,         VReverb,        "VReverb",        1),
-    (ffi_vvcf,            VVcf,           "VVcf",           1),
-    (ffi_vpolyvcf,        VPolyVcf,       "VPolyVcf",       1),
+    (ffi_vladder,            VLadder,           "VLadder",           1),
+    (ffi_vpolyladder,        VPolyLadder,       "VPolyLadder",       1),
+    (ffi_votavcf,            VOtaVcf,           "VOtaVcf",           1),
+    (ffi_votapolyvcf,        VOtaPolyVcf,       "VOtaPolyVcf",       1),
 }
 
 #[cfg(test)]
@@ -85,8 +93,10 @@ mod ffi_bundle_tests {
         "VFlanger",
         "VFlangerStereo",
         "VReverb",
-        "VVcf",
-        "VPolyVcf",
+        "VLadder",
+        "VPolyLadder",
+        "VOtaVcf",
+        "VOtaPolyVcf",
     ];
 
     #[test]

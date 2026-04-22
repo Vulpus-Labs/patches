@@ -152,4 +152,17 @@ impl Bbd {
     pub fn smoothing_interval(&self) -> u32 {
         self.proto.smoothing_interval()
     }
+
+    /// Set clock-jitter amount in `[0, 1]`. `0.0` is bit-identical to a
+    /// non-jittered build — modules that never touch jitter incur no
+    /// runtime cost beyond a per-sample branch on `amount > 0`.
+    pub fn set_jitter_amount(&mut self, amount: f32) {
+        self.proto.set_jitter_amount(amount);
+    }
+
+    /// Seed the jitter random walk so multiple BBDs in the same module
+    /// (e.g. dual-stage chorus, FDN reverb) wander independently.
+    pub fn set_jitter_seed(&mut self, seed: u32) {
+        self.proto.set_jitter_seed(seed);
+    }
 }

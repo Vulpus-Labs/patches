@@ -129,6 +129,16 @@ impl VFlangerStereoCore {
         self.lf_bypass = on;
     }
 
+    pub fn set_jitter(&mut self, amount: f32) {
+        self.left.bbd.set_jitter_amount(amount);
+        self.right.bbd.set_jitter_amount(amount);
+    }
+
+    pub fn set_jitter_seed_base(&mut self, base: u32) {
+        self.left.bbd.set_jitter_seed(base);
+        self.right.bbd.set_jitter_seed(base.wrapping_add(1));
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,

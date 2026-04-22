@@ -36,13 +36,30 @@ const PROFILE_ITERS: u64 = 200_000;
 const WARMUP_TICKS: u64 = 44_100;
 
 fn main() {
-    let path = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "examples/poly_synth_layered.patches".to_owned());
+    let mut args = env::args().skip(1);
+    let mut path: Option<String> = None;
+    let mut dylibs: Vec<String> = Vec::new();
+    while let Some(a) = args.next() {
+        if a == "--dylib" {
+            if let Some(v) = args.next() { dylibs.push(v); }
+        } else {
+            path = Some(a);
+        }
+    }
+    let path = path.unwrap_or_else(|| "examples/poly_synth_layered.patches".to_owned());
 
     println!("patch:  {path}");
 
-    let registry = patches_modules::default_registry();
+    let mut registry = patches_modules::default_registry();
+    if !dylibs.is_empty() {
+        let report = patches_ffi::scanner::PluginScanner::new(dylibs.iter().map(std::path::PathBuf::from).collect::<Vec<_>>())
+            .scan(&mut registry);
+        if !report.errors.is_empty() {
+            eprintln!("dylib scan errors: {:?}", report.errors);
+            process::exit(1);
+        }
+        println!("scanned {} dylib(s), {} module(s) registered", dylibs.len(), report.loaded.len());
+    }
     let load = patches_dsl::load_with(std::path::Path::new(&path), |p| fs::read_to_string(p)).unwrap_or_else(|e| {
         eprintln!("load error: {e}");
         process::exit(1);

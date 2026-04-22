@@ -45,7 +45,7 @@ patch {
     # --- FX chain ------------------------------------------------------
     # BBD chorus
     module chorus : VChorus {
-        mode: one
+        mode: two
         variant: bright
         hiss: 0.35
     }
@@ -55,16 +55,16 @@ patch {
 
     # Short BBD delay for air, low feedback (one per side)
     module delay_l : VBbd(channels: 1) {
-        dry_wet: 0.22,
-        delay_ms[0]: 320,
+        dry_wet: 0.4,
+        delay_ms[0]: 200,
         gain[0]: 1.0,
-        feedback[0]: 0.22
+        feedback[0]: 0.3
     }
     module delay_r : VBbd(channels: 1) {
-        dry_wet: 0.22,
-        delay_ms[0]: 260,
+        dry_wet: 0.4,
+        delay_ms[0]: 150,
         gain[0]: 1.0,
-        feedback[0]: 0.22
+        feedback[0]: 0.3
     }
     chorus.out_left  -> delay_l.in
     chorus.out_right -> delay_r.in

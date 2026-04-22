@@ -57,6 +57,7 @@ module_params! {
         variant: Enum<Variant>,
         mode:    Enum<Mode>,
         hiss:    Float,
+        jitter:  Float,
     }
 }
 
@@ -86,6 +87,7 @@ impl Module for VChorus {
             .enum_param(params::variant, Variant::Bright)
             .enum_param(params::mode, Mode::One)
             .float_param(params::hiss, 0.0, 1.0, 1.0)
+            .float_param(params::jitter, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -97,7 +99,11 @@ impl Module for VChorus {
             instance_id,
             descriptor,
             // xorshift64 requires a non-zero seed.
-            core: VChorusCore::new(env.sample_rate, instance_id.as_u64().wrapping_add(1)),
+            core: {
+                let mut c = VChorusCore::new(env.sample_rate, instance_id.as_u64().wrapping_add(1));
+                c.set_jitter_seed_base((instance_id.as_u64() ^ 0xBBD0_0010) as u32);
+                c
+            },
             in_l: MonoInput::default(),
             in_r: MonoInput::default(),
             rate_cv: MonoInput::default(),
@@ -111,6 +117,7 @@ impl Module for VChorus {
         self.core.set_variant(p.get(params::variant));
         self.core.set_mode(p.get(params::mode));
         self.core.set_hiss(p.get(params::hiss));
+        self.core.set_jitter(p.get(params::jitter));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

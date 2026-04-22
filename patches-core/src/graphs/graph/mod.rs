@@ -63,7 +63,7 @@ pub enum GraphError {
     /// `available` lists the input ports the node does have.
     InputPortNotFound { node: NodeId, port: String, available: Vec<String> },
     InputAlreadyConnected { node: NodeId, port: String },
-    /// `scale` must be finite and in `[-1.0, 1.0]`.
+    /// `scale` must be finite and in `[-10.0, 10.0]`.
     ScaleOutOfRange(f32),
     /// The source output port and the destination input port have different
     /// `CableKind`s (e.g. mono output wired to poly input).
@@ -99,7 +99,7 @@ impl fmt::Display for GraphError {
                 )
             }
             GraphError::ScaleOutOfRange(s) => {
-                write!(f, "scale {s} is out of range; must be finite and in [-1.0, 1.0]")
+                write!(f, "scale {s} is out of range; must be finite and in [-10.0, 10.0]")
             }
             GraphError::CableKindMismatch { from_port, to_port } => {
                 write!(
@@ -132,7 +132,7 @@ struct Edge {
     to: NodeId,
     input_name: &'static str,
     input_index: usize,
-    /// Scaling factor applied to the signal at read-time. Must be in `[-1.0, 1.0]`.
+    /// Scaling factor applied to the signal at read-time. Must be in `[-10.0, 10.0]`.
     scale: f32,
 }
 
@@ -196,12 +196,12 @@ impl ModuleGraph {
     /// destination ports by name and index. Use `index: 0` for modules with a
     /// single port of a given name.
     ///
-    /// `scale` is a multiplier in `[-1.0, 1.0]` applied to the signal at
+    /// `scale` is a multiplier in `[-10.0, 10.0]` applied to the signal at
     /// read-time during `tick()`. Use `1.0` for an unscaled connection.
     ///
     /// Returns an error if either node or port does not exist, if the target
     /// input already has an incoming connection, or if `scale` is not finite
-    /// or falls outside `[-1.0, 1.0]`.
+    /// or falls outside `[-10.0, 10.0]`.
     pub fn connect(
         &mut self,
         from: &NodeId,
@@ -210,7 +210,7 @@ impl ModuleGraph {
         input: PortRef,
         scale: f32,
     ) -> Result<(), GraphError> {
-        if !scale.is_finite() || !(-1.0..=1.0).contains(&scale) {
+        if !scale.is_finite() || !(-10.0..=10.0).contains(&scale) {
             return Err(GraphError::ScaleOutOfRange(scale));
         }
 

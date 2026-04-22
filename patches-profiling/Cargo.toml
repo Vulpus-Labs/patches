@@ -23,3 +23,5 @@ patches-engine      = { path = "../patches-engine" }
 patches-planner     = { path = "../patches-planner" }
 patches-interpreter = { path = "../patches-interpreter" }
 patches-modules     = { path = "../patches-modules" }
+patches-ffi         = { path = "../patches-ffi" }
+patches-registry    = { path = "../patches-registry" }
