@@ -68,6 +68,10 @@ pub struct PatchesClapPlugin {
     // ── DSL state ───────────────────────────────────────────────────
     pub(crate) dsl_source: String,
 
+    /// Persisted module search paths. Populated at `create_plugin` (empty)
+    /// or `state_load`. Rescanned at every `activate` into `registry`.
+    pub(crate) module_paths: Vec<std::path::PathBuf>,
+
     // ── GUI ─────────────────────────────────────────────────────────
     pub(crate) gui_state: Arc<Mutex<GuiState>>,
     pub(crate) gui_handle: Option<crate::gui_vizia::ViziaGuiHandle>,
@@ -263,6 +267,15 @@ unsafe extern "C" fn plugin_activate(
     p.processor = Some(processor);
     p.plan_rx = Some(plan_rx);
     p.runtime = Some(runtime);
+
+    // Rebuild the registry from scratch: default set plus a fresh scan
+    // of any module paths the host persisted. Ticket 0566.
+    p.registry = patches_modules::default_registry();
+    if !p.module_paths.is_empty() {
+        let scanner = patches_ffi::PluginScanner::new(p.module_paths.clone());
+        let report = scanner.scan(&mut p.registry);
+        dlog!("activate: module scan {}", report.summary());
+    }
 
     // If we already have DSL source (e.g. from state_load), compile now.
     if !p.dsl_source.is_empty() {
@@ -602,5 +615,140 @@ fn set_status_from_load(
         Err(e) => lock_gui_mut(&p.gui_state, |g| {
             g.push_status(format!("Read error: {e}"));
         }),
+    }
+}
+
+#[cfg(test)]
+mod activate_scan_tests {
+    //! Ticket 0566: end-to-end — craft a saved state pointing at a
+    //! module plugin dir, load it into a freshly created plugin, call
+    //! `activate`, and verify the scanned module appears in the
+    //! activated runtime's registry.
+    use super::*;
+    use crate::factory::PLUGIN_DESCRIPTOR;
+    use crate::gui::GuiState;
+    use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
+    use clap_sys::stream::clap_istream;
+    use std::cell::RefCell;
+    use std::ffi::c_void;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use patches_registry::Registry;
+    use patches_modules::default_registry;
+    use crate::extensions::get_extension;
+    use clap_sys::plugin::clap_plugin;
+
+    fn gain_dylib_path() -> PathBuf {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.push("target");
+        p.push("debug");
+        #[cfg(target_os = "macos")]
+        p.push("libtest_gain_plugin.dylib");
+        #[cfg(target_os = "linux")]
+        p.push("libtest_gain_plugin.so");
+        #[cfg(target_os = "windows")]
+        p.push("test_gain_plugin.dll");
+        p
+    }
+
+    struct InCtx { buf: Vec<u8>, pos: RefCell<usize> }
+    unsafe extern "C" fn istream_read(
+        stream: *const clap_istream, data: *mut c_void, size: u64,
+    ) -> i64 {
+        let ctx = &*((*stream).ctx as *const InCtx);
+        let mut pos = ctx.pos.borrow_mut();
+        let avail = ctx.buf.len() - *pos;
+        let n = avail.min(size as usize);
+        if n == 0 { return 0; }
+        std::ptr::copy_nonoverlapping(ctx.buf[*pos..].as_ptr(), data as *mut u8, n);
+        *pos += n;
+        n as i64
+    }
+
+    fn craft_state_bytes(module_paths: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        // empty file_path
+        out.extend_from_slice(&0u32.to_le_bytes());
+        // empty dsl_source
+        out.extend_from_slice(&0u32.to_le_bytes());
+        // module_paths
+        out.extend_from_slice(&(module_paths.len() as u32).to_le_bytes());
+        for p in module_paths {
+            let bytes = p.as_bytes();
+            out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            out.extend_from_slice(bytes);
+        }
+        out
+    }
+
+    #[test]
+    fn state_load_plus_activate_scans_module_paths() {
+        let dylib = gain_dylib_path();
+        assert!(dylib.exists(), "gain dylib missing at {}", dylib.display());
+
+        // Fresh plugin instance.
+        let data = Box::new(PatchesClapPlugin {
+            host: std::ptr::null(),
+            processor: None,
+            plan_rx: None,
+            runtime: None,
+            registry: default_registry(),
+            dsl_source: String::new(),
+            module_paths: Vec::new(),
+            gui_state: Arc::new(Mutex::new(GuiState::default())),
+            gui_handle: None,
+            gui_scale: 1.0,
+            sample_rate: 0.0,
+            prev_beat: -1.0,
+            prev_bar: -1,
+        });
+        let data_ptr = Box::into_raw(data);
+        let clap_plugin_box = Box::new(make_clap_plugin(
+            &PLUGIN_DESCRIPTOR,
+            std::ptr::null(),
+            data_ptr,
+        ));
+        let plugin_ptr: *const clap_plugin = Box::into_raw(clap_plugin_box);
+
+        unsafe {
+            // Load crafted state.
+            let dylib_str = dylib.to_string_lossy().into_owned();
+            let bytes = craft_state_bytes(&[&dylib_str]);
+            let in_ctx = InCtx { buf: bytes, pos: RefCell::new(0) };
+            let stream = clap_istream {
+                ctx: &in_ctx as *const InCtx as *mut c_void,
+                read: Some(istream_read),
+            };
+
+            let ext = get_extension(CLAP_EXT_STATE.as_ptr());
+            assert!(!ext.is_null());
+            let state_ext = &*(ext as *const clap_plugin_state);
+            let load_fn = state_ext.load.expect("state.load vtable");
+            assert!(load_fn(plugin_ptr, &stream), "state_load failed");
+
+            // module_paths populated from the saved state.
+            assert_eq!(
+                (*data_ptr).module_paths,
+                vec![PathBuf::from(&dylib_str)],
+            );
+
+            // Activate — should rescan and register Gain.
+            let activate = (*plugin_ptr).activate.expect("activate vtable");
+            assert!(activate(plugin_ptr, 48_000.0, 32, 1024));
+
+            let registry: &Registry = &(*data_ptr).registry;
+            let names: Vec<&str> = registry.module_names().collect();
+            assert!(
+                names.contains(&"Gain"),
+                "Gain not in activated registry: {names:?}",
+            );
+
+            // Clean shutdown.
+            let deactivate = (*plugin_ptr).deactivate.expect("deactivate vtable");
+            deactivate(plugin_ptr);
+            let destroy = (*plugin_ptr).destroy.expect("destroy vtable");
+            destroy(plugin_ptr);
+        }
     }
 }

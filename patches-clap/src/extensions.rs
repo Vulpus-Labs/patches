@@ -125,7 +125,14 @@ static STATE: clap_plugin_state = clap_plugin_state {
 /// ```text
 /// [4 bytes LE: path_len] [path UTF-8 bytes]
 /// [4 bytes LE: source_len] [source UTF-8 bytes]
+/// [4 bytes LE: module_paths_count]         // optional trailing section
+/// for each:
+///   [4 bytes LE: len] [path UTF-8 bytes]
 /// ```
+///
+/// Legacy states written before 0566 end after the source section;
+/// `state_load` treats a clean EOF at the module-paths count as an
+/// empty list.
 unsafe extern "C" fn state_save(
     plugin: *const clap_plugin,
     stream: *const clap_ostream,
@@ -146,6 +153,17 @@ unsafe extern "C" fn state_save(
     }
     if !write_length_prefixed(stream, source_bytes.as_bytes()) {
         return false;
+    }
+
+    let count = p.module_paths.len() as u32;
+    if !stream_write_all(stream, &count.to_le_bytes()) {
+        return false;
+    }
+    for mp in &p.module_paths {
+        let s = mp.to_string_lossy();
+        if !write_length_prefixed(stream, s.as_bytes()) {
+            return false;
+        }
     }
     true
 }
@@ -183,6 +201,28 @@ unsafe extern "C" fn state_load(
         }
     }
     p.dsl_source = source;
+
+    // Optional trailing module_paths section. A clean EOF here means a
+    // legacy state written before ticket 0566 — default to empty.
+    p.module_paths = match try_read_u32(stream) {
+        ReadU32::Ok(count) => {
+            let mut out = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let bytes = match read_length_prefixed(stream) {
+                    Some(b) => b,
+                    None => return false,
+                };
+                let s = match String::from_utf8(bytes) {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                };
+                out.push(std::path::PathBuf::from(s));
+            }
+            out
+        }
+        ReadU32::Eof => Vec::new(),
+        ReadU32::Err => return false,
+    };
 
     // If activated, compile and push the plan.
     if p.runtime.is_some() && !p.dsl_source.is_empty() {
@@ -434,6 +474,40 @@ unsafe fn stream_write_all(stream: *const clap_ostream, data: &[u8]) -> bool {
     true
 }
 
+/// Result of a tolerant u32 read: distinguishes clean EOF from error.
+pub(crate) enum ReadU32 {
+    Ok(u32),
+    Eof,
+    Err,
+}
+
+/// Attempt to read a little-endian u32. Returns `Eof` if the first
+/// read returns 0 bytes (clean end-of-stream), `Err` on any partial or
+/// failed read after that.
+pub(crate) unsafe fn try_read_u32(stream: *const clap_istream) -> ReadU32 {
+    let read_fn = match (*stream).read {
+        Some(f) => f,
+        None => return ReadU32::Err,
+    };
+    let mut buf = [0u8; 4];
+    let mut offset = 0usize;
+    while offset < 4 {
+        let n = read_fn(
+            stream,
+            buf[offset..].as_mut_ptr() as *mut c_void,
+            (4 - offset) as u64,
+        );
+        if n == 0 && offset == 0 {
+            return ReadU32::Eof;
+        }
+        if n <= 0 {
+            return ReadU32::Err;
+        }
+        offset += n as usize;
+    }
+    ReadU32::Ok(u32::from_le_bytes(buf))
+}
+
 /// Read all bytes from a CLAP input stream, handling partial reads.
 unsafe fn stream_read_all(stream: *const clap_istream, buf: &mut [u8]) -> bool {
     let read_fn = match (*stream).read {
@@ -453,4 +527,108 @@ unsafe fn stream_read_all(stream: *const clap_istream, buf: &mut [u8]) -> bool {
         offset += read as usize;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    struct OutCtx { buf: RefCell<Vec<u8>> }
+    struct InCtx  { buf: Vec<u8>, pos: RefCell<usize> }
+
+    unsafe extern "C" fn ostream_write(
+        stream: *const clap_ostream, data: *const c_void, size: u64,
+    ) -> i64 {
+        let ctx = &*((*stream).ctx as *const OutCtx);
+        let slice = std::slice::from_raw_parts(data as *const u8, size as usize);
+        ctx.buf.borrow_mut().extend_from_slice(slice);
+        size as i64
+    }
+    unsafe extern "C" fn istream_read(
+        stream: *const clap_istream, data: *mut c_void, size: u64,
+    ) -> i64 {
+        let ctx = &*((*stream).ctx as *const InCtx);
+        let mut pos = ctx.pos.borrow_mut();
+        let avail = ctx.buf.len() - *pos;
+        let n = avail.min(size as usize);
+        if n == 0 { return 0; }
+        std::ptr::copy_nonoverlapping(
+            ctx.buf[*pos..].as_ptr(),
+            data as *mut u8,
+            n,
+        );
+        *pos += n;
+        n as i64
+    }
+
+    fn mk_ostream(ctx: &OutCtx) -> clap_ostream {
+        clap_ostream {
+            ctx: ctx as *const OutCtx as *mut c_void,
+            write: Some(ostream_write),
+        }
+    }
+    fn mk_istream(ctx: &InCtx) -> clap_istream {
+        clap_istream {
+            ctx: ctx as *const InCtx as *mut c_void,
+            read: Some(istream_read),
+        }
+    }
+
+    /// Writing a module-paths section then reading it back yields the
+    /// original list.
+    #[test]
+    fn module_paths_round_trip() {
+        let out = OutCtx { buf: RefCell::new(Vec::new()) };
+        let os = mk_ostream(&out);
+
+        let paths = vec![
+            "/tmp/a".to_string(),
+            "/opt/patches/modules".to_string(),
+            "".to_string(),
+        ];
+        unsafe {
+            let count = paths.len() as u32;
+            assert!(stream_write_all(&os, &count.to_le_bytes()));
+            for p in &paths {
+                assert!(write_length_prefixed(&os, p.as_bytes()));
+            }
+        }
+
+        let in_ctx = InCtx { buf: out.buf.into_inner(), pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        unsafe {
+            let count = match try_read_u32(&is) {
+                ReadU32::Ok(n) => n,
+                _ => panic!("expected count"),
+            };
+            let mut got = Vec::new();
+            for _ in 0..count {
+                let b = read_length_prefixed(&is).expect("read");
+                got.push(String::from_utf8(b).unwrap());
+            }
+            assert_eq!(got, paths);
+        }
+    }
+
+    /// Legacy state (no trailing module-paths section) — try_read_u32
+    /// at stream end returns `Eof`, not `Err`.
+    #[test]
+    fn legacy_state_eof_is_clean() {
+        let in_ctx = InCtx { buf: Vec::new(), pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        unsafe {
+            assert!(matches!(try_read_u32(&is), ReadU32::Eof));
+        }
+    }
+
+    /// A partial u32 (1–3 bytes) is an error, not EOF.
+    #[test]
+    fn partial_u32_is_err() {
+        let in_ctx = InCtx { buf: vec![1, 0], pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        unsafe {
+            assert!(matches!(try_read_u32(&is), ReadU32::Err));
+        }
+    }
 }
