@@ -1,10 +1,27 @@
 use patches_core::{
+    params_enum,
     AudioEnvironment, CablePool, GateInput, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoOutput, ModuleShape, OutputPort, TriggerInput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
-use patches_dsp::AdsrCore;
+use patches_dsp::{AdsrCore, AdsrShape};
+
+params_enum! {
+    pub enum AdsrShapeParam {
+        Linear => "linear",
+        Exponential => "exponential",
+    }
+}
+
+impl From<AdsrShapeParam> for AdsrShape {
+    fn from(p: AdsrShapeParam) -> Self {
+        match p {
+            AdsrShapeParam::Linear => AdsrShape::Linear,
+            AdsrShapeParam::Exponential => AdsrShape::Exponential,
+        }
+    }
+}
 
 module_params! {
     Adsr {
@@ -12,6 +29,7 @@ module_params! {
         decay:   Float,
         sustain: Float,
         release: Float,
+        shape:   Enum<AdsrShapeParam>,
     }
 }
 
@@ -42,6 +60,7 @@ module_params! {
 /// | `decay` | float | 0.001 -- 10.0 | `0.1` | Decay time in seconds |
 /// | `sustain` | float | 0.0 -- 1.0 | `0.7` | Sustain level |
 /// | `release` | float | 0.001 -- 10.0 | `0.3` | Release time in seconds |
+/// | `shape` | enum | linear, exponential | `linear` | Segment shape: linear ramp (default) or analog-style RC curve |
 pub struct Adsr {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -68,6 +87,7 @@ impl Module for Adsr {
             .float_param(params::decay,   0.001, 10.0, 0.1)
             .float_param(params::sustain, 0.0,   1.0,  0.7)
             .float_param(params::release, 0.001, 10.0, 0.3)
+            .enum_param(params::shape, AdsrShapeParam::Linear)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -91,6 +111,8 @@ impl Module for Adsr {
         self.sustain = p.get(params::sustain);
         self.release_secs = p.get(params::release);
         self.core.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
+        let shape: AdsrShapeParam = p.get(params::shape);
+        self.core.set_shape(shape.into());
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

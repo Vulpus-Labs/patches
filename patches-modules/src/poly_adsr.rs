@@ -1,19 +1,38 @@
 use patches_core::{
+    params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyGateInput, PolyOutput, PolyTriggerInput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+
+params_enum! {
+    pub enum PolyAdsrShapeParam {
+        Linear => "linear",
+        Exponential => "exponential",
+    }
+}
+
+impl From<PolyAdsrShapeParam> for AdsrShape {
+    fn from(p: PolyAdsrShapeParam) -> Self {
+        match p {
+            PolyAdsrShapeParam::Linear => AdsrShape::Linear,
+            PolyAdsrShapeParam::Exponential => AdsrShape::Exponential,
+        }
+    }
+}
+
 module_params! {
     PolyAdsr {
         attack:  Float,
         decay:   Float,
         sustain: Float,
         release: Float,
+        shape:   Enum<PolyAdsrShapeParam>,
     }
 }
 
-use patches_dsp::AdsrCore;
+use patches_dsp::{AdsrCore, AdsrShape};
 
 /// Polyphonic ADSR envelope generator.
 ///
@@ -41,6 +60,7 @@ use patches_dsp::AdsrCore;
 /// | `decay` | float | 0.001 -- 10.0 | `0.1` | Decay time in seconds |
 /// | `sustain` | float | 0.0 -- 1.0 | `0.7` | Sustain level |
 /// | `release` | float | 0.001 -- 10.0 | `0.3` | Release time in seconds |
+/// | `shape` | enum | linear, exponential | `linear` | Segment shape: linear ramp (default) or analog-style RC curve |
 pub struct PolyAdsr {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -66,6 +86,7 @@ impl Module for PolyAdsr {
             .float_param(params::decay,   0.001, 10.0, 0.1)
             .float_param(params::sustain, 0.0,   1.0,  0.7)
             .float_param(params::release, 0.001, 10.0, 0.3)
+            .enum_param(params::shape, PolyAdsrShapeParam::Linear)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -89,8 +110,10 @@ impl Module for PolyAdsr {
         self.decay_secs = p.get(params::decay);
         self.sustain = p.get(params::sustain);
         self.release_secs = p.get(params::release);
+        let shape: AdsrShape = p.get(params::shape).into();
         for voice in &mut self.voices {
             voice.set_params(self.attack_secs, self.decay_secs, self.sustain, self.release_secs);
+            voice.set_shape(shape);
         }
     }
 

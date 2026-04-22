@@ -29,11 +29,14 @@ pub use biquad::{MonoBiquad, PolyBiquad};
 pub mod svf;
 pub use svf::{SvfCoeffs, SvfKernel, SvfState, PolySvfKernel, svf_f, q_to_damp, stability_clamp};
 
+pub mod ladder;
+pub use ladder::{LadderCoeffs, LadderKernel, LadderVariant, PolyLadderKernel};
+
 pub mod oscillator;
 pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep};
 
 pub mod adsr;
-pub use adsr::{AdsrCore, AdsrStage};
+pub use adsr::{AdsrCore, AdsrShape, AdsrStage};
 
 pub mod noise;
 pub use noise::{xorshift64, PinkFilter, BrownFilter};
