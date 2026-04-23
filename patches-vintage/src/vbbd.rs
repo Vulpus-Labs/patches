@@ -46,10 +46,16 @@ use patches_core::{
     MonoInput, MonoOutput, OutputPort,
 };
 use patches_dsp::approximate::fast_tanh;
+use std::f32::consts::TAU;
 
 use crate::bbd::{Bbd, BbdDevice};
 
 use crate::compander::{CompanderParams, Compressor, Expander};
+
+// Feedback-path loop filter: DC block + LP damping to stop narrow-band
+// self-oscillation ("ticking") at the comb's resonant peak.
+const FB_HP_HZ: f32 = 5.0;
+const FB_LP_HZ: f32 = 2_000.0;
 
 module_params! {
     VBbd {
@@ -76,6 +82,13 @@ struct Tap {
     exp: Expander,
     /// Feedback value carried from the previous tick.
     fb_state: f32,
+    // One-pole HP (DC block) state for the feedback path.
+    fb_hp_x_prev: f32,
+    fb_hp_y_prev: f32,
+    fb_hp_r: f32,
+    // One-pole LP state for the feedback path.
+    fb_lp_y_prev: f32,
+    fb_lp_alpha: f32,
 }
 
 impl Tap {
@@ -85,7 +98,22 @@ impl Tap {
             comp: Compressor::new(CompanderParams::NE570_DEFAULT, sr),
             exp: Expander::new(CompanderParams::NE570_DEFAULT, sr),
             fb_state: 0.0,
+            fb_hp_x_prev: 0.0,
+            fb_hp_y_prev: 0.0,
+            fb_hp_r: 1.0 - TAU * FB_HP_HZ / sr,
+            fb_lp_y_prev: 0.0,
+            fb_lp_alpha: 1.0 - (-TAU * FB_LP_HZ / sr).exp(),
         }
+    }
+
+    #[inline]
+    fn filter_feedback(&mut self, x: f32) -> f32 {
+        let hp = x - self.fb_hp_x_prev + self.fb_hp_r * self.fb_hp_y_prev;
+        self.fb_hp_x_prev = x;
+        self.fb_hp_y_prev = hp;
+        let lp = self.fb_lp_y_prev + self.fb_lp_alpha * (hp - self.fb_lp_y_prev);
+        self.fb_lp_y_prev = lp;
+        lp
     }
 }
 
@@ -199,10 +227,13 @@ impl Module for VBbd {
 
         let mut wet_sum = 0.0_f32;
         for i in 0..self.taps {
-            // BBD input = dry + own feedback (saturated so runaway is bounded).
-            let drive = in_val + self.tap_state[i].fb_state;
-            let compressed = self.tap_state[i].comp.process(fast_tanh(drive));
-            let bbd_out = self.tap_state[i].bbd.process(compressed);
+            // Compander sits on the dry path only; feedback is summed
+            // post-compressor and the loop contains just BBD + HP/LP +
+            // tanh. Keeping compression out of the loop avoids its
+            // low-signal gain (>1) regenerating narrow-band residue.
+            let compressed = self.tap_state[i].comp.process(fast_tanh(in_val));
+            let with_fb = fast_tanh(compressed + self.tap_state[i].fb_state);
+            let bbd_out = self.tap_state[i].bbd.process(with_fb);
             let tap_out = self.tap_state[i].exp.process(bbd_out);
 
             let eff_gain = (self.gains[i] + pool.read_mono(&self.gain_cv[i])).clamp(0.0, 1.0);
@@ -210,7 +241,8 @@ impl Module for VBbd {
 
             let eff_fb =
                 (self.feedbacks[i] + pool.read_mono(&self.fb_cv[i])).clamp(0.0, FEEDBACK_MAX);
-            self.tap_state[i].fb_state = tap_out * eff_fb;
+            let fb_filtered = self.tap_state[i].filter_feedback(bbd_out);
+            self.tap_state[i].fb_state = fb_filtered * eff_fb;
         }
 
         let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);
