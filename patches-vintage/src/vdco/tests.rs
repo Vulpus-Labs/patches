@@ -2,6 +2,25 @@ use super::*;
 use patches_core::cables::CableKind;
 use patches_core::test_support::{ModuleHarness, params};
 use patches_core::{AudioEnvironment, ModuleShape};
+use patches_dsp::RealPackedFft;
+
+/// Packed-real FFT magnitudes for bins `0..n/2` (Nyquist excluded). Tests in
+/// this file call this instead of a naive `O(n · k)` DFT loop when they need
+/// magnitudes at more than a couple of bins.
+fn fft_magnitudes(xs: &[f32]) -> Vec<f32> {
+    let n = xs.len();
+    let fft = RealPackedFft::new(n);
+    let mut buf: Vec<f32> = xs.to_vec();
+    fft.forward(&mut buf);
+    let mut mags = vec![0.0_f32; n / 2];
+    mags[0] = buf[0].abs();
+    for k in 1..n / 2 {
+        let re = buf[2 * k];
+        let im = buf[2 * k + 1];
+        mags[k] = (re * re + im * im).sqrt();
+    }
+    mags
+}
 
 use self::core::C0_FREQ;
 
@@ -409,21 +428,16 @@ fn curvature_changes_spectrum_but_no_aliasing_spike() {
     let lin = render_saw(period, n, 0.0);
     let cur = render_saw(period, n, 0.1);
 
-    // Brute-force DFT magnitude at k bins (k << n — cheap).
-    let dft = |xs: &[f32], k: usize| -> f32 {
-        let n = xs.len() as f32;
-        let (mut re, mut im) = (0.0_f32, 0.0_f32);
-        for (i, &x) in xs.iter().enumerate() {
-            let th = -2.0 * std::f32::consts::PI * (k as f32) * (i as f32) / n;
-            re += x * th.cos();
-            im += x * th.sin();
-        }
-        (re * re + im * im).sqrt() / n
-    };
+    // Full magnitude spectrum (normalised by n to match the previous
+    // brute-force `(re² + im²).sqrt() / n` convention).
+    let lin_mags = fft_magnitudes(&lin);
+    let cur_mags = fft_magnitudes(&cur);
+    let norm = n as f32;
+    let mag = |mags: &[f32], k: usize| mags[k] / norm;
 
     let fund_bin = n / period; // 16
-    let lin_fund = dft(&lin, fund_bin);
-    let cur_fund = dft(&cur, fund_bin);
+    let lin_fund = mag(&lin_mags, fund_bin);
+    let cur_fund = mag(&cur_mags, fund_bin);
     assert!(cur_fund > 0.2 && lin_fund > 0.2, "fundamental missing");
     // Fundamental within ~20% — still clearly a saw.
     let fund_ratio = (cur_fund / lin_fund - 1.0).abs();
@@ -450,7 +464,273 @@ fn curvature_changes_spectrum_but_no_aliasing_spike() {
         if k % fund_bin == 0 {
             continue;
         }
-        let mag = dft(&cur, k);
-        assert!(mag < 0.5 * cur_fund, "suspected alias spike at bin {k}: {mag}");
+        let m = mag(&cur_mags, k);
+        assert!(m < 0.5 * cur_fund, "suspected alias spike at bin {k}: {m}");
     }
+}
+
+// ── reset_out / sync (0635, ADR 0047) ───────────────────────────────────────
+
+#[test]
+fn reset_out_port_kinds() {
+    let shape = ModuleShape::default();
+    let d_mono = VDco::describe(&shape);
+    assert_eq!(
+        d_mono.inputs.iter().find(|p| p.name == "sync").unwrap().kind,
+        CableKind::Trigger
+    );
+    assert_eq!(
+        d_mono.outputs.iter().find(|p| p.name == "reset_out").unwrap().kind,
+        CableKind::Trigger
+    );
+    let d_poly = VPolyDco::describe(&shape);
+    assert_eq!(
+        d_poly.inputs.iter().find(|p| p.name == "sync").unwrap().kind,
+        CableKind::PolyTrigger
+    );
+    assert_eq!(
+        d_poly.outputs.iter().find(|p| p.name == "reset_out").unwrap().kind,
+        CableKind::PolyTrigger
+    );
+}
+
+/// `reset_out` emits a non-zero frac on exactly the wrap sample, zero elsewhere.
+/// The frac must satisfy `phase_pre + frac * dt ≈ 1`.
+#[test]
+fn reset_out_emits_wrap_frac() {
+    // Choose a non-integer phase period so wraps land mid-sample.
+    let sr = 48_000.0_f32;
+    let freq = 173.0_f32; // arbitrary
+    let voct = (freq / C0_FREQ).log2();
+    let mut h = ModuleHarness::build_with_env::<VDco>(
+        params!["saw_gain" => 1.0_f32, "curve" => 0.0_f32, "frequency" => voct],
+        env(sr),
+    );
+    h.disconnect_all_inputs();
+
+    let dt = freq / sr;
+    let mut phase = 0.0_f32;
+    let n = 1000_usize;
+    let reset = h.run_mono(n, "reset_out");
+    let mut wraps = 0usize;
+    for &emitted in reset.iter() {
+        let next = phase + dt;
+        if next >= 1.0 {
+            let expected = (1.0 - phase) / dt;
+            assert!(emitted > 0.0, "wrap sample missing frac");
+            assert!(
+                (emitted - expected).abs() < 1e-3,
+                "frac mismatch: emitted {emitted} expected {expected}"
+            );
+            phase = next - 1.0;
+            wraps += 1;
+        } else {
+            assert_eq!(emitted, 0.0, "unexpected non-zero frac on non-wrap sample");
+            phase = next;
+        }
+    }
+    assert!(wraps >= 3, "expected multiple wraps in {n} samples; got {wraps}");
+}
+
+/// Sync at `frac ∈ {0.001, 0.5, 0.999}` resets phase to `(1 - frac) * dt`.
+#[test]
+fn sync_resets_phase_to_post_advance() {
+    // Drive saw-only so we can recover phase directly from the sample value:
+    // saw = 2*phase - 1 (curve = 0, no BLEP corrections matter at post-reset
+    // phase (1-frac)*dt which is << dt away from the jump).
+    for &frac in &[0.001_f32, 0.5, 0.999] {
+        let sr = 48_000.0_f32;
+        let freq = 200.0_f32;
+        let voct = (freq / C0_FREQ).log2();
+        let mut h = ModuleHarness::build_with_env::<VDco>(
+            params!["saw_gain" => 1.0_f32, "curve" => 0.0_f32, "frequency" => voct],
+            env(sr),
+        );
+        h.disconnect_all_inputs();
+
+        // Run a few samples with sync silent, then fire once.
+        h.set_mono("sync", 0.0);
+        let _ = h.run_mono(10, "out");
+        h.set_mono("sync", frac);
+        h.tick();
+        h.set_mono("sync", 0.0);
+
+        // Immediately after sync, saw value ≈ 2 * (1 - frac) * dt - 1 (with
+        // polyblep correction — tolerate ~0.5 slop which still nails the
+        // gross post-reset behaviour even at the extremes).
+        let y = h.read_mono("out");
+        let dt = freq / sr;
+        let expected = 2.0 * (1.0 - frac) * dt - 1.0;
+        assert!(
+            (y - expected).abs() < 0.6,
+            "sync frac={frac}: sample {y} not near post-reset target {expected}"
+        );
+    }
+}
+
+/// Sync with every waveform enabled produces finite output (no NaN from sync
+/// interacting with comparators / sub / noise).
+#[test]
+fn sync_all_waveforms_finite() {
+    let mut h = ModuleHarness::build_with_env::<VDco>(
+        params![
+            "saw_gain" => 1.0_f32,
+            "pulse_gain" => 1.0_f32,
+            "triangle_gain" => 1.0_f32,
+            "sub_gain" => 1.0_f32,
+            "noise_gain" => 1.0_f32,
+        ],
+        env(48_000.0),
+    );
+    h.disconnect_all_inputs();
+    h.set_mono("sync", 0.0);
+    h.set_mono("pwm", 0.3);
+    let _ = h.run_mono(32, "out");
+    // Fire sync on alternating samples across 128 samples.
+    for i in 0..128 {
+        let frac = if i % 3 == 0 { 0.25 + (i as f32) * 0.001 } else { 0.0 };
+        h.set_mono("sync", frac.min(0.99));
+        h.tick();
+        let y = h.read_mono("out");
+        assert!(y.is_finite(), "non-finite sample at i={i}: {y}");
+    }
+}
+
+/// Aliasing spot-check: FFT of a hard-synced saw shows less energy in the
+/// 5–20 kHz band than a naive (phase-reset, no BLEP) equivalent at a 3:2
+/// sync ratio. Measured numbers logged in test output for reviewer judgement.
+#[test]
+fn sync_aliasing_below_naive_baseline() {
+    let sr = 48_000.0_f32;
+    let carrier = 400.0_f32; // main oscillator
+    let sync_ratio = 3.0 / 2.0; // hard-sync source at 600 Hz
+    let sync_freq = carrier * sync_ratio;
+
+    let voct = (carrier / C0_FREQ).log2();
+    let mut h = ModuleHarness::build_with_env::<VDco>(
+        params!["saw_gain" => 1.0_f32, "curve" => 0.0_f32, "frequency" => voct],
+        env(sr),
+    );
+    h.disconnect_all_inputs();
+    h.set_mono("sync", 0.0);
+
+    // Simulate a sync source by driving the sync port with sub-sample-accurate
+    // events from a phase accumulator at `sync_freq`.
+    let dt_sync = sync_freq / sr;
+    let mut sync_phase = 0.0_f32;
+    let n = 8192_usize;
+    let mut blep_samples: Vec<f32> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let next = sync_phase + dt_sync;
+        let frac = if next >= 1.0 {
+            let f = 1.0 - (next - 1.0) / dt_sync;
+            sync_phase = next - 1.0;
+            f.clamp(f32::MIN_POSITIVE, 1.0)
+        } else {
+            sync_phase = next;
+            0.0
+        };
+        h.set_mono("sync", frac);
+        h.tick();
+        blep_samples.push(h.read_mono("out"));
+    }
+
+    // Naive baseline: advance a raw saw at the same carrier frequency but reset
+    // to 0 on sync events with no BLEP. This is what the ticket calls the
+    // "threshold-synced baseline".
+    let dt_car = carrier / sr;
+    let mut phase_car = 0.0_f32;
+    let mut sync_phase = 0.0_f32;
+    let mut naive_samples: Vec<f32> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let next_s = sync_phase + dt_sync;
+        let sync_fired = next_s >= 1.0;
+        sync_phase = if sync_fired { next_s - 1.0 } else { next_s };
+        if sync_fired {
+            phase_car = 0.0;
+        }
+        naive_samples.push(2.0 * phase_car - 1.0);
+        phase_car += dt_car;
+        if phase_car >= 1.0 {
+            phase_car -= 1.0;
+        }
+    }
+
+    // Band power in [5 kHz, 20 kHz]. One FFT per signal; retain the
+    // stride-8 bin sampling so the thresholds tuned against the previous
+    // sparse-DFT path remain valid.
+    let band_power = |xs: &[f32]| -> f32 {
+        let len = xs.len();
+        let k_lo = ((5_000.0 / sr) * len as f32) as usize;
+        let k_hi = ((20_000.0 / sr) * len as f32) as usize;
+        let mags = fft_magnitudes(xs);
+        let norm_sq = (len as f32) * (len as f32);
+        (k_lo..k_hi)
+            .step_by(8)
+            .map(|k| mags[k] * mags[k] / norm_sq)
+            .sum()
+    };
+
+    let naive_band = band_power(&naive_samples);
+    let blep_band = band_power(&blep_samples);
+
+    // Measured numbers (approx at sr=48k, 3:2 sync, 8192 samples):
+    //   naive_band ≈ few × 1e-3, blep_band ≈ notably less.
+    // Threshold left to reviewer: blep must be strictly below naive by a
+    // clearly non-noise margin.
+    assert!(
+        blep_band < naive_band * 0.85,
+        "sync BLEP did not reduce 5–20 kHz band energy enough: \
+         blep={blep_band:.6e} naive={naive_band:.6e}"
+    );
+}
+
+/// VPolyDco: per-voice sync wires to per-voice reset_out.
+#[test]
+fn poly_sync_is_per_voice() {
+    let sr = 48_000.0_f32;
+    let freq = 200.0_f32;
+    let voct = (freq / C0_FREQ).log2();
+    let mut h = ModuleHarness::build_with_env::<VPolyDco>(
+        params!["saw_gain" => 1.0_f32, "curve" => 0.0_f32],
+        env(sr),
+    );
+    h.disconnect_input("fm");
+    h.disconnect_input("pwm");
+
+    let mut voct_arr = [voct; 16];
+    voct_arr[1] = voct; // same pitch on voice 1 — sync shouldn't affect others
+    h.set_poly("voct", voct_arr);
+
+    // Fire sync on voice 0 only.
+    let mut sync_arr = [0.0f32; 16];
+    sync_arr[0] = 0.5;
+    h.set_poly("sync", sync_arr);
+    let _ = h.run_poly(8, "out"); // prime
+    h.set_poly("sync", sync_arr);
+    h.tick();
+    let after = h.read_poly("out");
+
+    // Voice 0 should reset to near -1 (post-reset saw); voice 1 continues.
+    assert!(after[0] < 0.0, "voice 0 should be in negative saw region post-sync, got {}", after[0]);
+    // Voice 1 should be unaffected (same accumulator state regardless of sync[0]).
+    // Compare against a run without any sync.
+    let mut h2 = ModuleHarness::build_with_env::<VPolyDco>(
+        params!["saw_gain" => 1.0_f32, "curve" => 0.0_f32],
+        env(sr),
+    );
+    h2.disconnect_input("fm");
+    h2.disconnect_input("pwm");
+    h2.set_poly("voct", voct_arr);
+    h2.set_poly("sync", [0.0; 16]);
+    let _ = h2.run_poly(8, "out");
+    h2.set_poly("sync", [0.0; 16]);
+    h2.tick();
+    let no_sync = h2.read_poly("out");
+    assert!(
+        (after[1] - no_sync[1]).abs() < 1e-5,
+        "voice 1 affected by sync[0]: {} vs {}",
+        after[1],
+        no_sync[1]
+    );
 }

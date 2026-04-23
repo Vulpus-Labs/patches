@@ -1,0 +1,19 @@
+# Ticket 0637 / ADR 0047: hard-sync via a 0/1 pulse round-trip.
+# master.reset_out -> SyncToTrigger -> TriggerToSync -> slave.sync
+# The converter pair discards the fractional sample position, simulating
+# sample-boundary rounding of each sync event. Used as the aliasing baseline
+# against the typed sub-sample path in `hard_sync_direct.patches`.
+
+patch {
+    module master : Osc { frequency: 440Hz }
+    module slave  : Osc { frequency: 660Hz }
+    module s2t    : SyncToTrigger
+    module t2s    : TriggerToSync
+    module out    : AudioOut
+
+    master.reset_out -> s2t.in
+    s2t.out          -> t2s.in
+    t2s.out          -> slave.sync
+    slave.sawtooth   -> out.in_left
+    slave.sawtooth   -> out.in_right
+}

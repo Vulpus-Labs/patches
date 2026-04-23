@@ -1,0 +1,12 @@
+# Ticket 0637 / ADR 0047: direct typed sub-sample hard-sync.
+# master.reset_out (Trigger) drives slave.sync (Trigger) with no rounding.
+
+patch {
+    module master : Osc { frequency: 440Hz }
+    module slave  : Osc { frequency: 660Hz }
+    module out    : AudioOut
+
+    master.reset_out -> slave.sync
+    slave.sawtooth   -> out.in_left
+    slave.sawtooth   -> out.in_right
+}

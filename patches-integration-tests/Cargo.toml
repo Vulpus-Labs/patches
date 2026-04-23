@@ -18,6 +18,7 @@ rtrb = "0.3"
 [dev-dependencies]
 patches-modules = { path = "../patches-modules" }
 patches-dsl = { path = "../patches-dsl" }
+patches-dsp = { path = "../patches-dsp" }
 patches-interpreter = { path = "../patches-interpreter" }
 patches-ffi = { path = "../patches-ffi" }
 patches-ffi-common = { path = "../patches-ffi-common" }
