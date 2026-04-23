@@ -61,7 +61,7 @@ impl Module for PatternPlayer {
             .poly_in("clock")
             .mono_out_multi("cv1", n)
             .mono_out_multi("cv2", n)
-            .mono_out_multi("trigger", n)
+            .trigger_out_multi("trigger", n)
             .mono_out_multi("gate", n)
     }
 
@@ -99,7 +99,7 @@ impl Module for PatternPlayer {
         for i in 0..n {
             self.cv1_out[i] = MonoOutput::from_ports(outputs, i);
             self.cv2_out[i] = MonoOutput::from_ports(outputs, n + i);
-            self.trigger_out[i] = MonoOutput::from_ports(outputs, 2 * n + i);
+            self.trigger_out[i] = outputs[2 * n + i].expect_trigger();
             self.gate_out[i] = MonoOutput::from_ports(outputs, 3 * n + i);
         }
     }

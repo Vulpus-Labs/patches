@@ -50,8 +50,8 @@ impl Module for HostTransport {
             .mono_out("tempo")
             .mono_out("beat")
             .mono_out("bar")
-            .mono_out("beat_trigger")
-            .mono_out("bar_trigger")
+            .trigger_out("beat_trigger")
+            .trigger_out("bar_trigger")
             .mono_out("tsig_num")
             .mono_out("tsig_denom")
     }
@@ -95,8 +95,8 @@ impl Module for HostTransport {
         self.out_tempo = MonoOutput::from_ports(outputs, 1);
         self.out_beat = MonoOutput::from_ports(outputs, 2);
         self.out_bar = MonoOutput::from_ports(outputs, 3);
-        self.out_beat_trigger = MonoOutput::from_ports(outputs, 4);
-        self.out_bar_trigger = MonoOutput::from_ports(outputs, 5);
+        self.out_beat_trigger = outputs[4].expect_trigger();
+        self.out_bar_trigger = outputs[5].expect_trigger();
         self.out_tsig_num = MonoOutput::from_ports(outputs, 6);
         self.out_tsig_denom = MonoOutput::from_ports(outputs, 7);
     }

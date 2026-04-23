@@ -685,6 +685,207 @@ fn sync_aliasing_below_naive_baseline() {
     );
 }
 
+// ── sync_softness (0638) ────────────────────────────────────────────────────
+
+/// With `sync_softness = 0` the soft path is not taken; output matches the
+/// 0635 hard-sync BLEP path sample-for-sample.
+#[test]
+fn softness_zero_matches_hard_sync_sample_for_sample() {
+    let sr = 48_000.0_f32;
+    let freq = 347.0_f32;
+    let voct = (freq / C0_FREQ).log2();
+    let build = |softness: f32| {
+        let mut h = ModuleHarness::build_with_env::<VDco>(
+            params![
+                "saw_gain" => 1.0_f32,
+                "pulse_gain" => 1.0_f32,
+                "sub_gain" => 1.0_f32,
+                "curve" => 0.0_f32,
+                "frequency" => voct,
+                "sync_softness" => softness,
+            ],
+            env(sr),
+        );
+        h.disconnect_input("voct");
+        h.disconnect_input("fm");
+        h.set_mono("pwm", 0.5);
+        h
+    };
+    let mut a = build(0.0);
+    let mut b = build(0.0);
+    // Drive the same sync pattern into both.
+    let n = 400_usize;
+    let dt_sync = 273.0 / sr;
+    let mut phase = 0.0_f32;
+    let mut out_a = Vec::with_capacity(n);
+    let mut out_b = Vec::with_capacity(n);
+    for _ in 0..n {
+        let next = phase + dt_sync;
+        let frac = if next >= 1.0 {
+            let f = 1.0 - (next - 1.0) / dt_sync;
+            phase = next - 1.0;
+            f.clamp(f32::MIN_POSITIVE, 1.0)
+        } else {
+            phase = next;
+            0.0
+        };
+        a.set_mono("sync", frac);
+        b.set_mono("sync", frac);
+        a.tick();
+        b.tick();
+        out_a.push(a.read_mono("out"));
+        out_b.push(b.read_mono("out"));
+    }
+    assert_eq!(out_a, out_b, "softness=0 determinism failed");
+}
+
+/// `sync_softness = 0.5` produces measurable phase continuity across sync:
+/// the first post-sync sample stays closer to the pre-sync saw value than
+/// the hard-reset path would (which snaps the saw to near −1).
+#[test]
+fn softness_half_shows_phase_continuity_across_sync() {
+    let sr = 48_000.0_f32;
+    let freq = 400.0_f32;
+    let voct = (freq / C0_FREQ).log2();
+    let run = |softness: f32| -> (f32, f32) {
+        let mut h = ModuleHarness::build_with_env::<VDco>(
+            params![
+                "saw_gain" => 1.0_f32,
+                "curve" => 0.0_f32,
+                "frequency" => voct,
+                "sync_softness" => softness,
+            ],
+            env(sr),
+        );
+        h.disconnect_input("voct");
+        h.disconnect_input("fm");
+        h.disconnect_input("pwm");
+        h.set_mono("sync", 0.0);
+        let dt = freq / sr;
+        let samples = (0.85_f32 / dt) as usize;
+        for _ in 0..samples {
+            h.tick();
+        }
+        let pre = h.read_mono("out");
+        h.set_mono("sync", 0.5);
+        h.tick();
+        h.set_mono("sync", 0.0);
+        h.tick();
+        let post = h.read_mono("out");
+        (pre, post)
+    };
+    let (pre_h, post_h) = run(0.0);
+    let (pre_s, post_s) = run(0.5);
+    // Pre-sync state is identical between runs (no softness yet active).
+    assert!((pre_h - pre_s).abs() < 1e-5);
+    let pre = pre_h;
+    let d_hard = (pre - post_h).abs();
+    let d_soft = (pre - post_s).abs();
+    assert!(
+        d_soft < d_hard * 0.9,
+        "softness=0.5 did not improve continuity: pre={pre} hard_post={post_h} soft_post={post_s}"
+    );
+}
+
+/// `sync_softness = 1` rolls off the sync edge: high-frequency band power
+/// (5–20 kHz) is lower than the hard-sync (softness=0) equivalent.
+#[test]
+fn softness_one_reduces_high_band_energy() {
+    let sr = 48_000.0_f32;
+    let carrier = 400.0_f32;
+    let sync_freq = carrier * 1.5;
+    let voct = (carrier / C0_FREQ).log2();
+    let run = |softness: f32| -> Vec<f32> {
+        let mut h = ModuleHarness::build_with_env::<VDco>(
+            params![
+                "saw_gain" => 1.0_f32,
+                "curve" => 0.0_f32,
+                "frequency" => voct,
+                "sync_softness" => softness,
+            ],
+            env(sr),
+        );
+        h.disconnect_input("voct");
+        h.disconnect_input("fm");
+        h.disconnect_input("pwm");
+        h.set_mono("sync", 0.0);
+        let dt_sync = sync_freq / sr;
+        let mut phase = 0.0_f32;
+        let n = 8192_usize;
+        let mut samples = Vec::with_capacity(n);
+        for _ in 0..n {
+            let next = phase + dt_sync;
+            let frac = if next >= 1.0 {
+                let f = 1.0 - (next - 1.0) / dt_sync;
+                phase = next - 1.0;
+                f.clamp(f32::MIN_POSITIVE, 1.0)
+            } else {
+                phase = next;
+                0.0
+            };
+            h.set_mono("sync", frac);
+            h.tick();
+            samples.push(h.read_mono("out"));
+        }
+        samples
+    };
+    let band_power = |xs: &[f32]| -> f32 {
+        let len = xs.len();
+        let k_lo = ((5_000.0 / sr) * len as f32) as usize;
+        let k_hi = ((20_000.0 / sr) * len as f32) as usize;
+        let mags = fft_magnitudes(xs);
+        let norm_sq = (len as f32) * (len as f32);
+        (k_lo..k_hi).map(|k| mags[k] * mags[k] / norm_sq).sum()
+    };
+    let hard = band_power(&run(0.0));
+    let soft = band_power(&run(1.0));
+    assert!(
+        soft < hard * 0.85,
+        "softness=1 did not roll off high-band energy: soft={soft:.3e} hard={hard:.3e}"
+    );
+}
+
+/// `reset_out` emits natural-wrap frac regardless of softness (sync events
+/// themselves suppress wrap_frac, as in 0635).
+#[test]
+fn softness_preserves_reset_out_on_natural_wraps() {
+    let sr = 48_000.0_f32;
+    let freq = 173.0_f32;
+    let voct = (freq / C0_FREQ).log2();
+    let mut h = ModuleHarness::build_with_env::<VDco>(
+        params![
+            "saw_gain" => 1.0_f32,
+            "curve" => 0.0_f32,
+            "frequency" => voct,
+            "sync_softness" => 0.5_f32,
+        ],
+        env(sr),
+    );
+    h.disconnect_all_inputs();
+    let dt = freq / sr;
+    let mut phase = 0.0_f32;
+    let n = 1000_usize;
+    let reset = h.run_mono(n, "reset_out");
+    let mut wraps = 0usize;
+    for &emitted in reset.iter() {
+        let next = phase + dt;
+        if next >= 1.0 {
+            let expected = (1.0 - phase) / dt;
+            assert!(emitted > 0.0, "wrap sample missing frac");
+            assert!(
+                (emitted - expected).abs() < 1e-3,
+                "frac mismatch under softness: emitted {emitted} expected {expected}"
+            );
+            phase = next - 1.0;
+            wraps += 1;
+        } else {
+            assert_eq!(emitted, 0.0);
+            phase = next;
+        }
+    }
+    assert!(wraps >= 3, "expected multiple wraps; got {wraps}");
+}
+
 /// VPolyDco: per-voice sync wires to per-voice reset_out.
 #[test]
 fn poly_sync_is_per_voice() {

@@ -5,7 +5,14 @@
 //! Mode controls polarity: bipolar ([-1, 1]), unipolar_positive ([0, 1]),
 //! or unipolar_negative ([-1, 0]).
 //!
-//! The `sync` input resets the phase to 0 on each rising edge (transition from <= 0 to > 0).
+//! The `sync` input is a typed sub-sample trigger (ADR 0047): an event at
+//! fractional position `frac ∈ (0, 1]` resets phase to `(1 - frac) * dt`.
+//! BLEP is *not* applied on reset — LFO rates are far below audible aliasing
+//! frequencies, and the polyBLEP correction window (which spans one sample)
+//! is ~audio-rate wide. A plain phase reset is accurate enough; any residual
+//! aliasing sits well below 20 Hz. Saw/square also use plain output (no BLEP),
+//! consistent with the rest of the LFO.
+//!
 //! The `rate_cv` input adds an offset in Hz to the base `rate` parameter; the result is
 //! clamped to [0.001, 40.0] Hz before use.
 //! The `sync_ms` input, when connected, fully overrides the rate parameter by treating
@@ -15,7 +22,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `sync` | mono | Rising-edge sync resets phase to 0 |
+//! | `sync` | trigger | Sub-sample phase reset (ADR 0047) |
 //! | `rate_cv` | mono | Additive rate offset in Hz |
 //! | `sync_ms` | mono | When connected, overrides rate with period in ms |
 //!
@@ -29,6 +36,7 @@
 //! | `saw_down` | mono | Falling sawtooth waveform |
 //! | `square` | mono | Square waveform (50% duty) |
 //! | `random` | mono | Sample-and-hold random value (updates once per cycle) |
+//! | `reset_out` | trigger | Sub-sample fractional position of each phase wrap (ADR 0047) |
 //!
 //! # Parameters
 //!
@@ -41,8 +49,9 @@
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
+    MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
@@ -86,6 +95,7 @@ pub struct Lfo {
     out_saw_down: MonoOutput,
     out_square: MonoOutput,
     out_random: MonoOutput,
+    out_reset: MonoOutput,
 }
 
 fn apply_mode(v: f32, mode: LfoMode) -> f32 {
@@ -99,7 +109,7 @@ fn apply_mode(v: f32, mode: LfoMode) -> f32 {
 impl Module for Lfo {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Lfo", shape.clone())
-            .mono_in("sync")
+            .trigger_in("sync")
             .mono_in("rate_cv")
             .mono_in("sync_ms")
             .mono_out("sine")
@@ -108,6 +118,7 @@ impl Module for Lfo {
             .mono_out("saw_down")
             .mono_out("square")
             .mono_out("random")
+            .trigger_out("reset_out")
             .float_param(params::rate, 0.01, 20.0, 1.0)
             .float_param(params::phase_offset, 0.0, 1.0, 0.0)
             .enum_param(params::mode, LfoMode::Bipolar)
@@ -135,6 +146,7 @@ impl Module for Lfo {
             out_saw_down: MonoOutput::default(),
             out_square: MonoOutput::default(),
             out_random: MonoOutput::default(),
+            out_reset: MonoOutput::default(),
         }
     }
 
@@ -165,14 +177,10 @@ impl Module for Lfo {
         self.out_saw_down = MonoOutput::from_ports(outputs, 3);
         self.out_square = MonoOutput::from_ports(outputs, 4);
         self.out_random = MonoOutput::from_ports(outputs, 5);
+        self.out_reset = outputs[6].expect_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Sync: rising edge resets phase before advance (standard 0.5 threshold).
-        if self.in_sync.is_connected() && self.in_sync.tick(pool) {
-            self.phase = 0.0;
-        }
-
         // sync_ms overrides rate entirely when connected (ms → Hz).
         let increment = if self.in_sync_ms.is_connected() {
             let ms = pool.read_mono(&self.in_sync_ms).max(0.01);
@@ -183,12 +191,26 @@ impl Module for Lfo {
             self.phase_increment
         };
 
-        let new_phase = self.phase + increment;
-        let wrapped = new_phase >= 1.0;
-        self.phase = new_phase.fract();
-
-        if wrapped {
-            self.random_value = xorshift64(&mut self.prng_state);
+        // Sub-sample sync: reset phase to (1 - frac) * dt, no BLEP. Pre-empts
+        // the natural advance for this sample.
+        let sync = if self.in_sync.is_connected() { self.in_sync.tick(pool) } else { None };
+        let mut wrap_frac = 0.0_f32;
+        if let Some(frac) = sync {
+            let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+            self.phase = (1.0 - frac) * increment;
+        } else {
+            let next = self.phase + increment;
+            if next >= 1.0 {
+                self.phase = next - 1.0;
+                self.random_value = xorshift64(&mut self.prng_state);
+                wrap_frac = if increment > 0.0 {
+                    (1.0 - self.phase / increment).clamp(f32::MIN_POSITIVE, 1.0)
+                } else {
+                    1.0
+                };
+            } else {
+                self.phase = next;
+            }
         }
 
         let read_phase = (self.phase + self.phase_offset).fract();
@@ -212,6 +234,9 @@ impl Module for Lfo {
         }
         if self.out_random.is_connected() {
             pool.write_mono(&self.out_random, apply_mode(self.random_value, mode));
+        }
+        if self.out_reset.is_connected() {
+            pool.write_mono(&self.out_reset, wrap_frac);
         }
     }
 
@@ -352,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_rising_edge_resets_phase_mid_cycle() {
+    fn sync_event_resets_phase_mid_cycle() {
         let rate = 1.0_f32;
         let period = 100_usize;
         let sample_rate = rate * period as f32;
@@ -362,47 +387,34 @@ mod tests {
         h.set_mono("rate_cv", 0.0);
         h.run_mono(25, "sine"); // advance 25 samples (quarter-cycle) with sync low
 
-        // Rising edge: sync goes 0 → 1.
-        h.set_mono("sync", 1.0);
+        // Sync event at frac = 0.5: phase resets to 0.5 * dt.
+        h.set_mono("sync", 0.5);
         h.tick();
+        h.set_mono("sync", 0.0);
         let after_reset = h.read_mono("sine");
 
-        // A fresh LFO at sample 1 should match.
-        let mut fresh = make_lfo(rate, sample_rate);
-        fresh.tick();
-        let expected = fresh.read_mono("sine");
-
+        let dt = 1.0_f32 / period as f32;
+        let expected = lookup_sine(0.5 * dt);
         assert!(
-            (after_reset - expected).abs() < 1e-10,
-            "after sync reset sine={after_reset}, expected fresh LFO sine={expected}"
+            (after_reset - expected).abs() < 1e-5,
+            "after sync frac=0.5 reset sine={after_reset}, expected {expected}"
         );
     }
 
     #[test]
-    fn sync_level_does_not_retrigger() {
+    fn sync_frac_one_resets_to_zero() {
         let rate = 1.0_f32;
         let period = 100_usize;
         let sample_rate = rate * period as f32;
 
-        // Trigger a rising edge (prev=0 → 1), then hold high.
         let mut h = make_lfo_with_cv(rate, sample_rate);
         h.set_mono("sync", 1.0);
         h.set_mono("rate_cv", 0.0);
-        h.tick(); // rising edge
         let values = h.run_mono(25, "sine");
 
-        // Reference: identical LFO, same sequence.
-        let mut r = make_lfo_with_cv(rate, sample_rate);
-        r.set_mono("sync", 1.0);
-        r.set_mono("rate_cv", 0.0);
-        r.tick();
-        let ref_values = r.run_mono(25, "sine");
-
-        for (i, (&v, &r)) in values.iter().zip(ref_values.iter()).enumerate() {
-            assert!(
-                (v - r).abs() < 1e-10,
-                "sample {i}: sync level caused retrigger; got {v} vs ref {r}"
-            );
+        // sync=1.0 every sample ⇒ phase pinned at 0 ⇒ sine = 0 every sample.
+        for (i, &v) in values.iter().enumerate() {
+            assert!(v.abs() < 1e-5, "sample {i}: sync frac=1 should pin sine to 0; got {v}");
         }
     }
 
@@ -467,5 +479,32 @@ mod tests {
                 "sync_ms=500 should give 100-sample period; mismatch at {i}: {a} vs {b}"
             );
         }
+    }
+
+    #[test]
+    fn reset_out_emits_wrap_frac() {
+        // Non-integer period so wraps land mid-sample.
+        let sample_rate = 1000.0_f32;
+        let rate = 7.3_f32;
+        let dt = rate / sample_rate;
+        let mut h = make_lfo(rate, sample_rate);
+        let n = 400_usize;
+        let reset = h.run_mono(n, "reset_out");
+        let mut phase = 0.0_f32;
+        let mut wraps = 0usize;
+        for &e in &reset {
+            let next = phase + dt;
+            if next >= 1.0 {
+                let expected = (1.0 - phase) / dt;
+                assert!(e > 0.0, "wrap sample missing frac");
+                assert!((e - expected).abs() < 1e-3, "frac {e} vs {expected}");
+                phase = next - 1.0;
+                wraps += 1;
+            } else {
+                assert_eq!(e, 0.0);
+                phase = next;
+            }
+        }
+        assert!(wraps >= 2);
     }
 }

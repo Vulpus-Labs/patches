@@ -69,7 +69,7 @@ impl Module for Quant {
         ModuleDescriptor::new("Quant", shape.clone())
             .mono_in("in")
             .mono_out("out")
-            .mono_out("trig_out")
+            .trigger_out("trig_out")
             .float_param_multi(params::pitch, n, -8.0, 8.0, 0.0)
             .float_param(params::centre, -4.0, 4.0, 0.0)
             .float_param(params::scale, -4.0, 4.0, 1.0)
@@ -110,7 +110,7 @@ impl Module for Quant {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_sig  = MonoInput::from_ports(inputs, 0);
         self.out     = MonoOutput::from_ports(outputs, 0);
-        self.trig_out = MonoOutput::from_ports(outputs, 1);
+        self.trig_out = outputs[1].expect_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {

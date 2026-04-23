@@ -18,12 +18,14 @@
 //! | `voct` | mono | Pitch CV (1 V/oct, added to `frequency`) |
 //! | `fm` | mono | Frequency modulation (linear Hz or exponential V/oct, per `fm_type`) |
 //! | `pwm` | mono | Pulse width (0..1; clamped to `[0.02, 0.98]`) |
+//! | `sync` | trigger | Sub-sample hard-sync (ADR 0047): on event at `frac`, phase resets and each waveform applies PolyBLEP scaled by its pre→post jump |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
 //! | `out` | mono | Pre-mixed signal (saw + pulse + triangle + sub + noise) |
+//! | `reset_out` | trigger | Sub-sample fractional position of each phase wrap (ADR 0047) |
 //!
 //! # Parameters
 //!
@@ -37,9 +39,11 @@
 //! | `sub_gain` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
 //! | `noise_gain` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
 //! | `curve` | float | 0.0--1.0 | `0.1` | Analog cap-charge curvature applied to the phase read (always-on vintage colour) |
+//! | `sync_softness` | float | 0.0--1.0 | `0.0` | 0 = instant hard sync (PolyBLEP path). >0 slews the phase toward the reset target with time constant τ = softness²·3 samples (Jupiter-8 RC-discharge model); BLEP residual is skipped since the slew is already C⁰-continuous. |
 
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
+use patches_core::cables::TriggerInput;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
@@ -63,6 +67,7 @@ module_params! {
         sub_gain:        Float,
         noise_gain:      Float,
         curve: Float,
+        sync_softness: Float,
     }
 }
 
@@ -77,7 +82,9 @@ pub struct VDco {
     in_voct: MonoInput,
     in_fm: MonoInput,
     in_pwm: MonoInput,
+    in_sync: TriggerInput,
     out: MonoOutput,
+    reset_out: MonoOutput,
 }
 
 impl Module for VDco {
@@ -86,7 +93,9 @@ impl Module for VDco {
             .mono_in("voct")
             .mono_in("fm")
             .mono_in("pwm")
+            .trigger_in("sync")
             .mono_out("out")
+            .trigger_out("reset_out")
             .float_param(params::frequency, -4.0, 12.0, 0.0)
             .enum_param(params::fm_type, VDcoFmType::Linear)
             .float_param(params::saw_gain, 0.0, 1.0, 1.0)
@@ -95,6 +104,7 @@ impl Module for VDco {
             .float_param(params::sub_gain, 0.0, 1.0, 0.0)
             .float_param(params::noise_gain, 0.0, 1.0, 0.0)
             .float_param(params::curve, 0.0, 1.0, 0.1)
+            .float_param(params::sync_softness, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -115,7 +125,9 @@ impl Module for VDco {
             in_voct: MonoInput::default(),
             in_fm: MonoInput::default(),
             in_pwm: MonoInput::default(),
+            in_sync: TriggerInput::default(),
             out: MonoOutput::default(),
+            reset_out: MonoOutput::default(),
         }
     }
 
@@ -128,6 +140,7 @@ impl Module for VDco {
         self.mix.sub_gain = p.get(params::sub_gain);
         self.mix.noise_gain = p.get(params::noise_gain);
         self.mix.curve = p.get(params::curve);
+        self.mix.sync_softness = p.get(params::sync_softness);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -142,7 +155,9 @@ impl Module for VDco {
         self.in_voct = inputs[0].expect_mono();
         self.in_fm = inputs[1].expect_mono();
         self.in_pwm = inputs[2].expect_mono();
+        self.in_sync = TriggerInput::from_ports(inputs, 3);
         self.out = outputs[0].expect_mono();
+        self.reset_out = outputs[1].expect_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -161,18 +176,43 @@ impl Module for VDco {
             self.sample_rate,
         );
 
-        if !self.out.is_connected() {
-            self::core::advance(&mut self.voice);
-            return;
-        }
+        let sync = if self.in_sync.is_connected() {
+            self.in_sync.tick(pool)
+        } else {
+            None
+        };
 
         let pwm = if self.in_pwm.is_connected() {
             pool.read_mono(&self.in_pwm)
         } else {
             0.5
         };
-        let y = self::core::render_and_advance(&mut self.voice, pwm, &self.mix);
-        pool.write_mono(&self.out, y);
+
+        let (y, wrap_frac) = if self.mix.sync_softness > 0.0 {
+            self::core::render_and_advance_soft(&mut self.voice, sync, pwm, &self.mix)
+        } else {
+            match sync {
+                Some(frac) => {
+                    let y = self::core::render_sync_and_advance(&mut self.voice, frac, pwm, &self.mix);
+                    (y, 0.0)
+                }
+                None => {
+                    if !self.out.is_connected() && !self.reset_out.is_connected() {
+                        self::core::advance(&mut self.voice);
+                        return;
+                    }
+                    let (y, frac) = self::core::render_and_advance(&mut self.voice, pwm, &self.mix);
+                    (y, frac)
+                }
+            }
+        };
+
+        if self.out.is_connected() {
+            pool.write_mono(&self.out, y);
+        }
+        if self.reset_out.is_connected() {
+            pool.write_mono(&self.reset_out, wrap_frac);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -10,19 +10,20 @@
 //! | Port | Kind | Description |
 //! |------|------|-------------|
 //! | `ms` | mono | Tick interval in milliseconds |
-//! | `reset` | mono | Rising edge resets phase to zero |
+//! | `reset` | trigger | One-sample pulse resets phase to zero (ADR 0047) |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `trigger` | mono | Single-sample pulse (1.0) at each interval boundary |
+//! | `trigger` | trigger | Single-sample pulse (1.0) at each interval boundary (ADR 0047) |
 //! | `gate` | mono | High (1.0) for first half of interval, low (0.0) for second |
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
+    MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 
 /// Millisecond-interval ticker.  See [module-level documentation](self).
@@ -42,8 +43,8 @@ impl Module for MsTicker {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("MsTicker", shape.clone())
             .mono_in("ms")
-            .mono_in("reset")
-            .mono_out("trigger")
+            .trigger_in("reset")
+            .trigger_out("trigger")
             .mono_out("gate")
     }
 
@@ -72,13 +73,13 @@ impl Module for MsTicker {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_ms = MonoInput::from_ports(inputs, 0);
         self.in_reset = TriggerInput::from_ports(inputs, 1);
-        self.out_trigger = MonoOutput::from_ports(outputs, 0);
+        self.out_trigger = outputs[0].expect_trigger();
         self.out_gate = MonoOutput::from_ports(outputs, 1);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         // Reset on rising edge
-        if self.in_reset.is_connected() && self.in_reset.tick(pool) {
+        if self.in_reset.is_connected() && self.in_reset.tick(pool).is_some() {
             self.phase = 0.0;
         }
 

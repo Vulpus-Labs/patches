@@ -28,8 +28,9 @@
 /// | `noise`      | float | 0.0–1.0     | 0.15    | Noise layer amount       |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::drum::{DecayEnvelope, PitchSweep};
@@ -71,7 +72,7 @@ pub struct Tom {
 impl Module for Tom {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Tom", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::pitch, 40.0, 500.0, 120.0)
@@ -130,7 +131,7 @@ impl Module for Tom {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {

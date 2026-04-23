@@ -1,8 +1,9 @@
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, GateInput, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoOutput, ModuleShape, OutputPort, TriggerInput,
+    MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::{AdsrCore, AdsrShape};
@@ -43,7 +44,7 @@ module_params! {
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `trigger` | mono | Rising edge starts Attack phase |
+/// | `trigger` | trigger | One-sample pulse starts Attack phase (ADR 0047) |
 /// | `gate` | mono | Held high to sustain; release to enter Release phase |
 ///
 /// # Outputs
@@ -80,7 +81,7 @@ pub struct Adsr {
 impl Module for Adsr {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Adsr", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("gate")
             .mono_out("out")
             .float_param(params::attack,  0.001, 10.0, 0.01)
@@ -130,7 +131,7 @@ impl Module for Adsr {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let triggered = self.in_trigger.tick(pool);
+        let triggered = self.in_trigger.tick(pool).is_some();
         let gate = self.in_gate.tick(pool);
         let level = self.core.tick(triggered, gate.is_high);
         pool.write_mono(&self.out_env, level);

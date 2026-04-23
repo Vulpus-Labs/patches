@@ -8,12 +8,14 @@
 //! | `voct` | poly | Pitch CV per voice (1 V/oct, added to `frequency`) |
 //! | `fm` | poly | FM CV per voice (linear Hz or exponential V/oct, per `fm_type`) |
 //! | `pwm` | poly | Pulse width per voice (0..1; clamped to `[0.02, 0.98]`) |
+//! | `sync` | poly_trigger | Per-voice sub-sample hard-sync (ADR 0047) |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
 //! | `out` | poly | Pre-mixed signal (saw + pulse + triangle + sub + noise) per voice |
+//! | `reset_out` | poly_trigger | Per-voice sub-sample fractional position of each phase wrap (ADR 0047) |
 //!
 //! # Parameters
 //!
@@ -27,7 +29,9 @@
 //! | `sub_gain` | float | 0.0--1.0 | `0.0` | Sub (÷2 square) level |
 //! | `noise_gain` | float | 0.0--1.0 | `0.0` | Noise level (internally scaled ≈ 0.5) |
 //! | `curve` | float | 0.0--1.0 | `0.1` | Analog cap-charge curvature applied to the phase read (always-on vintage colour) |
+//! | `sync_softness` | float | 0.0--1.0 | `0.0` | 0 = instant hard sync (PolyBLEP path). >0 slews the phase toward the reset target (RC-discharge) with τ = softness²·3 samples; BLEP residual is skipped. |
 
+use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
@@ -36,8 +40,8 @@ use patches_core::{
 };
 
 use super::core::{
-    advance, compute_increment, render_and_advance, voct_to_increment, VDcoFmType, VDcoMix,
-    VDcoVoice,
+    advance, compute_increment, render_and_advance, render_and_advance_soft,
+    render_sync_and_advance, voct_to_increment, VDcoFmType, VDcoMix, VDcoVoice,
 };
 
 module_params! {
@@ -50,6 +54,7 @@ module_params! {
         sub_gain:        Float,
         noise_gain:      Float,
         curve: Float,
+        sync_softness: Float,
     }
 }
 
@@ -64,7 +69,9 @@ pub struct VPolyDco {
     in_voct: PolyInput,
     in_fm: PolyInput,
     in_pwm: PolyInput,
+    in_sync: PolyTriggerInput,
     out: PolyOutput,
+    reset_out: PolyOutput,
 }
 
 impl Module for VPolyDco {
@@ -73,7 +80,9 @@ impl Module for VPolyDco {
             .poly_in("voct")
             .poly_in("fm")
             .poly_in("pwm")
+            .poly_trigger_in("sync")
             .poly_out("out")
+            .poly_trigger_out("reset_out")
             .float_param(params::frequency, -4.0, 12.0, 0.0)
             .enum_param(params::fm_type, VDcoFmType::Linear)
             .float_param(params::saw_gain, 0.0, 1.0, 1.0)
@@ -82,6 +91,7 @@ impl Module for VPolyDco {
             .float_param(params::sub_gain, 0.0, 1.0, 0.0)
             .float_param(params::noise_gain, 0.0, 1.0, 0.0)
             .float_param(params::curve, 0.0, 1.0, 0.1)
+            .float_param(params::sync_softness, 0.0, 1.0, 0.0)
     }
 
     fn prepare(
@@ -110,7 +120,9 @@ impl Module for VPolyDco {
             in_voct: PolyInput::default(),
             in_fm: PolyInput::default(),
             in_pwm: PolyInput::default(),
+            in_sync: PolyTriggerInput::default(),
             out: PolyOutput::default(),
+            reset_out: PolyOutput::default(),
         }
     }
 
@@ -123,6 +135,7 @@ impl Module for VPolyDco {
         self.mix.sub_gain = p.get(params::sub_gain);
         self.mix.noise_gain = p.get(params::noise_gain);
         self.mix.curve = p.get(params::curve);
+        self.mix.sync_softness = p.get(params::sync_softness);
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -137,7 +150,9 @@ impl Module for VPolyDco {
         self.in_voct = PolyInput::from_ports(inputs, 0);
         self.in_fm = PolyInput::from_ports(inputs, 1);
         self.in_pwm = PolyInput::from_ports(inputs, 2);
+        self.in_sync = PolyTriggerInput::from_ports(inputs, 3);
         self.out = PolyOutput::from_ports(outputs, 0);
+        self.reset_out = outputs[1].expect_poly_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -158,12 +173,14 @@ impl Module for VPolyDco {
             );
         }
 
-        if !self.out.is_connected() {
-            for v in &mut self.voices {
-                advance(v);
-            }
-            return;
-        }
+        let sync = if self.in_sync.is_connected() {
+            self.in_sync.tick(pool)
+        } else {
+            [None; 16]
+        };
+
+        let out_connected = self.out.is_connected();
+        let reset_connected = self.reset_out.is_connected();
 
         let pw_connected = self.in_pwm.is_connected();
         let pwm = if pw_connected {
@@ -173,10 +190,36 @@ impl Module for VPolyDco {
         };
 
         let mut out = [0.0f32; 16];
-        for ((o, v), pw) in out.iter_mut().zip(self.voices.iter_mut()).zip(pwm.iter()) {
-            *o = render_and_advance(v, *pw, &self.mix);
+        let mut reset = [0.0f32; 16];
+        let soft = self.mix.sync_softness > 0.0;
+        for (i, v) in self.voices.iter_mut().enumerate() {
+            if soft {
+                let (y, frac) = render_and_advance_soft(v, sync[i], pwm[i], &self.mix);
+                out[i] = y;
+                reset[i] = frac;
+                continue;
+            }
+            match sync[i] {
+                Some(frac) => {
+                    out[i] = render_sync_and_advance(v, frac, pwm[i], &self.mix);
+                }
+                None => {
+                    if !out_connected && !reset_connected {
+                        advance(v);
+                    } else {
+                        let (y, frac) = render_and_advance(v, pwm[i], &self.mix);
+                        out[i] = y;
+                        reset[i] = frac;
+                    }
+                }
+            }
         }
-        pool.write_poly(&self.out, out);
+        if out_connected {
+            pool.write_poly(&self.out, out);
+        }
+        if reset_connected {
+            pool.write_poly(&self.reset_out, reset);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

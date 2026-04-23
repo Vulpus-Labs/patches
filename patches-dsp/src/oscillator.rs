@@ -34,6 +34,32 @@ impl MonoPhaseAccumulator {
         let wrap = if phase >= 1.0 { 1.0 } else { 0.0 };
         self.phase = phase - wrap;
     }
+
+    /// Advance and return the sub-sample wrap position in `(0, 1]`, or `0.0`
+    /// if no wrap occurred this sample (ADR 0047 `Trigger` encoding).
+    pub fn advance_wrap_frac(&mut self) -> f32 {
+        let dt = self.phase_increment;
+        let next = self.phase + dt;
+        if next >= 1.0 {
+            self.phase = next - 1.0;
+            if dt > 0.0 {
+                (1.0 - self.phase / dt).clamp(f32::MIN_POSITIVE, 1.0)
+            } else {
+                1.0
+            }
+        } else {
+            self.phase = next;
+            0.0
+        }
+    }
+
+    /// Reset the phase for a sub-sample sync event at fractional position
+    /// `frac ∈ (0, 1]`. Sets phase to `(1 - frac) * phase_increment` so the
+    /// remainder of the current sample is accounted for.
+    pub fn sync_reset(&mut self, frac: f32) {
+        let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+        self.phase = (1.0 - frac) * self.phase_increment;
+    }
 }
 
 impl Default for MonoPhaseAccumulator {
@@ -90,6 +116,33 @@ impl PolyPhaseAccumulator {
             self.phases[i] = phase - wrap;
         }
     }
+
+    /// Advance all voices and return per-voice sub-sample wrap positions
+    /// (ADR 0047 `Trigger` encoding; `0.0` = no wrap).
+    pub fn advance_all_wrap_frac(&mut self) -> [f32; 16] {
+        let mut out = [0.0_f32; 16];
+        for i in 0..16 {
+            let dt = self.phase_increments[i];
+            let next = self.phases[i] + dt;
+            if next >= 1.0 {
+                self.phases[i] = next - 1.0;
+                out[i] = if dt > 0.0 {
+                    (1.0 - self.phases[i] / dt).clamp(f32::MIN_POSITIVE, 1.0)
+                } else {
+                    1.0
+                };
+            } else {
+                self.phases[i] = next;
+            }
+        }
+        out
+    }
+
+    /// Reset a single voice's phase for a sub-sample sync event.
+    pub fn sync_reset(&mut self, voice: usize, frac: f32) {
+        let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+        self.phases[voice] = (1.0 - frac) * self.phase_increments[voice];
+    }
 }
 
 impl Default for PolyPhaseAccumulator {
@@ -102,6 +155,16 @@ impl Default for PolyPhaseAccumulator {
 ///
 /// Returns a correction value that smooths the discontinuity near `t = 0` (rising)
 /// and `t = 1` (falling) transitions. Only effective when `dt < 0.5`.
+/// PolyBLEP residual for a sub-sample sync reset.
+///
+/// `post_phase` is the phase right after the reset (`(1 - frac) * dt`),
+/// `post_dt` the phase increment at that sample, `delta = pre - post` the
+/// waveform-specific value jump. Add to the post-reset waveform sample.
+#[inline]
+pub fn sync_blep_residual(post_phase: f32, post_dt: f32, delta: f32) -> f32 {
+    polyblep(post_phase, post_dt) * 0.5 * delta
+}
+
 pub fn polyblep(t: f32, dt: f32) -> f32 {
     if t < dt {
         let t = t / dt;

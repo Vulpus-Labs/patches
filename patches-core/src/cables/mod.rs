@@ -13,7 +13,7 @@ pub use gate::{GateEdge, GateInput, PolyGateInput};
 pub use mono::{MonoInput, MonoOutput};
 pub use poly::{PolyInput, PolyLayout, PolyOutput};
 pub use ports::{InputPort, OutputPort};
-pub use trigger::{PolySubTriggerInput, PolyTriggerInput, SubTriggerInput, TriggerInput};
+pub use trigger::{PolyTriggerInput, TriggerInput};
 
 /// Buffer pool index of the permanent mono read-null slot.
 ///
@@ -95,7 +95,9 @@ pub const GLOBAL_MIDI: usize = 10;
 /// cable ever aliases a reserved slot.
 pub const RESERVED_SLOTS: usize = 16;
 
-/// Threshold used by all trigger and gate input types.
+/// Threshold used by gate input types (and legacy producers that still emit
+/// level signals on mono cables). Triggers now use sub-sample encoding
+/// (ADR 0047) and do not consult this constant.
 ///
 /// A signal is considered "high" when `>= TRIGGER_THRESHOLD` and "low" when
 /// `< TRIGGER_THRESHOLD`.

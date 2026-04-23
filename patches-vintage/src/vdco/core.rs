@@ -52,6 +52,9 @@ pub struct VDcoMix {
     pub noise_gain: f32,
     /// Always-on analog phasor curvature in `[0, 1]`. `0.0` is linear.
     pub curve: f32,
+    /// Sync softness in `[0, 1]`. `0.0` = instant hard sync (0635 BLEP path).
+    /// `> 0` uses an RC-discharge slew on sync; BLEP is skipped.
+    pub sync_softness: f32,
 }
 
 impl VDcoMix {
@@ -62,6 +65,7 @@ impl VDcoMix {
         sub_gain: 0.0,
         noise_gain: 0.0,
         curve: 0.1,
+        sync_softness: 0.0,
     };
 }
 
@@ -81,6 +85,8 @@ fn shape_dt(dt: f32, phase: f32, curvature: f32) -> f32 {
 /// Per-voice mutable state: phase, increment, sub flip-flop, noise PRNG.
 pub struct VDcoVoice {
     pub phase: f32,
+    /// Free-running phase target. On sync, snaps to 0 while `phase` slews toward it.
+    pub phase_target: f32,
     pub phase_increment: f32,
     pub sub_flipflop: bool,
     pub prng_state: u64,
@@ -90,6 +96,7 @@ impl VDcoVoice {
     pub fn new(seed: u64) -> Self {
         Self {
             phase: 0.0,
+            phase_target: 0.0,
             phase_increment: 0.0,
             sub_flipflop: false,
             // xorshift64 requires non-zero state.
@@ -133,14 +140,30 @@ pub fn compute_increment(
 
 /// Advance the phase by `phase_increment`, wrapping to `[0, 1)`. Toggles the
 /// sub flip-flop on each wrap so the ÷2 square stays phase-locked.
+///
+/// Returns the sub-sample fractional position of the wrap in `(0.0, 1.0]`
+/// (ADR 0047 `Trigger` encoding), or `0.0` if no wrap occurred this sample.
+/// The fractional position is measured from the start of the current sample:
+/// `frac = (1 - phase_pre) / dt`, recovered post-wrap as `1 - phase_post / dt`.
 #[inline]
-pub fn advance(voice: &mut VDcoVoice) {
-    let next = voice.phase + voice.phase_increment;
+pub fn advance(voice: &mut VDcoVoice) -> f32 {
+    let dt = voice.phase_increment;
+    // Target advances alongside phase; wraps independently (slewed phase may lag/lead).
+    voice.phase_target += dt;
+    if voice.phase_target >= 1.0 {
+        voice.phase_target -= 1.0;
+    }
+    let next = voice.phase + dt;
     if next >= 1.0 {
         voice.phase = next - 1.0;
         voice.sub_flipflop = !voice.sub_flipflop;
+        // dt > 0 here since next >= 1.0 and voice.phase was in [0, 1).
+        let frac = 1.0 - voice.phase / dt;
+        // Clamp into (0, 1] so a near-zero frac still encodes as an event.
+        frac.clamp(f32::MIN_POSITIVE, 1.0)
     } else {
         voice.phase = next;
+        0.0
     }
 }
 
@@ -148,8 +171,12 @@ pub fn advance(voice: &mut VDcoVoice) {
 ///
 /// `pwm` is the raw PWM CV (clamped internally). The saw, pulse, and sub all
 /// derive from the same raw `phase`, each with its own polyBLEP correction.
+///
+/// Returns `(sample, wrap_frac)` where `wrap_frac` is the sub-sample position
+/// of the natural phase wrap this sample (see [`advance`]), or `0.0` if no
+/// wrap occurred.
 #[inline]
-pub fn render_and_advance(voice: &mut VDcoVoice, pwm: f32, mix: &VDcoMix) -> f32 {
+pub fn render_and_advance(voice: &mut VDcoVoice, pwm: f32, mix: &VDcoMix) -> (f32, f32) {
     let lin_phase = voice.phase;
     let lin_dt = voice.phase_increment;
     let c = mix.curve;
@@ -195,6 +222,183 @@ pub fn render_and_advance(voice: &mut VDcoVoice, pwm: f32, mix: &VDcoMix) -> f32
         y += mix.noise_gain * NOISE_SCALE * w;
     }
 
-    advance(voice);
+    let wrap_frac = advance(voice);
+    (y, wrap_frac)
+}
+
+/// Render one mixed sample with a sync event at sub-sample offset `frac`.
+///
+/// `frac ∈ (0.0, 1.0]` is the position within this sample where the sync
+/// event fired (ADR 0047 `Trigger` encoding). The phase advances linearly to
+/// the event point, each active waveform's pre-reset value is captured, then
+/// phase resets to `0` and sub-flipflop to `false`, phase advances to
+/// `(1 - frac) * dt`, and each waveform applies a PolyBLEP residual at that
+/// offset scaled by its own `Δ = pre - post` jump. The pulse jump is handled
+/// as a single combined `Δ` (no separate comparator BLEP). Triangle is C⁰ so
+/// no BLEP is applied; its value jump is represented implicitly.
+///
+/// Does not emit a wrap-frac on `reset_out`: the sync sample is not a
+/// natural wrap.
+#[inline]
+pub fn render_sync_and_advance(
+    voice: &mut VDcoVoice,
+    frac: f32,
+    pwm: f32,
+    mix: &VDcoMix,
+) -> f32 {
+    // Guard against degenerate frac values.
+    let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+    let dt = voice.phase_increment;
+    let c = mix.curve;
+    let pwm_c = pwm.clamp(PWM_MIN, PWM_MAX);
+
+    // Pre-sync linear phase at the event (the pulse comparator always reads
+    // raw phase — never BLEP-corrected saw — so we derive pre-values from it).
+    let mut lin_pre = voice.phase + frac * dt;
+    let pre_flipflop = if lin_pre >= 1.0 {
+        lin_pre -= 1.0;
+        !voice.sub_flipflop
+    } else {
+        voice.sub_flipflop
+    };
+    let pre_phase = shape_phase(lin_pre, c);
+    let pre_saw = 2.0 * pre_phase - 1.0;
+    let pre_pulse = if pre_phase < pwm_c { 1.0 } else { -1.0 };
+    let lin_pre_sub = lin_pre * 0.5 + if pre_flipflop { 0.5 } else { 0.0 };
+    let pre_sub_phase = shape_phase(lin_pre_sub, c);
+    let pre_sub = if pre_sub_phase < 0.5 { 1.0 } else { -1.0 };
+
+    // Reset and advance to the remainder of the sample.
+    voice.sub_flipflop = false;
+    let lin_post = (1.0 - frac) * dt;
+    voice.phase = lin_post;
+    // Keep target aligned with phase in the hard-reset path so softness-up transitions stay sane.
+    voice.phase_target = lin_post;
+
+    let post_phase = shape_phase(lin_post, c);
+    let post_dt = shape_dt(dt, lin_post, c);
+    let post_saw = 2.0 * post_phase - 1.0;
+    let post_pulse = if post_phase < pwm_c { 1.0 } else { -1.0 };
+    let post_tri = 1.0 - 2.0 * (2.0 * post_phase - 1.0).abs();
+    let lin_post_sub = lin_post * 0.5; // sub_flipflop == false → no half offset
+    let post_sub_phase = shape_phase(lin_post_sub, c);
+    let post_sub_dt = shape_dt(dt * 0.5, lin_post_sub, c);
+    let post_sub = if post_sub_phase < 0.5 { 1.0 } else { -1.0 };
+
+    // Canonical polyBLEP residual for a Δ = +2 discontinuity at sub-sample
+    // offset `frac` from the sample start (i.e. `1 - frac` before the next
+    // sample boundary, so phase distance past the jump is `(1 - frac) * dt`).
+    // Scale by `Δ / 2` per waveform where `Δ = pre - post`.
+    let blep_saw = polyblep(lin_post, post_dt) * 0.5;
+    let blep_sub = polyblep(lin_post_sub, post_sub_dt) * 0.5;
+
+    let mut y = 0.0_f32;
+
+    if mix.saw_gain > 0.0 {
+        let delta = pre_saw - post_saw;
+        y += mix.saw_gain * (post_saw + blep_saw * delta);
+    }
+
+    if mix.pulse_gain > 0.0 {
+        let delta = pre_pulse - post_pulse;
+        y += mix.pulse_gain * (post_pulse + blep_saw * delta);
+    }
+
+    if mix.triangle_gain > 0.0 {
+        y += mix.triangle_gain * post_tri;
+    }
+
+    if mix.sub_gain > 0.0 {
+        let delta = pre_sub - post_sub;
+        y += mix.sub_gain * (post_sub + blep_sub * delta);
+    }
+
+    if mix.noise_gain > 0.0 {
+        let w = xorshift64(&mut voice.prng_state);
+        y += mix.noise_gain * NOISE_SCALE * w;
+    }
+
     y
+}
+
+/// Render one sample under the soft-sync (RC-discharge) model.
+///
+/// Used only when `mix.sync_softness > 0`. Per-sample: phase slews toward
+/// `phase_target` with one-pole coefficient `(1 - a)`, where
+/// `a = exp(-1/τ)` and `τ = softness² · 3` samples (so `0.5 → τ ≈ 0.75`,
+/// `1.0 → τ = 3`). τ ≤ 3 keeps the effect clearly a sync discharge rather
+/// than a free-running ramp. On sync, `phase_target` snaps to 0 and
+/// `sub_flipflop` resets (discrete state — sharp sub edge under softness,
+/// matching the analog /2 divider). No PolyBLEP residual is applied at the
+/// sync event: the slew is already C⁰-continuous. Natural-wrap BLEP on the
+/// phase accumulator is retained.
+///
+/// Returns `(sample, wrap_frac)`. On a sync sample, `wrap_frac = 0.0`.
+#[inline]
+pub fn render_and_advance_soft(
+    voice: &mut VDcoVoice,
+    sync: Option<f32>,
+    pwm: f32,
+    mix: &VDcoMix,
+) -> (f32, f32) {
+    let softness = mix.sync_softness.clamp(0.0, 1.0);
+    let tau = softness * softness * 3.0;
+    let a = if tau > 0.0 { (-1.0 / tau).exp() } else { 0.0 };
+
+    // Slew phase toward target. With tau → 0, a → 0 → phase := target (hard snap).
+    voice.phase += (voice.phase_target - voice.phase) * (1.0 - a);
+    // Keep phase in [0, 1) for rendering (slew can cross the wrap boundary).
+    if voice.phase < 0.0 {
+        voice.phase += 1.0;
+    }
+    if voice.phase >= 1.0 {
+        voice.phase -= 1.0;
+    }
+
+    // Sync event: snap target to 0, reset discrete flipflop. No BLEP.
+    if sync.is_some() {
+        voice.phase_target = 0.0;
+        voice.sub_flipflop = false;
+    }
+
+    // Render at slewed phase with natural-wrap BLEP (same formulas as render_and_advance).
+    let lin_phase = voice.phase;
+    let lin_dt = voice.phase_increment;
+    let c = mix.curve;
+    let phase = shape_phase(lin_phase, c);
+    let dt = shape_dt(lin_dt, lin_phase, c);
+
+    let mut y = 0.0_f32;
+    if mix.saw_gain > 0.0 {
+        y += mix.saw_gain * ((2.0 * phase - 1.0) - polyblep(phase, dt));
+    }
+    if mix.pulse_gain > 0.0 {
+        let pwm_c = pwm.clamp(PWM_MIN, PWM_MAX);
+        let raw = if phase < pwm_c { 1.0 } else { -1.0 };
+        let blep = polyblep(phase, dt) - polyblep((phase - pwm_c).rem_euclid(1.0), dt);
+        y += mix.pulse_gain * (raw + blep);
+    }
+    if mix.triangle_gain > 0.0 {
+        let tri = 1.0 - 2.0 * (2.0 * phase - 1.0).abs();
+        y += mix.triangle_gain * tri;
+    }
+    if mix.sub_gain > 0.0 {
+        let lin_sub_phase = lin_phase * 0.5 + if voice.sub_flipflop { 0.5 } else { 0.0 };
+        let lin_sub_dt = lin_dt * 0.5;
+        let sub_phase = shape_phase(lin_sub_phase, c);
+        let sub_dt = shape_dt(lin_sub_dt, lin_sub_phase, c);
+        let raw = if sub_phase < 0.5 { 1.0 } else { -1.0 };
+        let blep =
+            polyblep(sub_phase, sub_dt) - polyblep((sub_phase - 0.5).rem_euclid(1.0), sub_dt);
+        y += mix.sub_gain * (raw + blep);
+    }
+    if mix.noise_gain > 0.0 {
+        let w = xorshift64(&mut voice.prng_state);
+        y += mix.noise_gain * NOISE_SCALE * w;
+    }
+
+    // Advance. On sync sample, suppress wrap_frac (not a natural wrap).
+    let wrap_frac = advance(voice);
+    let wrap_frac = if sync.is_some() { 0.0 } else { wrap_frac };
+    (y, wrap_frac)
 }

@@ -139,7 +139,7 @@ impl Module for MonoMidiIn {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("MidiIn", shape.clone())
             .mono_out("voct")
-            .mono_out("trigger")
+            .trigger_out("trigger")
             .mono_out("gate")
             .mono_out("mod")
             .mono_out("pitch")
@@ -183,7 +183,7 @@ impl Module for MonoMidiIn {
 
     fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
         self.out_v_oct = MonoOutput::from_ports(outputs, 0);
-        self.out_trigger = MonoOutput::from_ports(outputs, 1);
+        self.out_trigger = outputs[1].expect_trigger();
         self.out_gate = MonoOutput::from_ports(outputs, 2);
         self.out_mod = MonoOutput::from_ports(outputs, 3);
         self.out_pitch = MonoOutput::from_ports(outputs, 4);

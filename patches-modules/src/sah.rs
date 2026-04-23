@@ -1,7 +1,8 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, TriggerInput,
+    MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 
 /// Mono sample-and-hold.
@@ -14,7 +15,7 @@ use patches_core::param_frame::ParamView;
 /// | Port | Kind | Description |
 /// |------|------|-------------|
 /// | `in` | mono | Signal to sample |
-/// | `trig` | mono | Trigger input (rising edge at 0.5 threshold) |
+/// | `trig` | trigger | One-sample pulse latches `in` (ADR 0047) |
 ///
 /// # Outputs
 ///
@@ -34,7 +35,7 @@ impl Module for Sah {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Sah", shape.clone())
             .mono_in("in")
-            .mono_in("trig")
+            .trigger_in("trig")
             .mono_out("out")
     }
 
@@ -61,7 +62,7 @@ impl Module for Sah {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        if self.in_trig.tick(pool) {
+        if self.in_trig.tick(pool).is_some() {
             self.held = pool.read_mono(&self.in_sig);
         }
         pool.write_mono(&self.out, self.held);

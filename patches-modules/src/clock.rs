@@ -60,10 +60,10 @@ pub struct Clock {
 impl Module for Clock {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Clock", shape.clone())
-            .mono_out("bar")
-            .mono_out("beat")
-            .mono_out("quaver")
-            .mono_out("semiquaver")
+            .trigger_out("bar")
+            .trigger_out("beat")
+            .trigger_out("quaver")
+            .trigger_out("semiquaver")
             .float_param(params::bpm, 1.0, 300.0, 120.0)
             .int_param(params::beats_per_bar, 1, 16, 4)
             .int_param(params::quavers_per_beat, 1, 4, 2)
@@ -106,10 +106,10 @@ impl Module for Clock {
     }
 
     fn set_ports(&mut self, _inputs: &[patches_core::InputPort], outputs: &[OutputPort]) {
-        self.out_bar = MonoOutput::from_ports(outputs, 0);
-        self.out_beat = MonoOutput::from_ports(outputs, 1);
-        self.out_quaver = MonoOutput::from_ports(outputs, 2);
-        self.out_semiquaver = MonoOutput::from_ports(outputs, 3);
+        self.out_bar = outputs[0].expect_trigger();
+        self.out_beat = outputs[1].expect_trigger();
+        self.out_quaver = outputs[2].expect_trigger();
+        self.out_semiquaver = outputs[3].expect_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {

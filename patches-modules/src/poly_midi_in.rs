@@ -119,7 +119,7 @@ impl Module for PolyMidiIn {
             inputs: vec![],
             outputs: vec![
                 PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "trigger", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "trigger", index: 0, kind: CableKind::PolyTrigger, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
@@ -156,7 +156,7 @@ impl Module for PolyMidiIn {
 
     fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
         self.out_v_oct    = PolyOutput::from_ports(outputs, 0);
-        self.out_trigger  = PolyOutput::from_ports(outputs, 1);
+        self.out_trigger  = outputs[1].expect_poly_trigger();
         self.out_gate     = PolyOutput::from_ports(outputs, 2);
         self.out_velocity = PolyOutput::from_ports(outputs, 3);
         self.out_mod      = MonoOutput::from_ports(outputs, 4);

@@ -3,6 +3,7 @@ use patches_core::{
     ModuleShape, MonoInput, OutputPort, PolyInput, PolyOutput,
     GLOBAL_DRIFT, HALF_SEMITONE_VOCT, OSCILLATOR_DRIFT_STEP,
 };
+use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use crate::oscillator::OscFmType;
@@ -15,7 +16,7 @@ module_params! {
     }
 }
 use crate::common::approximate::lookup_sine;
-use patches_dsp::polyblep;
+use patches_dsp::{polyblep, sync_blep_residual};
 use crate::common::frequency::{C0_FREQ, FMMode, PolyFrequencyConverter, PolyFrequencyChangeTracker};
 use crate::common::phase_accumulator::PolyPhaseAccumulator;
 
@@ -36,6 +37,7 @@ const DRIFT_PERIOD: u8 = 64;
 /// | `fm` | poly | Frequency modulation input per voice |
 /// | `pulse_width_cv` | poly | Pulse width modulation for the square output per voice |
 /// | `phase_mod` | poly | Phase modulation offset applied to all waveforms per voice |
+/// | `sync` | poly_trigger | Per-voice sub-sample hard-sync (ADR 0047) |
 ///
 /// # Outputs
 ///
@@ -45,6 +47,7 @@ const DRIFT_PERIOD: u8 = 64;
 /// | `triangle` | poly | Triangle waveform |
 /// | `sawtooth` | poly | Sawtooth waveform (PolyBLEP anti-aliased) |
 /// | `square` | poly | Square waveform (PolyBLEP anti-aliased, PWM via `pulse_width_cv`) |
+/// | `reset_out` | poly_trigger | Per-voice sub-sample fractional position of each phase wrap (ADR 0047) |
 ///
 /// # Parameters
 ///
@@ -64,12 +67,14 @@ pub struct PolyOsc {
     in_fm: PolyInput,
     in_pulse_width: PolyInput,
     in_phase_mod: PolyInput,
+    in_sync: PolyTriggerInput,
     /// Fixed input pointing at the engine-level global drift backplane slot.
     in_global_drift: MonoInput,
     out_sine: PolyOutput,
     out_triangle: PolyOutput,
     out_sawtooth: PolyOutput,
     out_square: PolyOutput,
+    out_reset: PolyOutput,
     // Drift state
     /// `drift` parameter value in [0.0, 1.0]. Zero disables drift entirely.
     drift: f32,
@@ -88,10 +93,12 @@ impl Module for PolyOsc {
             .poly_in("fm")
             .poly_in("pulse_width_cv")
             .poly_in("phase_mod")
+            .poly_trigger_in("sync")
             .poly_out("sine")
             .poly_out("triangle")
             .poly_out("sawtooth")
             .poly_out("square")
+            .poly_trigger_out("reset_out")
             .float_param(params::frequency, -4.0, 12.0, 0.0)
             .enum_param(params::fm_type, OscFmType::Linear)
             .float_param(params::drift, 0.0, 1.0, 0.0)
@@ -113,11 +120,13 @@ impl Module for PolyOsc {
             in_fm: PolyInput::default(),
             in_pulse_width: PolyInput::default(),
             in_phase_mod: PolyInput::default(),
+            in_sync: PolyTriggerInput::default(),
             in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
             out_sine: PolyOutput::default(),
             out_triangle: PolyOutput::default(),
             out_sawtooth: PolyOutput::default(),
             out_square: PolyOutput::default(),
+            out_reset: PolyOutput::default(),
             drift: 0.0,
             drift_walks,
             drift_counter: 0,
@@ -148,10 +157,12 @@ impl Module for PolyOsc {
         self.in_fm          = PolyInput::from_ports(inputs, 1);
         self.in_pulse_width = PolyInput::from_ports(inputs, 2);
         self.in_phase_mod   = PolyInput::from_ports(inputs, 3);
+        self.in_sync        = PolyTriggerInput::from_ports(inputs, 4);
         self.out_sine     = PolyOutput::from_ports(outputs, 0);
         self.out_triangle = PolyOutput::from_ports(outputs, 1);
         self.out_sawtooth = PolyOutput::from_ports(outputs, 2);
         self.out_square   = PolyOutput::from_ports(outputs, 3);
+        self.out_reset    = outputs[4].expect_poly_trigger();
 
         self.freq_tracker.voct_modulating = self.in_voct.is_connected();
         self.freq_tracker.fm_modulating   = self.in_fm.is_connected();
@@ -211,12 +222,20 @@ impl Module for PolyOsc {
             }
         }
 
+        let sync = if self.in_sync.is_connected() {
+            self.in_sync.tick(pool)
+        } else {
+            [None; 16]
+        };
+
         let do_sine = self.out_sine.is_connected();
         let do_tri  = self.out_triangle.is_connected();
         let do_saw  = self.out_sawtooth.is_connected();
         let do_sq   = self.out_square.is_connected();
+        let do_reset = self.out_reset.is_connected();
 
-        if !do_sine && !do_tri && !do_saw && !do_sq {
+        let any_sync = sync.iter().any(|s| s.is_some());
+        if !do_sine && !do_tri && !do_saw && !do_sq && !do_reset && !any_sync {
             // Advance phases even when no outputs connected, so pitch stays coherent.
             self.phase_acc.advance_all();
             return;
@@ -235,41 +254,73 @@ impl Module for PolyOsc {
         let mut tri_out  = [0.0f32; 16];
         let mut saw_out  = [0.0f32; 16];
         let mut sq_out   = [0.0f32; 16];
+        let mut reset_out = [0.0f32; 16];
 
         for i in 0..16 {
-            let raw_phase = self.phase_acc.phases[i];
-            // phase_mod is in [-1, 1]; raw_phase is in [0, 1), so sum is in [-1, 2).
-            // `sum - sum.floor()` maps that range correctly to [0, 1) and vectorises
-            // (floor → frintm on aarch64 NEON), unlike rem_euclid.
-            let phase = if phase_mod_connected {
-                let sum = raw_phase + phase_mod[i].clamp(-1.0, 1.0);
-                sum - sum.floor()
+            let pm = if phase_mod_connected { phase_mod[i].clamp(-1.0, 1.0) } else { 0.0 };
+            let duty = if pw_connected {
+                (0.5 + 0.5 * pulse_widths[i]).clamp(0.01, 0.99)
             } else {
-                raw_phase
+                0.5
             };
             let dt = self.phase_acc.phase_increments[i];
 
-            if do_sine { sine_out[i] = lookup_sine(phase); }
-            if do_tri  { tri_out[i]  = 1.0 - 4.0 * (phase - 0.5).abs(); }
-            if do_saw  { saw_out[i]  = (2.0 * phase - 1.0) - polyblep(phase, dt); }
-            if do_sq {
-                let duty = if pw_connected {
-                    (0.5 + 0.5 * pulse_widths[i]).clamp(0.01, 0.99)
-                } else {
-                    0.5
-                };
-                let raw = if phase < duty { 1.0 } else { -1.0 };
-                let blep = polyblep(phase, dt) - polyblep((phase - duty).rem_euclid(1.0), dt);
-                sq_out[i] = raw + blep;
+            match sync[i] {
+                Some(frac) => {
+                    let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+                    let mut pre_raw = self.phase_acc.phases[i] + frac * dt;
+                    if pre_raw >= 1.0 { pre_raw -= 1.0; }
+                    let pre_read = { let s = pre_raw + pm; s - s.floor() };
+
+                    self.phase_acc.sync_reset(i, frac);
+                    let post_raw = self.phase_acc.phases[i];
+                    let post_read = { let s = post_raw + pm; s - s.floor() };
+
+                    if do_sine { sine_out[i] = lookup_sine(post_read); }
+                    if do_tri  { tri_out[i]  = 1.0 - 4.0 * (post_read - 0.5).abs(); }
+                    if do_saw  {
+                        let pre = 2.0 * pre_read - 1.0;
+                        let post = 2.0 * post_read - 1.0;
+                        saw_out[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+                    }
+                    if do_sq {
+                        let pre = if pre_read < duty { 1.0 } else { -1.0 };
+                        let post = if post_read < duty { 1.0 } else { -1.0 };
+                        sq_out[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+                    }
+                }
+                None => {
+                    let raw_phase = self.phase_acc.phases[i];
+                    let phase = { let s = raw_phase + pm; s - s.floor() };
+
+                    if do_sine { sine_out[i] = lookup_sine(phase); }
+                    if do_tri  { tri_out[i]  = 1.0 - 4.0 * (phase - 0.5).abs(); }
+                    if do_saw  { saw_out[i]  = (2.0 * phase - 1.0) - polyblep(phase, dt); }
+                    if do_sq {
+                        let raw = if phase < duty { 1.0 } else { -1.0 };
+                        let blep = polyblep(phase, dt) - polyblep((phase - duty).rem_euclid(1.0), dt);
+                        sq_out[i] = raw + blep;
+                    }
+
+                    // Advance this voice; record wrap frac.
+                    let next = self.phase_acc.phases[i] + dt;
+                    if next >= 1.0 {
+                        self.phase_acc.phases[i] = next - 1.0;
+                        reset_out[i] = if dt > 0.0 {
+                            (1.0 - self.phase_acc.phases[i] / dt).clamp(f32::MIN_POSITIVE, 1.0)
+                        } else { 1.0 };
+                    } else {
+                        self.phase_acc.phases[i] = next;
+                    }
+                }
             }
         }
-
-        self.phase_acc.advance_all();
 
         if do_sine { pool.write_poly(&self.out_sine,     sine_out); }
         if do_tri  { pool.write_poly(&self.out_triangle, tri_out);  }
         if do_saw  { pool.write_poly(&self.out_sawtooth, saw_out);  }
         if do_sq   { pool.write_poly(&self.out_square,   sq_out);   }
+        if do_reset { pool.write_poly(&self.out_reset,   reset_out); }
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -438,5 +489,76 @@ mod tests {
         // Voice 1 at phase 0.48 → sine near 0 (phase 0.5 is zero-crossing)
         // lookup table max error ~1e-4; 0.15 tolerance for phase slightly before 0.5
         assert_within!(0.0, last[1], 0.15_f32);
+    }
+
+    // ── reset_out / sync (0636, ADR 0047) ────────────────────────────────
+
+    #[test]
+    fn reset_out_emits_per_voice_wrap_frac() {
+        let sr = 48_000.0_f32;
+        let freq = 200.0_f32;
+        let voct = (freq / C0_FREQ).log2();
+        let mut h = ModuleHarness::build_with_env::<PolyOsc>(
+            params!["frequency" => voct],
+            env(sr, 2),
+        );
+        h.disconnect_input("fm");
+        h.disconnect_input("pulse_width_cv");
+        h.disconnect_input("phase_mod");
+        h.disconnect_input("sync");
+        let mut voct_arr = [voct; 16];
+        voct_arr[1] = voct + 1.0; // voice 1 one octave up
+        h.set_poly("voct", voct_arr);
+        let n = 400_usize;
+        let frames = h.run_poly(n, "reset_out");
+        let (mut w0, mut w1) = (0usize, 0usize);
+        for f in &frames {
+            if f[0] > 0.0 { w0 += 1; }
+            if f[1] > 0.0 { w1 += 1; }
+        }
+        assert!(w1 > w0, "voice 1 should wrap more often than voice 0; got v0={w0} v1={w1}");
+    }
+
+    #[test]
+    fn poly_sync_is_per_voice() {
+        let sr = 48_000.0_f32;
+        let freq = 200.0_f32;
+        let voct = (freq / C0_FREQ).log2();
+        let mut h = ModuleHarness::build_with_env::<PolyOsc>(
+            params!["frequency" => voct],
+            env(sr, 2),
+        );
+        h.disconnect_input("fm");
+        h.disconnect_input("pulse_width_cv");
+        h.disconnect_input("phase_mod");
+        h.set_poly("voct", [voct; 16]);
+
+        let mut sync_arr = [0.0f32; 16];
+        sync_arr[0] = 0.5;
+        h.set_poly("sync", sync_arr);
+        let _ = h.run_poly(8, "sawtooth");
+        h.set_poly("sync", sync_arr);
+        h.tick();
+        let after = h.read_poly("sawtooth");
+
+        let mut h2 = ModuleHarness::build_with_env::<PolyOsc>(
+            params!["frequency" => voct],
+            env(sr, 2),
+        );
+        h2.disconnect_input("fm");
+        h2.disconnect_input("pulse_width_cv");
+        h2.disconnect_input("phase_mod");
+        h2.set_poly("voct", [voct; 16]);
+        h2.set_poly("sync", [0.0; 16]);
+        let _ = h2.run_poly(8, "sawtooth");
+        h2.set_poly("sync", [0.0; 16]);
+        h2.tick();
+        let no_sync = h2.read_poly("sawtooth");
+
+        assert!(after[0] < 0.0, "voice 0 should be in negative saw post-sync; got {}", after[0]);
+        assert!(
+            (after[1] - no_sync[1]).abs() < 1e-5,
+            "voice 1 affected by sync[0]"
+        );
     }
 }

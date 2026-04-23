@@ -61,7 +61,7 @@ impl Module for PolyQuant {
         ModuleDescriptor::new("PolyQuant", shape.clone())
             .poly_in("in")
             .poly_out("out")
-            .poly_out("trig_out")
+            .poly_trigger_out("trig_out")
             .float_param_multi(params::pitch, n, -8.0, 8.0, 0.0)
             .float_param(params::centre, -4.0, 4.0, 0.0)
             .float_param(params::scale, -4.0, 4.0, 1.0)
@@ -102,7 +102,7 @@ impl Module for PolyQuant {
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_sig  = PolyInput::from_ports(inputs, 0);
         self.out     = PolyOutput::from_ports(outputs, 0);
-        self.trig_out = PolyOutput::from_ports(outputs, 1);
+        self.trig_out = outputs[1].expect_poly_trigger();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {

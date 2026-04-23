@@ -58,6 +58,21 @@ patch {
         curve: 0.9
     }
 
+    module sync : VPolyDco {
+        saw_gain: 0.0
+        pulse_gain: 1.0
+        triangle_gain: 1.0
+        sub_gain: 0.0
+        frequency: 200Hz
+    }
+
+    module sync_lfo : Lfo { rate: 0.05 }
+    module m2p : MonoToPoly
+    sync_lfo.triangle -> m2p.in
+    m2p.out -[1.0]-> sync.voct
+
+    dco.reset_out -> sync.sync
+
     # ── Shared modulation ──────────────────────────────────────────────────
     module lfo        : Lfo        { rate: 0.1, mode: bipolar }
     module lfo_spread : MonoToPoly
@@ -83,7 +98,7 @@ patch {
 
     # ── Highpass (gentle here, bump cutoff for thinning) ───────────────────
     module hpf : PolyHighpass { cutoff: -1.0, resonance: 0.0 }
-    dco.out -> hpf.in
+    sync.out -> hpf.in
     kbd.voct -> hpf.voct
 
     # ── VCF ────────────────────────────────────────────────────────────────

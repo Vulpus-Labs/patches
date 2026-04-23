@@ -25,8 +25,9 @@
 /// | `reson` | float | 0.3–1.0      | 0.85    | Bandpass resonance / ring |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::drum::DecayEnvelope;
@@ -59,7 +60,7 @@ pub struct Claves {
 impl Module for Claves {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Claves", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::pitch, 200.0, 5000.0, 2500.0)
@@ -113,7 +114,7 @@ impl Module for Claves {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {

@@ -1,7 +1,8 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyInput, PolyOutput, TriggerInput,
+    ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 
 /// Polyphonic sample-and-hold.
@@ -14,7 +15,7 @@ use patches_core::param_frame::ParamView;
 /// | Port | Kind | Description |
 /// |------|------|-------------|
 /// | `in` | poly | Signal to sample (per-voice) |
-/// | `trig` | mono | Trigger input (rising edge at 0.5 threshold) |
+/// | `trig` | trigger | One-sample pulse latches all voices (ADR 0047) |
 ///
 /// # Outputs
 ///
@@ -34,7 +35,7 @@ impl Module for PolySah {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("PolySah", shape.clone())
             .poly_in("in")
-            .mono_in("trig")
+            .trigger_in("trig")
             .poly_out("out")
     }
 
@@ -61,7 +62,7 @@ impl Module for PolySah {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        if self.in_trig.tick(pool) {
+        if self.in_trig.tick(pool).is_some() {
             self.held = pool.read_poly(&self.in_sig);
         }
         pool.write_poly(&self.out, self.held);

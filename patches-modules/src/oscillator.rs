@@ -4,6 +4,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
     OSCILLATOR_DRIFT_STEP,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -22,7 +23,7 @@ module_params! {
     }
 }
 
-use patches_dsp::polyblep;
+use patches_dsp::{polyblep, sync_blep_residual};
 use crate::common::approximate::lookup_sine;
 use crate::common::frequency::{C0_FREQ, FMMode, MonoFrequencyConverter, MonoFrequencyChangeTracker};
 use crate::common::phase_accumulator::MonoPhaseAccumulator;
@@ -45,6 +46,7 @@ const DRIFT_PERIOD: u8 = 64;
 /// | `fm` | mono | Frequency modulation input |
 /// | `pulse_width_cv` | mono | Pulse width modulation for the square output |
 /// | `phase_mod` | mono | Phase modulation offset applied to all waveforms |
+/// | `sync` | trigger | Sub-sample hard-sync (ADR 0047): on event at `frac`, phase resets and saw/square apply PolyBLEP scaled by pre→post jump |
 ///
 /// # Outputs
 ///
@@ -54,6 +56,7 @@ const DRIFT_PERIOD: u8 = 64;
 /// | `triangle` | mono | Triangle waveform |
 /// | `sawtooth` | mono | Sawtooth waveform (PolyBLEP anti-aliased) |
 /// | `square` | mono | Square waveform (PolyBLEP anti-aliased, PWM via `pulse_width_cv`) |
+/// | `reset_out` | trigger | Sub-sample fractional position of each phase wrap (ADR 0047) |
 ///
 /// # Parameters
 ///
@@ -73,6 +76,7 @@ pub struct Oscillator {
     in_fm: MonoInput,
     in_pulse_width: MonoInput,
     in_phase_mod: MonoInput,
+    in_sync: TriggerInput,
     /// Fixed input pointing at the engine-level global drift backplane slot.
     in_global_drift: MonoInput,
     // Output port fields
@@ -80,6 +84,7 @@ pub struct Oscillator {
     out_triangle: MonoOutput,
     out_sawtooth: MonoOutput,
     out_square: MonoOutput,
+    out_reset: MonoOutput,
     // Drift state
     /// `drift` parameter value in [0.0, 1.0]. Zero disables drift entirely.
     drift: f32,
@@ -98,10 +103,12 @@ impl Module for Oscillator {
             .mono_in("fm")
             .mono_in("pulse_width_cv")
             .mono_in("phase_mod")
+            .trigger_in("sync")
             .mono_out("sine")
             .mono_out("triangle")
             .mono_out("sawtooth")
             .mono_out("square")
+            .trigger_out("reset_out")
             .float_param(params::frequency, -4.0, 12.0, 0.0)
             .enum_param(params::fm_type, OscFmType::Linear)
             .float_param(params::drift, 0.0, 1.0, 0.0)
@@ -120,11 +127,13 @@ impl Module for Oscillator {
             in_fm: MonoInput::default(),
             in_pulse_width: MonoInput::default(),
             in_phase_mod: MonoInput::default(),
+            in_sync: TriggerInput::default(),
             in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
             out_sine: MonoOutput::default(),
             out_triangle: MonoOutput::default(),
             out_sawtooth: MonoOutput::default(),
             out_square: MonoOutput::default(),
+            out_reset: MonoOutput::default(),
             drift: 0.0,
             drift_walk: BoundedRandomWalk::new(seed, OSCILLATOR_DRIFT_STEP),
             drift_counter: 0,
@@ -160,44 +169,84 @@ impl Module for Oscillator {
         self.in_fm = inputs[1].expect_mono();
         self.in_pulse_width = inputs[2].expect_mono();
         self.in_phase_mod = inputs[3].expect_mono();
+        self.in_sync = TriggerInput::from_ports(inputs, 4);
         self.out_sine = outputs[0].expect_mono();
         self.out_triangle = outputs[1].expect_mono();
         self.out_sawtooth = outputs[2].expect_mono();
         self.out_square = outputs[3].expect_mono();
-        
+        self.out_reset = outputs[4].expect_trigger();
+
         self.freq_tracker.voct_modulating = self.in_voct.is_connected();
         self.freq_tracker.fm_modulating = self.in_fm.is_connected();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let phase = self.phase_acc.phase;
-        let read_phase = if self.in_phase_mod.is_connected() {
-            (phase + pool.read_mono(&self.in_phase_mod)).rem_euclid(1.0)
+        let sync = if self.in_sync.is_connected() { self.in_sync.tick(pool) } else { None };
+        let phase_mod = if self.in_phase_mod.is_connected() {
+            pool.read_mono(&self.in_phase_mod)
         } else {
-            phase
+            0.0
+        };
+        let duty = if self.in_pulse_width.is_connected() {
+            (0.5 + 0.5 * pool.read_mono(&self.in_pulse_width)).clamp(0.01, 0.99)
+        } else {
+            0.5
         };
 
-        if self.out_sine.is_connected() {
-            pool.write_mono(&self.out_sine, lookup_sine(read_phase));
-        }
-        if self.out_triangle.is_connected() {
-            pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (read_phase - 0.5).abs());
-        }
-        if self.out_sawtooth.is_connected() {
-            let dt = self.phase_acc.phase_increment;
-            pool.write_mono(&self.out_sawtooth, (2.0 * read_phase - 1.0) - polyblep(read_phase, dt));
-        }
-        if self.out_square.is_connected() {
-            let dt = self.phase_acc.phase_increment;
-            let duty = if self.in_pulse_width.is_connected() {
-                (0.5 + 0.5 * pool.read_mono(&self.in_pulse_width)).clamp(0.01, 0.99)
-            } else {
-                0.5
-            };
-            let raw = if read_phase < duty { 1.0 } else { -1.0 };
-            let blep = polyblep(read_phase, dt)
-                - polyblep((read_phase - duty).rem_euclid(1.0), dt);
-            pool.write_mono(&self.out_square, raw + blep);
+        let dt = self.phase_acc.phase_increment;
+        let mut wrap_frac = 0.0_f32;
+
+        if let Some(frac) = sync {
+            let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+            // Pre-sync raw phase at the event.
+            let mut pre_raw = self.phase_acc.phase + frac * dt;
+            if pre_raw >= 1.0 { pre_raw -= 1.0; }
+            let pre_read = (pre_raw + phase_mod).rem_euclid(1.0);
+
+            // Reset and advance to the remainder of the sample.
+            self.phase_acc.sync_reset(frac);
+            let post_raw = self.phase_acc.phase;
+            let post_read = (post_raw + phase_mod).rem_euclid(1.0);
+
+            if self.out_sine.is_connected() {
+                pool.write_mono(&self.out_sine, lookup_sine(post_read));
+            }
+            if self.out_triangle.is_connected() {
+                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (post_read - 0.5).abs());
+            }
+            if self.out_sawtooth.is_connected() {
+                let pre_saw = 2.0 * pre_read - 1.0;
+                let post_saw = 2.0 * post_read - 1.0;
+                let delta = pre_saw - post_saw;
+                let y = post_saw + sync_blep_residual(post_raw, dt, delta);
+                pool.write_mono(&self.out_sawtooth, y);
+            }
+            if self.out_square.is_connected() {
+                let pre_sq = if pre_read < duty { 1.0 } else { -1.0 };
+                let post_sq = if post_read < duty { 1.0 } else { -1.0 };
+                let delta = pre_sq - post_sq;
+                let y = post_sq + sync_blep_residual(post_raw, dt, delta);
+                pool.write_mono(&self.out_square, y);
+            }
+        } else {
+            let phase = self.phase_acc.phase;
+            let read_phase = (phase + phase_mod).rem_euclid(1.0);
+
+            if self.out_sine.is_connected() {
+                pool.write_mono(&self.out_sine, lookup_sine(read_phase));
+            }
+            if self.out_triangle.is_connected() {
+                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (read_phase - 0.5).abs());
+            }
+            if self.out_sawtooth.is_connected() {
+                pool.write_mono(&self.out_sawtooth, (2.0 * read_phase - 1.0) - polyblep(read_phase, dt));
+            }
+            if self.out_square.is_connected() {
+                let raw = if read_phase < duty { 1.0 } else { -1.0 };
+                let blep = polyblep(read_phase, dt)
+                    - polyblep((read_phase - duty).rem_euclid(1.0), dt);
+                pool.write_mono(&self.out_square, raw + blep);
+            }
         }
 
         // Drift: every DRIFT_PERIOD samples, advance the local walk and sample
@@ -228,7 +277,12 @@ impl Module for Oscillator {
             let freq = self.freq_tracker.base_frequency() * self.drift_voct_offset.exp2();
             self.phase_acc.set_increment(self.freq_converter.to_increment(freq));
         }
-        self.phase_acc.advance();
+        if sync.is_none() {
+            wrap_frac = self.phase_acc.advance_wrap_frac();
+        }
+        if self.out_reset.is_connected() {
+            pool.write_mono(&self.out_reset, wrap_frac);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -399,5 +453,75 @@ mod tests {
         h.tick();
         // lookup_sine(0.0) returns exactly 0.0; 1e-6 accounts for any startup variation
         assert_within!(lookup_sine(0.0), h.read_mono("sine"), 1e-6_f32);
+    }
+
+    // ── reset_out / sync (0636, ADR 0047) ────────────────────────────────
+
+    #[test]
+    fn reset_out_emits_wrap_frac() {
+        let sr = 48_000.0_f32;
+        let voct = 7.0_f32; // ~C7, a few thousand Hz → many wraps in 2000 samples
+        let mut h = ModuleHarness::build_with_env::<Oscillator>(
+            params!["frequency" => voct],
+            env(sr),
+        );
+        h.disconnect_all_inputs();
+        let n = 2000_usize;
+        let reset = h.run_mono(n, "reset_out");
+        let mut wraps = 0usize;
+        for &e in &reset {
+            if e > 0.0 {
+                assert!(e <= 1.0, "frac out of range: {e}");
+                wraps += 1;
+            }
+        }
+        assert!(wraps >= 3, "expected ≥3 wraps in {n} samples; got {wraps}");
+    }
+
+    #[test]
+    fn sync_resets_saw_to_post_advance() {
+        for &frac in &[0.001_f32, 0.5, 0.999] {
+            let sr = 48_000.0_f32;
+            let freq = 200.0_f32;
+            let voct = (freq / C0_FREQ).log2();
+            let mut h = ModuleHarness::build_with_env::<Oscillator>(
+                params!["frequency" => voct],
+                env(sr),
+            );
+            h.disconnect_all_inputs();
+            h.set_mono("sync", 0.0);
+            let _ = h.run_mono(10, "sawtooth");
+            h.set_mono("sync", frac);
+            h.tick();
+            h.set_mono("sync", 0.0);
+            let y = h.read_mono("sawtooth");
+            let dt = freq / sr;
+            let expected = 2.0 * (1.0 - frac) * dt - 1.0;
+            assert!(
+                (y - expected).abs() < 0.6,
+                "sync frac={frac}: saw {y} not near post-reset {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_all_waveforms_finite() {
+        let mut h = ModuleHarness::build_with_env::<Oscillator>(
+            params!["frequency" => 4.0_f32],
+            env(48_000.0),
+        );
+        h.disconnect_all_inputs();
+        h.set_mono("sync", 0.0);
+        h.set_mono("pulse_width_cv", 0.3);
+        let _ = h.run_mono(16, "sawtooth");
+        for i in 0..128 {
+            let frac = if i % 3 == 0 { 0.25 + (i as f32) * 0.001 } else { 0.0 };
+            h.set_mono("sync", frac.min(0.99));
+            h.tick();
+            for n in ["sine", "triangle", "sawtooth", "square"] {
+                let v = h.read_mono(n);
+                assert!(v.is_finite(), "non-finite {n} at i={i}: {v}");
+            }
+        }
     }
 }

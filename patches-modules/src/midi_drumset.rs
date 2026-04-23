@@ -114,7 +114,7 @@ impl Module for MidiDrumset {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         let mut desc = ModuleDescriptor::new("MidiDrumset", shape.clone());
         for &(_, trig_name, vel_name) in &DRUM_MAP {
-            desc = desc.mono_out(trig_name).mono_out(vel_name);
+            desc = desc.trigger_out(trig_name).mono_out(vel_name);
         }
         desc.int_param(params::channel, 0, 16, 0)
     }
@@ -150,7 +150,7 @@ impl Module for MidiDrumset {
 
     fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
         for (i, out) in self.outputs.iter_mut().enumerate() {
-            *out = MonoOutput::from_ports(outputs, i);
+            *out = if i % 2 == 0 { outputs[i].expect_trigger() } else { outputs[i].expect_mono() };
         }
     }
 

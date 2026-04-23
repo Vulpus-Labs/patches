@@ -28,8 +28,9 @@
 /// | `bursts` | int   | 1–8         | 4       | Number of noise bursts    |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, BurstGenerator};
@@ -70,7 +71,7 @@ pub struct ClapDrum {
 impl Module for ClapDrum {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Clap", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::decay, 0.05, 2.0, 0.3)
@@ -138,7 +139,7 @@ impl Module for ClapDrum {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {

@@ -34,8 +34,9 @@ use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, PeriodicUpdate, TriggerInput,
+    MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
@@ -80,7 +81,7 @@ pub struct Kick {
 impl Module for Kick {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Kick", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("voct")
             .mono_in("velocity")
             .mono_out("out")
@@ -156,7 +157,7 @@ impl Module for Kick {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {

@@ -26,8 +26,9 @@
 /// | `filter` | float | 2000–16000 Hz | 8000    | Noise highpass cutoff           |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -63,7 +64,7 @@ pub struct ClosedHiHat {
 impl Module for ClosedHiHat {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("ClosedHiHat", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::pitch, 100.0, 8000.0, 400.0)
@@ -125,7 +126,7 @@ impl Module for ClosedHiHat {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {
@@ -200,8 +201,8 @@ pub struct OpenHiHat {
 impl Module for OpenHiHat {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("OpenHiHat", shape.clone())
-            .mono_in("trigger")
-            .mono_in("choke")
+            .trigger_in("trigger")
+            .trigger_in("choke")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::pitch, 100.0, 8000.0, 400.0)
@@ -265,8 +266,8 @@ impl Module for OpenHiHat {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
-        let choke_rose = self.in_choke.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
+        let choke_rose = self.in_choke.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {

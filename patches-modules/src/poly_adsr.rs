@@ -1,8 +1,9 @@
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyGateInput, PolyOutput, PolyTriggerInput,
+    ModuleShape, OutputPort, PolyGateInput, PolyOutput,
 };
+use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -43,7 +44,7 @@ use patches_dsp::{AdsrCore, AdsrShape};
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `trigger` | poly | Rising edge starts Attack phase per voice |
+/// | `trigger` | poly_trigger | One-sample pulse starts Attack phase per voice (ADR 0047) |
 /// | `gate` | poly | Held high to sustain; release to enter Release phase per voice |
 ///
 /// # Outputs
@@ -79,7 +80,7 @@ pub struct PolyAdsr {
 impl Module for PolyAdsr {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("PolyAdsr", shape.clone())
-            .poly_in("trigger")
+            .poly_trigger_in("trigger")
             .poly_in("gate")
             .poly_out("out")
             .float_param(params::attack,  0.001, 10.0, 0.01)
@@ -133,7 +134,7 @@ impl Module for PolyAdsr {
         let mut out = [0.0f32; 16];
 
         for (i, level) in out.iter_mut().enumerate() {
-            *level = self.voices[i].tick(triggers[i], gates[i].is_high);
+            *level = self.voices[i].tick(triggers[i].is_some(), gates[i].is_high);
         }
 
         pool.write_poly(&self.out_env, out);

@@ -28,8 +28,9 @@
 /// | `shimmer` | float | 0.0–1.0       | 0.2     | Partial frequency modulation depth |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, TriggerInput,
+    ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::drum::{DecayEnvelope, MetallicTone};
@@ -70,7 +71,7 @@ pub struct Cymbal {
 impl Module for Cymbal {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Cymbal", shape.clone())
-            .mono_in("trigger")
+            .trigger_in("trigger")
             .mono_in("velocity")
             .mono_out("out")
             .float_param(params::pitch, 200.0, 10000.0, 600.0)
@@ -142,7 +143,7 @@ impl Module for Cymbal {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let trigger_rose = self.in_trigger.tick(pool);
+        let trigger_rose = self.in_trigger.tick(pool).is_some();
 
         if trigger_rose {
             self.latched_velocity = if self.in_velocity.connected {
