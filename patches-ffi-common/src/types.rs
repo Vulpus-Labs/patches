@@ -128,8 +128,6 @@ impl From<FfiModuleShape> for patches_core::ModuleShape {
 /// Tag values for port kind discrimination across the C ABI.
 pub const PORT_TAG_MONO: u8 = 0;
 pub const PORT_TAG_POLY: u8 = 1;
-pub const PORT_TAG_TRIGGER: u8 = 2;
-pub const PORT_TAG_POLY_TRIGGER: u8 = 3;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -155,18 +153,6 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: p.scale,
                 connected: p.connected as u8,
             },
-            patches_core::InputPort::Trigger(m) => Self {
-                tag: PORT_TAG_TRIGGER,
-                cable_idx: m.cable_idx,
-                scale: m.scale,
-                connected: m.connected as u8,
-            },
-            patches_core::InputPort::PolyTrigger(p) => Self {
-                tag: PORT_TAG_POLY_TRIGGER,
-                cable_idx: p.cable_idx,
-                scale: p.scale,
-                connected: p.connected as u8,
-            },
         }
     }
 }
@@ -185,8 +171,6 @@ impl From<FfiInputPort> for patches_core::InputPort {
         };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::InputPort::Poly(poly),
-            PORT_TAG_TRIGGER => patches_core::InputPort::Trigger(mono),
-            PORT_TAG_POLY_TRIGGER => patches_core::InputPort::PolyTrigger(poly),
             _ => patches_core::InputPort::Mono(mono),
         }
     }
@@ -213,16 +197,6 @@ impl From<&patches_core::OutputPort> for FfiOutputPort {
                 cable_idx: p.cable_idx,
                 connected: p.connected as u8,
             },
-            patches_core::OutputPort::Trigger(m) => Self {
-                tag: PORT_TAG_TRIGGER,
-                cable_idx: m.cable_idx,
-                connected: m.connected as u8,
-            },
-            patches_core::OutputPort::PolyTrigger(p) => Self {
-                tag: PORT_TAG_POLY_TRIGGER,
-                cable_idx: p.cable_idx,
-                connected: p.connected as u8,
-            },
         }
     }
 }
@@ -239,8 +213,6 @@ impl From<FfiOutputPort> for patches_core::OutputPort {
         };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::OutputPort::Poly(poly),
-            PORT_TAG_TRIGGER => patches_core::OutputPort::Trigger(mono),
-            PORT_TAG_POLY_TRIGGER => patches_core::OutputPort::PolyTrigger(poly),
             _ => patches_core::OutputPort::Mono(mono),
         }
     }

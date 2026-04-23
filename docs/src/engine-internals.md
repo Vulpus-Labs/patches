@@ -153,3 +153,33 @@ pub trait PeriodicUpdate {
 ```
 
 Modules that implement this trait (and return `Some(self)` from `as_periodic()`) have their `periodic_update` method called every N samples (a configurable interval, typically a few dozen samples). This is where they read their CV inputs and update filter coefficients, frequency targets, or other derived state. The processing in `process` then uses these precomputed values, keeping the per-sample path fast.
+
+## Observability
+
+Each runtime's FFI data plane carries a small set of counters that a
+non-real-time observer can sample at any time. They are updated with
+`Relaxed` atomics on the hot paths — no allocation, no blocking, safe
+from the audio thread — and exposed via `RuntimeArcTables::snapshot()`
+(control side) or `RuntimeAudioHandles::snapshot()` (audio side).
+
+`RuntimeCountersSnapshot` contains:
+
+- `float_buffers.capacity` — current `ArcTable<[f32]>` slot capacity.
+- `float_buffers.high_watermark` — peak live-id count seen since
+  runtime start (monotonic).
+- `float_buffers.growth_events` — number of `ArcTable` grow
+  operations (chunk appends + index retire).
+- `float_buffers.releases_queued` — cumulative count of ids pushed
+  onto the audio→control release ring.
+- `float_buffers.releases_drained` — cumulative count drained on the
+  control thread.
+- `float_buffers.pending_release_depth()` — derived queue depth
+  (`queued - drained`), eventually consistent.
+- `param_frames_dispatched` — cumulative count of `ParamFrame`
+  deliveries. The dispatcher increments this via
+  `RuntimeAudioHandles::note_param_frame_dispatched()`.
+
+These are the observability surface referenced by ADR 0043 (cable tap
+/ observation). The attach API that routes counters to a UI or
+logging sink is still deferred; until then, tests and soak runs read
+them directly through the snapshot accessors.

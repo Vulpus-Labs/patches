@@ -202,7 +202,7 @@ mod tests {
 
     use super::*;
     use super::super::PlanError;
-    use patches_core::cables::{CableKind, PolyLayout};
+    use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
     use patches_core::modules::{ModuleDescriptor, ModuleShape, PortDescriptor};
     use patches_core::parameter_map::ParameterMap;
     use patches_core::ModuleGraph;
@@ -212,13 +212,13 @@ mod tests {
             module_name: "Src",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         };
         let dst_desc = ModuleDescriptor {
             module_name: "Dst",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![],
             parameters: vec![],
         };
@@ -235,12 +235,12 @@ mod tests {
             module_name: "Test",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![
-                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![
-                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "out", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "out", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![],
         }
@@ -281,8 +281,8 @@ mod tests {
             module_name: "Dst2",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![
-                PortDescriptor { name: "x", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "y", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "x", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "y", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![],
             parameters: vec![],

@@ -92,8 +92,18 @@ fn write_port_descriptor(out: &mut String, port: &PortDescriptor) {
     match port.kind {
         CableKind::Mono => write_string(out, "mono"),
         CableKind::Poly => write_string(out, "poly"),
-        CableKind::Trigger => write_string(out, "trigger"),
-        CableKind::PolyTrigger => write_string(out, "poly_trigger"),
+    }
+    out.push_str(",\"mono_layout\":");
+    match port.mono_layout {
+        patches_core::MonoLayout::Audio => write_string(out, "audio"),
+        patches_core::MonoLayout::Trigger => write_string(out, "trigger"),
+    }
+    out.push_str(",\"poly_layout\":");
+    match port.poly_layout {
+        patches_core::PolyLayout::Audio => write_string(out, "audio"),
+        patches_core::PolyLayout::Trigger => write_string(out, "trigger"),
+        patches_core::PolyLayout::Transport => write_string(out, "transport"),
+        patches_core::PolyLayout::Midi => write_string(out, "midi"),
     }
     out.push('}');
 }

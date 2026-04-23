@@ -1,6 +1,32 @@
 use super::ports::{InputPort, OutputPort};
 use super::{CableValue, MONO_READ_SINK, MONO_WRITE_SINK};
 
+/// The structured semantics of a mono cable's per-sample `f32`.
+///
+/// Mono cables default to `Audio` (audio-rate sample / CV). A `Trigger` layout
+/// tags the cable as carrying sub-sample event encodings (ADR 0047):
+/// `0.0` means "no event on this sample" and a value in `(0.0, 1.0]` is the
+/// fractional sub-sample position of an event.
+///
+/// Layouts must match exactly: an `Audio` output cannot connect to a `Trigger`
+/// input or vice versa. Enforced at graph-connection time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonoLayout {
+    /// Audio-rate sample or CV value.
+    Audio,
+    /// Sub-sample trigger event encoding (ADR 0047).
+    Trigger,
+}
+
+impl MonoLayout {
+    /// Returns `true` if `self` and `other` are compatible for connection.
+    ///
+    /// Layouts must match exactly.
+    pub fn compatible_with(self, other: MonoLayout) -> bool {
+        self == other
+    }
+}
+
 /// A mono input port. `cable_idx` indexes the shared cable pool; `scale` is
 /// applied on read; `connected` tracks whether a cable is attached.
 #[derive(Clone, Copy, Debug, PartialEq)]

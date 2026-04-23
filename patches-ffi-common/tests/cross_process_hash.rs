@@ -54,7 +54,7 @@ fn descriptor_hash_stable_repeated_in_process() {
 
 #[test]
 fn descriptor_hash_changes_on_port_rename() {
-    use patches_core::cables::{CableKind, PolyLayout};
+    use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
     use patches_core::PortDescriptor;
 
     let mut base = probe_descriptor();
@@ -64,6 +64,7 @@ fn descriptor_hash_changes_on_port_rename() {
         name: "in",
         index: 0,
         kind: CableKind::Mono,
+        mono_layout: MonoLayout::Audio,
         poly_layout: PolyLayout::Audio,
     });
     let added_port_hash = descriptor_hash(&base);

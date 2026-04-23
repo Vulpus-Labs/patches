@@ -92,7 +92,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     let outputs = vec![
         OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 1, connected: true }),
         OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 2, connected: true }),
-        OutputPort::Trigger(MonoOutput { cable_idx: trigger_slot, connected: true }),
+        OutputPort::Mono(MonoOutput { cable_idx: trigger_slot, connected: true }),
         OutputPort::Mono(MonoOutput { cable_idx: gate_slot, connected: true }),
     ];
     player.set_ports(&inputs, &outputs);

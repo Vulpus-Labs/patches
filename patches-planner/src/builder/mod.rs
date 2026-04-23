@@ -433,8 +433,6 @@ impl PatchBuilder {
                     match port_desc.kind {
                         CableKind::Mono => InputPort::Mono(MonoInput { cable_idx: buf_idx, scale, connected }),
                         CableKind::Poly => InputPort::Poly(PolyInput { cable_idx: buf_idx, scale, connected }),
-                        CableKind::Trigger => InputPort::Trigger(MonoInput { cable_idx: buf_idx, scale, connected }),
-                        CableKind::PolyTrigger => InputPort::PolyTrigger(PolyInput { cable_idx: buf_idx, scale, connected }),
                     }
                 })
                 .collect();
@@ -453,13 +451,6 @@ impl PatchBuilder {
                                 to_zero_poly.push(buf_idx);
                             }
                             OutputPort::Poly(PolyOutput { cable_idx: buf_idx, connected })
-                        }
-                        CableKind::Trigger => OutputPort::Trigger(MonoOutput { cable_idx: buf_idx, connected }),
-                        CableKind::PolyTrigger => {
-                            if to_zero_set.contains(&buf_idx) {
-                                to_zero_poly.push(buf_idx);
-                            }
-                            OutputPort::PolyTrigger(PolyOutput { cable_idx: buf_idx, connected })
                         }
                     }
                 })

@@ -120,17 +120,21 @@ pub(crate) fn find_port_cable_class(
         .outputs
         .iter()
         .find(|p| p.name == port_name && p.index == idx)?;
-    Some(cable_class(port.kind.clone(), port.poly_layout))
+    Some(cable_class(port.kind.clone(), port.mono_layout, port.poly_layout))
 }
 
-fn cable_class(kind: patches_core::cables::CableKind, layout: patches_core::cables::PolyLayout) -> &'static str {
-    use patches_core::cables::{CableKind, PolyLayout};
-    match (kind, layout) {
-        (CableKind::Mono, _) => "cable-mono",
-        (CableKind::Poly, PolyLayout::Audio) => "cable-poly-audio",
-        (CableKind::Poly, PolyLayout::Transport) => "cable-poly-transport",
-        (CableKind::Poly, PolyLayout::Midi) => "cable-poly-midi",
-        (CableKind::Trigger, _) => "cable-trigger",
-        (CableKind::PolyTrigger, _) => "cable-poly-trigger",
+fn cable_class(
+    kind: patches_core::cables::CableKind,
+    mono_layout: patches_core::cables::MonoLayout,
+    poly_layout: patches_core::cables::PolyLayout,
+) -> &'static str {
+    use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
+    match (kind, mono_layout, poly_layout) {
+        (CableKind::Mono, MonoLayout::Trigger, _) => "cable-trigger",
+        (CableKind::Mono, MonoLayout::Audio, _) => "cable-mono",
+        (CableKind::Poly, _, PolyLayout::Trigger) => "cable-poly-trigger",
+        (CableKind::Poly, _, PolyLayout::Transport) => "cable-poly-transport",
+        (CableKind::Poly, _, PolyLayout::Midi) => "cable-poly-midi",
+        (CableKind::Poly, _, PolyLayout::Audio) => "cable-poly-audio",
     }
 }

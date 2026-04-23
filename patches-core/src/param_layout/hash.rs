@@ -14,7 +14,7 @@ use crate::modules::module_descriptor::{
     ModuleDescriptor, ParameterDescriptor, ParameterKind, PortDescriptor,
 };
 
-use super::{param_kind_tag, port_kind_tag};
+use super::{mono_layout_tag, param_kind_tag, poly_layout_tag, port_kind_tag};
 
 const FNV_OFFSET_64: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME_64: u64 = 0x0000_0100_0000_01b3;
@@ -116,5 +116,7 @@ fn encode_ports(h: &mut Fnv1a64, ports: &[PortDescriptor]) {
         h.write_str(p.name);
         h.write_u32(p.index as u32);
         h.write_u8(port_kind_tag(&p.kind));
+        h.write_u8(mono_layout_tag(p.mono_layout));
+        h.write_u8(poly_layout_tag(p.poly_layout));
     }
 }

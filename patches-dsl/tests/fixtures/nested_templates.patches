@@ -32,7 +32,7 @@ template filtered_voice(attack: float = 0.01, sustain: float = 0.7, cutoff: floa
 }
 
 patch {
-    module seq   : MidiIn
+    module seq   : MidiToCv
     module fv    : filtered_voice(attack: 0.02, cutoff: 6.2)
     module out   : AudioOut
 

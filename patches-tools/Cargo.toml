@@ -1,0 +1,21 @@
+[package]
+name = "patches-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "patches-check"
+path = "src/bin/patches-check.rs"
+
+[[bin]]
+name = "patches-manifest"
+path = "src/bin/patches-manifest.rs"
+
+[dependencies]
+patches-core        = { path = "../patches-core" }
+patches-host        = { path = "../patches-host" }
+patches-modules     = { path = "../patches-modules" }
+patches-registry    = { path = "../patches-registry" }
+patches-diagnostics = { path = "../patches-diagnostics" }
+patches-ffi         = { path = "../patches-ffi" }

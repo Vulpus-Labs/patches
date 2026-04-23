@@ -204,13 +204,6 @@ fn poly_sub_trigger_per_voice() {
 fn cable_kind_helpers() {
     assert!(!CableKind::Mono.is_poly());
     assert!(CableKind::Poly.is_poly());
-    assert!(!CableKind::Trigger.is_poly());
-    assert!(CableKind::PolyTrigger.is_poly());
-
-    assert!(!CableKind::Mono.is_trigger());
-    assert!(!CableKind::Poly.is_trigger());
-    assert!(CableKind::Trigger.is_trigger());
-    assert!(CableKind::PolyTrigger.is_trigger());
 }
 
 // ── PolyGateInput ────────────────────────────────────────────────────

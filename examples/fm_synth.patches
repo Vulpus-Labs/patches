@@ -1,5 +1,5 @@
 patch {
-    module kbd : PolyMidiIn
+    module kbd : PolyMidiToCv
     module vol_adsr : PolyAdsr
     module mod_adsr : PolyAdsr { attack: 0.005, decay: 0.5, sustain: 0.0, release: 0.1 }
     module osc_a : PolyOsc { fm_type: "linear" }

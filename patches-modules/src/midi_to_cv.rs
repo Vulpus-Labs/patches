@@ -3,6 +3,13 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
 use patches_core::param_frame::ParamView;
+use patches_core::module_params;
+
+module_params! {
+    MidiToCv {
+        legato: Bool,
+    }
+}
 
 /// Semitones per octave, used to convert MIDI note numbers to V/oct.
 const VOCT_SCALING: f32 = 1.0 / 12.0;
@@ -75,7 +82,14 @@ impl NoteStack {
 /// | `mod` | mono | CC 1 (mod wheel) normalised to \[0.0, 1.0\] |
 /// | `pitch` | mono | Pitchbend normalised to \[-1.0, 1.0\] |
 /// | `velocity` | mono | Last note-on velocity normalised to \[0.0, 1.0\] |
-pub struct MonoMidiIn {
+/// | `slur` | mono | 1.0 while more than one note is physically held, else 0.0 |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `legato` | bool | — | `false` | When true, suppress `trigger` on note-on if another note is still held |
+pub struct MidiToCv {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     /// Debounced MIDI input from the GLOBAL_MIDI backplane slot.
@@ -96,6 +110,9 @@ pub struct MonoMidiIn {
     pitch_value: f32,
     /// Last note-on velocity normalised to [0.0, 1.0].
     velocity: f32,
+    /// When true, a note-on whose press finds another note already held
+    /// does not arm `trigger_armed`.
+    legato: bool,
     // Output port fields
     out_v_oct: MonoOutput,
     out_trigger: MonoOutput,
@@ -103,16 +120,21 @@ pub struct MonoMidiIn {
     out_mod: MonoOutput,
     out_pitch: MonoOutput,
     out_velocity: MonoOutput,
+    out_slur: MonoOutput,
 }
 
-impl MonoMidiIn {
+impl MidiToCv {
     /// Process a single MIDI message through the note stack and controller state.
     fn handle_midi_message(&mut self, msg: MidiMessage) {
         match msg {
             MidiMessage::NoteOn { note, velocity, .. } => {
+                let other_held = !self.stack.is_empty()
+                    && !(self.stack.count == 1 && self.stack.notes[0] == note);
                 self.stack.push(note);
                 self.current_note = note;
-                self.trigger_armed = true;
+                if !(self.legato && other_held) {
+                    self.trigger_armed = true;
+                }
                 self.velocity = velocity as f32 / 127.0;
             }
             MidiMessage::NoteOff { note, .. } => {
@@ -135,15 +157,18 @@ impl MonoMidiIn {
     }
 }
 
-impl Module for MonoMidiIn {
+impl Module for MidiToCv {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiIn", shape.clone())
+        ModuleDescriptor::new("MidiToCv", shape.clone())
+            .midi_in("midi")
             .mono_out("voct")
             .trigger_out("trigger")
             .mono_out("gate")
             .mono_out("mod")
             .mono_out("pitch")
             .mono_out("velocity")
+            .mono_out("slur")
+            .bool_param(params::legato, false)
     }
 
     fn prepare(
@@ -162,16 +187,20 @@ impl Module for MonoMidiIn {
             mod_value: 0.0,
             pitch_value: 0.0,
             velocity: 0.0,
+            legato: false,
             out_v_oct: MonoOutput::default(),
             out_trigger: MonoOutput::default(),
             out_gate: MonoOutput::default(),
             out_mod: MonoOutput::default(),
             out_pitch: MonoOutput::default(),
             out_velocity: MonoOutput::default(),
+            out_slur: MonoOutput::default(),
         }
     }
 
-    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
+    fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
+        self.legato = p.get(params::legato);
+    }
 
     fn descriptor(&self) -> &ModuleDescriptor {
         &self.descriptor
@@ -181,13 +210,15 @@ impl Module for MonoMidiIn {
         self.instance_id
     }
 
-    fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
+    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+        self.midi_in = MidiInput::from_port(&inputs[0]);
         self.out_v_oct = MonoOutput::from_ports(outputs, 0);
         self.out_trigger = outputs[1].expect_trigger();
         self.out_gate = MonoOutput::from_ports(outputs, 2);
         self.out_mod = MonoOutput::from_ports(outputs, 3);
         self.out_pitch = MonoOutput::from_ports(outputs, 4);
         self.out_velocity = MonoOutput::from_ports(outputs, 5);
+        self.out_slur = MonoOutput::from_ports(outputs, 6);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -211,6 +242,9 @@ impl Module for MonoMidiIn {
         pool.write_mono(&self.out_mod, self.mod_value);
         pool.write_mono(&self.out_pitch, self.pitch_value);
         pool.write_mono(&self.out_velocity, self.velocity);
+
+        let slur_val = if self.stack.count > 1 { 1.0 } else { 0.0 };
+        pool.write_mono(&self.out_slur, slur_val);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -223,10 +257,18 @@ impl Module for MonoMidiIn {
 mod tests {
     use super::*;
     use patches_core::MidiEvent;
-    use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, cc, send_midi};
+    use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, cc, send_midi, params};
 
     fn make_keyboard() -> ModuleHarness {
-        ModuleHarness::build::<MonoMidiIn>(&[])
+        let mut h = ModuleHarness::build::<MidiToCv>(&[]);
+        h.disconnect_input("midi");
+        h
+    }
+
+    fn make_keyboard_legato() -> ModuleHarness {
+        let mut h = ModuleHarness::build::<MidiToCv>(&params!["legato" => true][..]);
+        h.disconnect_input("midi");
+        h
     }
 
     fn pitch_bend(raw: u16) -> MidiEvent {
@@ -292,17 +334,19 @@ mod tests {
     // ── Module behaviour tests ───────────────────────────────────────────────
 
     #[test]
-    fn descriptor_has_six_outputs_no_inputs() {
+    fn descriptor_has_seven_outputs_one_midi_input() {
         let h = make_keyboard();
         let d = h.descriptor();
-        assert_eq!(d.inputs.len(), 0);
-        assert_eq!(d.outputs.len(), 6);
+        assert_eq!(d.inputs.len(), 1);
+        assert_eq!(d.inputs[0].name, "midi");
+        assert_eq!(d.outputs.len(), 7);
         assert_eq!(d.outputs[0].name, "voct");
         assert_eq!(d.outputs[1].name, "trigger");
         assert_eq!(d.outputs[2].name, "gate");
         assert_eq!(d.outputs[3].name, "mod");
         assert_eq!(d.outputs[4].name, "pitch");
         assert_eq!(d.outputs[5].name, "velocity");
+        assert_eq!(d.outputs[6].name, "slur");
     }
 
     #[test]
@@ -464,6 +508,54 @@ mod tests {
         send_midi(&mut h, &[note_off(60)]);
         h.tick();
         assert_within!(100.0 / 127.0, h.read_mono("velocity"), 1e-6_f32);
+    }
+
+    #[test]
+    fn slur_high_when_more_than_one_note_held() {
+        let mut h = make_keyboard();
+        send_midi(&mut h, &[note_on(60, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("slur"), 0.0);
+        send_midi(&mut h, &[note_on(64, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("slur"), 1.0);
+        send_midi(&mut h, &[note_off(64)]);
+        h.tick();
+        assert_eq!(h.read_mono("slur"), 0.0);
+    }
+
+    #[test]
+    fn legato_suppresses_trigger_on_overlap() {
+        let mut h = make_keyboard_legato();
+        send_midi(&mut h, &[note_on(60, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("trigger"), 1.0, "first note should still trigger");
+        send_midi(&mut h, &[note_on(64, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("trigger"), 0.0, "legato note should not trigger");
+        assert_eq!(h.read_mono("voct"), 64.0 * VOCT_SCALING);
+    }
+
+    #[test]
+    fn legato_triggers_when_previous_note_released() {
+        let mut h = make_keyboard_legato();
+        send_midi(&mut h, &[note_on(60, 100)]);
+        h.tick();
+        send_midi(&mut h, &[note_off(60)]);
+        h.tick();
+        send_midi(&mut h, &[note_on(64, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("trigger"), 1.0);
+    }
+
+    #[test]
+    fn legato_off_triggers_every_note_on() {
+        let mut h = make_keyboard();
+        send_midi(&mut h, &[note_on(60, 100)]);
+        h.tick();
+        send_midi(&mut h, &[note_on(64, 100)]);
+        h.tick();
+        assert_eq!(h.read_mono("trigger"), 1.0);
     }
 
     #[test]

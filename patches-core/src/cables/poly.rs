@@ -14,6 +14,8 @@ use super::{CableValue, POLY_READ_SINK, POLY_WRITE_SINK};
 pub enum PolyLayout {
     /// Untyped 16-channel audio/CV (default).
     Audio,
+    /// Per-voice sub-sample trigger encoding (ADR 0047).
+    Trigger,
     /// Host transport frame (lane layout defined by [`TransportFrame`](crate::TransportFrame)).
     Transport,
     /// Packed MIDI events (lane layout defined by [`MidiFrame`](crate::MidiFrame)).

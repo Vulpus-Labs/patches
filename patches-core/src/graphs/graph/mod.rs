@@ -78,6 +78,16 @@ pub enum GraphError {
         to_port: String,
         to_layout: PolyLayout,
     },
+    /// Both ports are mono but carry incompatible layouts (e.g. an `Audio`
+    /// output wired to a `Trigger` input). See ADR 0047.
+    MonoLayoutMismatch {
+        from_node: NodeId,
+        from_port: String,
+        from_layout: crate::cables::MonoLayout,
+        to_node: NodeId,
+        to_port: String,
+        to_layout: crate::cables::MonoLayout,
+    },
 }
 
 impl fmt::Display for GraphError {
@@ -108,6 +118,16 @@ impl fmt::Display for GraphError {
                 )
             }
             GraphError::PolyLayoutMismatch {
+                from_node, from_port, from_layout,
+                to_node, to_port, to_layout,
+            } => {
+                write!(
+                    f,
+                    "cannot connect {from_layout:?} output {from_port:?} on {:?} to {to_layout:?} input {to_port:?} on {:?}",
+                    from_node, to_node,
+                )
+            }
+            GraphError::MonoLayoutMismatch {
                 from_node, from_port, from_layout,
                 to_node, to_port, to_layout,
             } => {
@@ -214,8 +234,8 @@ impl ModuleGraph {
             return Err(GraphError::ScaleOutOfRange(scale));
         }
 
-        // Validate source node and output port; capture its CableKind and PolyLayout.
-        let (output_kind, output_layout) = {
+        // Validate source node and output port; capture its CableKind and layouts.
+        let (output_kind, output_mono_layout, output_poly_layout) = {
             let from_node = self
                 .nodes
                 .get(from)
@@ -225,7 +245,7 @@ impl ModuleGraph {
                 .outputs
                 .iter()
                 .find(|p| p.name == output.name && p.index == output.index)
-                .map(|p| (p.kind.clone(), p.poly_layout))
+                .map(|p| (p.kind.clone(), p.mono_layout, p.poly_layout))
                 .ok_or_else(|| GraphError::OutputPortNotFound {
                     node: from.clone(),
                     port: format!("{}/{}", output.name, output.index),
@@ -235,8 +255,8 @@ impl ModuleGraph {
                 })?
         };
 
-        // Validate destination node and input port; capture its CableKind and PolyLayout.
-        let (input_kind, input_layout) = {
+        // Validate destination node and input port; capture its CableKind and layouts.
+        let (input_kind, input_mono_layout, input_poly_layout) = {
             let to_node = self
                 .nodes
                 .get(to)
@@ -246,7 +266,7 @@ impl ModuleGraph {
                 .inputs
                 .iter()
                 .find(|p| p.name == input.name && p.index == input.index)
-                .map(|p| (p.kind.clone(), p.poly_layout))
+                .map(|p| (p.kind.clone(), p.mono_layout, p.poly_layout))
                 .ok_or_else(|| GraphError::InputPortNotFound {
                     node: to.clone(),
                     port: format!("{}/{}", input.name, input.index),
@@ -257,29 +277,34 @@ impl ModuleGraph {
         };
 
         // Reject connections that cross cable arities.
-        let kinds_match = matches!(
-            (&output_kind, &input_kind),
-            (CableKind::Mono, CableKind::Mono)
-                | (CableKind::Poly, CableKind::Poly)
-                | (CableKind::Trigger, CableKind::Trigger)
-                | (CableKind::PolyTrigger, CableKind::PolyTrigger)
-        );
-        if !kinds_match {
+        if output_kind != input_kind {
             return Err(GraphError::CableKindMismatch {
                 from_port: format!("{}/{}", output.name, output.index),
                 to_port: format!("{}/{}", input.name, input.index),
             });
         }
 
-        // Reject poly connections with incompatible structured layouts (ADR 0033).
-        if output_kind == CableKind::Poly && !output_layout.compatible_with(input_layout) {
+        // Reject poly connections with incompatible structured layouts (ADR 0033 / ADR 0047).
+        if output_kind == CableKind::Poly && !output_poly_layout.compatible_with(input_poly_layout) {
             return Err(GraphError::PolyLayoutMismatch {
                 from_node: from.clone(),
                 from_port: format!("{}/{}", output.name, output.index),
-                from_layout: output_layout,
+                from_layout: output_poly_layout,
                 to_node: to.clone(),
                 to_port: format!("{}/{}", input.name, input.index),
-                to_layout: input_layout,
+                to_layout: input_poly_layout,
+            });
+        }
+
+        // Reject mono connections with incompatible layouts (ADR 0047).
+        if output_kind == CableKind::Mono && !output_mono_layout.compatible_with(input_mono_layout) {
+            return Err(GraphError::MonoLayoutMismatch {
+                from_node: from.clone(),
+                from_port: format!("{}/{}", output.name, output.index),
+                from_layout: output_mono_layout,
+                to_node: to.clone(),
+                to_port: format!("{}/{}", input.name, input.index),
+                to_layout: input_mono_layout,
             });
         }
 

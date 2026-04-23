@@ -6,11 +6,14 @@ pub mod audio_out;
 pub mod clock;
 pub mod filter;
 pub mod midi_cc;
-pub mod midi_in;
+pub mod midi_to_cv;
+pub mod midi_source;
+pub mod midi_split;
+pub mod midi_transpose;
 pub mod oscillator;
 pub mod poly_adsr;
 pub mod poly_filter;
-pub mod poly_midi_in;
+pub mod poly_midi_to_cv;
 pub mod poly_sum;
 pub mod poly_osc;
 pub mod poly_to_mono;
@@ -19,6 +22,7 @@ pub mod sum;
 pub mod vca;
 pub mod glide;
 pub mod lfo;
+pub mod poly_lfo;
 pub mod tuner;
 pub mod common;
 pub mod noise;
@@ -69,10 +73,13 @@ pub use poly_filter::PolyResonantHighpass;
 pub use poly_filter::PolyResonantBandpass;
 pub use mono_to_poly::MonoToPoly;
 pub use midi_cc::MidiCc;
-pub use midi_in::MonoMidiIn;
+pub use midi_to_cv::MidiToCv;
+pub use midi_source::MidiIn;
+pub use midi_split::MidiSplit;
+pub use midi_transpose::MidiTranspose;
 pub use oscillator::Oscillator;
 pub use poly_adsr::PolyAdsr;
-pub use poly_midi_in::PolyMidiIn;
+pub use poly_midi_to_cv::PolyMidiToCv;
 pub use poly_sum::PolySum;
 pub use poly_osc::PolyOsc;
 pub use poly_to_mono::PolyToMono;
@@ -81,6 +88,7 @@ pub use sum::Sum;
 pub use vca::Vca;
 pub use glide::Glide;
 pub use lfo::Lfo;
+pub use poly_lfo::PolyLfo;
 pub use tuner::Tuner;
 pub use poly_tuner::PolyTuner;
 pub use noise::{Noise, PolyNoise};
@@ -128,6 +136,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<Clock>();
     r.register::<Glide>();
     r.register::<Lfo>();
+    r.register::<PolyLfo>();
     r.register::<ResonantLowpass>();
     r.register::<ResonantHighpass>();
     r.register::<ResonantBandpass>();
@@ -137,8 +146,11 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<Tuner>();
     r.register::<PolyTuner>();
     r.register::<MidiCc>();
-    r.register::<MonoMidiIn>();
-    r.register::<PolyMidiIn>();
+    r.register::<MidiToCv>();
+    r.register::<PolyMidiToCv>();
+    r.register::<MidiIn>();
+    r.register::<MidiSplit>();
+    r.register::<MidiTranspose>();
     r.register::<PolyOsc>();
     r.register::<PolyAdsr>();
     r.register::<PolyVca>();
@@ -214,13 +226,14 @@ mod tests {
             "Clock",
             "Glide",
             "Lfo",
+            "PolyLfo",
             "Lowpass",
             "Highpass",
             "Bandpass",
             "Tuner",
             "PolyTuner",
-            "MidiIn",
-            "PolyMidiIn",
+            "MidiToCv",
+            "PolyMidiToCv",
             "PolyOsc",
             "PolyAdsr",
             "PolyVca",
@@ -261,6 +274,8 @@ mod tests {
             "Claves",
             "Cymbal",
             "MidiDrumset",
+            "MidiSplit",
+            "MidiTranspose",
             "Bitcrusher",
             "Drive",
             "TransientShaper",

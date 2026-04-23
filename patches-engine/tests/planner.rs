@@ -7,7 +7,7 @@
 
 use patches_core::{
     AudioEnvironment, CableKind, CableValue, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, PolyLayout, PortDescriptor, PortRef,
+    ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PortRef,
 };
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{ModulePool, ReadyState, StaleState};
@@ -47,7 +47,7 @@ impl Module for Counter {
             module_name: "Counter",
             shape: shape.clone(),
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             parameters: vec![],
         }
     }

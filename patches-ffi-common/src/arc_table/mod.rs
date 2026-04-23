@@ -5,11 +5,18 @@
 //! the per-runtime typed container exposed to the rest of the
 //! system.
 
+mod counters;
 mod refcount;
 mod soak_tests;
 mod table;
 
+#[cfg(test)]
+mod fuzz_tests;
+
 pub mod runtime;
 
-pub use runtime::{RuntimeArcTables, RuntimeArcTablesConfig, RuntimeAudioHandles};
+pub use counters::ArcTableCountersSnapshot;
+pub use runtime::{
+    RuntimeArcTables, RuntimeArcTablesConfig, RuntimeAudioHandles, RuntimeCountersSnapshot,
+};
 pub use table::{ArcTable, ArcTableAudio, ArcTableControl, ArcTableError};

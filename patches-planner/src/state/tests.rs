@@ -1,5 +1,5 @@
 use super::*;
-use patches_core::cables::{CableKind, PolyLayout};
+use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
 use patches_core::modules::{InstanceId, ModuleDescriptor, ParameterDescriptor, ParameterKind, ParameterValue, PortDescriptor, PortRef};
 use patches_core::ModuleGraph;
 
@@ -12,7 +12,7 @@ fn osc_desc() -> ModuleDescriptor {
         module_name: "Oscillator",
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: vec![],
-        outputs: vec![PortDescriptor { name: "sine", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+        outputs: vec![PortDescriptor { name: "sine", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
         parameters: vec![],
     }
 }
@@ -22,8 +22,8 @@ fn sink_desc() -> ModuleDescriptor {
         module_name: "AudioOut",
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: vec![
-            PortDescriptor { name: "left", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-            PortDescriptor { name: "right", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "left", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "right", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
         ],
         outputs: vec![],
         parameters: vec![],
@@ -34,8 +34,8 @@ fn multi_in_desc(module_name: &'static str, in_count: usize, shape: ModuleShape)
     ModuleDescriptor {
         module_name,
         shape,
-        inputs: (0..in_count).map(|i| PortDescriptor { name: "in", index: i, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }).collect(),
-        outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+        inputs: (0..in_count).map(|i| PortDescriptor { name: "in", index: i, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }).collect(),
+        outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
         parameters: vec![],
     }
 }
@@ -309,8 +309,8 @@ fn gain_desc() -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "Gain",
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
-        inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
-        outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+        inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
+        outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
         parameters: vec![ParameterDescriptor {
             name: "gain",
             index: 0,

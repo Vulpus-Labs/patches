@@ -1,7 +1,8 @@
 use crate::cable_pool::CablePool;
-use crate::cables::{PolyInput, PolyOutput};
+use crate::cables::{InputPort, OutputPort, PolyInput, PolyOutput};
 use crate::frames::MidiFrame;
 use crate::midi::MidiEvent;
+use crate::GLOBAL_MIDI;
 
 /// Maximum number of MIDI events that can be accumulated across frames.
 pub const MAX_STASH: usize = 32;
@@ -69,6 +70,30 @@ impl MidiInput {
         }
     }
 
+    /// Resolve a `midi` input port to either the upstream cable (if the port
+    /// is connected) or the global MIDI backplane slot (if not). This is the
+    /// standard fallback convention for any module with a `midi` input port
+    /// (ADR 0048): downstream `process()` reads through one indirection
+    /// regardless of the connection state — no per-sample branch.
+    pub fn from_port(port: &InputPort) -> Self {
+        let pi = port.expect_poly();
+        if pi.is_connected() {
+            Self {
+                inner: pi,
+                stash: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
+                stash_count: 0,
+            }
+        } else {
+            Self::backplane(GLOBAL_MIDI)
+        }
+    }
+
+    /// Slot index this input is currently reading from. Useful for tests
+    /// asserting backplane fallback vs. upstream wiring.
+    pub fn cable_idx(&self) -> usize {
+        self.inner.cable_idx
+    }
+
     /// Read MIDI events from the cable pool, debouncing across samples.
     ///
     /// If the frame signals more events pending (`total_count > MAX_EVENTS`),
@@ -124,6 +149,11 @@ impl MidiOutput {
             buffer: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
             buffer_count: 0,
         }
+    }
+
+    /// Build a `MidiOutput` from a `midi` output port slot.
+    pub fn from_port(port: &OutputPort) -> Self {
+        Self::new(port.expect_poly())
     }
 
     /// Queue a MIDI event for output. Silently dropped if the buffer is full.

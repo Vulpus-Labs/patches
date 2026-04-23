@@ -85,22 +85,22 @@ fn shape_dt(dt: f32, phase: f32, curvature: f32) -> f32 {
 /// Per-voice mutable state: phase, increment, sub flip-flop, noise PRNG.
 pub struct VDcoVoice {
     pub phase: f32,
-    /// Free-running phase target. On sync, snaps to 0 while `phase` slews toward it.
-    pub phase_target: f32,
     pub phase_increment: f32,
     pub sub_flipflop: bool,
     pub prng_state: u64,
+    /// Previous soft-sync output for the output-domain one-pole smoother.
+    pub prev_soft_y: f32,
 }
 
 impl VDcoVoice {
     pub fn new(seed: u64) -> Self {
         Self {
             phase: 0.0,
-            phase_target: 0.0,
             phase_increment: 0.0,
             sub_flipflop: false,
             // xorshift64 requires non-zero state.
             prng_state: seed.wrapping_add(1),
+            prev_soft_y: 0.0,
         }
     }
 }
@@ -148,11 +148,6 @@ pub fn compute_increment(
 #[inline]
 pub fn advance(voice: &mut VDcoVoice) -> f32 {
     let dt = voice.phase_increment;
-    // Target advances alongside phase; wraps independently (slewed phase may lag/lead).
-    voice.phase_target += dt;
-    if voice.phase_target >= 1.0 {
-        voice.phase_target -= 1.0;
-    }
     let next = voice.phase + dt;
     if next >= 1.0 {
         voice.phase = next - 1.0;
@@ -272,8 +267,6 @@ pub fn render_sync_and_advance(
     voice.sub_flipflop = false;
     let lin_post = (1.0 - frac) * dt;
     voice.phase = lin_post;
-    // Keep target aligned with phase in the hard-reset path so softness-up transitions stay sane.
-    voice.phase_target = lin_post;
 
     let post_phase = shape_phase(lin_post, c);
     let post_dt = shape_dt(dt, lin_post, c);
@@ -321,17 +314,19 @@ pub fn render_sync_and_advance(
     y
 }
 
-/// Render one sample under the soft-sync (RC-discharge) model.
+/// Render one sample under the soft-sync (partial cap-discharge) model.
 ///
-/// Used only when `mix.sync_softness > 0`. Per-sample: phase slews toward
-/// `phase_target` with one-pole coefficient `(1 - a)`, where
-/// `a = exp(-1/τ)` and `τ = softness² · 3` samples (so `0.5 → τ ≈ 0.75`,
-/// `1.0 → τ = 3`). τ ≤ 3 keeps the effect clearly a sync discharge rather
-/// than a free-running ramp. On sync, `phase_target` snaps to 0 and
-/// `sub_flipflop` resets (discrete state — sharp sub edge under softness,
-/// matching the analog /2 divider). No PolyBLEP residual is applied at the
-/// sync event: the slew is already C⁰-continuous. Natural-wrap BLEP on the
-/// phase accumulator is retained.
+/// Used only when `mix.sync_softness > 0`. On a sync event the integrator
+/// cap is only partially discharged: phase is scaled by a residual factor
+/// `residual = softness²`, so `softness → 0` approaches hard reset (phase → 0)
+/// and `softness → 1` approaches no reset. Phase only ever moves forward —
+/// no backward sweep through the waveform, so pulse/triangle edges are not
+/// re-crossed and integer sync ratios stay clean.
+///
+/// The sub flip-flop is a digital divider downstream of the core; a partial
+/// discharge that does not cross zero does not toggle it, so `sub_flipflop`
+/// is left alone on the sync event. Natural-wrap BLEP is retained via
+/// `render_and_advance`.
 ///
 /// Returns `(sample, wrap_frac)`. On a sync sample, `wrap_frac = 0.0`.
 #[inline]
@@ -342,63 +337,21 @@ pub fn render_and_advance_soft(
     mix: &VDcoMix,
 ) -> (f32, f32) {
     let softness = mix.sync_softness.clamp(0.0, 1.0);
-    let tau = softness * softness * 3.0;
-    let a = if tau > 0.0 { (-1.0 / tau).exp() } else { 0.0 };
-
-    // Slew phase toward target. With tau → 0, a → 0 → phase := target (hard snap).
-    voice.phase += (voice.phase_target - voice.phase) * (1.0 - a);
-    // Keep phase in [0, 1) for rendering (slew can cross the wrap boundary).
-    if voice.phase < 0.0 {
-        voice.phase += 1.0;
-    }
-    if voice.phase >= 1.0 {
-        voice.phase -= 1.0;
-    }
-
-    // Sync event: snap target to 0, reset discrete flipflop. No BLEP.
     if sync.is_some() {
-        voice.phase_target = 0.0;
-        voice.sub_flipflop = false;
+        // Cap residual below 1 so even maximum softness still discharges the
+        // integrator partially on each sync pulse (matches physical RC: pulse
+        // width is always > 0, so full voltage retention is not reachable).
+        let residual = (softness * softness).min(0.95);
+        voice.phase *= residual;
     }
-
-    // Render at slewed phase with natural-wrap BLEP (same formulas as render_and_advance).
-    let lin_phase = voice.phase;
-    let lin_dt = voice.phase_increment;
-    let c = mix.curve;
-    let phase = shape_phase(lin_phase, c);
-    let dt = shape_dt(lin_dt, lin_phase, c);
-
-    let mut y = 0.0_f32;
-    if mix.saw_gain > 0.0 {
-        y += mix.saw_gain * ((2.0 * phase - 1.0) - polyblep(phase, dt));
-    }
-    if mix.pulse_gain > 0.0 {
-        let pwm_c = pwm.clamp(PWM_MIN, PWM_MAX);
-        let raw = if phase < pwm_c { 1.0 } else { -1.0 };
-        let blep = polyblep(phase, dt) - polyblep((phase - pwm_c).rem_euclid(1.0), dt);
-        y += mix.pulse_gain * (raw + blep);
-    }
-    if mix.triangle_gain > 0.0 {
-        let tri = 1.0 - 2.0 * (2.0 * phase - 1.0).abs();
-        y += mix.triangle_gain * tri;
-    }
-    if mix.sub_gain > 0.0 {
-        let lin_sub_phase = lin_phase * 0.5 + if voice.sub_flipflop { 0.5 } else { 0.0 };
-        let lin_sub_dt = lin_dt * 0.5;
-        let sub_phase = shape_phase(lin_sub_phase, c);
-        let sub_dt = shape_dt(lin_sub_dt, lin_sub_phase, c);
-        let raw = if sub_phase < 0.5 { 1.0 } else { -1.0 };
-        let blep =
-            polyblep(sub_phase, sub_dt) - polyblep((sub_phase - 0.5).rem_euclid(1.0), sub_dt);
-        y += mix.sub_gain * (raw + blep);
-    }
-    if mix.noise_gain > 0.0 {
-        let w = xorshift64(&mut voice.prng_state);
-        y += mix.noise_gain * NOISE_SCALE * w;
-    }
-
-    // Advance. On sync sample, suppress wrap_frac (not a natural wrap).
-    let wrap_frac = advance(voice);
+    let (y_raw, wrap_frac) = render_and_advance(voice, pwm, mix);
+    // Post-VCO output-domain one-pole to model the finite-bandwidth analog
+    // buffer stage that smears the cap-discharge transient. τ scales with
+    // softness² so softness=0 is bypass and softness=1 is the strongest smear.
+    let tau = softness * softness * 2.0;
+    let a = if tau > 0.0 { (-1.0 / tau).exp() } else { 0.0 };
+    let y = a * voice.prev_soft_y + (1.0 - a) * y_raw;
+    voice.prev_soft_y = y;
     let wrap_frac = if sync.is_some() { 0.0 } else { wrap_frac };
     (y, wrap_frac)
 }

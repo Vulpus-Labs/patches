@@ -5,7 +5,7 @@
 # and a plate-style reverb. Chorus does most of the stereo width work.
 
 patch {
-    module kbd       : PolyMidiIn
+    module kbd       : PolyMidiToCv
     module osc_a     : PolyOsc { frequency: -0.004 }
     module osc_b     : PolyOsc { frequency:  0.004 }
     module sub       : PolyOsc { frequency: -1.0 }

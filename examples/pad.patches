@@ -70,7 +70,7 @@ patch {
 
     module stutter : stutter(rhythm: sandstorm)
 
-    module midi : PolyMidiIn
+    module midi : PolyMidiToCv
     module tuner : PolyTuner { octave: 1 }
     module lowsaw : superosc(wave: square, cutoff: 1.0)
     module highsaw : superosc(wave: sawtooth, cutoff: 1.0)

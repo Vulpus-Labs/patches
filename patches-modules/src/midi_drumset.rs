@@ -112,7 +112,7 @@ pub struct MidiDrumset {
 
 impl Module for MidiDrumset {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let mut desc = ModuleDescriptor::new("MidiDrumset", shape.clone());
+        let mut desc = ModuleDescriptor::new("MidiDrumset", shape.clone()).midi_in("midi");
         for &(_, trig_name, vel_name) in &DRUM_MAP {
             desc = desc.trigger_out(trig_name).mono_out(vel_name);
         }
@@ -148,7 +148,8 @@ impl Module for MidiDrumset {
         self.instance_id
     }
 
-    fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
+    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+        self.midi_in = MidiInput::from_port(&inputs[0]);
         for (i, out) in self.outputs.iter_mut().enumerate() {
             *out = if i % 2 == 0 { outputs[i].expect_trigger() } else { outputs[i].expect_mono() };
         }
@@ -202,7 +203,9 @@ mod tests {
     use patches_core::test_support::{ModuleHarness, note_on, send_midi};
 
     fn make_drumset() -> ModuleHarness {
-        ModuleHarness::build::<MidiDrumset>(&[])
+        let mut h = ModuleHarness::build::<MidiDrumset>(&[]);
+        h.disconnect_input("midi");
+        h
     }
 
     fn note_on_ch(ch: u8, note: u8, vel: u8) -> MidiEvent {
@@ -273,6 +276,7 @@ mod tests {
         let mut h = ModuleHarness::build::<MidiDrumset>(&[
             ("channel", ParameterValue::Int(10)),
         ]);
+        h.disconnect_input("midi");
         // Note on channel 10 — should trigger
         send_midi(&mut h, &[note_on_ch(10, 36, 100)]);
         h.tick();

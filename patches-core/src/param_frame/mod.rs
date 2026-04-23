@@ -17,6 +17,9 @@ pub mod view;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod fuzz_tests;
+
 pub use frame::{ParamFrame, U64_SIZE};
 pub use pack::{pack_into, PackError};
 pub use view::{ParamView, ParamViewIndex};

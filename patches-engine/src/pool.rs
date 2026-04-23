@@ -174,7 +174,7 @@ mod tests {
 
     use patches_core::{
         AudioEnvironment, CableKind, CablePool, CableValue, InstanceId, Module, ModuleDescriptor,
-        ModuleShape, MonoOutput, PolyLayout, PortDescriptor, RESERVED_SLOTS,
+        ModuleShape, MonoOutput, MonoLayout, PolyLayout, PortDescriptor, RESERVED_SLOTS,
     };
     use patches_core::parameter_map::ParameterMap;
     use patches_core::param_frame::ParamView;
@@ -200,7 +200,7 @@ mod tests {
                     module_name: "ConstSource",
                     shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
                     inputs: vec![],
-                    outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+                    outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
                     parameters: vec![],
                 },
                 out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true },
@@ -214,7 +214,7 @@ mod tests {
                 module_name: "ConstSource",
                 shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
                 inputs: vec![],
-                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio }],
+                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
                 parameters: vec![],
             }
         }

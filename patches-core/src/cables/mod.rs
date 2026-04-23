@@ -11,6 +11,7 @@ mod trigger;
 
 pub use gate::{GateEdge, GateInput, PolyGateInput};
 pub use mono::{MonoInput, MonoOutput};
+pub use mono::MonoLayout;
 pub use poly::{PolyInput, PolyLayout, PolyOutput};
 pub use ports::{InputPort, OutputPort};
 pub use trigger::{PolyTriggerInput, TriggerInput};
@@ -103,31 +104,23 @@ pub const RESERVED_SLOTS: usize = 16;
 /// `< TRIGGER_THRESHOLD`.
 pub const TRIGGER_THRESHOLD: f32 = 0.5;
 
-/// The arity and semantics of a cable.
+/// The arity of a cable: `Mono` carries a single `f32` per sample; `Poly`
+/// carries `[f32; 16]` per sample.
 ///
-/// `Mono` / `Poly` carry per-sample audio/CV values (single `f32` or
-/// `[f32; 16]`). `Trigger` / `PolyTrigger` use the same buffer layout but
-/// carry sub-sample event encodings: `0.0` means "no event on this sample"
-/// and a value in `(0.0, 1.0]` is the fractional sub-sample position of an
-/// event (see ADR 0047). The type tag is enforced by the graph connection
-/// validator; no implicit coercion is permitted.
+/// Semantics within an arity (audio/CV vs. sub-sample triggers vs. structured
+/// frame formats like MIDI/transport) are expressed by the layout types
+/// [`MonoLayout`] and [`PolyLayout`]. The graph connection validator enforces
+/// matching arity AND matching layout; no implicit coercion is permitted.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CableKind {
     Mono,
     Poly,
-    Trigger,
-    PolyTrigger,
 }
 
 impl CableKind {
-    /// Returns `true` for poly-arity cables (`Poly`, `PolyTrigger`).
+    /// Returns `true` for poly-arity cables.
     pub fn is_poly(&self) -> bool {
-        matches!(self, CableKind::Poly | CableKind::PolyTrigger)
-    }
-
-    /// Returns `true` for trigger-semantic cables (`Trigger`, `PolyTrigger`).
-    pub fn is_trigger(&self) -> bool {
-        matches!(self, CableKind::Trigger | CableKind::PolyTrigger)
+        matches!(self, CableKind::Poly)
     }
 }
 

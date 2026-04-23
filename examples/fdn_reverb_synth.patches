@@ -1,7 +1,7 @@
 # fdn_reverb_synth.patches — polyphonic synth with stereo FDN hall reverb
 #
 # Architecture:
-#   kbd      — PolyMidiIn: LIFO voice allocation (up to poly_voices voices)
+#   kbd      — PolyMidiToCv: LIFO voice allocation (up to poly_voices voices)
 #   osc      — PolyOsc: one sawtooth per voice, driven by poly V/oct
 #   amp_env  — PolyAdsr: per-voice amplitude envelope (short decay, no sustain)
 #   vca      — PolyVca: shapes each voice's audio with its amplitude envelope
@@ -24,7 +24,7 @@
 #   - Scale down the collapse→reverb connection (try 0.2) for a drier mix.
 
 patch {
-    module kbd      : PolyMidiIn
+    module kbd      : PolyMidiToCv
     module osc      : PolyOsc
     module amp_env  : PolyAdsr   { attack: 0.005, decay: 0.25, sustain: 0.0, release: 0.6 }
     module vca      : PolyVca

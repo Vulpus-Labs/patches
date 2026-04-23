@@ -16,7 +16,7 @@ pub use de::deserialize_module_descriptor;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, PolyLayout, PortDescriptor};
+    use patches_core::{CableKind, ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, MonoLayout, PolyLayout, PortDescriptor};
 
     #[test]
     fn module_descriptor_round_trip() {
@@ -24,11 +24,11 @@ mod tests {
             module_name: "TestGain",
             shape: ModuleShape { channels: 2, length: 8, high_quality: true },
             inputs: vec![
-                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "sidechain", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "sidechain", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![
-                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![
                 ParameterDescriptor { name: "gain", index: 0, parameter_type: ParameterKind::Float { min: 0.0, max: 2.0, default: 1.0 } },

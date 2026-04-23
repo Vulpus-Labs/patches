@@ -1,7 +1,7 @@
 # poly_synth.patches — 16-voice polyphonic sawtooth synth with ADSR amplitude and filter shaping
 #
 # Voice architecture:
-#   kbd        — PolyMidiIn with LIFO voice stealing (8 voices from poly_voices)
+#   kbd        — PolyMidiToCv with LIFO voice stealing (8 voices from poly_voices)
 #   osc        — PolyOsc: one sawtooth per voice, driven by poly V/oct
 #   amp_env    — PolyAdsr: per-voice amplitude envelope
 #   vca        — PolyVca: shapes each voice's audio with its amplitude envelope
@@ -44,7 +44,7 @@
 #   - Widen vibrato depth (try 0.05–0.15) for more pronounced phase modulation.
 
 patch {
-    module kbd       : PolyMidiIn
+    module kbd       : PolyMidiToCv
     #module vibrato   : Lfo        { rate: 5.0 }
     module pm_spread : MonoToPoly
     module osc       : PolyOsc

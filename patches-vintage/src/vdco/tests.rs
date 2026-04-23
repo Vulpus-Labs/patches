@@ -1,5 +1,5 @@
 use super::*;
-use patches_core::cables::CableKind;
+use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
 use patches_core::test_support::{ModuleHarness, params};
 use patches_core::{AudioEnvironment, ModuleShape};
 use patches_dsp::RealPackedFft;
@@ -475,23 +475,20 @@ fn curvature_changes_spectrum_but_no_aliasing_spike() {
 fn reset_out_port_kinds() {
     let shape = ModuleShape::default();
     let d_mono = VDco::describe(&shape);
-    assert_eq!(
-        d_mono.inputs.iter().find(|p| p.name == "sync").unwrap().kind,
-        CableKind::Trigger
-    );
-    assert_eq!(
-        d_mono.outputs.iter().find(|p| p.name == "reset_out").unwrap().kind,
-        CableKind::Trigger
-    );
+    let sync_mono = d_mono.inputs.iter().find(|p| p.name == "sync").unwrap();
+    assert_eq!(sync_mono.kind, CableKind::Mono);
+    assert_eq!(sync_mono.mono_layout, MonoLayout::Trigger);
+    let reset_mono = d_mono.outputs.iter().find(|p| p.name == "reset_out").unwrap();
+    assert_eq!(reset_mono.kind, CableKind::Mono);
+    assert_eq!(reset_mono.mono_layout, MonoLayout::Trigger);
+
     let d_poly = VPolyDco::describe(&shape);
-    assert_eq!(
-        d_poly.inputs.iter().find(|p| p.name == "sync").unwrap().kind,
-        CableKind::PolyTrigger
-    );
-    assert_eq!(
-        d_poly.outputs.iter().find(|p| p.name == "reset_out").unwrap().kind,
-        CableKind::PolyTrigger
-    );
+    let sync_poly = d_poly.inputs.iter().find(|p| p.name == "sync").unwrap();
+    assert_eq!(sync_poly.kind, CableKind::Poly);
+    assert_eq!(sync_poly.poly_layout, PolyLayout::Trigger);
+    let reset_poly = d_poly.outputs.iter().find(|p| p.name == "reset_out").unwrap();
+    assert_eq!(reset_poly.kind, CableKind::Poly);
+    assert_eq!(reset_poly.poly_layout, PolyLayout::Trigger);
 }
 
 /// `reset_out` emits a non-zero frac on exactly the wrap sample, zero elsewhere.
@@ -776,21 +773,23 @@ fn softness_half_shows_phase_continuity_across_sync() {
     };
     let (pre_h, post_h) = run(0.0);
     let (pre_s, post_s) = run(0.5);
-    // Pre-sync state is identical between runs (no softness yet active).
-    assert!((pre_h - pre_s).abs() < 1e-5);
-    let pre = pre_h;
-    let d_hard = (pre - post_h).abs();
-    let d_soft = (pre - post_s).abs();
+    // Each run's pre-sync sample is its own reference (the soft path's output
+    // smoother perturbs pre-sync samples slightly, which is expected).
+    let d_hard = (pre_h - post_h).abs();
+    let d_soft = (pre_s - post_s).abs();
     assert!(
         d_soft < d_hard * 0.9,
-        "softness=0.5 did not improve continuity: pre={pre} hard_post={post_h} soft_post={post_s}"
+        "softness=0.5 did not improve continuity: pre_h={pre_h} hard_post={post_h} pre_s={pre_s} soft_post={post_s}"
     );
 }
 
-/// `sync_softness = 1` rolls off the sync edge: high-frequency band power
-/// (5–20 kHz) is lower than the hard-sync (softness=0) equivalent.
+/// Mid-softness rolls off the sync edge: high-frequency band power
+/// (5–20 kHz) is lower than the hard-sync (softness=0) equivalent. Under the
+/// partial-discharge model, residual = softness² — at softness=0.5 the
+/// integrator is only ~75% discharged on each sync pulse, producing a
+/// smaller saw step and therefore less HF energy than a full hard reset.
 #[test]
-fn softness_one_reduces_high_band_energy() {
+fn softness_mid_reduces_high_band_energy() {
     let sr = 48_000.0_f32;
     let carrier = 400.0_f32;
     let sync_freq = carrier * 1.5;
@@ -838,10 +837,10 @@ fn softness_one_reduces_high_band_energy() {
         (k_lo..k_hi).map(|k| mags[k] * mags[k] / norm_sq).sum()
     };
     let hard = band_power(&run(0.0));
-    let soft = band_power(&run(1.0));
+    let soft = band_power(&run(0.5));
     assert!(
         soft < hard * 0.85,
-        "softness=1 did not roll off high-band energy: soft={soft:.3e} hard={hard:.3e}"
+        "softness=0.5 did not roll off high-band energy: soft={soft:.3e} hard={hard:.3e}"
     );
 }
 

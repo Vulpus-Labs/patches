@@ -2,7 +2,7 @@
 #
 # Signal path:
 #
-#   kbd (PolyMidiIn)
+#   kbd (PolyMidiToCv)
 #     │ voct / trigger / gate (poly)
 #     ▼
 #   dco (VPolyDco) ── pwm ◄── lfo_spread (MonoToPoly) ◄── lfo (Lfo triangle)
@@ -36,7 +36,7 @@
 # Notes:
 #   - Voice count is set by the host's AudioEnvironment.
 #     patches-player currently runs the default host poly_voices count;
-#     PolyMidiIn will allocate up to that many voices LIFO.
+#     PolyMidiToCv will allocate up to that many voices LIFO.
 #   - PolyLfo does not yet exist (see epic E102); we use a mono Lfo broadcast
 #     through MonoToPoly for both PWM and cutoff modulation. Delay-to-onset
 #     and triangle-only LFO shaping are follow-ups.
@@ -47,44 +47,41 @@
 
 patch {
     # ── Voice sources ──────────────────────────────────────────────────────
-    module kbd : PolyMidiIn
+    module kbd : PolyMidiToCv
 
-    module dco : VPolyDco {
-        saw_gain: 0.3
-        pulse_gain: 0.5
-        triangle_gain: 1.0
-        sub_gain: 0.4
-        noise_gain: 0.1
-        curve: 0.9
-    }
+    module sync_source : PolyOsc
 
     module sync : VPolyDco {
         saw_gain: 0.0
         pulse_gain: 1.0
         triangle_gain: 1.0
-        sub_gain: 0.0
-        frequency: 200Hz
+        sub_gain: 0.5
+        frequency: -1.5
+        sync_softness: 0.2
+        curve: 0.4
     }
 
-    module sync_lfo : Lfo { rate: 0.05 }
+    kbd.voct -> sync.voct
+
+    module sync_lfo : Lfo { rate: 0.5 }
     module m2p : MonoToPoly
     sync_lfo.triangle -> m2p.in
-    m2p.out -[1.0]-> sync.voct
+    env.out -[-2.0]-> sync.fm
 
-    dco.reset_out -> sync.sync
+    sync_source.reset_out -> sync.sync
 
     # ── Shared modulation ──────────────────────────────────────────────────
-    module lfo        : Lfo        { rate: 0.1, mode: bipolar }
-    module lfo_spread : MonoToPoly
+    module lfo : PolyLfo {
+        rate: 0.1,
+        mode: bipolar,
+        spread: 0.2
+    }
 
-    lfo.triangle -> lfo_spread.in
-
-    # LFO → DCO PWM (bipolar around 0.5 pulse width)
-    lfo_spread.out -[0.4]-> dco.pwm
+    lfo.triangle -[0.4]-> sync.pwm
 
     # ── Per-voice envelope (single shared envelope) ────────────────────────
     module env : PolyAdsr {
-        attack:  0.2
+        attack:  5.0
         decay:   0.25
         sustain: 0.6
         release: 2.0
@@ -94,7 +91,7 @@ patch {
     kbd.gate    -> env.gate
 
     # ── Pitch ──────────────────────────────────────────────────────────────
-    kbd.voct -> dco.voct
+    kbd.voct -> sync_source.voct
 
     # ── Highpass (gentle here, bump cutoff for thinning) ───────────────────
     module hpf : PolyHighpass { cutoff: -1.0, resonance: 0.0 }
@@ -109,7 +106,7 @@ patch {
         drive:        1.5
         drift_amount: 0.4
     }
-    hpf.out -> vcf.in
+    hpf.out -[0.2]-> vcf.in
 
     # Envelope + LFO → cutoff_cv (V/oct, summed). Each summand is clamped to
     # ±1 octave by the DSL's scale range; we stack env across multiple sum
@@ -117,7 +114,8 @@ patch {
     # invert that summand (brightness-down character).
     module cutoff_mod : PolySum(channels: [env, lfo])
     env.out        -[3.0]-> cutoff_mod.in[env]
-    lfo_spread.out -[0.2]-> cutoff_mod.in[lfo]
+    kbd.trigger -> lfo.sync
+    lfo.triangle -[0.2]-> cutoff_mod.in[lfo]
     cutoff_mod.out -> vcf.cutoff_cv
 
     # ── VCA ────────────────────────────────────────────────────────────────
@@ -129,9 +127,9 @@ patch {
     module mix : PolyToMono
     vca.out -> mix.in
 
-    module chorus : VChorus { jitter: 0.0, mode: one }
-    module delay_l: VBbd(channels: 1) { dry_wet: 0.5, jitter: 1.0, delay_ms:  200, feedback: 0.4 }
-    module delay_r: VBbd(channels: 1) { dry_wet: 0.5, jitter: 1.0, delay_ms:  150, feedback: 0.4 }
+    module chorus : VChorus { jitter: 0.2, mode: one, hiss: 0.0 }
+    module delay_l: VBbd(channels: 1) { dry_wet: 0.5, jitter: 0.2, delay_ms:  200, feedback: 0.7 }
+    module delay_r: VBbd(channels: 1) { dry_wet: 0.5, jitter: 0.2, delay_ms:  150, feedback: 0.7 }
 
     mix.out -[0.4]-> chorus.in_left, chorus.in_right
 

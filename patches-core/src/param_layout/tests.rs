@@ -245,4 +245,4 @@ fn hash_regression_fixture() {
 // Computed once from a trusted run; kept here as the canonical anchor.
 // If this is the first run of the test, set it to 0, run, and paste the
 // `got` value the assertion reports.
-const EXPECTED_FIXTURE_HASH: u64 = 0xab8f_f74c_ed1b_735d;
+const EXPECTED_FIXTURE_HASH: u64 = 0xdfb3_ddec_00bd_1ba5;

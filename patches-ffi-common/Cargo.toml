@@ -15,3 +15,6 @@ path = "src/bin/descriptor_hash_probe.rs"
 patches-core = { path = "../patches-core" }
 rtrb = "0.3"
 tracing = "0.1"
+
+[dev-dependencies]
+proptest = "1"

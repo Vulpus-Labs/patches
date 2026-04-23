@@ -615,8 +615,6 @@ impl ModuleHarness {
                 match kind {
                     CableKind::Mono => InputPort::Mono(mono),
                     CableKind::Poly => InputPort::Poly(poly),
-                    CableKind::Trigger => InputPort::Trigger(mono),
-                    CableKind::PolyTrigger => InputPort::PolyTrigger(poly),
                 }
             })
             .collect();
@@ -636,8 +634,6 @@ impl ModuleHarness {
                 match kind {
                     CableKind::Mono => OutputPort::Mono(mono),
                     CableKind::Poly => OutputPort::Poly(poly),
-                    CableKind::Trigger => OutputPort::Trigger(mono),
-                    CableKind::PolyTrigger => OutputPort::PolyTrigger(poly),
                 }
             })
             .collect();

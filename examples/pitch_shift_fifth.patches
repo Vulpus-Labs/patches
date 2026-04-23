@@ -1,7 +1,7 @@
 # pitch_shift_fifth.patches — polyphonic synth with spectral pitch-shifted fifth
 #
 # Voice architecture:
-#   kbd        — PolyMidiIn with LIFO voice stealing
+#   kbd        — PolyMidiToCv with LIFO voice stealing
 #   osc        — PolyOsc: sawtooth + square mix per voice
 #   amp_env    — PolyAdsr: per-voice amplitude envelope
 #   vca        — PolyVca: shapes each voice's audio
@@ -27,7 +27,7 @@
 
 patch {
     # ── Voice modules ──
-    module kbd       : PolyMidiIn
+    module kbd       : PolyMidiToCv
     module osc       : PolyOsc
     module mix       : PolySum(channels: 2)
     module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.15,  sustain: 0.6,  release: 0.4 }

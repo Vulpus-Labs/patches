@@ -3,6 +3,8 @@ pub mod arc_table;
 pub mod json;
 pub mod port_frame;
 pub mod sdk;
+#[cfg(test)]
+mod sdk_fuzz;
 pub mod types;
 
 // Re-exports of the audio-thread parameter data plane, now owned by

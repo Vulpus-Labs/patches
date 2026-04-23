@@ -1,4 +1,5 @@
 use super::*;
+use crate::cables::MonoLayout;
 use crate::modules::{ModuleDescriptor, ModuleShape, ParameterMap, PortDescriptor, PortRef};
 
 fn stub_desc(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescriptor {
@@ -7,11 +8,11 @@ fn stub_desc(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescrip
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: inputs
             .iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
         outputs: outputs
             .iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
         parameters: vec![],
     }
@@ -23,11 +24,11 @@ fn stub_desc_poly(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDe
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: inputs
             .iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
         outputs: outputs
             .iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
         parameters: vec![],
     }
@@ -247,8 +248,8 @@ fn port_ref_index_distinguishes_same_named_ports() {
         module_name: "stub",
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: vec![
-            PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-            PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
         ],
         outputs: vec![],
         parameters: vec![],
@@ -319,19 +320,37 @@ fn connect_poly_output_to_mono_input_returns_kind_mismatch() {
 
 // ── Trigger / PolyTrigger validation (ADR 0047) ─────────────────────
 
-fn stub_desc_kind(
+fn stub_desc_mono_layout(
     inputs: &[&'static str],
     outputs: &[&'static str],
-    kind: CableKind,
+    mono_layout: MonoLayout,
 ) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_trigger",
         shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
         inputs: inputs.iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: kind.clone(), poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout, poly_layout: PolyLayout::Audio })
             .collect(),
         outputs: outputs.iter()
-            .map(|&n| PortDescriptor { name: n, index: 0, kind: kind.clone(), poly_layout: PolyLayout::Audio })
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout, poly_layout: PolyLayout::Audio })
+            .collect(),
+        parameters: vec![],
+    }
+}
+
+fn stub_desc_poly_layout(
+    inputs: &[&'static str],
+    outputs: &[&'static str],
+    poly_layout: PolyLayout,
+) -> ModuleDescriptor {
+    ModuleDescriptor {
+        module_name: "stub_poly_trigger",
+        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        inputs: inputs.iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout })
+            .collect(),
+        outputs: outputs.iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout })
             .collect(),
         parameters: vec![],
     }
@@ -340,38 +359,38 @@ fn stub_desc_kind(
 #[test]
 fn connect_trigger_to_trigger_succeeds() {
     let mut g = ModuleGraph::new();
-    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
-    g.add_module("d", stub_desc_kind(&["in"], &[], CableKind::Trigger), &no_params()).unwrap();
+    g.add_module("s", stub_desc_mono_layout(&[], &["out"], MonoLayout::Trigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc_mono_layout(&["in"], &[], MonoLayout::Trigger), &no_params()).unwrap();
     assert!(g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0).is_ok());
 }
 
 #[test]
-fn connect_trigger_to_mono_is_kind_mismatch() {
+fn connect_trigger_to_mono_is_mono_layout_mismatch() {
     let mut g = ModuleGraph::new();
-    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
+    g.add_module("s", stub_desc_mono_layout(&[], &["out"], MonoLayout::Trigger), &no_params()).unwrap();
     g.add_module("d", stub_desc(&["in"], &[]), &no_params()).unwrap();
     assert!(matches!(
         g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
-        Err(GraphError::CableKindMismatch { .. })
+        Err(GraphError::MonoLayoutMismatch { .. })
     ));
 }
 
 #[test]
-fn connect_poly_trigger_to_poly_is_kind_mismatch() {
+fn connect_poly_trigger_to_poly_is_poly_layout_mismatch() {
     let mut g = ModuleGraph::new();
-    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::PolyTrigger), &no_params()).unwrap();
+    g.add_module("s", stub_desc_poly_layout(&[], &["out"], PolyLayout::Trigger), &no_params()).unwrap();
     g.add_module("d", stub_desc_poly(&["in"], &[]), &no_params()).unwrap();
     assert!(matches!(
         g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
-        Err(GraphError::CableKindMismatch { .. })
+        Err(GraphError::PolyLayoutMismatch { .. })
     ));
 }
 
 #[test]
 fn connect_trigger_to_poly_trigger_is_kind_mismatch() {
     let mut g = ModuleGraph::new();
-    g.add_module("s", stub_desc_kind(&[], &["out"], CableKind::Trigger), &no_params()).unwrap();
-    g.add_module("d", stub_desc_kind(&["in"], &[], CableKind::PolyTrigger), &no_params()).unwrap();
+    g.add_module("s", stub_desc_mono_layout(&[], &["out"], MonoLayout::Trigger), &no_params()).unwrap();
+    g.add_module("d", stub_desc_poly_layout(&["in"], &[], PolyLayout::Trigger), &no_params()).unwrap();
     assert!(matches!(
         g.connect(&NodeId::from("s"), pref("out"), &NodeId::from("d"), pref("in"), 1.0),
         Err(GraphError::CableKindMismatch { .. })
@@ -390,13 +409,13 @@ fn poly_desc_layout(
         inputs: inputs
             .iter()
             .map(|&(n, layout)| PortDescriptor {
-                name: n, index: 0, kind: CableKind::Poly, poly_layout: layout,
+                name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: layout,
             })
             .collect(),
         outputs: outputs
             .iter()
             .map(|&(n, layout)| PortDescriptor {
-                name: n, index: 0, kind: CableKind::Poly, poly_layout: layout,
+                name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: layout,
             })
             .collect(),
         parameters: vec![],

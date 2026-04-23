@@ -14,3 +14,4 @@ test-support = []
 
 [dev-dependencies]
 trybuild = "1"
+proptest = "1"

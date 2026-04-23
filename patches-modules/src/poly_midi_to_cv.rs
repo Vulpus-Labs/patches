@@ -3,7 +3,7 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
     GLOBAL_MIDI,
 };
-use patches_core::{CableKind, PolyLayout};
+use patches_core::{CableKind, MonoLayout, PolyLayout};
 use patches_core::param_frame::ParamView;
 
 const VOCT_SCALING: f32 = 1.0 / 12.0;
@@ -40,7 +40,7 @@ impl Voice {
 /// | `velocity` | poly | Note-on velocity per voice normalised to \[0.0, 1.0\] |
 /// | `mod` | mono | CC 1 (mod wheel) normalised to \[0.0, 1.0\] |
 /// | `pitch` | mono | Pitchbend normalised to \[-1.0, 1.0\] |
-pub struct PolyMidiIn {
+pub struct PolyMidiToCv {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     voice_count: usize,
@@ -60,7 +60,7 @@ pub struct PolyMidiIn {
     out_pitch: MonoOutput,
 }
 
-impl PolyMidiIn {
+impl PolyMidiToCv {
     /// Find a free voice, or steal the most-recently-allocated one (LIFO).
     fn find_or_steal_voice(&self) -> usize {
         for i in 0..self.voice_count {
@@ -111,19 +111,21 @@ impl PolyMidiIn {
     }
 }
 
-impl Module for PolyMidiIn {
+impl Module for PolyMidiToCv {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
-            module_name: "PolyMidiIn",
+            module_name: "PolyMidiToCv",
             shape: shape.clone(),
-            inputs: vec![],
+            inputs: vec![
+                PortDescriptor { name: "midi", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Midi },
+            ],
             outputs: vec![
-                PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "trigger", index: 0, kind: CableKind::PolyTrigger, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "trigger", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Trigger },
+                PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             parameters: vec![],
         }
@@ -154,7 +156,8 @@ impl Module for PolyMidiIn {
 
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
-    fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
+    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+        self.midi_in      = MidiInput::from_port(&inputs[0]);
         self.out_v_oct    = PolyOutput::from_ports(outputs, 0);
         self.out_trigger  = outputs[1].expect_poly_trigger();
         self.out_gate     = PolyOutput::from_ports(outputs, 2);
@@ -208,10 +211,12 @@ mod tests {
     use patches_core::test_support::{assert_within, ModuleHarness, note_on, note_off, send_midi};
 
     fn make_kbd(poly_voices: usize) -> ModuleHarness {
-        ModuleHarness::build_with_env::<PolyMidiIn>(
+        let mut h = ModuleHarness::build_with_env::<PolyMidiToCv>(
             &[],
             AudioEnvironment { sample_rate: 44100.0, poly_voices, periodic_update_interval: 32, hosted: false },
-        )
+        );
+        h.disconnect_input("midi");
+        h
     }
 
 

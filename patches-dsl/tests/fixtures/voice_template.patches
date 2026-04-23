@@ -21,7 +21,7 @@ template voice(attack: float = 0.01, decay: float = 0.1, sustain: float = 0.7) {
 }
 
 patch {
-    module seq   : MidiIn
+    module seq   : MidiToCv
     module v1    : voice(attack: 0.005, sustain: 0.6)   # decay uses default
     module v2    : voice                                  # all defaults
     module out   : AudioOut

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly 10k-cycle soak (ticket 0651).
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -34,3 +37,21 @@ jobs:
           cargo test -p patches-integration-tests \
             --features audio-thread-allocator-trap \
             --test alloc_trap --test alloc_trap_negative
+
+      # Ticket 0651: 1 000-cycle smoke on every PR/push; the nightly
+      # schedule below runs the full 10 000-cycle variant.
+      - name: Soak smoke (1k cycles)
+        if: github.event_name != 'schedule'
+        run: |
+          cargo test -p patches-integration-tests \
+            --features audio-thread-allocator-trap \
+            --test soak_randomised_params
+
+      - name: Soak full (10k cycles)
+        if: github.event_name == 'schedule'
+        env:
+          PATCHES_SOAK_CYCLES: "10000"
+        run: |
+          cargo test -p patches-integration-tests --release \
+            --features audio-thread-allocator-trap \
+            --test soak_randomised_params

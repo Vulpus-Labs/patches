@@ -1,5 +1,5 @@
 patch {
-    module kbd       : PolyMidiIn
+    module kbd       : PolyMidiToCv
 
     module noise     : PolyNoise
     module filt      : PolySvf { cutoff: C0, q: 0.97 }

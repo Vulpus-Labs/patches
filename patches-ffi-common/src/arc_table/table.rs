@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
+use super::counters::{ArcTableCounters, ArcTableCountersSnapshot};
 use super::refcount::{CHUNK_SIZE, Exhausted, RefcountTable, Slots};
 
 #[derive(Debug)]
@@ -40,12 +41,14 @@ pub struct ArcTableControl<T: ?Sized> {
     refcount: RefcountTable,
     entries: HashMap<u64, Arc<T>>,
     release_rx: Consumer<u64>,
+    counters: Arc<ArcTableCounters>,
 }
 
 /// Audio-thread half. Retain and release are wait-free.
 pub struct ArcTableAudio {
     slots: Slots,
     release_tx: Producer<u64>,
+    counters: Arc<ArcTableCounters>,
 }
 
 pub struct ArcTable;
@@ -59,15 +62,19 @@ impl ArcTable {
         let refcount = RefcountTable::with_capacity(initial_capacity);
         let slots = refcount.slots().clone();
         let (tx, rx) = RingBuffer::new(RELEASE_RING_CAPACITY);
+        let counters = ArcTableCounters::new_arc();
+        counters.set_capacity(refcount.capacity());
         (
             ArcTableControl {
                 refcount,
                 entries: HashMap::with_capacity(refcount_capacity(&slots) as usize),
                 release_rx: rx,
+                counters: Arc::clone(&counters),
             },
             ArcTableAudio {
                 slots,
                 release_tx: tx,
+                counters,
             },
         )
     }
@@ -86,6 +93,7 @@ impl<T: ?Sized> ArcTableControl<T> {
     pub fn mint(&mut self, value: Arc<T>) -> Result<u64, ArcTableError> {
         let id = self.refcount.insert()?;
         self.entries.insert(id, value);
+        self.counters.observe_live(self.entries.len() as u32);
         Ok(id)
     }
 
@@ -97,6 +105,7 @@ impl<T: ?Sized> ArcTableControl<T> {
         while let Ok(id) = self.release_rx.pop() {
             if self.entries.remove(&id).is_some() {
                 self.refcount.remove(id);
+                self.counters.bump_released_drained();
             } else {
                 debug_assert!(false, "drain saw id {id:#x} not in entries");
             }
@@ -108,7 +117,16 @@ impl<T: ?Sized> ArcTableControl<T> {
     /// Rounds up to a whole chunk. Returns the new total capacity.
     /// Old chunk indices are retired via the quiescence barrier.
     pub fn grow(&mut self, additional_slots: u32) -> u32 {
-        self.refcount.grow(additional_slots)
+        let new_cap = self.refcount.grow(additional_slots);
+        self.counters.bump_growth();
+        self.counters.set_capacity(new_cap);
+        new_cap
+    }
+
+    /// Snapshot the observability counters for this table (ADR 0045
+    /// Spike 9 / ticket 0652).
+    pub fn counters_snapshot(&self) -> ArcTableCountersSnapshot {
+        self.counters.snapshot()
     }
 
     pub fn capacity(&self) -> u32 {
@@ -160,7 +178,13 @@ impl ArcTableAudio {
             // Ring is sized to the maximum table capacity, so push
             // cannot fail under grow-only storage.
             let _ = self.release_tx.push(id);
+            self.counters.bump_released_queued();
         }
+    }
+
+    /// Snapshot the observability counters for this table.
+    pub fn counters_snapshot(&self) -> ArcTableCountersSnapshot {
+        self.counters.snapshot()
     }
 }
 

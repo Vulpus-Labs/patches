@@ -41,6 +41,7 @@ pub struct MidiCc {
 impl Module for MidiCc {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("MidiCC", shape.clone())
+            .midi_in("midi")
             .mono_out("out")
             .int_param(params::cc, 0, 127, 1)
     }
@@ -73,7 +74,8 @@ impl Module for MidiCc {
         self.instance_id
     }
 
-    fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
+    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
+        self.midi_in = MidiInput::from_port(&inputs[0]);
         self.out = MonoOutput::from_ports(outputs, 0);
     }
 
@@ -118,6 +120,7 @@ mod tests {
     #[test]
     fn cc_zero_maps_to_minus_one() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
+        h.disconnect_input("midi");
         send_midi(&mut h, &[cc(7, 0)]);
         h.tick();
         assert_eq!(h.read_mono("out"), -1.0);
@@ -126,6 +129,7 @@ mod tests {
     #[test]
     fn cc_127_maps_to_plus_one() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
+        h.disconnect_input("midi");
         send_midi(&mut h, &[cc(7, 127)]);
         h.tick();
         assert_eq!(h.read_mono("out"), 1.0);
@@ -134,6 +138,7 @@ mod tests {
     #[test]
     fn cc_64_maps_to_approximately_zero() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
+        h.disconnect_input("midi");
         send_midi(&mut h, &[cc(7, 64)]);
         h.tick();
         let expected = 64.0 / 127.0 * 2.0 - 1.0;
@@ -143,6 +148,7 @@ mod tests {
     #[test]
     fn ignores_other_cc_numbers() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 7i64]);
+        h.disconnect_input("midi");
         send_midi(&mut h, &[cc(10, 127)]);
         h.tick();
         assert_eq!(h.read_mono("out"), -1.0, "should ignore CC 10 when listening for CC 7");
@@ -151,6 +157,7 @@ mod tests {
     #[test]
     fn ignores_non_cc_messages() {
         let mut h = ModuleHarness::build::<MidiCc>(params!["cc" => 1i64]);
+        h.disconnect_input("midi");
         // Note on
         send_midi(&mut h, &[MidiEvent { bytes: [0x90, 60, 100] }]);
         h.tick();

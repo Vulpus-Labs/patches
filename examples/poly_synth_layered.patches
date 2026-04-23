@@ -6,7 +6,7 @@
 #            played note via V/oct, giving an airy, pitched transient character)
 #
 # Patch architecture:
-#   kbd        — PolyMidiIn: shared keyboard / LIFO voice allocation
+#   kbd        — PolyMidiToCv: shared keyboard / LIFO voice allocation
 #   vibrato    — Lfo: slow sine for phase modulation on the lo layer
 #   pm_spread  — MonoToPoly: broadcasts vibrato to lo poly voices
 #   tuner      — PolyTuner(octave: 1): shifts kbd.voct up by one octave for the hi layer
@@ -145,7 +145,7 @@ template noise_voice(
 
 patch {
     # ── Shared keyboard and modulation ─────────────────────────────────────────
-    module kbd       : PolyMidiIn
+    module kbd       : PolyMidiToCv
     module vibrato   : Lfo        { rate: 4.0 }
     module pm_spread : MonoToPoly
 

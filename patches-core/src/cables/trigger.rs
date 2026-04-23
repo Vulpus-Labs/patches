@@ -21,7 +21,7 @@ pub struct TriggerInput {
 
 impl TriggerInput {
     pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
-        Self { inner: ports[idx].expect_trigger() }
+        Self { inner: ports[idx].expect_mono() }
     }
 
     pub fn is_connected(&self) -> bool {
@@ -45,7 +45,7 @@ pub struct PolyTriggerInput {
 
 impl PolyTriggerInput {
     pub fn from_ports(ports: &[InputPort], idx: usize) -> Self {
-        Self { inner: ports[idx].expect_poly_trigger() }
+        Self { inner: ports[idx].expect_poly() }
     }
 
     pub fn is_connected(&self) -> bool {

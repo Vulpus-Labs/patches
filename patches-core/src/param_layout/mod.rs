@@ -204,8 +204,22 @@ pub(crate) fn port_kind_tag(kind: &CableKind) -> u8 {
     match kind {
         CableKind::Mono => 0,
         CableKind::Poly => 1,
-        CableKind::Trigger => 2,
-        CableKind::PolyTrigger => 3,
+    }
+}
+
+pub(crate) fn mono_layout_tag(layout: crate::cables::MonoLayout) -> u8 {
+    match layout {
+        crate::cables::MonoLayout::Audio => 0,
+        crate::cables::MonoLayout::Trigger => 1,
+    }
+}
+
+pub(crate) fn poly_layout_tag(layout: crate::cables::PolyLayout) -> u8 {
+    match layout {
+        crate::cables::PolyLayout::Audio => 0,
+        crate::cables::PolyLayout::Trigger => 1,
+        crate::cables::PolyLayout::Transport => 2,
+        crate::cables::PolyLayout::Midi => 3,
     }
 }
 

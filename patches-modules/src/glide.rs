@@ -9,6 +9,7 @@
 //! | Port | Kind | Description |
 //! |------|------|-------------|
 //! | `in` | mono | V/OCT pitch signal |
+//! | `slur_in` | mono | Gate: when high, glide time is multiplied by `slur_amount` |
 //!
 //! # Outputs
 //!
@@ -21,6 +22,7 @@
 //! | Name | Type | Range | Default | Description |
 //! |------|------|-------|---------|-------------|
 //! | `glide_ms` | float | 0.0--10000.0 | `100.0` | Glide time in milliseconds |
+//! | `slur_amount` | float | 0.0--100.0 | `1.0` | Multiplier applied to glide time while `slur_in` gate is high |
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -32,6 +34,7 @@ use patches_core::module_params;
 module_params! {
     Glide {
         glide_ms: Float,
+        slur_amount: Float,
     }
 }
 
@@ -42,26 +45,29 @@ pub struct Glide {
     voct: f32,
     alpha: f32,
     beta: f32,
+    beta_slur: f32,
     glide_ms: f32,
+    slur_amount: f32,
     sample_rate: f32,
     // Port fields
     in_port: MonoInput,
+    slur_in_port: MonoInput,
     out_port: MonoOutput,
 }
 
 impl Glide {
-    fn update_beta(&mut self) {
-        let n_samples = self.sample_rate * self.glide_ms / 1000.0;
+    fn beta_for(&self, ms: f32) -> f32 {
+        let n_samples = self.sample_rate * ms / 1000.0;
         if n_samples <= 0.0 {
-            self.beta = 1.0;
+            1.0
         } else {
-            self.beta = 1.0 - self.alpha.powf(1.0 / n_samples);
+            1.0 - self.alpha.powf(1.0 / n_samples)
         }
     }
 
-    fn set_glide_ms(&mut self, glide_ms: f32) {
-        self.glide_ms = glide_ms;
-        self.update_beta();
+    fn update_betas(&mut self) {
+        self.beta = self.beta_for(self.glide_ms);
+        self.beta_slur = self.beta_for(self.glide_ms * self.slur_amount);
     }
 }
 
@@ -69,8 +75,10 @@ impl Module for Glide {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("Glide", shape.clone())
             .mono_in("in")
+            .mono_in("slur_in")
             .mono_out("out")
             .float_param(params::glide_ms, 0.0, 10_000.0, 100.0)
+            .float_param(params::slur_amount, 0.0, 100.0, 1.0)
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -80,16 +88,20 @@ impl Module for Glide {
             voct: 0.0,
             alpha: 0.01,
             beta: 0.0,
+            beta_slur: 0.0,
             glide_ms: 0.0,
+            slur_amount: 1.0,
             sample_rate: audio_environment.sample_rate,
             in_port: MonoInput::default(),
+            slur_in_port: MonoInput::default(),
             out_port: MonoOutput::default(),
         }
     }
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
-        let v = p.get(params::glide_ms);
-        self.set_glide_ms(v);
+        self.glide_ms = p.get(params::glide_ms);
+        self.slur_amount = p.get(params::slur_amount);
+        self.update_betas();
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -102,14 +114,15 @@ impl Module for Glide {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         self.in_port = MonoInput::from_ports(inputs, 0);
+        self.slur_in_port = MonoInput::from_ports(inputs, 1);
         self.out_port = MonoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Input is V/OCT (C2 = 0.0). Interpolate directly in V/OCT space —
-        // no ln/exp needed since V/OCT is already a log-frequency scale.
         let input = pool.read_mono(&self.in_port);
-        self.voct += self.beta * (input - self.voct);
+        let slur = pool.read_mono(&self.slur_in_port) > 0.5;
+        let beta = if slur { self.beta_slur } else { self.beta };
+        self.voct += beta * (input - self.voct);
         pool.write_mono(&self.out_port, self.voct);
     }
 
@@ -127,6 +140,13 @@ mod tests {
     fn make_glide_harness(glide_ms: f32, sample_rate: f32) -> ModuleHarness {
         ModuleHarness::build_with_env::<Glide>(
             params!["glide_ms" => glide_ms],
+            AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false },
+        )
+    }
+
+    fn make_glide_harness_with_slur(glide_ms: f32, slur_amount: f32, sample_rate: f32) -> ModuleHarness {
+        ModuleHarness::build_with_env::<Glide>(
+            params!["glide_ms" => glide_ms, "slur_amount" => slur_amount],
             AudioEnvironment { sample_rate, poly_voices: 16, periodic_update_interval: 32, hosted: false },
         )
     }
@@ -158,6 +178,26 @@ mod tests {
         h.set_mono("in", 2.0);
         h.tick();
         assert_within!(2.0, h.read_mono("out"), 1e-9_f32);
+    }
+
+    #[test]
+    fn slur_in_gate_scales_glide_time() {
+        // slur_amount = 0 → gate high means glide time = 0 → tracks instantly.
+        let mut h = make_glide_harness_with_slur(500.0, 0.0, 44100.0);
+        h.set_mono("slur_in", 1.0);
+        h.set_mono("in", 2.0);
+        h.tick();
+        assert_within!(2.0, h.read_mono("out"), 1e-6_f32);
+    }
+
+    #[test]
+    fn slur_in_gate_low_uses_normal_glide() {
+        // slur_amount = 0 but gate low → normal glide time applies (not instant).
+        let mut h = make_glide_harness_with_slur(500.0, 0.0, 44100.0);
+        h.set_mono("slur_in", 0.0);
+        h.set_mono("in", 2.0);
+        h.tick();
+        assert!(h.read_mono("out") < 2.0);
     }
 
     #[test]

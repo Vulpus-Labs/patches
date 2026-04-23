@@ -272,16 +272,19 @@ fn deserialize_port_descriptor(val: &JsonValue) -> Result<PortDescriptor, String
     let index = val.get("index").and_then(|v| v.as_usize()).unwrap_or(0);
     let kind = match val.get("kind").and_then(|v| v.as_str()) {
         Some("poly") => CableKind::Poly,
-        Some("trigger") => CableKind::Trigger,
-        Some("poly_trigger") => CableKind::PolyTrigger,
         _ => CableKind::Mono,
     };
+    let mono_layout = match val.get("mono_layout").and_then(|v| v.as_str()) {
+        Some("trigger") => patches_core::cables::MonoLayout::Trigger,
+        _ => patches_core::cables::MonoLayout::Audio,
+    };
     let poly_layout = match val.get("poly_layout").and_then(|v| v.as_str()) {
+        Some("trigger") => patches_core::cables::PolyLayout::Trigger,
         Some("transport") => patches_core::cables::PolyLayout::Transport,
         Some("midi") => patches_core::cables::PolyLayout::Midi,
         _ => patches_core::cables::PolyLayout::Audio,
     };
-    Ok(PortDescriptor { name, index, kind, poly_layout })
+    Ok(PortDescriptor { name, index, kind, mono_layout, poly_layout })
 }
 
 fn deserialize_parameter_descriptor(val: &JsonValue) -> Result<ParameterDescriptor, String> {

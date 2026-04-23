@@ -8,7 +8,7 @@ use std::f32::consts::TAU;
 
 use patches_core::{
     AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, ParameterDescriptor, ParameterKind, PolyLayout, PortDescriptor, PortRef,
+    ModuleShape, NodeId, ParameterDescriptor, ParameterKind, MonoLayout, PolyLayout, PortDescriptor, PortRef,
     PolyOutput,
 };
 use patches_registry::Registry;
@@ -53,7 +53,7 @@ impl Module for PolySineSource {
             module_name: "PolySineSource",
             shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
             inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Poly, poly_layout: PolyLayout::Audio }],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             parameters: vec![ParameterDescriptor {
                 name: "frequency",
                 index: 0,
