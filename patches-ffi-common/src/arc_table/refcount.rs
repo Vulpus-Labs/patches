@@ -128,6 +128,84 @@ impl Drop for SlotsShared {
     }
 }
 
+/// RAII bracket for the audio-thread quiescence protocol. Construction
+/// opens the bracket (`started.fetch_add`) and snapshots the current
+/// chunk index; `Drop` closes it (`completed.fetch_add`). Holding the
+/// guard pins the index pointer against retirement for the guard's
+/// lifetime (ADR 0049).
+///
+/// The `&'s ChunkIndex` lifetime prevents the snapshotted index from
+/// escaping the bracket; the `Drop` impl ensures the bracket closes on
+/// every exit path including panics.
+struct QuiescenceGuard<'s> {
+    shared: &'s SlotsShared,
+    index: &'s ChunkIndex,
+}
+
+impl<'s> QuiescenceGuard<'s> {
+    #[inline]
+    fn enter(shared: &'s SlotsShared) -> Self {
+        shared.quiescence.started.fetch_add(1, Ordering::AcqRel);
+        let ptr = shared.index.load(Ordering::Acquire);
+        // SAFETY: the started++ above pins this index against
+        // retirement until Drop runs completed++. The control thread
+        // samples `retire_at` from `started` *after* swapping in a new
+        // index, so any index we observe here has a retire_at >= our
+        // started value.
+        let index = unsafe { &*ptr };
+        Self { shared, index }
+    }
+
+    /// Resolve `id_and_gen` to its live slot reference. Debug-asserts
+    /// that the stored id matches (stale/forged-id guard).
+    #[inline]
+    fn slot(&self, id_and_gen: u64) -> &Slot {
+        // SAFETY: slot_ptr returns a pointer into a chunk whose Box is
+        // owned by the control thread and is never moved; the guard
+        // keeps the index alive so the chunk pointer is valid.
+        let s = unsafe { &*self.index.slot_ptr(id_and_gen as u32) };
+        debug_assert_eq!(
+            s.id_and_gen.load(Ordering::Acquire),
+            id_and_gen,
+            "refcount op on stale/forged id {id_and_gen:#x}"
+        );
+        s
+    }
+}
+
+impl Drop for QuiescenceGuard<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
+    }
+}
+
+/// Control-side index accessor. Shares the slot-decoding helper with
+/// `QuiescenceGuard` but skips the quiescence bracket: the control
+/// thread is the sole writer of `index`, so it cannot race retirement
+/// of its own swap. No `Drop` — zero runtime cost beyond the borrow.
+struct ControlAccess<'s> {
+    index: &'s ChunkIndex,
+}
+
+impl<'s> ControlAccess<'s> {
+    #[inline]
+    fn enter(shared: &'s SlotsShared) -> Self {
+        // Acquire to pair with the last growth's Release swap.
+        let ptr = shared.index.load(Ordering::Acquire);
+        // SAFETY: control thread is the sole writer of `index`; the
+        // current pointer is live until this thread swaps it.
+        Self { index: unsafe { &*ptr } }
+    }
+
+    #[inline]
+    fn slot(&self, slot_idx: u32) -> &Slot {
+        // SAFETY: slot_ptr returns into a chunk whose Box is owned by
+        // the control thread and never moved.
+        unsafe { &*self.index.slot_ptr(slot_idx) }
+    }
+}
+
 /// Cheap-to-clone handle over the shared slots state. One lives in
 /// each of `ArcTableControl` and `ArcTableAudio`; clones share the
 /// same underlying atomics and chunk pointers.
@@ -151,46 +229,24 @@ impl Slots {
     /// quiescence + one `fetch_add` on the slot refcount.
     #[inline]
     pub fn retain(&self, id_and_gen: u64) {
-        let _gen = self.shared.quiescence.started.fetch_add(1, Ordering::AcqRel);
-        // SAFETY: between started++ and completed++ the control
-        // thread will not free any index whose retire_at <= _gen,
-        // so the pointer we load here stays valid for this call.
-        let idx_ptr = self.shared.index.load(Ordering::Acquire);
-        let idx = unsafe { &*idx_ptr };
-        let slot = id_and_gen as u32;
-        let s = unsafe { &*idx.slot_ptr(slot) };
-        debug_assert_eq!(
-            s.id_and_gen.load(Ordering::Acquire),
-            id_and_gen,
-            "refcount retain on stale/forged id"
-        );
-        s.refcount.fetch_add(1, Ordering::Relaxed);
-        self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
+        let g = QuiescenceGuard::enter(&self.shared);
+        g.slot(id_and_gen).refcount.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Audio-thread release. Wait-free. Returns `true` if the caller
     /// was the last reference.
     #[inline]
     pub fn release(&self, id_and_gen: u64) -> bool {
-        let _gen = self.shared.quiescence.started.fetch_add(1, Ordering::AcqRel);
-        let idx_ptr = self.shared.index.load(Ordering::Acquire);
-        let idx = unsafe { &*idx_ptr };
-        let slot = id_and_gen as u32;
-        let s = unsafe { &*idx.slot_ptr(slot) };
-        debug_assert_eq!(
-            s.id_and_gen.load(Ordering::Acquire),
-            id_and_gen,
-            "refcount release on stale/forged id"
-        );
+        let g = QuiescenceGuard::enter(&self.shared);
+        let s = g.slot(id_and_gen);
         let prev = s.refcount.fetch_sub(1, Ordering::AcqRel);
         if cfg!(debug_assertions) && prev == 0 {
-            // Restore invariant so Drop-time cleanup does not fire a
-            // secondary panic, then surface the double-release.
-            s.refcount.fetch_add(1, Ordering::AcqRel);
-            self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
+            // Restore the slot invariant before unwinding, in case any
+            // concurrent reader observes it before the process dies.
+            // Quiescence is closed automatically by the guard's Drop.
+            s.refcount.fetch_add(1, Ordering::Relaxed);
             panic!("refcount release underflow (double-release) for id {id_and_gen:#x}");
         }
-        self.shared.quiescence.completed.fetch_add(1, Ordering::Release);
         prev == 1
     }
 
@@ -198,33 +254,32 @@ impl Slots {
     /// minted id. Refcount is initialised to 1 (mint-time
     /// reference). Reaches the slot via the current index.
     pub fn install(&self, slot: u32, id_and_gen: u64) {
-        // Control thread is the sole writer of `index`, so a
-        // Relaxed load is sufficient — but we pay Acquire for
-        // uniformity with the audio side and to pair with the last
-        // growth's Release swap.
-        let idx = unsafe { &*self.shared.index.load(Ordering::Acquire) };
-        let s = unsafe { &*idx.slot_ptr(slot) };
+        let c = ControlAccess::enter(&self.shared);
+        let s = c.slot(slot);
         s.id_and_gen.store(id_and_gen, Ordering::Release);
         s.refcount.store(1, Ordering::Release);
     }
 
     /// Control-thread clear: zero a slot once its refcount is zero.
     pub fn clear(&self, slot: u32) {
-        let idx = unsafe { &*self.shared.index.load(Ordering::Acquire) };
-        let s = unsafe { &*idx.slot_ptr(slot) };
-        s.id_and_gen.store(0, Ordering::Release);
+        ControlAccess::enter(&self.shared)
+            .slot(slot)
+            .id_and_gen
+            .store(0, Ordering::Release);
     }
 
     pub(crate) fn refcount_of(&self, slot: u32) -> u32 {
-        let idx = unsafe { &*self.shared.index.load(Ordering::Acquire) };
-        let s = unsafe { &*idx.slot_ptr(slot) };
-        s.refcount.load(Ordering::Acquire)
+        ControlAccess::enter(&self.shared)
+            .slot(slot)
+            .refcount
+            .load(Ordering::Acquire)
     }
 
     pub(crate) fn id_of(&self, slot: u32) -> u64 {
-        let idx = unsafe { &*self.shared.index.load(Ordering::Acquire) };
-        let s = unsafe { &*idx.slot_ptr(slot) };
-        s.id_and_gen.load(Ordering::Acquire)
+        ControlAccess::enter(&self.shared)
+            .slot(slot)
+            .id_and_gen
+            .load(Ordering::Acquire)
     }
 }
 
@@ -565,6 +620,31 @@ mod tests {
         assert!(t.retire_queue_len() >= 1);
         // Drop here — Miri / ASan would flag a leak if this failed.
         drop(t);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn release_underflow_panic_closes_quiescence() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut t = RefcountTable::with_capacity(1);
+        let id = t.insert().unwrap();
+        // Drop the mint reference.
+        assert!(t.slots().release(id));
+        let started_before = t.slots.shared.quiescence.started.load(Ordering::Acquire);
+        let completed_before = t.slots.shared.quiescence.completed.load(Ordering::Acquire);
+        let slots = t.slots().clone();
+        let res = catch_unwind(AssertUnwindSafe(|| slots.release(id)));
+        assert!(res.is_err(), "underflow release must panic in debug");
+        let started_after = t.slots.shared.quiescence.started.load(Ordering::Acquire);
+        let completed_after = t.slots.shared.quiescence.completed.load(Ordering::Acquire);
+        assert_eq!(started_after - started_before, 1);
+        assert_eq!(
+            completed_after - completed_before,
+            1,
+            "Drop must close the bracket even on panic"
+        );
+        assert_eq!(started_after, completed_after);
+        t.remove(id);
     }
 
     #[test]
