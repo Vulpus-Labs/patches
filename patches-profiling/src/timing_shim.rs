@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    OutputPort, ParameterMap, PeriodicUpdate,
+    OutputPort, ParameterMap,
 };
 use patches_core::param_frame::ParamView;
 use patches_core::build_error::BuildError;
@@ -76,19 +76,13 @@ impl Module for TimingShim {
         self
     }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        if self.inner.as_periodic().is_some() {
-            Some(self)
-        } else {
-            None
-        }
+    fn wants_periodic(&self) -> bool {
+        self.inner.wants_periodic()
     }
-}
 
-impl PeriodicUpdate for TimingShim {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let t0 = Instant::now();
-        self.inner.as_periodic().unwrap().periodic_update(pool);
+        self.inner.periodic_update(pool);
         let nanos = t0.elapsed().as_nanos() as u64;
         self.collector.record_periodic(self.inner.instance_id(), self.name, nanos);
     }

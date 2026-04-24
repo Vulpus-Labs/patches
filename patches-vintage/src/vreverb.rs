@@ -48,7 +48,6 @@
 //! | `decay` | float | 0.0--0.95 | `0.7` | FDN feedback coefficient |
 
 use patches_core::module_params;
-use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -249,13 +248,8 @@ impl Module for VReverb {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for VReverb {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         // Delay times are driven by the `size` parameter + `size_cv`
         // input; both change at Periodic cadence, so one `set_delay`

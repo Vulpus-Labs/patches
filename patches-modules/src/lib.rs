@@ -10,6 +10,8 @@ pub mod midi_to_cv;
 pub mod midi_source;
 pub mod midi_split;
 pub mod midi_transpose;
+pub mod midi_arp;
+pub mod midi_delay;
 pub mod oscillator;
 pub mod poly_adsr;
 pub mod poly_filter;
@@ -77,6 +79,8 @@ pub use midi_to_cv::MidiToCv;
 pub use midi_source::MidiIn;
 pub use midi_split::MidiSplit;
 pub use midi_transpose::MidiTranspose;
+pub use midi_arp::MidiArp;
+pub use midi_delay::MidiDelay;
 pub use oscillator::Oscillator;
 pub use poly_adsr::PolyAdsr;
 pub use poly_midi_to_cv::PolyMidiToCv;
@@ -151,6 +155,8 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<MidiIn>();
     r.register::<MidiSplit>();
     r.register::<MidiTranspose>();
+    r.register::<MidiArp>();
+    r.register::<MidiDelay>();
     r.register::<PolyOsc>();
     r.register::<PolyAdsr>();
     r.register::<PolyVca>();
@@ -276,6 +282,8 @@ mod tests {
             "MidiDrumset",
             "MidiSplit",
             "MidiTranspose",
+            "MidiArp",
+            "MidiDelay",
             "Bitcrusher",
             "Drive",
             "TransientShaper",

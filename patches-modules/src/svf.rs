@@ -2,8 +2,7 @@ use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, ModuleShape, OutputPort, };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::{SvfKernel, svf_f, q_to_damp};
@@ -164,13 +163,8 @@ impl Module for Svf {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for Svf {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;

@@ -4,8 +4,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, OutputPort, };
 use patches_dsp::MonoBiquad;
 
 use super::compute_biquad_lowpass;
@@ -154,13 +153,8 @@ impl Module for ResonantLowpass {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for ResonantLowpass {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;

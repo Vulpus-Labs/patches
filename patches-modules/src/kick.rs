@@ -34,8 +34,7 @@ use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, OutputPort, };
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
@@ -197,15 +196,8 @@ impl Module for Kick {
 
         pool.write_mono(&self.out_audio, output * self.latched_velocity);
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any { self }
-}
-
-impl PeriodicUpdate for Kick {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.voct_connected {
             return;
@@ -215,6 +207,8 @@ impl PeriodicUpdate for Kick {
         let end_hz = start_hz * ratio;
         self.pitch_sweep.set_params(start_hz, end_hz, self.sweep_time);
     }
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
 #[cfg(test)]

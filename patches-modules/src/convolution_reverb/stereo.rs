@@ -2,7 +2,6 @@
 
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
-use patches_core::modules::module::PeriodicUpdate;
 use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_core::{
@@ -145,13 +144,8 @@ impl patches_core::Module for StereoConvReverb {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for StereoConvReverb {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         self.core.poll_loader();
 

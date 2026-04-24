@@ -4,8 +4,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, OutputPort, };
 use patches_dsp::MonoBiquad;
 
 use crate::common::approximate::fast_sine;
@@ -279,13 +278,8 @@ impl Module for FdnReverb {
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for FdnReverb {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let size_cv   = if self.in_size_cv.is_connected()       { pool.read_mono(&self.in_size_cv) }       else { 0.0 };
         let bright_cv = if self.in_brightness_cv.is_connected() { pool.read_mono(&self.in_brightness_cv) } else { 0.0 };

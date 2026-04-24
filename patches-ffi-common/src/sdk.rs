@@ -262,12 +262,11 @@ macro_rules! export_plugin {
             };
             let pool =
                 ::patches_core::cable_pool::CablePool::new(slice, write_index);
-            match ::patches_core::Module::as_periodic(&mut inst.module) {
-                ::std::option::Option::Some(p) => {
-                    p.periodic_update(&pool);
-                    1
-                }
-                ::std::option::Option::None => 0,
+            if ::patches_core::Module::wants_periodic(&inst.module) {
+                ::patches_core::Module::periodic_update(&mut inst.module, &pool);
+                1
+            } else {
+                0
             }
         }
 
@@ -295,7 +294,7 @@ macro_rules! export_plugin {
                 abi_version: $crate::types::ABI_VERSION,
                 module_version: 0,
                 // Always 1: the plugin-side `periodic_update` wrapper consults
-                // `Module::as_periodic` at runtime and returns 0 for modules
+                // `Module::wants_periodic` at runtime and returns 0 for modules
                 // that don't need it. Setting this to 0 at compile time would
                 // prevent the host from *ever* calling `periodic_update`, which
                 // silently freezes LFOs and any other periodic state.
@@ -620,12 +619,11 @@ macro_rules! export_modules {
                     };
                     let pool =
                         ::patches_core::cable_pool::CablePool::new(slice, write_index);
-                    match ::patches_core::Module::as_periodic(&mut inst.module) {
-                        ::std::option::Option::Some(p) => {
-                            p.periodic_update(&pool);
-                            1
-                        }
-                        ::std::option::Option::None => 0,
+                    if ::patches_core::Module::wants_periodic(&inst.module) {
+                        ::patches_core::Module::periodic_update(&mut inst.module, &pool);
+                        1
+                    } else {
+                        0
                     }
                 }
 
@@ -651,7 +649,7 @@ macro_rules! export_modules {
                         abi_version: $crate::types::ABI_VERSION,
                         module_version: $version,
                         // Always 1: the plugin-side `periodic_update` wrapper
-                        // consults `Module::as_periodic` at runtime and returns
+                        // consults `Module::wants_periodic` at runtime and returns
                         // 0 for modules that don't need it. Setting this to 0
                         // at compile time would prevent the host from *ever*
                         // calling `periodic_update` on any module in the

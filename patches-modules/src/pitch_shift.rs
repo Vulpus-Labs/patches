@@ -33,7 +33,6 @@ use std::sync::Arc;
 
 use patches_core::module_params;
 use patches_core::cable_pool::CablePool;
-use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput,
@@ -269,13 +268,8 @@ impl patches_core::Module for PitchShift {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PitchShift {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.in_pitch.is_connected() && !self.in_mix.is_connected() {
             return;

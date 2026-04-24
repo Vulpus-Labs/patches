@@ -31,8 +31,7 @@
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, ModuleShape, OutputPort, };
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::{fast_tanh, fast_sine, BitcrusherKernel, DcBlocker, ToneFilter};
@@ -177,13 +176,8 @@ impl Module for Drive {
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for Drive {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let cv = if self.in_drive_cv.is_connected() {
             pool.read_mono(&self.in_drive_cv)

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use patches_core::{CablePool, InputPort, Module, OutputPort, PeriodicUpdate, TrackerData};
+use patches_core::{CablePool, InputPort, Module, OutputPort, TrackerData};
 use patches_core::param_frame::{ParamFrame, ParamView};
 use patches_planner::ParamState;
 
@@ -35,37 +35,17 @@ impl ModulePool {
         self.modules.len()
     }
 
+    /// Return the module name at `idx`, or `None` if the slot is empty.
+    pub fn module_name_at(&self, idx: usize) -> Option<&'static str> {
+        self.modules.get(idx).and_then(|o| o.as_ref()).map(|m| m.descriptor().module_name)
+    }
+
     /// Return a raw mutable pointer to the module at `idx`, or `None` if the slot is empty.
     ///
     /// The pointer is derived from the stable heap allocation inside the `Box<[...]>` and
     /// remains valid as long as the slot is occupied and `ModulePool` is not moved or dropped.
     pub fn as_ptr(&mut self, idx: usize) -> Option<*mut dyn Module> {
         self.modules[idx].as_mut().map(|m| &mut **m as *mut dyn Module)
-    }
-
-    /// Return a raw mutable pointer to the [`PeriodicUpdate`] impl of the module at `idx`,
-    /// or `None` if the slot is empty or the module does not implement [`PeriodicUpdate`].
-    pub fn as_periodic_ptr(&mut self, idx: usize) -> Option<*mut dyn PeriodicUpdate> {
-        self.modules[idx].as_mut().and_then(|m| {
-            m.as_periodic().map(|p| {
-                // SAFETY:
-                // 1. `Module` implementations are heap-allocated `Box<dyn Module>` with
-                //    `'static` data. The module itself lives as long as the slot is
-                //    occupied, and `ModulePool` is neither moved nor dropped while
-                //    `ReadyState` holds raw pointers into it.
-                // 2. `Module::as_periodic` is required by contract to return a
-                //    reference to a field *owned by the module* (e.g. `Some(self)` or
-                //    `Some(&mut self.inner_field)`), never a reference to a local
-                //    temporary. This guarantees the pointer remains valid for the
-                //    module's lifetime, so erasing the borrow-checker lifetime
-                //    (which is only tied to `&mut self` on this method) is sound.
-                // 3. `ReadyState` upholds a rebuild-before-tick invariant: any stored
-                //    `*mut dyn PeriodicUpdate` is invalidated and re-derived whenever
-                //    the owning module could have moved or been dropped.
-                let p_lt: *mut (dyn PeriodicUpdate + '_) = p;
-                unsafe { std::mem::transmute::<*mut (dyn PeriodicUpdate + '_), *mut dyn PeriodicUpdate>(p_lt) }
-            })
-        })
     }
 
     /// Remove the module at `idx`, leaving the slot empty, and return it
@@ -143,15 +123,12 @@ impl ModulePool {
         }
     }
 
-    /// Call [`PeriodicUpdate::periodic_update`] on the module at `idx`.
+    /// Call [`Module::periodic_update`] on the module at `idx`.
     ///
-    /// Does nothing if the slot is empty or if the module does not implement
-    /// [`PeriodicUpdate`].
+    /// Does nothing if the slot is empty.
     pub fn periodic_update(&mut self, idx: usize, cable_pool: &CablePool<'_>) {
         if let Some(m) = self.modules[idx].as_mut() {
-            if let Some(updater) = m.as_periodic() {
-                updater.periodic_update(cable_pool);
-            }
+            m.periodic_update(cable_pool);
         }
     }
 

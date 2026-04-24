@@ -194,9 +194,7 @@ fn poly_lowpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
     }
@@ -208,9 +206,7 @@ fn poly_lowpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([x; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
         if let CableValue::Poly(v) = pool[4][wi] {
@@ -240,11 +236,12 @@ fn poly_lowpass_static_path_when_no_cv() {
     // Downcast to inspect internal state: all deltas should be zero in static path.
     let concrete = f.as_any().downcast_ref::<PolyResonantLowpass>().unwrap();
     for i in 0..16 {
-        assert_eq!(concrete.biquad.db0[i], 0.0, "voice {i}: db0 should be zero in static path");
-        assert_eq!(concrete.biquad.db1[i], 0.0, "voice {i}: db1 should be zero in static path");
-        assert_eq!(concrete.biquad.db2[i], 0.0, "voice {i}: db2 should be zero in static path");
-        assert_eq!(concrete.biquad.da1[i], 0.0, "voice {i}: da1 should be zero in static path");
-        assert_eq!(concrete.biquad.da2[i], 0.0, "voice {i}: da2 should be zero in static path");
+        for (k, name) in ["db0", "db1", "db2", "da1", "da2"].iter().enumerate() {
+            assert_eq!(
+                concrete.biquad.coefs.delta[k][i], 0.0,
+                "voice {i}: {name} should be zero in static path"
+            );
+        }
     }
 }
 
@@ -297,9 +294,7 @@ fn poly_highpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
     }
@@ -310,9 +305,7 @@ fn poly_highpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([x; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
         if let CableValue::Poly(v) = pool[4][wi] {
@@ -405,9 +398,7 @@ fn poly_bandpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
     }
@@ -418,9 +409,7 @@ fn poly_bandpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::Poly([x; 16]);
         pool[1][1 - wi] = CableValue::Poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            if let Some(p) = f.as_periodic() {
-                p.periodic_update(&CablePool::new(&mut pool, wi));
-            }
+            f.periodic_update(&CablePool::new(&mut pool, wi));
         }
         f.process(&mut CablePool::new(&mut pool, wi));
         if let CableValue::Poly(v) = pool[4][wi] {

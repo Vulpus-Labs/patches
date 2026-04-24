@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
     AudioEnvironment, BASE_PERIODIC_UPDATE_INTERVAL, CableKind, CablePool, InstanceId, Module,
-    ModuleDescriptor, ModuleGraph, ModuleShape, PeriodicUpdate, MonoLayout, PolyLayout, PortDescriptor,
+    ModuleDescriptor, ModuleGraph, ModuleShape, MonoLayout, PolyLayout, PortDescriptor,
 };
 use patches_registry::Registry;
 use patches_core::parameter_map::ParameterMap;
@@ -67,13 +67,8 @@ impl Module for PeriodicCounter {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PeriodicCounter {
     fn periodic_update(&mut self, _pool: &CablePool<'_>) {
         self.count.fetch_add(1, Ordering::Relaxed);
     }

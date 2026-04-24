@@ -41,7 +41,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     params_enum, AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, PeriodicUpdate, GLOBAL_DRIFT,
+    ModuleShape, MonoInput, MonoOutput, OutputPort, GLOBAL_DRIFT,
 };
 use patches_dsp::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles};
 
@@ -189,13 +189,8 @@ impl Module for VOtaVcf {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for VOtaVcf {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let cv_connected = self.in_cutoff_cv.is_connected();
         let drift_active = self.drift_amount > 0.0;

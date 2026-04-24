@@ -14,15 +14,14 @@
 /// decide whether to synchronise with the host or run their own clock.
 ///
 /// `periodic_update_interval` is the number of inner ticks between successive
-/// [`PeriodicUpdate::periodic_update`] calls. At 1× oversampling this equals
+/// [`Module::periodic_update`] calls. At 1× oversampling this equals
 /// [`BASE_PERIODIC_UPDATE_INTERVAL`] (32); at N× oversampling it equals
 /// `BASE_PERIODIC_UPDATE_INTERVAL * N`, preserving the same wall-clock update rate.
-/// Modules implementing [`PeriodicUpdate`] should use this value (not the
+/// Modules with `wants_periodic() == true` should use this value (not the
 /// compile-time constant) to compute per-sample interpolation deltas.
 ///
 /// [`BASE_PERIODIC_UPDATE_INTERVAL`]: crate::BASE_PERIODIC_UPDATE_INTERVAL
-/// [`PeriodicUpdate`]: crate::PeriodicUpdate
-/// [`PeriodicUpdate::periodic_update`]: crate::PeriodicUpdate::periodic_update
+/// [`Module::periodic_update`]: crate::Module::periodic_update
 #[derive(Debug, Clone, Copy)]
 pub struct AudioEnvironment {
     pub sample_rate: f32,

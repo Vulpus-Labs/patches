@@ -4,7 +4,7 @@ use crate::filter::{compute_biquad_bandpass, compute_biquad_highpass, compute_bi
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PeriodicUpdate, PolyInput, PolyOutput,
+    ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -172,13 +172,8 @@ impl Module for PolyResonantLowpass {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PolyResonantLowpass {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;
@@ -341,13 +336,8 @@ impl Module for PolyResonantHighpass {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PolyResonantHighpass {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;
@@ -510,13 +500,8 @@ impl Module for PolyResonantBandpass {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PolyResonantBandpass {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;

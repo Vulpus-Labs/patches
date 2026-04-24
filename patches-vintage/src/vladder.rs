@@ -30,8 +30,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     params_enum, AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, PeriodicUpdate,
-};
+    ModuleShape, MonoInput, MonoOutput, OutputPort, };
 use patches_dsp::{LadderCoeffs, LadderKernel, LadderVariant};
 
 params_enum! {
@@ -160,13 +159,8 @@ impl Module for VLadder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for VLadder {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.in_cutoff_cv.is_connected() {
             return;

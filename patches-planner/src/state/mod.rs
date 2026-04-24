@@ -71,9 +71,9 @@ pub struct NodeState {
     pub input_ports: Vec<InputPort>,
     /// The `OutputPort` objects computed during the last build, for change detection.
     pub output_ports: Vec<OutputPort>,
-    /// Whether the module at this node implements [`PeriodicUpdate`].
+    /// Whether the module at this node wants periodic updates.
     ///
-    /// Cached at build time from `Module::as_periodic()` so that `periodic_indices`
+    /// Cached at build time from `Module::wants_periodic()` so that `periodic_indices`
     /// can be populated by the builder without access to the live module pool.
     pub is_periodic: bool,
     /// Parameter-plane layout for this instance. Computed once from the

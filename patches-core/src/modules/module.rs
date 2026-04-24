@@ -8,20 +8,6 @@ use super::parameter_map::{ParameterMap, ParameterValue};
 use crate::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use crate::param_layout::{compute_layout, defaults_from_descriptor};
 
-/// Trait for modules that need periodic coefficient recalculation.
-///
-/// Modules implementing this trait receive a call to [`periodic_update`] every
-/// [`COEFF_UPDATE_INTERVAL`] samples, before the main per-sample processing loop.
-/// The callback reads CV input values from the previous sample's cable pool snapshot
-/// (consistent with the 1-sample cable delay) and uses them to update interpolation ramps.
-///
-/// [`periodic_update`]: PeriodicUpdate::periodic_update
-/// [`COEFF_UPDATE_INTERVAL`]: crate::COEFF_UPDATE_INTERVAL
-pub trait PeriodicUpdate {
-    fn periodic_update(&mut self, pool: &CablePool<'_>);
-}
-
-
 /// Validate `params` against `descriptor`.
 ///
 /// Returns an error if:
@@ -321,28 +307,24 @@ pub trait Module: Send {
         None
     }
 
-    /// Returns `Some(self)` if this module implements [`PeriodicUpdate`], `None` otherwise.
+    /// Whether this module wants periodic coefficient updates.
     ///
-    /// Override this to return `Some(self)` in modules that implement [`PeriodicUpdate`].
-    /// The execution plan uses this during plan activation to build `periodic_indices`.
+    /// Queried once at plan-build time. Modules returning `true` are added to
+    /// the engine's `periodic_indices` list and receive [`periodic_update`]
+    /// calls every `periodic_update_interval` samples. Default: `false`.
     ///
-    /// The default implementation returns `None`.
+    /// [`periodic_update`]: Module::periodic_update
+    fn wants_periodic(&self) -> bool { false }
+
+    /// Called every `periodic_update_interval` samples for modules that
+    /// returned `true` from [`wants_periodic`](Module::wants_periodic).
     ///
-    /// # Safety contract
+    /// Reads CV input values from the previous sample's cable pool snapshot
+    /// (consistent with the 1-sample cable delay) and uses them to update
+    /// interpolation ramps. Default: no-op.
     ///
-    /// The returned reference must point to data *owned by the module itself*
-    /// — typically `Some(self)`, or `Some(&mut self.some_field)` where
-    /// `some_field` lives inside the module. It must **never** reference a
-    /// local temporary or borrowed data.
-    ///
-    /// `ModulePool::as_periodic_ptr` erases the borrow-checker lifetime on
-    /// this pointer so that `ReadyState` can store it across ticks. The
-    /// pointer's validity therefore piggy-backs on the module's own
-    /// lifetime in the pool — a returned reference to a temporary would be
-    /// dangling as soon as this method returns.
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        None
-    }
+    /// **Must not allocate, block, or perform I/O.**
+    fn periodic_update(&mut self, _pool: &CablePool<'_>) {}
 }
 
 #[cfg(test)]

@@ -39,7 +39,6 @@
 //! | `feedback[i]` | float | 0.0--0.95 | `0.0` | Self-feedback per tap |
 
 use patches_core::module_params;
-use patches_core::modules::module::PeriodicUpdate;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
@@ -253,13 +252,8 @@ impl Module for VBbd {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for VBbd {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         // Delay is driven by `delay_ms[i]` parameter + `delay_cv[i]`
         // input; both change at Periodic cadence, so one `set_delay`

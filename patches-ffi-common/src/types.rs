@@ -5,7 +5,7 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 // ── FfiBytes ─────────────────────────────────────────────────────────────────
 

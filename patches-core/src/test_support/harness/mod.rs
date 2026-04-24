@@ -302,14 +302,12 @@ impl ModuleHarness {
 
     /// Process one sample. Returns `&mut Self` for chaining.
     ///
-    /// Mirrors [`ExecutionPlan::tick`]: calls [`PeriodicUpdate::periodic_update`] every
+    /// Mirrors [`ExecutionPlan::tick`]: calls [`Module::periodic_update`] every
     /// [`COEFF_UPDATE_INTERVAL`] samples before the main process call.
     pub fn tick(&mut self) -> &mut Self {
-        if self.sample_counter == 0 {
+        if self.sample_counter == 0 && self.module.wants_periodic() {
             let pool = CablePool::new(&mut self.pool, self.wi);
-            if let Some(p) = self.module.as_periodic() {
-                p.periodic_update(&pool);
-            }
+            self.module.periodic_update(&pool);
         }
         self.sample_counter += 1;
         if self.sample_counter >= COEFF_UPDATE_INTERVAL {

@@ -2,7 +2,7 @@ use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PeriodicUpdate, PolyInput, PolyOutput,
+    ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -180,13 +180,8 @@ impl Module for PolySvf {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for PolySvf {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         if !self.any_cv_connected() {
             return;

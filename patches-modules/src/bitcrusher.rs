@@ -27,8 +27,7 @@
 /// | `dry_wet` | float | 0.0--1.0   | `1.0`   | Dry/wet mix                          |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, PeriodicUpdate,
-};
+    MonoInput, MonoOutput, ModuleShape, OutputPort, };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::BitcrusherKernel;
@@ -115,13 +114,8 @@ impl Module for Bitcrusher {
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
+    fn wants_periodic(&self) -> bool { true }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        Some(self)
-    }
-}
-
-impl PeriodicUpdate for Bitcrusher {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let rate_cv = if self.in_rate_cv.is_connected() {
             pool.read_mono(&self.in_rate_cv)

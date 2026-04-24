@@ -193,11 +193,10 @@ pub struct ExecutionPlan {
     /// `&ParameterMap`-based trait signature keeps working until 0596 flips
     /// it.
     pub param_frames: Vec<(usize, ParamFrame)>,
-    /// Pool indices of modules that implement [`PeriodicUpdate`].
+    /// Pool indices of modules that want periodic updates.
     ///
-    /// Populated during plan activation (not at build time) by calling
-    /// [`Module::as_periodic`] on each slot's module after all new modules have
-    /// been installed and port/parameter updates applied.
+    /// Populated at plan build time by calling
+    /// [`Module::wants_periodic`] on each slot's module.
     pub periodic_indices: Vec<usize>,
     /// Pool indices in execution order — one entry per slot, parallel to
     /// [`slots`](Self::slots).
@@ -472,7 +471,7 @@ impl PatchBuilder {
                             "fresh param state for install node {id:?} is missing"
                         ))
                     })?;
-                    let periodic = fresh.as_periodic().is_some();
+                    let periodic = fresh.wants_periodic();
                     if periodic { periodic_indices.push(pool_index); }
                     fresh.set_ports(&input_ports, &output_ports);
                     new_modules.push((pool_index, fresh));

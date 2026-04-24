@@ -1,6 +1,6 @@
 /// Base number of samples between periodic coefficient recalculations (at 1× oversampling).
 ///
-/// Used by [`ExecutionPlan::tick`] to trigger [`PeriodicUpdate::periodic_update`] calls,
+/// Used by [`ExecutionPlan::tick`] to trigger [`Module::periodic_update`] calls,
 /// and by module kernel implementations to compute per-sample interpolation deltas.
 ///
 /// At 48 kHz this gives a ~1500 Hz refresh rate for CV-modulated coefficients.
@@ -51,7 +51,7 @@ pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::QName;
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
 pub use tracker::Step as TrackerStep;
-pub use modules::{validate_parameters, Module, PeriodicUpdate, PortConnectivity};
+pub use modules::{validate_parameters, Module, PortConnectivity};
 pub use modules::{ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterRef, PortDescriptor, PortRef};
 pub use modules::{ParameterKey, ParameterMap, ParameterValue};
 pub use modules::parameter_map;

@@ -15,7 +15,6 @@ use std::sync::{Arc, OnceLock};
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::module::PeriodicUpdate;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
 use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use patches_core::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
@@ -153,16 +152,10 @@ impl Module for DylibModule {
         self
     }
 
-    fn as_periodic(&mut self) -> Option<&mut dyn PeriodicUpdate> {
-        if self.vtable.supports_periodic != 0 {
-            Some(self)
-        } else {
-            None
-        }
+    fn wants_periodic(&self) -> bool {
+        self.vtable.supports_periodic != 0
     }
-}
 
-impl PeriodicUpdate for DylibModule {
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let (ptr, len, wi) = pool.as_raw_parts();
         unsafe { (self.vtable.periodic_update)(self.handle, ptr, len, wi) };
