@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use patches_core::source_map::SourceMap;
 use patches_diagnostics::RenderedDiagnostic;
+use patches_engine::HaltInfoSnapshot;
 
 /// Upper bound on retained status messages. Older entries drop off the
 /// front when the log grows past this size.
@@ -31,10 +32,27 @@ pub struct GuiState {
     pub browse_requested: bool,
     /// Set to true by the Reload button; consumed by `on_main_thread`.
     pub reload_requested: bool,
+    /// Mirror of the plugin's persisted module search paths. Edited from
+    /// the GUI; written back to `PatchesClapPlugin::module_paths` by
+    /// `on_main_thread`. Changes do not auto-rescan — the user must press
+    /// the Rescan button for the new paths to take effect.
+    pub module_paths: Vec<PathBuf>,
+    /// Set to true by the "Add path" button; consumed by `on_main_thread`,
+    /// which opens a directory picker.
+    pub add_path_requested: bool,
+    /// Index of a module path to remove, set by a per-row delete button.
+    pub remove_path_index: Option<usize>,
+    /// Set to true by the Rescan button; triggers the hard-stop reload
+    /// flow (ADR 0044 §3).
+    pub rescan_requested: bool,
     /// Rolling log of the most recent status messages (newest last).
     pub status_log: VecDeque<String>,
     /// Current diagnostics plus the source map needed to render them.
     pub diagnostic_view: DiagnosticView,
+    /// Engine halt state (ADR 0051). `Some(_)` triggers a top-of-window
+    /// error banner; cleared by the audio callback once the rebuilt engine
+    /// reports no halt.
+    pub halt: Option<HaltInfoSnapshot>,
 }
 
 impl GuiState {

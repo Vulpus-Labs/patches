@@ -47,6 +47,9 @@ struct PluginUiData {
 enum PluginUiEvent {
     Browse,
     Reload,
+    AddPath,
+    RemovePath(usize),
+    Rescan,
 }
 
 impl Model for PluginUiData {
@@ -68,6 +71,30 @@ impl Model for PluginUiData {
                 }
                 self.host.request_callback();
             }
+            PluginUiEvent::AddPath => {
+                {
+                    let mut gui =
+                        self.gui_state.lock().expect("gui_state mutex poisoned");
+                    gui.add_path_requested = true;
+                }
+                self.host.request_callback();
+            }
+            PluginUiEvent::RemovePath(idx) => {
+                {
+                    let mut gui =
+                        self.gui_state.lock().expect("gui_state mutex poisoned");
+                    gui.remove_path_index = Some(idx);
+                }
+                self.host.request_callback();
+            }
+            PluginUiEvent::Rescan => {
+                {
+                    let mut gui =
+                        self.gui_state.lock().expect("gui_state mutex poisoned");
+                    gui.rescan_requested = true;
+                }
+                self.host.request_callback();
+            }
         });
     }
 }
@@ -79,6 +106,7 @@ struct UiSignals {
     path: Signal<String>,
     status: Signal<String>,
     diagnostics: Signal<DiagnosticView>,
+    module_paths: Signal<Vec<String>>,
 }
 
 // Safety: Signal<T> is just an ID + PhantomData — no thread-local state.
@@ -119,7 +147,7 @@ pub(crate) unsafe fn create_gui(
         return None;
     }
 
-    let (initial_path, initial_status, initial_view) = {
+    let (initial_path, initial_status, initial_view, initial_module_paths) = {
         let gui = gui_state.lock().expect("gui_state mutex poisoned");
         let path = gui
             .file_path
@@ -128,7 +156,12 @@ pub(crate) unsafe fn create_gui(
             .unwrap_or_else(|| "No file loaded".into());
         let status = gui.status_text();
         let view = gui.diagnostic_view.clone();
-        (path, status, view)
+        let mps = gui
+            .module_paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        (path, status, view, mps)
     };
 
     let signals: Arc<Mutex<Option<UiSignals>>> = Arc::new(Mutex::new(None));
@@ -141,12 +174,14 @@ pub(crate) unsafe fn create_gui(
         let path_sig = Signal::new(initial_path.clone());
         let status_sig = Signal::new(initial_status.clone());
         let diag_sig: Signal<DiagnosticView> = Signal::new(initial_view.clone());
+        let mp_sig: Signal<Vec<String>> = Signal::new(initial_module_paths.clone());
 
         *signals_app.lock().expect("gui_state mutex poisoned") =
             Some(UiSignals {
                 path: path_sig,
                 status: status_sig,
                 diagnostics: diag_sig,
+                module_paths: mp_sig,
             });
 
         PluginUiData {
@@ -172,6 +207,48 @@ pub(crate) unsafe fn create_gui(
             })
             .horizontal_gap(Pixels(4.0))
             .height(Auto);
+
+            // Module path editor.
+            HStack::new(cx, |cx| {
+                Label::new(cx, "Module paths")
+                    .width(Stretch(1.0));
+                Button::new(cx, |cx| Label::new(cx, "Add\u{2026}"))
+                    .on_press(|cx| cx.emit(PluginUiEvent::AddPath))
+                    .width(Pixels(80.0));
+                Button::new(cx, |cx| Label::new(cx, "Rescan"))
+                    .on_press(|cx| cx.emit(PluginUiEvent::Rescan))
+                    .width(Pixels(90.0));
+            })
+            .horizontal_gap(Pixels(4.0))
+            .height(Auto);
+
+            ScrollView::new(cx, move |cx| {
+                Binding::new(cx, mp_sig, move |cx| {
+                    let paths = mp_sig.get();
+                    if paths.is_empty() {
+                        Label::new(cx, "(no module paths configured)")
+                            .width(Stretch(1.0));
+                    } else {
+                        for (idx, p) in paths.iter().enumerate() {
+                            HStack::new(cx, |cx| {
+                                Label::new(cx, p.as_str())
+                                    .width(Stretch(1.0))
+                                    .text_wrap(false);
+                                Button::new(cx, |cx| Label::new(cx, "Remove"))
+                                    .on_press(move |cx| {
+                                        cx.emit(PluginUiEvent::RemovePath(idx))
+                                    })
+                                    .width(Pixels(80.0));
+                            })
+                            .horizontal_gap(Pixels(4.0))
+                            .height(Auto);
+                        }
+                    }
+                });
+            })
+            .width(Stretch(1.0))
+            .height(Pixels(120.0))
+            .background_color(Color::rgb(20, 22, 26));
 
             // Scrollable error surface: either structured diagnostics (when
             // the last compile failed) or the plain status log.
@@ -209,10 +286,16 @@ pub(crate) unsafe fn create_gui(
             .unwrap_or_else(|| "No file loaded".into());
         let new_status = gui.status_text();
         let new_view = gui.diagnostic_view.clone();
+        let new_mps = gui
+            .module_paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
         drop(gui);
         sigs.path.set(new_path);
         sigs.status.set(new_status);
         sigs.diagnostics.set(new_view);
+        sigs.module_paths.set(new_mps);
     })
     .open_parented(&ParentWindow(parent));
 

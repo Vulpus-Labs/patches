@@ -224,6 +224,13 @@ unsafe extern "C" fn state_load(
         ReadU32::Err => return false,
     };
 
+    // Mirror into GUI so the path editor reflects what's persisted,
+    // even before activate runs.
+    {
+        let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
+        gui.module_paths = p.module_paths.clone();
+    }
+
     // If activated, compile and push the plan.
     if p.runtime.is_some() && !p.dsl_source.is_empty() {
         if let Err(e) = p.compile_and_push_plan() {
