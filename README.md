@@ -3,6 +3,8 @@
 A Rust system for defining modular audio patches and running them in a real-time audio engine, with support for hot-reloading patches at runtime without stopping the audio stream or resetting module state (oscillator phase,
 filter history, etc.).
 
+📖 **Full manual:** <https://vulpus-labs.github.io/patches/>
+
 ```patches
 patch {
     module kbd : PolyMidiToCv
@@ -311,9 +313,9 @@ Duration parameters (e.g. attack, release) take bare floats in seconds.
 Some modules accept a variable number of ports, declared in parentheses:
 
 ```patches
-module mix : StereoMixer(channels: 4) {
-    level[0]: 0.8, pan[0]: -0.5,
-    level[1]: 0.5, pan[1]:  0.7
+module mix : StereoMixer(channels: [lead, pad, bass, noise]) {
+    level[lead]: 0.8, pan[lead]: -0.5,
+    level[pad]:  0.5, pan[pad]:   0.7
 }
 ```
 
@@ -322,9 +324,9 @@ module mix : StereoMixer(channels: 4) {
 Indexed parameters can be grouped per index using `@` blocks:
 
 ```patches
-module dly : Delay(channels: 2) {
-    @0: { delay_ms: 250, feedback: 0.4 },
-    @1: { delay_ms: 375, feedback: 0.3 }
+module dly : Delay(channels: [early, late]) {
+    @early: { delay_ms: 250, feedback: 0.4 },
+    @late:  { delay_ms: 375, feedback: 0.3 }
 }
 ```
 
