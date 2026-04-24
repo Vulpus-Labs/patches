@@ -1,7 +1,4 @@
 //! CLAP plugin factory.
-//!
-//! Implements `clap_plugin_factory` — the host calls this to
-//! discover and instantiate plugins.
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -14,10 +11,9 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::plugin::clap_plugin_descriptor;
 
 use crate::descriptor::*;
-use crate::gui::GuiState;
+use patches_plugin_common::GuiState;
 use crate::plugin::{make_clap_plugin, PatchesClapPlugin};
 
-/// Static plugin descriptor returned to the host.
 pub static PLUGIN_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     clap_version: clap_sys::version::CLAP_VERSION,
     id: PLUGIN_ID.as_ptr(),
@@ -31,8 +27,6 @@ pub static PLUGIN_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     features: FEATURES.as_ptr(),
 };
 
-/// Called by the host via `clap_entry.get_factory`.
-///
 /// # Safety
 /// `factory_id` must be a valid null-terminated C string.
 pub unsafe extern "C" fn get_factory(
@@ -52,14 +46,12 @@ static PLUGIN_FACTORY: clap_plugin_factory = clap_plugin_factory {
     create_plugin: Some(create_plugin),
 };
 
-unsafe extern "C" fn get_plugin_count(
-    _factory: *const clap_plugin_factory,
-) -> u32 {
+unsafe extern "C" fn get_plugin_count(_f: *const clap_plugin_factory) -> u32 {
     1
 }
 
 unsafe extern "C" fn get_plugin_descriptor(
-    _factory: *const clap_plugin_factory,
+    _f: *const clap_plugin_factory,
     index: u32,
 ) -> *const clap_plugin_descriptor {
     if index == 0 {
@@ -70,7 +62,7 @@ unsafe extern "C" fn get_plugin_descriptor(
 }
 
 unsafe extern "C" fn create_plugin(
-    _factory: *const clap_plugin_factory,
+    _f: *const clap_plugin_factory,
     host: *const clap_host,
     plugin_id: *const c_char,
 ) -> *const clap_plugin {
@@ -94,6 +86,7 @@ unsafe extern "C" fn create_plugin(
         prev_beat: -1.0,
         prev_bar: -1,
         halt_handle: None,
+        meter: std::sync::Arc::new(patches_plugin_common::MeterTap::new()),
     });
     let data_ptr = Box::into_raw(plugin_data);
 

@@ -1,0 +1,15 @@
+[package]
+name = "patches-plugin-common"
+version = "0.1.0"
+edition = "2021"
+description = "GUI-toolkit-agnostic pieces shared across Patches plugin crates"
+publish = false
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-engine = { path = "../patches-engine" }
+patches-diagnostics = { path = "../patches-diagnostics" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

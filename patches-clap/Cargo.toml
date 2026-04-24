@@ -17,8 +17,11 @@ patches-planner = { path = "../patches-planner" }
 patches-modules = { path = "../patches-modules" }
 patches-ffi = { path = "../patches-ffi" }
 patches-diagnostics = { path = "../patches-diagnostics" }
+patches-plugin-common = { path = "../patches-plugin-common" }
 patches-alloc-trap = { path = "../patches-alloc-trap" }
 clap-sys = "0.5"
 rfd = "0.17"
 rtrb = "0.3"
-vizia = { git = "https://github.com/vizia/vizia", default-features = false, features = ["baseview"] }
+wry = "0.55"
+raw-window-handle = "0.6"
+serde_json = "1"

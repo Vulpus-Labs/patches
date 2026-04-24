@@ -20,7 +20,8 @@ patches-modules/           Module implementations (oscillators, filters, effects
 patches-engine/            Patch builder, sound engine, CPAL integration
 patches-player/            patch_player binary: load a patch, play, hot-reload on change
 patches-io/                I/O integration (audio capture, WAV recording)
-patches-clap/              CLAP audio plugin host integration
+patches-clap/              CLAP audio plugin (wry webview GUI)
+patches-plugin-common/     GUI-toolkit-agnostic plugin state/helpers
 patches-lsp/               Language Server Protocol for .patches files (used by VS Code extension)
 patches-ffi/               FFI bindings for loading native module plugins
 patches-ffi-common/        Shared types for FFI plugin interface

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Patches</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #181a1e; color: #d0d4dc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 12px;
+  }
+  main {
+    display: flex; flex-direction: column;
+    height: 100%; min-width: 360px; box-sizing: border-box;
+  }
+  #halt {
+    display: none; background: #5a1f1f; color: #ffd5d5;
+    border-bottom: 1px solid #7a2a2a; padding: 6px 10px;
+    font-size: 12px; white-space: pre-wrap;
+  }
+  #halt.visible { display: block; }
+  header {
+    padding: 10px 12px 6px; border-bottom: 1px solid #23262c;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  header h1 { margin: 0; font-size: 14px; font-weight: 500; color: #c8ccd4; }
+  #file {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    color: #8a909b; word-break: break-all;
+  }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button {
+    background: #282c33; color: #d0d4dc; border: 1px solid #3a3f48;
+    padding: 4px 10px; font-size: 12px; border-radius: 3px; cursor: pointer;
+  }
+  button:hover { background: #323742; }
+  button.small { padding: 2px 6px; font-size: 11px; }
+  section {
+    padding: 8px 12px; border-bottom: 1px solid #23262c;
+    display: flex; flex-direction: column; gap: 4px;
+    flex: 0 0 auto;
+  }
+  section > h2 {
+    margin: 0; font-size: 11px; text-transform: uppercase;
+    color: #6a707b; letter-spacing: 0.06em; font-weight: 500;
+  }
+  #paths { display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow: auto; }
+  .path-row {
+    display: flex; gap: 6px; align-items: center;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  }
+  .path-row .text { flex: 1; color: #b0b6c0; word-break: break-all; }
+  #diagnostics {
+    flex: 0 1 auto; max-height: 40%; overflow: auto;
+    padding: 0;
+  }
+  #diagnostics.empty { display: none; }
+  #diagnostics .d {
+    padding: 6px 12px; border-bottom: 1px solid #1f2228;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+  }
+  #diagnostics .d.error { border-left: 3px solid #f06060; }
+  #diagnostics .d.warning { border-left: 3px solid #d0a040; }
+  #diagnostics .d.note { border-left: 3px solid #78a0f0; }
+  #diagnostics .d .head { color: #e0e4ec; }
+  #diagnostics .d.error .head { color: #ff9090; }
+  #diagnostics .d.warning .head { color: #e8c070; }
+  #diagnostics .d.note .head { color: #a0c0ff; }
+  #diagnostics .d .loc { color: #7a808b; margin-top: 2px; }
+  #status-wrap {
+    flex: 1 1 auto; display: flex; flex-direction: column;
+    min-height: 80px;
+  }
+  #status {
+    flex: 1; overflow: auto;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    background: #14161a; padding: 6px 12px;
+    white-space: pre-wrap; color: #a8aeb8;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div id="halt"></div>
+  <header>
+    <h1>Patches</h1>
+    <div id="file">(no file)</div>
+    <div class="row">
+      <button id="btn-browse">Browse</button>
+      <button id="btn-reload">Reload</button>
+      <button id="btn-rescan">Rescan</button>
+    </div>
+  </header>
+
+  <section>
+    <h2>Module paths</h2>
+    <div id="paths"></div>
+    <div class="row">
+      <button id="btn-add" class="small">Add path</button>
+    </div>
+  </section>
+
+  <section id="meters-sec">
+    <h2>Master</h2>
+    <canvas id="meters" width="320" height="40"></canvas>
+  </section>
+
+  <section id="diagnostics" class="empty"></section>
+
+  <section id="status-wrap">
+    <h2>Status</h2>
+    <div id="status"></div>
+  </section>
+</main>
+
+<!--
+  Bridge surface exposed to the Rust side (ticket 0671).
+
+  window.__patches.applyState(snapshot)
+    Called by Rust via evaluate_script. `snapshot` matches the
+    `GuiSnapshot` Rust struct (v=2): { v, file_path, module_paths,
+    status_log, halt_message, diagnostics, *_requested flags,
+    remove_path_index }. Bump `v` on breaking shape changes.
+
+  window.__patches.send(intent)
+    Posts an intent to Rust via wry's ipc_handler. `intent` is one of:
+      { kind: "browse" }
+      { kind: "reload" }
+      { kind: "rescan" }
+      { kind: "add_path" }
+      { kind: "remove_path", index: <usize> }
+    Matches the `Intent` enum in patches-plugin-common.
+-->
+<script>
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+
+  function send(intent) {
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify(intent));
+    }
+  }
+
+  el('btn-browse').addEventListener('click', function () { send({kind:'browse'}); });
+  el('btn-reload').addEventListener('click', function () { send({kind:'reload'}); });
+  el('btn-rescan').addEventListener('click', function () { send({kind:'rescan'}); });
+  el('btn-add').addEventListener('click', function () { send({kind:'add_path'}); });
+
+  function renderPaths(paths) {
+    var root = el('paths');
+    root.textContent = '';
+    if (!paths || paths.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'path-row';
+      empty.innerHTML = '<span class="text" style="color:#5a606b">(no module paths)</span>';
+      root.appendChild(empty);
+      return;
+    }
+    paths.forEach(function (p, i) {
+      var row = document.createElement('div');
+      row.className = 'path-row';
+      var text = document.createElement('span');
+      text.className = 'text';
+      text.textContent = p;
+      var btn = document.createElement('button');
+      btn.className = 'small';
+      btn.textContent = 'Remove';
+      btn.addEventListener('click', function () {
+        send({kind:'remove_path', index: i});
+      });
+      row.appendChild(text);
+      row.appendChild(btn);
+      root.appendChild(row);
+    });
+  }
+
+  function renderDiagnostics(diags) {
+    var root = el('diagnostics');
+    root.textContent = '';
+    if (!diags || diags.length === 0) {
+      root.classList.add('empty');
+      return;
+    }
+    root.classList.remove('empty');
+    diags.forEach(function (d) {
+      var wrap = document.createElement('div');
+      wrap.className = 'd ' + (d.severity || 'error');
+      var head = document.createElement('div');
+      head.className = 'head';
+      var code = d.code ? '[' + d.code + '] ' : '';
+      head.textContent = code + (d.message || '');
+      wrap.appendChild(head);
+      if (d.location || d.label) {
+        var loc = document.createElement('div');
+        loc.className = 'loc';
+        var parts = [];
+        if (d.location) parts.push(d.location);
+        if (d.label) parts.push(d.label);
+        loc.textContent = parts.join(' — ');
+        wrap.appendChild(loc);
+      }
+      root.appendChild(wrap);
+    });
+  }
+
+  function renderStatus(log) {
+    var root = el('status');
+    var atBottom = (root.scrollTop + root.clientHeight + 8) >= root.scrollHeight;
+    root.textContent = (log || []).join('\n');
+    if (atBottom) { root.scrollTop = root.scrollHeight; }
+  }
+
+  function renderHalt(msg) {
+    var root = el('halt');
+    if (msg) {
+      root.textContent = msg;
+      root.classList.add('visible');
+    } else {
+      root.textContent = '';
+      root.classList.remove('visible');
+    }
+  }
+
+  // Master-output meters (ticket 0673). Rust pushes frames via applyMeter;
+  // we poll at 20 Hz to request a new frame and redraw on rAF.
+  // Target values come from Rust at ~10 Hz; displayed values ease toward
+  // them every frame so the bars don't jerk. Peak snaps up instantly
+  // (transients should read crisply), eases down.
+  var meter = {
+    tgt: { pl: 0, pr: 0, rl: 0, rr: 0 },
+    cur: { pl: 0, pr: 0, rl: 0, rr: 0 },
+  };
+  function drawMeters() {
+    var cv = el('meters');
+    if (!cv) return;
+    var ctx = cv.getContext('2d');
+    var w = cv.width, h = cv.height;
+    // RMS easing — first-order toward target. ~60 fps * 0.2 ≈ 80 ms.
+    var a = 0.2;
+    meter.cur.rl += (meter.tgt.rl - meter.cur.rl) * a;
+    meter.cur.rr += (meter.tgt.rr - meter.cur.rr) * a;
+    // Peaks: snap up, ease down.
+    meter.cur.pl = meter.tgt.pl > meter.cur.pl
+      ? meter.tgt.pl : meter.cur.pl + (meter.tgt.pl - meter.cur.pl) * a;
+    meter.cur.pr = meter.tgt.pr > meter.cur.pr
+      ? meter.tgt.pr : meter.cur.pr + (meter.tgt.pr - meter.cur.pr) * a;
+
+    ctx.fillStyle = '#14161a';
+    ctx.fillRect(0, 0, w, h);
+    var barH = (h - 6) / 2;
+    function bar(y, peak, rms) {
+      var pw = Math.min(1, peak) * w;
+      var rw = Math.min(1, rms) * w;
+      ctx.fillStyle = '#2a4a2a';
+      ctx.fillRect(0, y, pw, barH);
+      ctx.fillStyle = '#6ad06a';
+      ctx.fillRect(0, y, rw, barH);
+      if (peak >= 0.98) {
+        ctx.fillStyle = '#ff6060';
+        ctx.fillRect(w - 3, y, 3, barH);
+      }
+    }
+    bar(2, meter.cur.pl, meter.cur.rl);
+    bar(4 + barH, meter.cur.pr, meter.cur.rr);
+  }
+  function tick() { drawMeters(); requestAnimationFrame(tick); }
+  requestAnimationFrame(tick);
+  setInterval(function () { send({kind:'poll_meter'}); }, 100);
+
+  window.__patches = {
+    applyMeter: function (pl, pr, rl, rr) {
+      meter.tgt.pl = pl; meter.tgt.pr = pr;
+      meter.tgt.rl = rl; meter.tgt.rr = rr;
+    },
+    applyState: function (snapshot) {
+      try {
+        el('file').textContent = snapshot.file_path || '(no file)';
+        renderHalt(snapshot.halt_message);
+        renderPaths(snapshot.module_paths);
+        renderDiagnostics(snapshot.diagnostics);
+        renderStatus(snapshot.status_log);
+      } catch (e) {
+        console.error('applyState failed', e);
+      }
+    },
+    send: send,
+  };
+})();
+</script>
+</body>
+</html>

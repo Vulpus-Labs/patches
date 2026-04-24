@@ -242,7 +242,8 @@ patches-cpal/              CPAL backend driver
 patches-player/            patch_player binary: load, play, hot-reload on change
 patches-io/                I/O integration (audio capture, WAV recording)
 patches-alloc-trap/        Audio-thread allocation trap (debug/test feature)
-patches-clap/              CLAP audio plugin host integration
+patches-clap/              CLAP audio plugin (wry webview GUI)
+patches-plugin-common/     GUI-toolkit-agnostic plugin state/helpers
 patches-lsp/               Language server for .patches files
 patches-svg/               SVG rendering of patch graphs
 patches-tracker-core/      Pure tracker/pattern-player logic

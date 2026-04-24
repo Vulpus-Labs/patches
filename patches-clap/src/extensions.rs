@@ -12,7 +12,7 @@ use clap_sys::ext::audio_ports::{
 #[allow(unused_imports)]
 use clap_sys::ext::gui::{
     clap_gui_resize_hints, clap_plugin_gui, clap_window, CLAP_EXT_GUI,
-    CLAP_WINDOW_API_COCOA, CLAP_WINDOW_API_WIN32, CLAP_WINDOW_API_X11,
+    CLAP_WINDOW_API_COCOA, CLAP_WINDOW_API_WIN32,
 };
 use clap_sys::ext::note_ports::{
     clap_note_port_info, clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_MIDI,
@@ -247,8 +247,6 @@ unsafe extern "C" fn state_load(
 const NATIVE_WINDOW_API: &CStr = CLAP_WINDOW_API_COCOA;
 #[cfg(target_os = "windows")]
 const NATIVE_WINDOW_API: &CStr = CLAP_WINDOW_API_WIN32;
-#[cfg(target_os = "linux")]
-const NATIVE_WINDOW_API: &CStr = CLAP_WINDOW_API_X11;
 
 const GUI_WIDTH: u32 = 800;
 const GUI_HEIGHT: u32 = 600;
@@ -375,10 +373,8 @@ unsafe extern "C" fn gui_set_parent(
     let parent = (*window).specific.cocoa;
     #[cfg(target_os = "windows")]
     let parent = (*window).specific.win32;
-    #[cfg(target_os = "linux")]
-    let parent = (*window).specific.x11 as usize as *mut c_void;
 
-    match crate::gui_vizia::create_gui(
+    match crate::gui::create_gui(
         parent,
         p.gui_state.clone(),
         p.host,

@@ -41,7 +41,7 @@ use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 
 use crate::error::CompileError;
 use crate::extensions;
-use crate::gui::{DiagnosticView, GuiState};
+use patches_plugin_common::{DiagnosticView, GuiState, MeterTap};
 
 /// The runtime state of a single plugin instance.
 ///
@@ -77,8 +77,10 @@ pub struct PatchesClapPlugin {
     /// Clonable handle for polling engine halt state (ADR 0051). Populated
     /// in `activate` from the processor.
     pub(crate) halt_handle: Option<patches_engine::HaltHandle>,
-    pub(crate) gui_handle: Option<crate::gui_vizia::ViziaGuiHandle>,
+    pub(crate) gui_handle: Option<crate::gui::WebviewGuiHandle>,
     pub(crate) gui_scale: f64,
+    /// Lock-free master-output meter tap. Audio thread writes, GUI reads.
+    pub(crate) meter: Arc<MeterTap>,
 
     pub(crate) sample_rate: f64,
 
@@ -482,6 +484,11 @@ unsafe extern "C" fn plugin_process(
         );
     }
 
+    // Meter accumulators — seed peaks from the previous block decayed.
+    let (mut meter_pl, mut meter_pr) = p.meter.decayed_peaks();
+    let mut meter_sq_l = 0.0f32;
+    let mut meter_sq_r = 0.0f32;
+
     // Sample-accurate processing loop.
     for f in 0..frames {
         // Deliver MIDI events at this sample offset.
@@ -513,6 +520,14 @@ unsafe extern "C" fn plugin_process(
         // Tick the engine.
         let (ol, or) = proc.tick();
 
+        // Meter accumulation.
+        let ola = ol.abs();
+        let ora = or.abs();
+        if ola > meter_pl { meter_pl = ola; }
+        if ora > meter_pr { meter_pr = ora; }
+        meter_sq_l += ol * ol;
+        meter_sq_r += or * or;
+
         // Write to the output buffer.
         if !out_buf.data32.is_null() {
             let ch0 = *out_buf.data32;
@@ -527,6 +542,8 @@ unsafe extern "C" fn plugin_process(
             }
         }
     }
+
+    p.meter.publish(meter_pl, meter_pr, meter_sq_l, meter_sq_r, frames);
 
     // Log diagnostics on the 10th buffer so we can see output levels.
     let count = PROCESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -674,6 +691,17 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         gui_dirty = true;
     }
 
+    // Meter poll — read atomics and push a frame. Not gated by gui_dirty
+    // since meter has its own JS channel.
+    let meter_poll = lock_gui(&p.gui_state, |g| g.meter_poll_requested);
+    if meter_poll {
+        lock_gui_mut(&p.gui_state, |g| g.meter_poll_requested = false);
+        if let Some(handle) = &p.gui_handle {
+            let (pl, pr, rl, rr) = p.meter.read();
+            handle.push_meter(pl, pr, rl, rr);
+        }
+    }
+
     // Refresh the GUI labels if anything changed.
     if gui_dirty {
         if let Some(handle) = &p.gui_handle {
@@ -737,7 +765,7 @@ mod activate_scan_tests {
     //! activated runtime's registry.
     use super::*;
     use crate::factory::PLUGIN_DESCRIPTOR;
-    use crate::gui::GuiState;
+    use patches_plugin_common::GuiState;
     use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
     use clap_sys::stream::clap_istream;
     use std::cell::RefCell;
@@ -814,6 +842,7 @@ mod activate_scan_tests {
             prev_beat: -1.0,
             prev_bar: -1,
             halt_handle: None,
+            meter: Arc::new(MeterTap::new()),
         });
         let data_ptr = Box::into_raw(data);
         let clap_plugin_box = Box::new(make_clap_plugin(
@@ -891,6 +920,7 @@ mod activate_scan_tests {
             prev_beat: -1.0,
             prev_bar: -1,
             halt_handle: None,
+            meter: Arc::new(MeterTap::new()),
         });
         let data_ptr = Box::into_raw(data);
         let clap_plugin_box = Box::new(make_clap_plugin(

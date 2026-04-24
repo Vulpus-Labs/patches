@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Local deploy: release-build patches-clap + patches-lsp, install the CLAP
-# plugin into the user's Audio Plug-Ins directory, and (re)install the
-# patches-vscode extension into VS Code.
+# Local deploy: release-build patches-clap + patches-lsp, install the
+# CLAP plugin into the user's Audio Plug-Ins directory (as Patches.clap),
+# and (re)install the patches-vscode extension into VS Code.
 #
 # macOS only. Run from the repo root (or anywhere — the script cd's to its
 # own dir).
@@ -23,8 +23,9 @@ case "$(uname -m)" in
   *)       echo "deploy.sh: unsupported arch $(uname -m)" >&2; exit 1 ;;
 esac
 
-CLAP_SRC="$REPO_ROOT/target/release/libpatches_clap.dylib"
 CLAP_DEST_DIR="$HOME/Library/Audio/Plug-Ins/CLAP"
+
+CLAP_SRC="$REPO_ROOT/target/release/libpatches_clap.dylib"
 CLAP_DEST="$CLAP_DEST_DIR/Patches.clap"
 
 echo "==> cargo build --release -p patches-clap"
@@ -35,12 +36,16 @@ if [[ ! -f "$CLAP_SRC" ]]; then
   exit 1
 fi
 
-echo "==> Installing CLAP plugin -> $CLAP_DEST"
 mkdir -p "$CLAP_DEST_DIR"
-# Strip quarantine from any previous copy that might still be present, then
-# overwrite.
-[[ -f "$CLAP_DEST" ]] && xattr -d com.apple.quarantine "$CLAP_DEST" 2>/dev/null || true
-cp "$CLAP_SRC" "$CLAP_DEST"
+install_clap() {
+  local src="$1" dest="$2"
+  echo "==> Installing CLAP plugin -> $dest"
+  # Strip quarantine from any previous copy that might still be present,
+  # then overwrite.
+  [[ -f "$dest" ]] && xattr -d com.apple.quarantine "$dest" 2>/dev/null || true
+  cp "$src" "$dest"
+}
+install_clap "$CLAP_SRC" "$CLAP_DEST"
 
 echo "==> Building .vsix for $VSCODE_TARGET"
 "$REPO_ROOT/scripts/package-vsix.sh" "$VSCODE_TARGET"
@@ -63,5 +68,5 @@ code --install-extension "$VSIX" --force
 
 echo ""
 echo "Done."
-echo "  CLAP:  $CLAP_DEST"
-echo "  VSIX:  $VSIX"
+echo "  CLAP: $CLAP_DEST"
+echo "  VSIX: $VSIX"
