@@ -61,3 +61,24 @@ input ──► dry delay (lookahead + group delay)
   a limited signal against an unlimitated reference.
 - All buffers are pre-allocated at `prepare` time for the maximum `attack_ms`
   value (50 ms), so changing `attack_ms` at runtime never allocates.
+
+---
+
+## `StereoLimiter` — Stereo lookahead limiter
+
+Stereo variant of `Limiter` with linked gain reduction across channels.
+See `patches-modules/src/stereo_limiter.rs` for the current parameter set.
+
+## `Bitcrusher` — Bit-depth and sample-rate reduction
+
+Quantises samples to a configurable bit depth and decimates the sample
+rate. See `patches-modules/src/bitcrusher.rs`.
+
+## `Drive` — Nonlinear waveshaper
+
+Soft-clip saturation / overdrive. See `patches-modules/src/drive.rs`.
+
+## `TransientShaper` — Attack/sustain emphasis
+
+Envelope-follower-based transient emphasis and suppression. See
+`patches-modules/src/transient_shaper.rs`.

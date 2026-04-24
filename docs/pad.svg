@@ -1,0 +1,257 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2860 1129" width="2860" height="1129"><style>.bg{fill:#f6f6f8;}.node-body{fill:#ffffff;stroke:#b0b6c2;stroke-width:1;}.node-header{fill:#d6dce8;}.header-text{fill:#1e2026;font:12px sans-serif;}.port-text{fill:#3a3d45;font:10px sans-serif;}.input-dot{fill:#3e8f50;}.output-dot{fill:#a0632c;}.cable{fill:none;stroke:#3a78c8;stroke-width:1.5;}.cable-mono{stroke:#3a78c8;}.cable-poly-audio{stroke:#9a3a82;stroke-width:2.5;}.cable-poly-transport{stroke:#8a6a28;stroke-dasharray:4 2;}.cable-poly-midi{stroke:#2a8a6e;stroke-dasharray:1 2;stroke-width:2;}</style><rect class="bg" x="0" y="0" width="2860" height="1129"/><path class="cable cable-poly-audio" d="M 1320 814.5 C 1332 814.5, 1338 805.5, 1350 805.5" data-source-id="1" data-span-start="361" data-span-end="395"><title>stutter/seq.clock → stutter/player.clock
+at pad.patches:17:5
+  seq.clock[trigger] -&gt; player.clock
+expanded from pad.patches:71:12
+  stutter : stutter</title></path><path class="cable cable-trigger" d="M 1510 805.5 C 1522 805.5, 1528 805.5, 1540 805.5" data-source-id="1" data-span-start="540" data-span-end="570"><title>stutter/player.trigger → stutter/adsr.trigger
+at pad.patches:24:5
+  player.trigger -&gt; adsr.trigger
+expanded from pad.patches:71:12
+  stutter : stutter</title></path><path class="cable cable-mono" d="M 1510 823.5 C 1522 823.5, 1528 823.5, 1540 823.5" data-source-id="1" data-span-start="575" data-span-end="599"><title>stutter/player.gate → stutter/adsr.gate
+at pad.patches:25:5
+  player.gate -&gt; adsr.gate
+expanded from pad.patches:71:12
+  stutter : stutter</title></path><path class="cable cable-mono" d="M 1700 805.5 C 1712 805.5, 1718 805.5, 1730 805.5" data-source-id="1" data-span-start="604" data-span-end="641"><title>stutter/adsr.out → stutter/left_vca.cv
+at pad.patches:26:5
+  adsr.out -&gt; left_vca.cv, right_vca.cv
+expanded from pad.patches:71:12
+  stutter : stutter</title></path><path class="cable cable-mono" d="M 1700 805.5 C 1712 805.5, 1718 649.5, 1730 649.5" data-source-id="1" data-span-start="604" data-span-end="641"><title>stutter/adsr.out → stutter/right_vca.cv
+at pad.patches:26:5
+  adsr.out -&gt; left_vca.cv, right_vca.cv
+expanded from pad.patches:71:12
+  stutter : stutter</title></path><path class="cable cable-poly-audio" d="M 370 612.75 C 382 612.75, 388 892.75, 400 892.75" data-source-id="1" data-span-start="1476" data-span-end="1500"><title>lowsaw/osc0.square → lowsaw/sum.in
+at pad.patches:52:5
+  osc0.&lt;wave&gt; -&gt; sum.in[0]
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 370 701.75 C 382 701.75, 388 910.75, 400 910.75" data-source-id="1" data-span-start="1505" data-span-end="1529"><title>lowsaw/osc1.square → lowsaw/sum.in/1
+at pad.patches:53:5
+  osc1.&lt;wave&gt; -&gt; sum.in[1]
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 370 900 C 382 900, 388 928.75, 400 928.75" data-source-id="1" data-span-start="1534" data-span-end="1558"><title>lowsaw/osc2.square → lowsaw/sum.in/2
+at pad.patches:54:5
+  osc2.&lt;wave&gt; -&gt; sum.in[2]
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 370 1016 C 382 1016, 388 946.75, 400 946.75" data-source-id="1" data-span-start="1563" data-span-end="1587"><title>lowsaw/osc3.square → lowsaw/sum.in/3
+at pad.patches:55:5
+  osc3.&lt;wave&gt; -&gt; sum.in[3]
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 370 1096 C 382 1096, 388 964.75, 400 964.75" data-source-id="1" data-span-start="1592" data-span-end="1616"><title>lowsaw/osc4.square → lowsaw/sum.in/4
+at pad.patches:56:5
+  osc4.&lt;wave&gt; -&gt; sum.in[4]
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 892.75 C 572 892.75, 578 1038, 590 1038" data-source-id="1" data-span-start="1622" data-span-end="1645"><title>lowsaw/sum.out → lowsaw/filt.in
+at pad.patches:58:5
+  sum.out -[0.2]-&gt;filt.in
+expanded from pad.patches:75:12
+  lowsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 738.5 C 572 738.5, 578 445.75, 590 445.75" data-source-id="1" data-span-start="1476" data-span-end="1500"><title>highsaw/osc0.sawtooth → highsaw/sum.in
+at pad.patches:52:5
+  osc0.&lt;wave&gt; -&gt; sum.in[0]
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 574 C 572 574, 578 463.75, 590 463.75" data-source-id="1" data-span-start="1505" data-span-end="1529"><title>highsaw/osc1.sawtooth → highsaw/sum.in/1
+at pad.patches:53:5
+  osc1.&lt;wave&gt; -&gt; sum.in[1]
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 476 C 572 476, 578 481.75, 590 481.75" data-source-id="1" data-span-start="1534" data-span-end="1558"><title>highsaw/osc2.sawtooth → highsaw/sum.in/2
+at pad.patches:54:5
+  osc2.&lt;wave&gt; -&gt; sum.in[2]
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 378 C 572 378, 578 499.75, 590 499.75" data-source-id="1" data-span-start="1563" data-span-end="1587"><title>highsaw/osc3.sawtooth → highsaw/sum.in/3
+at pad.patches:55:5
+  osc3.&lt;wave&gt; -&gt; sum.in[3]
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 560 266.5 C 572 266.5, 578 517.75, 590 517.75" data-source-id="1" data-span-start="1592" data-span-end="1616"><title>highsaw/osc4.sawtooth → highsaw/sum.in/4
+at pad.patches:56:5
+  osc4.&lt;wave&gt; -&gt; sum.in[4]
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 750 445.75 C 762 445.75, 768 574, 780 574" data-source-id="1" data-span-start="1622" data-span-end="1645"><title>highsaw/sum.out → highsaw/filt.in
+at pad.patches:58:5
+  sum.out -[0.2]-&gt;filt.in
+expanded from pad.patches:76:12
+  highsaw : superosc</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 523.75, 210 523.75" data-source-id="1" data-span-start="2666" data-span-end="2687"><title>midi.voct → tuner.in
+at pad.patches:100:5
+  midi.voct -&gt; tuner.in</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 612.75, 210 612.75" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/osc0.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 701.75, 210 701.75" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/osc1.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 900, 210 900" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/osc2.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 1016, 210 1016" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/osc3.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 192 837.5, 198 1096, 210 1096" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/osc4.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 180 837.5 C 344 837.5, 426 1056, 590 1056" data-source-id="1" data-span-start="2692" data-span-end="2716"><title>midi.voct → lowsaw/filt.voct
+at pad.patches:101:5
+  midi.voct -&gt; lowsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 382 523.75, 388 738.5, 400 738.5" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/osc0.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 382 523.75, 388 574, 400 574" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/osc1.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 382 523.75, 388 476, 400 476" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/osc2.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 382 523.75, 388 378, 400 378" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/osc3.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 382 523.75, 388 266.5, 400 266.5" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/osc4.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-poly-audio" d="M 370 523.75 C 534 523.75, 616 592, 780 592" data-source-id="1" data-span-start="2721" data-span-end="2746"><title>tuner.out → highsaw/filt.voct
+at pad.patches:102:5
+  tuner.out -&gt; highsaw.voct</title></path><path class="cable cable-mono" d="M 180 425.75 C 192 425.75, 198 425.75, 210 425.75" data-source-id="1" data-span-start="2779" data-span-end="2797"><title>lfo.sine → fan.in
+at pad.patches:105:5
+  lfo.sine -&gt; fan.in</title></path><path class="cable cable-poly-audio" d="M 370 425.75 C 382 425.75, 388 756.5, 400 756.5" data-source-id="1" data-span-start="2802" data-span-end="2823"><title>fan.out → highsaw/osc0.fm
+at pad.patches:106:5
+  fan.out -&gt; highsaw.fm</title></path><path class="cable cable-poly-audio" d="M 370 425.75 C 382 425.75, 388 592, 400 592" data-source-id="1" data-span-start="2802" data-span-end="2823"><title>fan.out → highsaw/osc1.fm
+at pad.patches:106:5
+  fan.out -&gt; highsaw.fm</title></path><path class="cable cable-poly-audio" d="M 370 425.75 C 382 425.75, 388 494, 400 494" data-source-id="1" data-span-start="2802" data-span-end="2823"><title>fan.out → highsaw/osc2.fm
+at pad.patches:106:5
+  fan.out -&gt; highsaw.fm</title></path><path class="cable cable-poly-audio" d="M 370 425.75 C 382 425.75, 388 396, 400 396" data-source-id="1" data-span-start="2802" data-span-end="2823"><title>fan.out → highsaw/osc3.fm
+at pad.patches:106:5
+  fan.out -&gt; highsaw.fm</title></path><path class="cable cable-poly-audio" d="M 370 425.75 C 382 425.75, 388 284.5, 400 284.5" data-source-id="1" data-span-start="2802" data-span-end="2823"><title>fan.out → highsaw/osc4.fm
+at pad.patches:106:5
+  fan.out -&gt; highsaw.fm</title></path><path class="cable cable-poly-audio" d="M 750 1038 C 914 1038, 996 703, 1160 703" data-source-id="1" data-span-start="2828" data-span-end="2853"><title>lowsaw/filt.out → mix.in
+at pad.patches:107:5
+  lowsaw.out -&gt; mix.in[low]</title></path><path class="cable cable-poly-audio" d="M 940 574 C 952 574, 958 413.5, 970 413.5" data-source-id="1" data-span-start="2858" data-span-end="2885"><title>highsaw/filt.out → high_filt.in
+at pad.patches:108:5
+  highsaw.out -&gt; high_filt.in</title></path><path class="cable cable-poly-audio" d="M 1130 413.5 C 1142 413.5, 1148 721, 1160 721" data-source-id="1" data-span-start="2890" data-span-end="2923"><title>high_filt.lowpass → mix.in/1
+at pad.patches:109:5
+  high_filt.lowpass -&gt; mix.in[high]</title></path><path class="cable cable-poly-trigger" d="M 180 855.5 C 192 855.5, 198 57, 210 57" data-source-id="1" data-span-start="2929" data-span-end="2957"><title>midi.trigger → adsr.trigger
+at pad.patches:111:5
+  midi.trigger -&gt; adsr.trigger</title></path><path class="cable cable-poly-audio" d="M 180 873.5 C 192 873.5, 198 75, 210 75" data-source-id="1" data-span-start="2962" data-span-end="2984"><title>midi.gate → adsr.gate
+at pad.patches:112:5
+  midi.gate -&gt; adsr.gate</title></path><path class="cable cable-poly-audio" d="M 370 57 C 762 57, 958 649.5, 1350 649.5" data-source-id="1" data-span-start="2989" data-span-end="3007"><title>adsr.out → vca.cv
+at pad.patches:113:5
+  adsr.out -&gt; vca.cv</title></path><path class="cable cable-poly-trigger" d="M 180 855.5 C 192 855.5, 198 155, 210 155" data-source-id="1" data-span-start="3013" data-span-end="3051"><title>midi.trigger → high_filt_adsr.trigger
+at pad.patches:115:5
+  midi.trigger -&gt; high_filt_adsr.trigger</title></path><path class="cable cable-poly-audio" d="M 180 873.5 C 192 873.5, 198 173, 210 173" data-source-id="1" data-span-start="3056" data-span-end="3088"><title>midi.gate → high_filt_adsr.gate
+at pad.patches:116:5
+  midi.gate -&gt; high_filt_adsr.gate</title></path><path class="cable cable-poly-audio" d="M 370 155 C 610 155, 730 431.5, 970 431.5" data-source-id="1" data-span-start="3093" data-span-end="3127"><title>high_filt_adsr.out → high_filt.fm
+at pad.patches:117:5
+  high_filt_adsr.out -&gt; high_filt.fm</title></path><path class="cable cable-poly-audio" d="M 1320 703 C 1332 703, 1338 667.5, 1350 667.5" data-source-id="1" data-span-start="3133" data-span-end="3150"><title>mix.out → vca.in
+at pad.patches:119:5
+  mix.out -&gt; vca.in</title></path><path class="cable cable-poly-audio" d="M 1510 649.5 C 1522 649.5, 1528 658.5, 1540 658.5" data-source-id="1" data-span-start="3155" data-span-end="3177"><title>vca.out → collapse.in
+at pad.patches:120:5
+  vca.out -&gt; collapse.in</title></path><path class="cable cable-mono" d="M 1700 658.5 C 1712 658.5, 1718 823.5, 1730 823.5" data-source-id="1" data-span-start="3375" data-span-end="3412"><title>collapse.out → stutter/left_vca.in
+at pad.patches:123:5
+  collapse.out -[0.3]-&gt; stutter.in_left</title></path><path class="cable cable-mono" d="M 1700 658.5 C 1712 658.5, 1718 667.5, 1730 667.5" data-source-id="1" data-span-start="3417" data-span-end="3455"><title>collapse.out → stutter/right_vca.in
+at pad.patches:124:5
+  collapse.out -[0.3]-&gt; stutter.in_right</title></path><path class="cable cable-mono" d="M 1890 805.5 C 1978 805.5, 2022 703, 2110 703" data-source-id="1" data-span-start="3460" data-span-end="3493"><title>stutter/left_vca.out → delay.in_left
+at pad.patches:125:5
+  stutter.out_left -&gt; delay.in_left</title></path><path class="cable cable-mono" d="M 1890 649.5 C 1902 649.5, 1908 658.5, 1920 658.5" data-source-id="1" data-span-start="3498" data-span-end="3533"><title>stutter/right_vca.out → short_delay.in
+at pad.patches:126:5
+  stutter.out_right -&gt; short_delay.in</title></path><path class="cable cable-mono" d="M 2080 658.5 C 2092 658.5, 2098 721, 2110 721" data-source-id="1" data-span-start="3538" data-span-end="3571"><title>short_delay.out → delay.in_right
+at pad.patches:127:5
+  short_delay.out -&gt; delay.in_right</title></path><path class="cable cable-mono" d="M 2270 703 C 2282 703, 2288 703, 2300 703" data-source-id="1" data-span-start="3577" data-span-end="3607"><title>delay.out_left → verb.in_left
+at pad.patches:129:5
+  delay.out_left -&gt; verb.in_left</title></path><path class="cable cable-mono" d="M 2270 721 C 2282 721, 2288 721, 2300 721" data-source-id="1" data-span-start="3612" data-span-end="3644"><title>delay.out_right → verb.in_right
+at pad.patches:130:5
+  delay.out_right -&gt; verb.in_right</title></path><path class="cable cable-mono" d="M 2460 703 C 2472 703, 2478 703, 2490 703" data-source-id="1" data-span-start="3686" data-span-end="3714"><title>verb.out_left → lim.in_left
+at pad.patches:134:5
+  verb.out_left -&gt; lim.in_left</title></path><path class="cable cable-mono" d="M 2460 721 C 2472 721, 2478 721, 2490 721" data-source-id="1" data-span-start="3719" data-span-end="3749"><title>verb.out_right → lim.in_right
+at pad.patches:135:5
+  verb.out_right -&gt; lim.in_right</title></path><path class="cable cable-mono" d="M 2650 703 C 2662 703, 2668 703, 2680 703" data-source-id="1" data-span-start="3759" data-span-end="3788"><title>lim.out_left → audio.in_left
+at pad.patches:137:5
+  lim.out_left -&gt; audio.in_left</title></path><path class="cable cable-mono" d="M 2650 721 C 2662 721, 2668 721, 2680 721" data-source-id="1" data-span-start="3793" data-span-end="3824"><title>lim.out_right → audio.in_right
+at pad.patches:138:5
+  lim.out_right -&gt; audio.in_right</title></path><g class="node" data-source-id="1" data-span-start="2241" data-span-end="2256"><title>adsr : PolyAdsr
+at pad.patches:82:12
+  adsr : PolyAdsr</title><rect class="node-body" x="210" y="20" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 210 24 Q 210 20 214 20 L 366 20 Q 370 20 370 24 L 370 44 Z L 210 44 Z"/><text class="header-text" x="218" y="36.8">adsr : PolyAdsr</text><circle class="input-dot" cx="216" cy="57" r="3"/><text class="port-text" x="223" y="60.5">trigger</text><circle class="input-dot" cx="216" cy="75" r="3"/><text class="port-text" x="223" y="78.5">gate</text><circle class="output-dot" cx="364" cy="57" r="3"/><text class="port-text" x="339" y="60.5">out</text></g><g class="node" data-source-id="1" data-span-start="2645" data-span-end="2660"><title>audio : AudioOut
+at pad.patches:98:12
+  audio: AudioOut</title><rect class="node-body" x="2680" y="666" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 2680 670 Q 2680 666 2684 666 L 2836 666 Q 2840 666 2840 670 L 2840 690 Z L 2680 690 Z"/><text class="header-text" x="2688" y="682.8">audio : AudioOut</text><circle class="input-dot" cx="2686" cy="703" r="3"/><text class="port-text" x="2693" y="706.5">in_left</text><circle class="input-dot" cx="2686" cy="721" r="3"/><text class="port-text" x="2693" y="724.5">in_right</text></g><g class="node" data-source-id="1" data-span-start="2553" data-span-end="2574"><title>collapse : PolyToMono
+at pad.patches:96:12
+  collapse : PolyToMono</title><rect class="node-body" x="1540" y="621.5" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 1540 625.5 Q 1540 621.5 1544 621.5 L 1696 621.5 Q 1700 621.5 1700 625.5 L 1700 645.5 Z L 1540 645.5 Z"/><text class="header-text" x="1548" y="638.3">collapse : PolyToMono</text><circle class="input-dot" cx="1546" cy="658.5" r="3"/><text class="port-text" x="1553" y="662">in</text><circle class="output-dot" cx="1694" cy="658.5" r="3"/><text class="port-text" x="1669" y="662">out</text></g><g class="node" data-source-id="1" data-span-start="3264" data-span-end="3283"><title>delay : StereoDelay
+at pad.patches:122:12
+  delay : StereoDelay</title><rect class="node-body" x="2110" y="666" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 2110 670 Q 2110 666 2114 666 L 2266 666 Q 2270 666 2270 670 L 2270 690 Z L 2110 690 Z"/><text class="header-text" x="2118" y="682.8">delay : StereoDelay</text><circle class="input-dot" cx="2116" cy="703" r="3"/><text class="port-text" x="2123" y="706.5">in_left</text><circle class="input-dot" cx="2116" cy="721" r="3"/><text class="port-text" x="2123" y="724.5">in_right</text><circle class="output-dot" cx="2264" cy="703" r="3"/><text class="port-text" x="2209" y="706.5">out_left</text><circle class="output-dot" cx="2264" cy="721" r="3"/><text class="port-text" x="2203" y="724.5">out_right</text></g><g class="node" data-source-id="1" data-span-start="2759" data-span-end="2774"><title>fan : MonoToPoly
+at pad.patches:104:12
+  fan: MonoToPoly</title><rect class="node-body" x="210" y="388.75" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 392.75 Q 210 388.75 214 388.75 L 366 388.75 Q 370 388.75 370 392.75 L 370 412.75 Z L 210 412.75 Z"/><text class="header-text" x="218" y="405.55">fan : MonoToPoly</text><circle class="input-dot" cx="216" cy="425.75" r="3"/><text class="port-text" x="223" y="429.25">in</text><circle class="output-dot" cx="364" cy="425.75" r="3"/><text class="port-text" x="339" y="429.25">out</text></g><g class="node" data-source-id="1" data-span-start="2486" data-span-end="2505"><title>high_filt : PolySvf
+at pad.patches:94:12
+  high_filt : PolySvf</title><rect class="node-body" x="970" y="376.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 970 380.5 Q 970 376.5 974 376.5 L 1126 376.5 Q 1130 376.5 1130 380.5 L 1130 400.5 Z L 970 400.5 Z"/><text class="header-text" x="978" y="393.3">high_filt : PolySvf</text><circle class="input-dot" cx="976" cy="413.5" r="3"/><text class="port-text" x="983" y="417">in</text><circle class="input-dot" cx="976" cy="431.5" r="3"/><text class="port-text" x="983" y="435">fm</text><circle class="output-dot" cx="1124" cy="413.5" r="3"/><text class="port-text" x="1075" y="417">lowpass</text></g><g class="node" data-source-id="1" data-span-start="2360" data-span-end="2385"><title>high_filt_adsr : PolyAdsr
+at pad.patches:88:12
+  high_filt_adsr : PolyAdsr</title><rect class="node-body" x="210" y="118" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 210 122 Q 210 118 214 118 L 366 118 Q 370 118 370 122 L 370 142 Z L 210 142 Z"/><text class="header-text" x="218" y="134.8">high_filt_adsr : PolyAdsr</text><circle class="input-dot" cx="216" cy="155" r="3"/><text class="port-text" x="223" y="158.5">trigger</text><circle class="input-dot" cx="216" cy="173" r="3"/><text class="port-text" x="223" y="176.5">gate</text><circle class="output-dot" cx="364" cy="155" r="3"/><text class="port-text" x="339" y="158.5">out</text></g><g class="node" data-source-id="1" data-span-start="1319" data-span-end="1336"><title>highsaw/filt : PolyLowpass
+at pad.patches:44:12
+  filt: PolyLowpass
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="780" y="537" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 780 541 Q 780 537 784 537 L 936 537 Q 940 537 940 541 L 940 561 Z L 780 561 Z"/><text class="header-text" x="788" y="553.8">highsaw/filt : PolyLowpass</text><circle class="input-dot" cx="786" cy="574" r="3"/><text class="port-text" x="793" y="577.5">in</text><circle class="input-dot" cx="786" cy="592" r="3"/><text class="port-text" x="793" y="595.5">voct</text><circle class="output-dot" cx="934" cy="574" r="3"/><text class="port-text" x="909" y="577.5">out</text></g><g class="node" data-source-id="1" data-span-start="895" data-span-end="908"><title>highsaw/osc0 : PolyOsc
+at pad.patches:38:12
+  osc0: PolyOsc
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="400" y="701.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 400 705.5 Q 400 701.5 404 701.5 L 556 701.5 Q 560 701.5 560 705.5 L 560 725.5 Z L 400 725.5 Z"/><text class="header-text" x="408" y="718.3">highsaw/osc0 : PolyOsc</text><circle class="input-dot" cx="406" cy="738.5" r="3"/><text class="port-text" x="413" y="742">voct</text><circle class="input-dot" cx="406" cy="756.5" r="3"/><text class="port-text" x="413" y="760">fm</text><circle class="output-dot" cx="554" cy="738.5" r="3"/><text class="port-text" x="499" y="742">sawtooth</text></g><g class="node" data-source-id="1" data-span-start="973" data-span-end="986"><title>highsaw/osc1 : PolyOsc
+at pad.patches:39:12
+  osc1: PolyOsc
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="400" y="537" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 400 541 Q 400 537 404 537 L 556 537 Q 560 537 560 541 L 560 561 Z L 400 561 Z"/><text class="header-text" x="408" y="553.8">highsaw/osc1 : PolyOsc</text><circle class="input-dot" cx="406" cy="574" r="3"/><text class="port-text" x="413" y="577.5">voct</text><circle class="input-dot" cx="406" cy="592" r="3"/><text class="port-text" x="413" y="595.5">fm</text><circle class="output-dot" cx="554" cy="574" r="3"/><text class="port-text" x="499" y="577.5">sawtooth</text></g><g class="node" data-source-id="1" data-span-start="1052" data-span-end="1065"><title>highsaw/osc2 : PolyOsc
+at pad.patches:40:12
+  osc2: PolyOsc
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="400" y="439" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 400 443 Q 400 439 404 439 L 556 439 Q 560 439 560 443 L 560 463 Z L 400 463 Z"/><text class="header-text" x="408" y="455.8">highsaw/osc2 : PolyOsc</text><circle class="input-dot" cx="406" cy="476" r="3"/><text class="port-text" x="413" y="479.5">voct</text><circle class="input-dot" cx="406" cy="494" r="3"/><text class="port-text" x="413" y="497.5">fm</text><circle class="output-dot" cx="554" cy="476" r="3"/><text class="port-text" x="499" y="479.5">sawtooth</text></g><g class="node" data-source-id="1" data-span-start="1127" data-span-end="1140"><title>highsaw/osc3 : PolyOsc
+at pad.patches:41:12
+  osc3: PolyOsc
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="400" y="341" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 400 345 Q 400 341 404 341 L 556 341 Q 560 341 560 345 L 560 365 Z L 400 365 Z"/><text class="header-text" x="408" y="357.8">highsaw/osc3 : PolyOsc</text><circle class="input-dot" cx="406" cy="378" r="3"/><text class="port-text" x="413" y="381.5">voct</text><circle class="input-dot" cx="406" cy="396" r="3"/><text class="port-text" x="413" y="399.5">fm</text><circle class="output-dot" cx="554" cy="378" r="3"/><text class="port-text" x="499" y="381.5">sawtooth</text></g><g class="node" data-source-id="1" data-span-start="1205" data-span-end="1218"><title>highsaw/osc4 : PolyOsc
+at pad.patches:42:12
+  osc4: PolyOsc
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="400" y="229.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 400 233.5 Q 400 229.5 404 229.5 L 556 229.5 Q 560 229.5 560 233.5 L 560 253.5 Z L 400 253.5 Z"/><text class="header-text" x="408" y="246.3">highsaw/osc4 : PolyOsc</text><circle class="input-dot" cx="406" cy="266.5" r="3"/><text class="port-text" x="413" y="270">voct</text><circle class="input-dot" cx="406" cy="284.5" r="3"/><text class="port-text" x="413" y="288">fm</text><circle class="output-dot" cx="554" cy="266.5" r="3"/><text class="port-text" x="499" y="270">sawtooth</text></g><g class="node" data-source-id="1" data-span-start="1282" data-span-end="1294"><title>highsaw/sum : PolySum
+at pad.patches:43:12
+  sum: PolySum
+expanded from pad.patches:76:12
+  highsaw : superosc</title><rect class="node-body" x="590" y="408.75" width="160" height="122" rx="4" ry="4"/><path class="node-header" d="M 590 412.75 Q 590 408.75 594 408.75 L 746 408.75 Q 750 408.75 750 412.75 L 750 432.75 Z L 590 432.75 Z"/><text class="header-text" x="598" y="425.55">highsaw/sum : PolySum</text><circle class="input-dot" cx="596" cy="445.75" r="3"/><text class="port-text" x="603" y="449.25">in</text><circle class="input-dot" cx="596" cy="463.75" r="3"/><text class="port-text" x="603" y="467.25">in/1</text><circle class="input-dot" cx="596" cy="481.75" r="3"/><text class="port-text" x="603" y="485.25">in/2</text><circle class="input-dot" cx="596" cy="499.75" r="3"/><text class="port-text" x="603" y="503.25">in/3</text><circle class="input-dot" cx="596" cy="517.75" r="3"/><text class="port-text" x="603" y="521.25">in/4</text><circle class="output-dot" cx="744" cy="445.75" r="3"/><text class="port-text" x="719" y="449.25">out</text></g><g class="node" data-source-id="1" data-span-start="2093" data-span-end="2101"><title>lfo : Lfo
+at pad.patches:77:12
+  lfo: Lfo</title><rect class="node-body" x="20" y="388.75" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 20 392.75 Q 20 388.75 24 388.75 L 176 388.75 Q 180 388.75 180 392.75 L 180 412.75 Z L 20 412.75 Z"/><text class="header-text" x="28" y="405.55">lfo : Lfo</text><circle class="output-dot" cx="174" cy="425.75" r="3"/><text class="port-text" x="143" y="429.25">sine</text></g><g class="node" data-source-id="1" data-span-start="3661" data-span-end="3680"><title>lim : StereoLimiter
+at pad.patches:132:12
+  lim : StereoLimiter</title><rect class="node-body" x="2490" y="666" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 2490 670 Q 2490 666 2494 666 L 2646 666 Q 2650 666 2650 670 L 2650 690 Z L 2490 690 Z"/><text class="header-text" x="2498" y="682.8">lim : StereoLimiter</text><circle class="input-dot" cx="2496" cy="703" r="3"/><text class="port-text" x="2503" y="706.5">in_left</text><circle class="input-dot" cx="2496" cy="721" r="3"/><text class="port-text" x="2503" y="724.5">in_right</text><circle class="output-dot" cx="2644" cy="703" r="3"/><text class="port-text" x="2589" y="706.5">out_left</text><circle class="output-dot" cx="2644" cy="721" r="3"/><text class="port-text" x="2583" y="724.5">out_right</text></g><g class="node" data-source-id="1" data-span-start="1319" data-span-end="1336"><title>lowsaw/filt : PolyLowpass
+at pad.patches:44:12
+  filt: PolyLowpass
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="590" y="1001" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 590 1005 Q 590 1001 594 1001 L 746 1001 Q 750 1001 750 1005 L 750 1025 Z L 590 1025 Z"/><text class="header-text" x="598" y="1017.8">lowsaw/filt : PolyLowpass</text><circle class="input-dot" cx="596" cy="1038" r="3"/><text class="port-text" x="603" y="1041.5">in</text><circle class="input-dot" cx="596" cy="1056" r="3"/><text class="port-text" x="603" y="1059.5">voct</text><circle class="output-dot" cx="744" cy="1038" r="3"/><text class="port-text" x="719" y="1041.5">out</text></g><g class="node" data-source-id="1" data-span-start="895" data-span-end="908"><title>lowsaw/osc0 : PolyOsc
+at pad.patches:38:12
+  osc0: PolyOsc
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="210" y="575.75" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 579.75 Q 210 575.75 214 575.75 L 366 575.75 Q 370 575.75 370 579.75 L 370 599.75 Z L 210 599.75 Z"/><text class="header-text" x="218" y="592.55">lowsaw/osc0 : PolyOsc</text><circle class="input-dot" cx="216" cy="612.75" r="3"/><text class="port-text" x="223" y="616.25">voct</text><circle class="output-dot" cx="364" cy="612.75" r="3"/><text class="port-text" x="321" y="616.25">square</text></g><g class="node" data-source-id="1" data-span-start="973" data-span-end="986"><title>lowsaw/osc1 : PolyOsc
+at pad.patches:39:12
+  osc1: PolyOsc
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="210" y="664.75" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 668.75 Q 210 664.75 214 664.75 L 366 664.75 Q 370 664.75 370 668.75 L 370 688.75 Z L 210 688.75 Z"/><text class="header-text" x="218" y="681.55">lowsaw/osc1 : PolyOsc</text><circle class="input-dot" cx="216" cy="701.75" r="3"/><text class="port-text" x="223" y="705.25">voct</text><circle class="output-dot" cx="364" cy="701.75" r="3"/><text class="port-text" x="321" y="705.25">square</text></g><g class="node" data-source-id="1" data-span-start="1052" data-span-end="1065"><title>lowsaw/osc2 : PolyOsc
+at pad.patches:40:12
+  osc2: PolyOsc
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="210" y="863" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 867 Q 210 863 214 863 L 366 863 Q 370 863 370 867 L 370 887 Z L 210 887 Z"/><text class="header-text" x="218" y="879.8">lowsaw/osc2 : PolyOsc</text><circle class="input-dot" cx="216" cy="900" r="3"/><text class="port-text" x="223" y="903.5">voct</text><circle class="output-dot" cx="364" cy="900" r="3"/><text class="port-text" x="321" y="903.5">square</text></g><g class="node" data-source-id="1" data-span-start="1127" data-span-end="1140"><title>lowsaw/osc3 : PolyOsc
+at pad.patches:41:12
+  osc3: PolyOsc
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="210" y="979" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 983 Q 210 979 214 979 L 366 979 Q 370 979 370 983 L 370 1003 Z L 210 1003 Z"/><text class="header-text" x="218" y="995.8">lowsaw/osc3 : PolyOsc</text><circle class="input-dot" cx="216" cy="1016" r="3"/><text class="port-text" x="223" y="1019.5">voct</text><circle class="output-dot" cx="364" cy="1016" r="3"/><text class="port-text" x="321" y="1019.5">square</text></g><g class="node" data-source-id="1" data-span-start="1205" data-span-end="1218"><title>lowsaw/osc4 : PolyOsc
+at pad.patches:42:12
+  osc4: PolyOsc
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="210" y="1059" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 1063 Q 210 1059 214 1059 L 366 1059 Q 370 1059 370 1063 L 370 1083 Z L 210 1083 Z"/><text class="header-text" x="218" y="1075.8">lowsaw/osc4 : PolyOsc</text><circle class="input-dot" cx="216" cy="1096" r="3"/><text class="port-text" x="223" y="1099.5">voct</text><circle class="output-dot" cx="364" cy="1096" r="3"/><text class="port-text" x="321" y="1099.5">square</text></g><g class="node" data-source-id="1" data-span-start="1282" data-span-end="1294"><title>lowsaw/sum : PolySum
+at pad.patches:43:12
+  sum: PolySum
+expanded from pad.patches:75:12
+  lowsaw : superosc</title><rect class="node-body" x="400" y="855.75" width="160" height="122" rx="4" ry="4"/><path class="node-header" d="M 400 859.75 Q 400 855.75 404 855.75 L 556 855.75 Q 560 855.75 560 859.75 L 560 879.75 Z L 400 879.75 Z"/><text class="header-text" x="408" y="872.55">lowsaw/sum : PolySum</text><circle class="input-dot" cx="406" cy="892.75" r="3"/><text class="port-text" x="413" y="896.25">in</text><circle class="input-dot" cx="406" cy="910.75" r="3"/><text class="port-text" x="413" y="914.25">in/1</text><circle class="input-dot" cx="406" cy="928.75" r="3"/><text class="port-text" x="413" y="932.25">in/2</text><circle class="input-dot" cx="406" cy="946.75" r="3"/><text class="port-text" x="413" y="950.25">in/3</text><circle class="input-dot" cx="406" cy="964.75" r="3"/><text class="port-text" x="413" y="968.25">in/4</text><circle class="output-dot" cx="554" cy="892.75" r="3"/><text class="port-text" x="529" y="896.25">out</text></g><g class="node" data-source-id="1" data-span-start="1904" data-span-end="1923"><title>midi : PolyMidiToCv
+at pad.patches:73:12
+  midi : PolyMidiToCv</title><rect class="node-body" x="20" y="800.5" width="160" height="86" rx="4" ry="4"/><path class="node-header" d="M 20 804.5 Q 20 800.5 24 800.5 L 176 800.5 Q 180 800.5 180 804.5 L 180 824.5 Z L 20 824.5 Z"/><text class="header-text" x="28" y="817.3">midi : PolyMidiToCv</text><circle class="output-dot" cx="174" cy="837.5" r="3"/><text class="port-text" x="143" y="841">voct</text><circle class="output-dot" cx="174" cy="855.5" r="3"/><text class="port-text" x="125" y="859">trigger</text><circle class="output-dot" cx="174" cy="873.5" r="3"/><text class="port-text" x="143" y="877">gate</text></g><g class="node" data-source-id="1" data-span-start="2127" data-span-end="2141"><title>mix : PolyMixer
+at pad.patches:78:12
+  mix: PolyMixer</title><rect class="node-body" x="1160" y="666" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1160 670 Q 1160 666 1164 666 L 1316 666 Q 1320 666 1320 670 L 1320 690 Z L 1160 690 Z"/><text class="header-text" x="1168" y="682.8">mix : PolyMixer</text><circle class="input-dot" cx="1166" cy="703" r="3"/><text class="port-text" x="1173" y="706.5">in</text><circle class="input-dot" cx="1166" cy="721" r="3"/><text class="port-text" x="1173" y="724.5">in/1</text><circle class="output-dot" cx="1314" cy="703" r="3"/><text class="port-text" x="1289" y="706.5">out</text></g><g class="node" data-source-id="1" data-span-start="3189" data-span-end="3208"><title>short_delay : Delay
+at pad.patches:121:12
+  short_delay : Delay</title><rect class="node-body" x="1920" y="621.5" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 1920 625.5 Q 1920 621.5 1924 621.5 L 2076 621.5 Q 2080 621.5 2080 625.5 L 2080 645.5 Z L 1920 645.5 Z"/><text class="header-text" x="1928" y="638.3">short_delay : Delay</text><circle class="input-dot" cx="1926" cy="658.5" r="3"/><text class="port-text" x="1933" y="662">in</text><circle class="output-dot" cx="2074" cy="658.5" r="3"/><text class="port-text" x="2049" y="662">out</text></g><g class="node" data-source-id="1" data-span-start="409" data-span-end="420"><title>stutter/adsr : Adsr
+at pad.patches:20:12
+  adsr : Adsr
+expanded from pad.patches:71:12
+  stutter : stutter</title><rect class="node-body" x="1540" y="768.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1540 772.5 Q 1540 768.5 1544 768.5 L 1696 768.5 Q 1700 768.5 1700 772.5 L 1700 792.5 Z L 1540 792.5 Z"/><text class="header-text" x="1548" y="785.3">stutter/adsr : Adsr</text><circle class="input-dot" cx="1546" cy="805.5" r="3"/><text class="port-text" x="1553" y="809">trigger</text><circle class="input-dot" cx="1546" cy="823.5" r="3"/><text class="port-text" x="1553" y="827">gate</text><circle class="output-dot" cx="1694" cy="805.5" r="3"/><text class="port-text" x="1669" y="809">out</text></g><g class="node" data-source-id="1" data-span-start="493" data-span-end="507"><title>stutter/left_vca : Vca
+at pad.patches:21:12
+  left_vca : Vca
+expanded from pad.patches:71:12
+  stutter : stutter</title><rect class="node-body" x="1730" y="768.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1730 772.5 Q 1730 768.5 1734 768.5 L 1886 768.5 Q 1890 768.5 1890 772.5 L 1890 792.5 Z L 1730 792.5 Z"/><text class="header-text" x="1738" y="785.3">stutter/left_vca : Vca</text><circle class="input-dot" cx="1736" cy="805.5" r="3"/><text class="port-text" x="1743" y="809">cv</text><circle class="input-dot" cx="1736" cy="823.5" r="3"/><text class="port-text" x="1743" y="827">in</text><circle class="output-dot" cx="1884" cy="805.5" r="3"/><text class="port-text" x="1859" y="809">out</text></g><g class="node" data-source-id="1" data-span-start="321" data-span-end="343"><title>stutter/player : PatternPlayer
+at pad.patches:16:12
+  player : PatternPlayer
+expanded from pad.patches:71:12
+  stutter : stutter</title><rect class="node-body" x="1350" y="768.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1350 772.5 Q 1350 768.5 1354 768.5 L 1506 768.5 Q 1510 768.5 1510 772.5 L 1510 792.5 Z L 1350 792.5 Z"/><text class="header-text" x="1358" y="785.3">stutter/player : PatternPlayer</text><circle class="input-dot" cx="1356" cy="805.5" r="3"/><text class="port-text" x="1363" y="809">clock</text><circle class="output-dot" cx="1504" cy="805.5" r="3"/><text class="port-text" x="1455" y="809">trigger</text><circle class="output-dot" cx="1504" cy="823.5" r="3"/><text class="port-text" x="1473" y="827">gate</text></g><g class="node" data-source-id="1" data-span-start="519" data-span-end="534"><title>stutter/right_vca : Vca
+at pad.patches:22:12
+  right_vca : Vca
+expanded from pad.patches:71:12
+  stutter : stutter</title><rect class="node-body" x="1730" y="612.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1730 616.5 Q 1730 612.5 1734 612.5 L 1886 612.5 Q 1890 612.5 1890 616.5 L 1890 636.5 Z L 1730 636.5 Z"/><text class="header-text" x="1738" y="629.3">stutter/right_vca : Vca</text><circle class="input-dot" cx="1736" cy="649.5" r="3"/><text class="port-text" x="1743" y="653">cv</text><circle class="input-dot" cx="1736" cy="667.5" r="3"/><text class="port-text" x="1743" y="671">in</text><circle class="output-dot" cx="1884" cy="649.5" r="3"/><text class="port-text" x="1859" y="653">out</text></g><g class="node" data-source-id="1" data-span-start="249" data-span-end="270"><title>stutter/seq : MasterSequencer
+at pad.patches:15:12
+  seq : MasterSequencer
+expanded from pad.patches:71:12
+  stutter : stutter</title><rect class="node-body" x="1160" y="777.5" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 1160 781.5 Q 1160 777.5 1164 777.5 L 1316 777.5 Q 1320 777.5 1320 781.5 L 1320 801.5 Z L 1160 801.5 Z"/><text class="header-text" x="1168" y="794.3">stutter/seq : MasterSequencer</text><circle class="output-dot" cx="1314" cy="814.5" r="3"/><text class="port-text" x="1277" y="818">clock</text></g><g class="node" data-source-id="1" data-span-start="1935" data-span-end="1952"><title>tuner : PolyTuner
+at pad.patches:74:12
+  tuner : PolyTuner</title><rect class="node-body" x="210" y="486.75" width="160" height="50" rx="4" ry="4"/><path class="node-header" d="M 210 490.75 Q 210 486.75 214 486.75 L 366 486.75 Q 370 486.75 370 490.75 L 370 510.75 Z L 210 510.75 Z"/><text class="header-text" x="218" y="503.55">tuner : PolyTuner</text><circle class="input-dot" cx="216" cy="523.75" r="3"/><text class="port-text" x="223" y="527.25">in</text><circle class="output-dot" cx="364" cy="523.75" r="3"/><text class="port-text" x="339" y="527.25">out</text></g><g class="node" data-source-id="1" data-span-start="2528" data-span-end="2541"><title>vca : PolyVca
+at pad.patches:95:12
+  vca : PolyVca</title><rect class="node-body" x="1350" y="612.5" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 1350 616.5 Q 1350 612.5 1354 612.5 L 1506 612.5 Q 1510 612.5 1510 616.5 L 1510 636.5 Z L 1350 636.5 Z"/><text class="header-text" x="1358" y="629.3">vca : PolyVca</text><circle class="input-dot" cx="1356" cy="649.5" r="3"/><text class="port-text" x="1363" y="653">cv</text><circle class="input-dot" cx="1356" cy="667.5" r="3"/><text class="port-text" x="1363" y="671">in</text><circle class="output-dot" cx="1504" cy="649.5" r="3"/><text class="port-text" x="1479" y="653">out</text></g><g class="node" data-source-id="1" data-span-start="2586" data-span-end="2608"><title>verb : StereoConvReverb
+at pad.patches:97:12
+  verb: StereoConvReverb</title><rect class="node-body" x="2300" y="666" width="160" height="68" rx="4" ry="4"/><path class="node-header" d="M 2300 670 Q 2300 666 2304 666 L 2456 666 Q 2460 666 2460 670 L 2460 690 Z L 2300 690 Z"/><text class="header-text" x="2308" y="682.8">verb : StereoConvReverb</text><circle class="input-dot" cx="2306" cy="703" r="3"/><text class="port-text" x="2313" y="706.5">in_left</text><circle class="input-dot" cx="2306" cy="721" r="3"/><text class="port-text" x="2313" y="724.5">in_right</text><circle class="output-dot" cx="2454" cy="703" r="3"/><text class="port-text" x="2399" y="706.5">out_left</text><circle class="output-dot" cx="2454" cy="721" r="3"/><text class="port-text" x="2393" y="724.5">out_right</text></g></svg>

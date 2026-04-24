@@ -144,15 +144,19 @@ Poly cable slots are zeroed with `Poly([0.0; 16])` rather than `Mono(0.0)` to pr
 
 ## Periodic updates
 
-Some modules need to recompute internal coefficients when their CV inputs change — for example, a filter whose cutoff is controlled by a cable. Recomputing coefficients on every sample would be expensive, so the engine supports a `PeriodicUpdate` trait:
+Some modules need to recompute internal coefficients when their CV inputs change — for example, a filter whose cutoff is controlled by a cable. Recomputing on every sample would be expensive, so the `Module` trait exposes a periodic hook:
 
 ```rust
-pub trait PeriodicUpdate {
-    fn periodic_update(&mut self, pool: &CablePool<'_>);
+pub trait Module {
+    // ...
+    const WANTS_PERIODIC: bool = false;
+    fn periodic_update(&mut self, _pool: &CablePool<'_>) {}
 }
 ```
 
-Modules that implement this trait (and return `Some(self)` from `as_periodic()`) have their `periodic_update` method called every N samples (a configurable interval, typically a few dozen samples). This is where they read their CV inputs and update filter coefficients, frequency targets, or other derived state. The processing in `process` then uses these precomputed values, keeping the per-sample path fast.
+Modules that set `WANTS_PERIODIC = true` override `periodic_update` to read their CV inputs and update filter coefficients, frequency targets, or other derived state. The planner collects their slot indices at plan-build time; every `periodic_update_interval` samples (typically a few dozen), the audio thread dispatches to `periodic_update` through the normal `&mut dyn Module` path. The per-sample `process` call then uses these precomputed values, keeping the hot path fast.
+
+This replaces the earlier `PeriodicUpdate` trait with `as_periodic()` (deleted in E114 / ADR 0052 along with its raw-pointer caching footgun).
 
 ## Observability
 

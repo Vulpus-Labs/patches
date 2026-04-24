@@ -7,7 +7,7 @@
 MIDI modules consume from the first available system MIDI input port. Connect
 your device before starting the player.
 
-## `MidiIn` — Mono MIDI note input
+## `MidiToCv` — Mono MIDI note input
 
 Monophonic: only one note active at a time (last-note priority). Pressing a
 new key updates pitch immediately; releasing the top key falls back to the
@@ -38,7 +38,7 @@ semitone:
 
 ---
 
-## `PolyMidiIn` — Polyphonic MIDI input
+## `PolyMidiToCv` — Polyphonic MIDI input
 
 Distributes incoming notes across up to 16 voices with LIFO voice stealing.
 When all voices are occupied the most-recently-allocated voice is stolen.
@@ -52,3 +52,32 @@ When all voices are occupied the most-recently-allocated voice is stolen.
 | `gate` | Poly | `1.0` while the note for that voice is physically held |
 | `mod` | Mono | CC 1 (mod wheel) normalised to [0.0, 1.0] |
 | `pitch` | Mono | Pitchbend normalised to [−1.0, 1.0] |
+
+---
+
+## `MidiArp` — Arpeggiator
+
+Arpeggiates held notes, clocked by an external trigger (e.g. `Clock`).
+Refer to the module doc comment in `patches-modules/src/midi_arp.rs` for
+the current parameter set and port list.
+
+## `MidiDelay` — MIDI note delay
+
+Delays incoming MIDI events by a configurable number of samples or beats,
+with optional feedback for repeating echoes. See
+`patches-modules/src/midi_delay.rs` for ports and parameters.
+
+## `MidiSplit` — MIDI splitter
+
+Routes incoming MIDI notes to one of several outputs based on channel,
+velocity, or pitch range. See `patches-modules/src/midi_split.rs`.
+
+## `MidiTranspose` — MIDI pitch transposer
+
+Transposes note-on / note-off events by a configurable number of
+semitones. See `patches-modules/src/midi_transpose.rs`.
+
+## `MidiDrumset` — MIDI note-to-drum mapper
+
+Maps incoming MIDI notes to trigger outputs for drum-voice modules
+(`Kick`, `Snare`, etc). See `patches-modules/src/midi_drumset.rs`.

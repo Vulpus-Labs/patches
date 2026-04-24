@@ -218,27 +218,33 @@ pub fn layout_graph(
     let components =
         rust_sugiyama::from_vertices_and_edges(&vertices, &sugi_edges, &sugi_config);
 
+    // rust-sugiyama returns vertex *centres* in its own coordinate system
+    // (y = rank centre, which starts negative for the topmost rank; x is
+    // shifted so the leftmost centre is 0). We convert to top-left corners,
+    // stack components vertically, then translate so the minimum corner sits
+    // at (graph_margin, graph_margin).
     let mut placed: Vec<Option<PositionedNode>> = (0..nodes.len()).map(|_| None).collect();
-    let mut max_x: f32 = 0.0;
-    let mut max_y: f32 = 0.0;
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
     let mut y_offset: f32 = 0.0;
 
     for (component, _w, _h) in &components {
-        let mut comp_max_y: f32 = 0.0;
+        let mut comp_min_y = f32::INFINITY;
+        let mut comp_max_y = f32::NEG_INFINITY;
         for &(idx, (sx, sy)) in component {
             let i = idx;
             let src = &nodes[i];
-            // Transpose: Sugiyama x → our y, Sugiyama y → our x.
-            let x = config.graph_margin + sy as f32;
-            let y = config.graph_margin + y_offset + sx as f32;
+            // Transpose: Sugiyama x → our y, Sugiyama y → our x. Centre → corner.
+            let x = sy as f32 - src.width * 0.5;
+            let y = y_offset + sx as f32 - src.height * 0.5;
             let right = x + src.width;
             let bottom = y + src.height;
-            if right > max_x {
-                max_x = right;
-            }
-            if bottom > comp_max_y {
-                comp_max_y = bottom;
-            }
+            min_x = min_x.min(x);
+            max_x = max_x.max(right);
+            comp_min_y = comp_min_y.min(y);
+            comp_max_y = comp_max_y.max(bottom);
             placed[i] = Some(PositionedNode {
                 id: src.id.clone(),
                 x,
@@ -251,11 +257,24 @@ pub fn layout_graph(
                 hint: src.hint.clone(),
             });
         }
-        if comp_max_y > max_y {
-            max_y = comp_max_y;
+        if comp_min_y.is_finite() {
+            min_y = min_y.min(comp_min_y);
+            max_y = max_y.max(comp_max_y);
+            // Next component starts one vertex_spacing below this component's
+            // bottom edge, expressed in the same raw coordinate space.
+            y_offset += (comp_max_y - comp_min_y) + config.vertex_spacing;
         }
-        y_offset = comp_max_y + config.vertex_spacing - config.graph_margin;
     }
+
+    // Translate everything so (min_x, min_y) → (graph_margin, graph_margin).
+    let tx = config.graph_margin - min_x;
+    let ty = config.graph_margin - min_y;
+    for n in placed.iter_mut().flatten() {
+        n.x += tx;
+        n.y += ty;
+    }
+    let content_w = max_x - min_x;
+    let content_h = max_y - min_y;
 
     let positioned: Vec<PositionedNode> = placed.into_iter().flatten().collect();
     let by_id: HashMap<&str, &PositionedNode> =
@@ -298,8 +317,8 @@ pub fn layout_graph(
     let bounds = Rect {
         x: 0.0,
         y: 0.0,
-        w: max_x + config.graph_margin,
-        h: max_y + config.graph_margin,
+        w: content_w + 2.0 * config.graph_margin,
+        h: content_h + 2.0 * config.graph_margin,
     };
 
     GraphLayout {

@@ -5,7 +5,7 @@ filter history, etc.).
 
 ```patches
 patch {
-    module kbd : PolyMidiIn
+    module kbd : PolyMidiToCv
     module osc : PolyOsc
     module env : PolyAdsr {
         attack: 0.005, decay: 0.1, sustain: 0.7, release: 0.3
@@ -32,9 +32,20 @@ Save this as `hello.patches`, connect a MIDI device, then run:
 cargo run -p patches-player -- hello.patches
 ```
 
-`PolyMidiIn` uses the first available MIDI input port. The device must be
+`PolyMidiToCv` uses the first available MIDI input port. The device must be
 connected before the process starts. While it is running, edit and save
 `hello.patches` to hot-reload the patch without interrupting audio.
+
+Larger patches render as signal-flow diagrams via `patches-svg`. Here is the
+[`pad`](examples/pad.patches) example:
+
+<a href="docs/pad.svg"><img src="docs/pad.svg" alt="pad patch graph" width="100%"></a>
+
+Generate your own:
+
+```sh
+cargo run -p patches-svg -- <input.patches> -o out.svg [--theme light|dark]
+```
 
 ## Running patches-player
 
@@ -50,6 +61,7 @@ patch_player [options] <path-to-patch.patches>
 | `--input-device <name>` | Open named input device for audio capture |
 | `--list-devices` | List available audio devices and exit |
 | `--no-stdin` | Run without stdin monitoring (kill process to stop) |
+| `--module-path <DIR\|FILE>` | Scan directory/file for FFI plugin bundles (repeatable) |
 
 Examples:
 
@@ -130,6 +142,14 @@ The core engine and a practical set of modules are in place:
   plays it, and hot-reloads whenever the file changes on disk.
 - **Language server** (`patches-lsp`) — diagnostics, hover, and go-to-definition
   for `.patches` files. Bundled into the VS Code extension.
+- **CLAP plugin host** (`patches-clap`) — run Patches inside a DAW with patch
+  persistence, hot-reload, MIDI input, and an in-GUI path editor.
+- **Native FFI plugin system** (`patches-ffi` / `patches-ffi-common`) — load
+  modules as dynamic libraries. Stable `repr(C)` ABI (v5), descriptor-hash
+  verification, tick-boundary panic containment, `ParamFrame` data plane.
+- **Oversampling** (1/2/4×/8×) and **WAV recording** in `patches-player`.
+- **Audio-thread allocation trap** (`patches-alloc-trap`) — debug feature
+  that catches any heap allocation on the audio thread.
 
 ### Modules
 
@@ -159,9 +179,14 @@ The core engine and a practical set of modules are in place:
 | `PolyToMono` | Collapse poly voices to mono |
 | `MonoToPoly` | Broadcast mono to all poly voices |
 | **MIDI** | |
-| `MidiIn` | Mono MIDI note input (last-note-priority stack) |
-| `PolyMidiIn` | Polyphonic MIDI input with LIFO voice stealing |
+| `MidiToCv` | Mono MIDI note input (last-note-priority stack) |
+| `PolyMidiToCv` | Polyphonic MIDI input with LIFO voice stealing |
 | `MidiCC` | MIDI CC to bipolar CV converter |
+| `MidiArp` | Arpeggiator over held notes (up/down/up-down/random/as-played) |
+| `MidiDelay` | MIDI note delay with feedback |
+| `MidiSplit` | Route notes to multiple outputs by velocity/channel/range |
+| `MidiTranspose` | Pitch-transpose MIDI stream |
+| `MidiDrumset` | Map MIDI notes to drum-module triggers |
 | **Noise** | |
 | `Noise` | Four-colour noise (white, pink, brown, red) |
 | `PolyNoise` | Polyphonic four-colour noise |
@@ -172,11 +197,22 @@ The core engine and a practical set of modules are in place:
 | `ConvReverb`, `StereoConvReverb` | Convolution reverb (built-in IRs or file) |
 | **Dynamics** | |
 | `Limiter` | Lookahead peak limiter with inter-sample peak detection |
+| `StereoLimiter` | Stereo peak limiter with linked gain reduction |
 | **Effects** | |
 | `RingMod` | Analog ring modulator (Parker diode-bridge model) |
 | `PitchShift` | Spectral pitch shifter (WOLA phase vocoder, optional formant preservation) |
+| `Bitcrusher` | Bit-depth reduction and sample-rate decimation |
+| `Drive` | Nonlinear waveshaping / saturation |
+| `TransientShaper` | Attack/sustain emphasis |
+| **Drum synthesis** | |
+| `Kick`, `Snare`, `Clap`, `ClosedHiHat`, `OpenHiHat`, `Tom`, `Cymbal`, `Claves` | 808-style synthesised drum voices |
 | **Sequencers & clocks** | |
 | `Clock` | Bar/beat/quaver/semiquaver trigger generator |
+| `MasterSequencer` | Song-level pattern sequencer driving `PatternPlayer`s |
+| `PatternPlayer` | Step/note pattern playback |
+| `TempoSync` | Host-tempo-aware clock divider |
+| `MsTicker` | Millisecond-interval trigger generator |
+| `TriggerToSync`, `SyncToTrigger` | Convert between trigger pulses and sync streams |
 | **Utilities** | |
 | `Glide` | Portamento / pitch smoothing |
 | `Tuner`, `PolyTuner` | Pitch offset (octave + semitones + cents) |
@@ -185,23 +221,34 @@ The core engine and a practical set of modules are in place:
 | **I/O** | |
 | `AudioOut` | Stereo audio output (backplane sink) |
 | `AudioIn` | Stereo audio input (backplane source) |
+| `HostTransport` | Exposes host (DAW/CLAP) transport position and tempo |
 
 ## Workspace layout
 
 ```text
 patches-core/              Core types, traits, and execution plan runtime
+patches-registry/          Module registry (compile-time descriptors)
 patches-dsp/               Pure DSP kernels (filters, delay, noise, ADSR)
 patches-dsl/               PEG parser and template expander for .patches DSL
 patches-interpreter/       Validates FlatPatch against module registry; builds ModuleGraph
+patches-diagnostics/       Diagnostic message types and span threading
 patches-modules/           Audio module implementations
-patches-engine/            Patch builder, Planner, PatchEngine, CPAL sound engine
+patches-planner/           ExecutionPlan builder (buffer layout, scheduling)
+patches-engine/            Patch builder, PatchEngine, lock-free plan handoff
+patches-host/              Host integration (CPAL + backplane)
+patches-cpal/              CPAL backend driver
 patches-player/            patch_player binary: load, play, hot-reload on change
 patches-io/                I/O integration (audio capture, WAV recording)
+patches-alloc-trap/        Audio-thread allocation trap (debug/test feature)
 patches-clap/              CLAP audio plugin host integration
 patches-lsp/               Language server for .patches files
+patches-svg/               SVG rendering of patch graphs
+patches-tracker-core/      Pure tracker/pattern-player logic
+patches-vintage/           Legacy modules (loaded via FFI, not in default registry)
 patches-ffi/               FFI bindings for native module plugins
 patches-ffi-common/        Shared types for FFI plugin interface
 patches-profiling/         Profiling utilities
+patches-tools/             Utility CLIs
 patches-integration-tests/ Cross-crate integration tests (not published)
 test-plugins/              Example native plugins (gain, conv-reverb)
 patches-vscode/            VS Code extension (syntax highlighting + LSP client)
@@ -321,7 +368,7 @@ brackets: `<freq>`.
 
 ```patches
 patch {
-    module kbd      : PolyMidiIn
+    module kbd      : PolyMidiToCv
     module osc_a    : PolyOsc { fm_type: "linear" }
     module osc_b    : PolyOsc { frequency: 200Hz }
     module vol_adsr : PolyAdsr

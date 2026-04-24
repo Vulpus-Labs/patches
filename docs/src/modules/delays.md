@@ -174,3 +174,17 @@ module verb : FdnReverb {
 | --- | --- |
 | `out_left` | Left reverb output |
 | `out_right` | Right reverb output |
+
+---
+
+## `ConvReverb` — Mono convolution reverb
+
+Partitioned-convolution reverb driven by an impulse response (built-in
+preset or loaded from a WAV file). See
+`patches-modules/src/convolution_reverb/` for the current parameter set,
+IR-loading mechanism, and port list.
+
+## `StereoConvReverb` — Stereo convolution reverb
+
+Stereo variant of `ConvReverb` with per-channel IR processing. See
+`patches-modules/src/convolution_reverb/` for details.
