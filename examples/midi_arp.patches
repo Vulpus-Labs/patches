@@ -1,0 +1,44 @@
+# MidiArp demo: hold notes on the MIDI input, Clock drives the arpeggiator.
+# Try holding a chord (e.g. C3 + Eb3 + G3) — each sixteenth the arpeggiator
+# walks through the held notes, expanding over two octaves.
+
+patch {
+    module midi  : MidiIn
+    module clock : Clock { bpm: 120, quavers_per_beat: 2 }
+
+    module arp : MidiArp {
+        pattern: up_down,
+        octaves: 2,
+        gate_length: 0.6
+    }
+
+    midi.midi          -> arp.midi
+    clock.semiquaver   -> arp.clock
+
+    module voice : MidiToCv
+    arp.midi -> voice.midi
+
+    module osc  : Osc
+    module env  : Adsr { attack: 0.005, decay: 0.08, sustain: 0.4, release: 0.12 }
+    module filt : Svf  { cutoff: 5.0, q: 0.3 }
+    module vca  : Vca
+
+    voice.voct    -> osc.voct
+    voice.trigger -> env.trigger
+    voice.gate    -> env.gate
+
+    osc.sawtooth  -> filt.in
+    filt.lowpass  -> vca.in
+    env.out       -> vca.cv
+
+    module delay : StereoDelay(channels: 1) { delay_ms: 250, feedback: 0.3, dry_wet: 0.3, pingpong: true }
+    module lim   : StereoLimiter
+    module out   : AudioOut
+
+    vca.out -> delay.in_left
+    vca.out -> delay.in_right
+    delay.out_left  -> lim.in_left
+    delay.out_right -> lim.in_right
+    lim.out_left  -> out.in_left
+    lim.out_right -> out.in_right
+}
