@@ -1,0 +1,9 @@
+---
+source: patches-lsp/src/workspace/tests/hover.rs
+expression: snapshot_hover(&h)
+---
+range: Some(Range { start: Position { line: 4, character: 0 }, end: Position { line: 4, character: 22 } })
+---
+**connection**
+
+- `mix.out` → `out.in_left`

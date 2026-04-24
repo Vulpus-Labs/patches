@@ -13,6 +13,13 @@
 //!
 //! Sugiyama layout lives in the [`layout`] submodule; rendering emits
 //! a standalone SVG `String` with inline styling.
+//!
+//! # Snapshot tests
+//!
+//! Structural regressions on the rendered output are pinned with `insta`
+//! snapshots under `src/snapshots/`. If you intentionally change the SVG
+//! shape (theme, layout config, class names), run `cargo insta review -p
+//! patches-svg` to accept new snapshots.
 
 pub mod layout;
 mod flat_to_layout;
@@ -153,21 +160,14 @@ mod tests {
     fn empty_patch_renders_minimal_svg() {
         let flat = FlatPatch::default();
         let svg = render(&flat, &SvgOptions::default());
-        assert!(svg.starts_with("<svg"));
-        assert!(svg.ends_with("</svg>"));
-        assert!(!svg.contains("<path class=\"cable"));
-        assert!(!svg.contains("<rect class=\"node-body\""));
+        insta::assert_snapshot!("empty_patch", svg);
     }
 
     #[test]
-    fn sample_patch_contains_expected_labels_and_path() {
+    fn sample_patch_snapshot() {
         let flat = sample_patch();
         let svg = render(&flat, &SvgOptions::default());
-        assert!(svg.contains("osc : Osc"));
-        assert!(svg.contains("vca : Vca"));
-        assert!(svg.contains("<path class=\"cable cable-mono\""));
-        assert!(svg.contains(">sine<"));
-        assert!(svg.contains(">in<"));
+        insta::assert_snapshot!("sample_patch_mono", svg);
     }
 
     #[test]
@@ -249,10 +249,7 @@ mod tests {
             &default_registry(),
             &SvgOptions::default(),
         );
-        assert!(svg.contains("<title>"), "expected <title> elements: {svg}");
-        assert!(svg.contains("data-span-start"), "expected data-span-start: {svg}");
-        assert!(svg.contains("data-source-id"), "expected data-source-id: {svg}");
-        assert!(svg.contains("master.patches"), "expected filename in tooltip: {svg}");
+        insta::assert_snapshot!("real_source_provenance", svg);
     }
 
     #[test]
@@ -270,7 +267,7 @@ mod tests {
             &default_registry(),
             &SvgOptions::default(),
         );
-        assert!(svg.contains("cable cable-mono"), "expected cable-mono class: {svg}");
+        insta::assert_snapshot!("mono_cable", svg);
     }
 
     #[test]

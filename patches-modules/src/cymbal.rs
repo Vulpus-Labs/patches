@@ -242,4 +242,52 @@ mod tests {
         let diff: f32 = s_no.iter().zip(s_yes.iter()).map(|(a, b)| (a - b).abs()).sum::<f32>() / 2000.0;
         assert!(diff > 0.001, "shimmer should change the output, avg diff = {diff}");
     }
+
+    #[test]
+    fn spectrum_is_hf_dominant() {
+        use crate::test_support::{band_energy, magnitude_spectrum};
+        let mut h = ModuleHarness::build::<Cymbal>(&[
+            ("decay", ParameterValue::Float(2.0)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let samples = h.run_mono(4096, "out");
+        let spec = magnitude_spectrum(&samples, 4096);
+        let lf = band_energy(&spec, 44100.0, 4096, 20.0, 500.0);
+        let hf = band_energy(&spec, 44100.0, 4096, 2000.0, 20000.0);
+        assert!(
+            hf > 4.0 * lf,
+            "cymbal should be HF-dominant: hf={hf}, lf={lf}, ratio={}",
+            hf / lf.max(1e-12),
+        );
+    }
+
+    #[test]
+    fn envelope_peak_is_early() {
+        use crate::test_support::windowed_rms;
+        let mut h = ModuleHarness::build::<Cymbal>(&[
+            ("decay", ParameterValue::Float(1.0)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let samples = h.run_mono(8192, "out");
+        let rms = windowed_rms(&samples, 256);
+        let (peak_idx, _) = rms
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap();
+        assert!(
+            peak_idx < rms.len() / 4,
+            "cymbal envelope peak should occur in first quarter, peak_idx={peak_idx} of {}",
+            rms.len(),
+        );
+        // And the tail should be quieter than the peak (sustained decay).
+        let tail_rms = rms[rms.len() - 4..].iter().copied().sum::<f32>() / 4.0;
+        assert!(tail_rms < rms[peak_idx] * 0.8, "tail not decaying past peak");
+    }
 }

@@ -104,7 +104,17 @@ fn hiss_silent_at_zero_and_bounded_at_one() {
         h2.tick();
         peak = peak.max(h2.read_mono("out_left").abs());
     }
-    assert!(peak > 0.0 && peak < 0.1, "hiss peak {peak} out of range");
+    // Bright hiss_floor = 0.0020 (see `VChorusCore::hiss_floor`). Uniform PRNG
+    // output is in [-1, 1], so the raw noise peak is ~0.002. The reconstruction
+    // low-pass softens it slightly but does not amplify — peak settles in the
+    // 0.001–0.005 range. Tight upper bound of 0.02 leaves one order of
+    // magnitude of headroom for run-to-run variation without masking a
+    // regression where the floor is misapplied (e.g. driven by hiss=1 directly,
+    // which would push peak toward 1.0).
+    assert!(
+        peak > 0.0 && peak < 0.02,
+        "hiss peak {peak} out of expected range [0, 0.02]"
+    );
 }
 
 #[test]

@@ -1,0 +1,5 @@
+---
+source: patches-lsp/src/workspace/tests/inlay.rs
+expression: snapshot_hints(&hints)
+---
+pos: 7:22 | label:  {channels=4} | tooltip:

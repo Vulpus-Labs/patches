@@ -2,6 +2,31 @@
 
 use super::*;
 
+fn snapshot_hints(hints: &[InlayHint]) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for h in hints {
+        let label = match &h.label {
+            InlayHintLabel::String(s) => s.clone(),
+            InlayHintLabel::LabelParts(parts) => {
+                parts.iter().map(|p| p.value.clone()).collect::<Vec<_>>().join("")
+            }
+        };
+        let tooltip = match &h.tooltip {
+            Some(tower_lsp::lsp_types::InlayHintTooltip::String(s)) => s.clone(),
+            Some(tower_lsp::lsp_types::InlayHintTooltip::MarkupContent(m)) => m.value.clone(),
+            None => String::new(),
+        };
+        writeln!(
+            out,
+            "pos: {}:{} | label: {} | tooltip: {}",
+            h.position.line, h.position.character, label, tooltip
+        )
+        .unwrap();
+    }
+    out
+}
+
 #[test]
 fn inlay_hints_single_call_single_module_shape() {
     let tmp = TempDir::new("inlay_single");
@@ -32,11 +57,7 @@ patch { module v : voice }
     let uri = tmp.uri("a.patches");
     let _ = ws.analyse_flat(&uri, src.to_string());
     let hints = ws.inlay_hints(&uri, full_range(src));
-    // voice emits exactly one module (Osc). Its shape is default
-    // (channels=0 etc.) → `render_shape_inline` returns an empty
-    // string, so no hint is produced unless indexed ports exist.
-    // Osc has no indexed ports either, so empty result is correct.
-    assert!(hints.is_empty() || hints.len() == 1, "{hints:?}");
+    insta::assert_snapshot!("template_call_emits_shape_hint", snapshot_hints(&hints));
 }
 
 #[test]
@@ -59,11 +80,7 @@ patch { module b : bus(channels: 4) }
     let uri = tmp.uri("a.patches");
     let _ = ws.analyse_flat(&uri, src.to_string());
     let hints = ws.inlay_hints(&uri, full_range(src));
-    let has_channels = hints.iter().any(|h| match &h.label {
-        InlayHintLabel::String(s) => s.contains("channels=4"),
-        InlayHintLabel::LabelParts(parts) => parts.iter().any(|p| p.value.contains("channels=4")),
-    });
-    assert!(has_channels, "expected channels=4 in inlay hints: {hints:?}");
+    insta::assert_snapshot!("template_call_with_shape_arg", snapshot_hints(&hints));
 }
 
 #[test]

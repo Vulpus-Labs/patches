@@ -1,0 +1,26 @@
+---
+source: patches-lsp/src/workspace/tests/hover.rs
+expression: snapshot_hover(&h)
+---
+range: Some(Range { start: Position { line: 1, character: 17 }, end: Position { line: 1, character: 20 } })
+---
+## Osc
+
+**Inputs:**
+- `voct` (mono)
+- `fm` (mono)
+- `pulse_width_cv` (mono)
+- `phase_mod` (mono)
+- `sync` (mono)
+
+**Outputs:**
+- `sine` (mono)
+- `triangle` (mono)
+- `sawtooth` (mono)
+- `square` (mono)
+- `reset_out` (mono)
+
+**Parameters:**
+- `frequency`: float (-4..12, default 0)
+- `fm_type`: enum (linear | logarithmic, default linear)
+- `drift`: float (0..1, default 0)

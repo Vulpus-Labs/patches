@@ -458,8 +458,16 @@ fn curvature_changes_spectrum_but_no_aliasing_spike() {
         "curvature produced no measurable shape change (rms diff {diff_rms})"
     );
 
-    // No single non-harmonic bin in the upper half approaches the fundamental
-    // (loose check for aliasing — no spurious spike).
+    // No single non-harmonic bin in the upper half approaches the fundamental.
+    //
+    // Threshold (`< 0.5 × cur_fund`) rationale: for a cleanly band-limited saw
+    // at this test's configuration (period=128, 16 cycles, curvature=0.1), the
+    // strongest non-harmonic bin measures ~1e-2 × fundamental. An actual
+    // aliasing spike from a broken BLEP would land within ~0.3–1.0 × the
+    // fundamental at the offending bin. 0.5 is deliberately loose — it catches
+    // a qualitative regression (a spike that becomes visible in the spectrum)
+    // while absorbing normal run-to-run variation in the 1e-2 floor. Tighten to
+    // e.g. 0.1 × cur_fund if the BLEP ever guarantees better than that.
     for k in (fund_bin * 8)..(n / 2) {
         if k % fund_bin == 0 {
             continue;
@@ -673,8 +681,14 @@ fn sync_aliasing_below_naive_baseline() {
 
     // Measured numbers (approx at sr=48k, 3:2 sync, 8192 samples):
     //   naive_band ≈ few × 1e-3, blep_band ≈ notably less.
-    // Threshold left to reviewer: blep must be strictly below naive by a
-    // clearly non-noise margin.
+    //
+    // 0.85 ratio rationale: a correctly BLEP'd hard-sync discontinuity
+    // measured ~40–60% of the naive baseline's 5–20 kHz energy during
+    // development (ticket 0635). We leave a conservative 15% margin so the
+    // test does not flap when the carrier/sync phase relationship shifts
+    // between runs (FFT-bin alignment can move the reported band power by
+    // ±10% at this sync ratio). If BLEP quality is ever tightened (e.g.
+    // longer window), drop this to 0.7 or below to exercise the improvement.
     assert!(
         blep_band < naive_band * 0.85,
         "sync BLEP did not reduce 5–20 kHz band energy enough: \

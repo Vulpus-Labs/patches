@@ -19,9 +19,13 @@ fn expand_error_has_real_span_not_whole_file() {
         .find(|d| matches!(&d.code,
             Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "ST0010"))
         .expect("ST0010 present");
-    assert!(
-        st.range != Range::new(Position::new(0, 0), Position::new(0, 0)),
-        "recursive-template diagnostic should have a non-placeholder range: {st:?}"
+    // `module m : foo` inside the template body sits at cols 51..58 on
+    // line 0. The diagnostic must point at this recursive self-reference,
+    // not the placeholder 0:0..0:0.
+    assert_eq!(
+        st.range,
+        Range::new(Position::new(0, 51), Position::new(0, 58)),
+        "ST0010 range should cover the recursive `m : foo` token: {st:?}"
     );
 }
 

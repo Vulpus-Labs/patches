@@ -427,4 +427,76 @@ mod tests {
             "open hat should ring longer: open={rms_open}, closed={rms_closed}"
         );
     }
+
+    #[test]
+    fn closed_hihat_spectrum_is_hf_dominant() {
+        use crate::test_support::{band_energy, magnitude_spectrum};
+        let mut h = ModuleHarness::build::<ClosedHiHat>(&[
+            ("decay", ParameterValue::Float(0.2)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let samples = h.run_mono(4096, "out");
+        let spec = magnitude_spectrum(&samples, 4096);
+        let lf = band_energy(&spec, 44100.0, 4096, 20.0, 500.0);
+        let hf = band_energy(&spec, 44100.0, 4096, 2000.0, 20000.0);
+        assert!(
+            hf > 4.0 * lf,
+            "closed hihat should be HF-dominant: hf={hf}, lf={lf}"
+        );
+    }
+
+    #[test]
+    fn open_hihat_spectrum_is_hf_dominant() {
+        use crate::test_support::{band_energy, magnitude_spectrum};
+        let mut h = ModuleHarness::build::<OpenHiHat>(&[
+            ("decay", ParameterValue::Float(0.5)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let samples = h.run_mono(4096, "out");
+        let spec = magnitude_spectrum(&samples, 4096);
+        let lf = band_energy(&spec, 44100.0, 4096, 20.0, 500.0);
+        let hf = band_energy(&spec, 44100.0, 4096, 2000.0, 20000.0);
+        assert!(
+            hf > 4.0 * lf,
+            "open hihat should be HF-dominant: hf={hf}, lf={lf}"
+        );
+    }
+
+    #[test]
+    fn open_hihat_decay_exceeds_closed_ratio() {
+        // Compare windowed-RMS decay envelopes on equivalent time scales.
+        let mut h_closed = ModuleHarness::build::<ClosedHiHat>(&[
+            ("decay", ParameterValue::Float(0.05)),
+        ]);
+        h_closed.disconnect_input("velocity");
+        let mut h_open = ModuleHarness::build::<OpenHiHat>(&[
+            ("decay", ParameterValue::Float(0.4)),
+        ]);
+        h_open.disconnect_input("velocity");
+
+        h_closed.set_mono("trigger", 1.0);
+        h_closed.tick();
+        h_closed.set_mono("trigger", 0.0);
+        h_open.set_mono("trigger", 1.0);
+        h_open.tick();
+        h_open.set_mono("trigger", 0.0);
+
+        // At 0.2s, closed should be effectively silent while open still rings.
+        for _ in 0..8820 {
+            h_closed.tick();
+            h_open.tick();
+        }
+        let rms_c = h_closed.measure_rms(500, "out");
+        let rms_o = h_open.measure_rms(500, "out");
+        assert!(
+            rms_o > rms_c * 20.0,
+            "open hat should ring far longer than closed: closed={rms_c}, open={rms_o}"
+        );
+    }
 }

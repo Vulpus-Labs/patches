@@ -25,12 +25,20 @@ fn descriptor_shape() {
 
 #[test]
 fn silent_input_bounded_output() {
+    // With zero input, the flanger's delay line should never see a nonzero
+    // sample, so the output must stay at (or extremely close to) 0. The old
+    // < 0.5 bound would have tolerated a factor-of-10⁵ regression. The feedback
+    // path and all-pass filter can produce sub-LSB residuals when denormals
+    // flush, so use a conservative 1e-6 ceiling rather than exact zero.
     let mut h = ModuleHarness::build_full::<VFlanger>(params![], ENV, shape());
     for _ in 0..((SR * 0.2) as usize) {
         h.set_mono("in", 0.0);
         h.tick();
         let y = h.read_mono("out");
-        assert!(y.is_finite() && y.abs() < 0.5);
+        assert!(
+            y.is_finite() && y.abs() < 1.0e-6,
+            "silent input produced audible output: {y}"
+        );
     }
 }
 

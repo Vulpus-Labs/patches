@@ -92,8 +92,21 @@ fn surviving_modules_are_not_re_instantiated() {
     let (plan_b, state_b) =
         build_patch(&graph, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
 
-    assert!(plan_b.new_modules.is_empty(), "no new modules for an identical rebuild");
-    assert!(plan_b.tombstones.is_empty(), "no tombstones for an identical rebuild");
+    // Identical rebuild: every node kept (osc + out = 2 surviving slots), no new
+    // instantiations, no tombstoned slots.
+    assert_eq!(plan_b.slots.len(), 2, "both nodes should still occupy slots");
+    assert_eq!(
+        plan_b.new_modules.len(),
+        0,
+        "no new modules for an identical rebuild, got {:?}",
+        plan_b.new_modules.iter().map(|(i, _)| *i).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        plan_b.tombstones.len(),
+        0,
+        "no tombstones for an identical rebuild, got {:?}",
+        plan_b.tombstones
+    );
 
     // Every node's InstanceId and pool slot must be stable across an identical rebuild.
     for (node_id, ns_a) in &state_a.nodes {

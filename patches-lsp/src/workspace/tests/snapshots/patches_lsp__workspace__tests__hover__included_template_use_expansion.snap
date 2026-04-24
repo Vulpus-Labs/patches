@@ -1,0 +1,16 @@
+---
+source: patches-lsp/src/workspace/tests/hover.rs
+expression: snapshot_hover(&h)
+---
+range: Some(Range { start: Position { line: 2, character: 11 }, end: Position { line: 2, character: 20 } })
+---
+**expansion** — 1 modules
+
+**In:**
+- `gate` (unwired)
+
+**Out:**
+- `audio` ← `osc.sine`
+
+**Modules:**
+- `v/osc` : `Osc`

@@ -34,10 +34,15 @@ fn load_helper_runs_full_pipeline_on_inline_source() {
     let registry = patches_modules::default_registry();
     let source = InMemorySource::new(TINY_PATCH.to_string());
     let loaded = load_patch(&source, &registry, &env()).expect("pipeline runs clean");
-    assert!(
-        !loaded.build_result.graph.node_ids().is_empty(),
-        "graph should contain at least the sine module"
-    );
+    let graph = &loaded.build_result.graph;
+    let ids = graph.node_ids();
+    assert_eq!(ids.len(), 2, "expected osc + out nodes, got {}", ids.len());
+    let types: std::collections::BTreeSet<_> = ids
+        .iter()
+        .map(|id| graph.get_node(id).unwrap().module_descriptor.module_name)
+        .collect();
+    assert!(types.contains("Osc"), "graph missing Osc node: {types:?}");
+    assert!(types.contains("AudioOut"), "graph missing AudioOut node: {types:?}");
     // Inline source has no on-disk includes — deps list is empty.
     assert!(loaded.dependencies.is_empty());
 }
@@ -72,12 +77,23 @@ fn host_builder_runtime_compiles_and_pushes_plan() {
     let loaded = runtime
         .compile_and_push(&source, &registry)
         .expect("compile + push succeeds");
-    assert!(!loaded.build_result.graph.node_ids().is_empty());
+    let graph = &loaded.build_result.graph;
+    assert_eq!(graph.node_ids().len(), 2);
+    let types: std::collections::BTreeSet<_> = graph
+        .node_ids()
+        .iter()
+        .map(|id| graph.get_node(id).unwrap().module_descriptor.module_name)
+        .collect();
+    assert!(types.contains("Osc") && types.contains("AudioOut"), "types = {types:?}");
 
-    // Audio endpoints can be claimed once.
-    let endpoints = runtime.take_audio_endpoints();
-    assert!(endpoints.is_some());
-    assert!(runtime.take_audio_endpoints().is_none());
+    // Audio endpoints (processor + plan consumer) can be claimed exactly once.
+    let (_processor, _plan_rx) = runtime
+        .take_audio_endpoints()
+        .expect("first take returns endpoints");
+    assert!(
+        runtime.take_audio_endpoints().is_none(),
+        "second take must return None"
+    );
 }
 
 /// Stub source that records how many times it was loaded and serves a

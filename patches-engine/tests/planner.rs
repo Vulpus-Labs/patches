@@ -143,6 +143,11 @@ fn planner_uses_fresh_modules_when_no_prev_plan() {
 
     let graph = counter_graph();
     let mut plan = planner.build(&graph, &registry, &env).unwrap();
+    // Fresh build: every graph module is freshly installed, nothing tombstoned.
+    assert_eq!(plan.slots.len(), 2);
+    assert_eq!(plan.new_modules.len(), 2, "expected counter + out installed");
+    assert!(plan.tombstones.is_empty(), "fresh build has nothing to tombstone");
+
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan, &mut stale);
 
@@ -150,10 +155,6 @@ fn planner_uses_fresh_modules_when_no_prev_plan() {
     let mut state = stale.rebuild(&plan, 32);
     let mut cp = patches_core::CablePool::new(&mut buffer_pool, 0);
     state.tick(&mut cp);
-    assert!(
-        !plan.new_modules.is_empty() || plan.tombstones.is_empty(),
-        "fresh build must install at least one module"
-    );
 }
 
 #[test]
@@ -161,5 +162,11 @@ fn planner_build_succeeds_for_valid_graph() {
     let registry = patches_modules::default_registry();
     let env = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let mut planner = Planner::new();
-    assert!(planner.build(&simple_graph(hz_to_voct(440.0)), &registry, &env).is_ok());
+    let plan = planner
+        .build(&simple_graph(hz_to_voct(440.0)), &registry, &env)
+        .unwrap();
+    // Graph is osc + out = 2 modules, with 2 stereo connections.
+    assert_eq!(plan.slots.len(), 2);
+    assert_eq!(plan.new_modules.len(), 2);
+    assert!(plan.tombstones.is_empty());
 }

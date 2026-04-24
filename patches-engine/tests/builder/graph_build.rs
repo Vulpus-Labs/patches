@@ -27,15 +27,25 @@ fn tick_runs_without_panic() {
 
     let stale = patches_engine::ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, 32);
+    let mut collected = Vec::with_capacity(1000);
     for i in 0..1000 {
-        let mut cp = CablePool::new(&mut buffer_pool, i % 2);
+        let wi = i % 2;
+        let mut cp = CablePool::new(&mut buffer_pool, wi);
         // SAFETY: state rebuilt from consistent plan+pool; no tombstoning since.
         state.tick(&mut cp);
+        let left = match buffer_pool[AUDIO_OUT_L][wi] { CableValue::Mono(v) => v, _ => 0.0 };
+        collected.push(left);
     }
-
-    let last_wi = 999 % 2;
-    let left = match buffer_pool[AUDIO_OUT_L][last_wi] { CableValue::Mono(v) => v, _ => 0.0 };
-    assert!(left.abs() <= 1.0);
+    // Oscillator output must stay bounded and cover a non-trivial range.
+    let (min, max) = collected
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+    assert!(min >= -1.001 && max <= 1.001, "output out of [-1, 1]: min={min}, max={max}");
+    assert!(
+        (max - min) > 0.5,
+        "oscillator produced near-constant output: range={}",
+        max - min
+    );
 }
 
 
@@ -78,13 +88,15 @@ fn input_scale_is_applied_at_tick_time() {
     let last_wi = 99 % 2;
     let half = match buf_half[AUDIO_OUT_L][last_wi] { CableValue::Mono(v) => v, _ => 0.0 };
     let full = match buf_full[AUDIO_OUT_L][last_wi] { CableValue::Mono(v) => v, _ => 0.0 };
-    if full.abs() > 1e-6 {
-        let ratio = half / full;
-        assert!(
-            (ratio - 0.5).abs() < 1e-9,
-            "expected half ≈ full * 0.5, got half={half}, full={full}, ratio={ratio}"
-        );
-    }
+    assert!(
+        full.abs() > 1e-4,
+        "full-scale path produced no audible signal: full={full}"
+    );
+    let ratio = half / full;
+    assert!(
+        (ratio - 0.5).abs() < 1e-5,
+        "expected half ≈ full * 0.5, got half={half}, full={full}, ratio={ratio}"
+    );
 }
 
 // ── Diffing acceptance tests (T-0073) ─────────────────────────────────────

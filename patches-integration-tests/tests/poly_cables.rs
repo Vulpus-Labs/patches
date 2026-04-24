@@ -268,11 +268,13 @@ fn poly_cable_propagation() {
     engine.tick();
     engine.tick();
 
-    let recorded = shared.last_received.lock().unwrap();
-    assert!(recorded.is_some(), "PolyProbe must have recorded a value");
+    let recorded = shared
+        .last_received
+        .lock()
+        .unwrap()
+        .expect("PolyProbe must have recorded a value");
     assert_eq!(
-        recorded.unwrap(),
-        POLY_PATTERN,
+        recorded, POLY_PATTERN,
         "recorded values must match the source pattern"
     );
 

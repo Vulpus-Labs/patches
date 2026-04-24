@@ -28,6 +28,10 @@ pub mod poly_lfo;
 pub mod tuner;
 pub mod common;
 pub mod noise;
+
+#[cfg(test)]
+mod test_support;
+
 pub mod ring_mod;
 pub mod svf;
 pub mod poly_svf;

@@ -235,4 +235,62 @@ mod tests {
         let rms = h.measure_rms(100, "out");
         assert!(rms < 0.01, "tom should decay, rms = {rms}");
     }
+
+    #[test]
+    fn fundamental_bin_matches_pitch() {
+        use crate::test_support::{dominant_bin, freq_to_bin, magnitude_spectrum};
+        // sweep=0 holds pitch steady; long decay keeps the tail audible.
+        let pitch_hz = 200.0;
+        let mut h = ModuleHarness::build::<Tom>(&[
+            ("pitch", ParameterValue::Float(pitch_hz)),
+            ("sweep", ParameterValue::Float(0.0)),
+            ("decay", ParameterValue::Float(2.0)),
+            ("noise", ParameterValue::Float(0.0)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        // Skip the sweep window (~30 ms) and the noise attack.
+        for _ in 0..1500 {
+            h.tick();
+        }
+        let samples = h.run_mono(4096, "out");
+        let spec = magnitude_spectrum(&samples, 4096);
+        let peak = dominant_bin(&spec);
+        let expected = freq_to_bin(pitch_hz, 44100.0, 4096);
+        // ±3 bins ≈ ±32 Hz at 4096/44100. Pitch-sweep tail may still drift a bit.
+        let diff = peak.abs_diff(expected);
+        assert!(
+            diff <= 3,
+            "tom fundamental bin = {peak}, expected {expected} (pitch {pitch_hz} Hz)"
+        );
+    }
+
+    #[test]
+    fn envelope_decays_monotonically() {
+        use crate::test_support::windowed_rms;
+        let mut h = ModuleHarness::build::<Tom>(&[
+            ("pitch", ParameterValue::Float(120.0)),
+            ("sweep", ParameterValue::Float(0.0)),
+            ("decay", ParameterValue::Float(0.5)),
+            ("noise", ParameterValue::Float(0.0)),
+        ]);
+        h.disconnect_input("velocity");
+        h.set_mono("trigger", 1.0);
+        h.tick();
+        h.set_mono("trigger", 0.0);
+        let samples = h.run_mono(8192, "out");
+        let rms = windowed_rms(&samples, 512);
+        // Skip the first block (initial attack); require overall non-increasing
+        // trend with a small tolerance for sine-phase jitter in short windows.
+        let mut prev = rms[1];
+        for (i, &r) in rms.iter().enumerate().skip(2) {
+            assert!(
+                r <= prev * 1.05,
+                "tom envelope not monotonic at block {i}: {r} > {prev}"
+            );
+            prev = r;
+        }
+    }
 }

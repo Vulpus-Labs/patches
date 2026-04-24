@@ -1,5 +1,11 @@
 use super::*;
 
+/// Format a hover result as a single string for snapshotting: the
+/// `Hover.range` on the first line, then the full markdown body.
+fn snapshot_hover(h: &Hover) -> String {
+    format!("range: {:?}\n---\n{}", h.range, hover_value(h))
+}
+
 #[test]
 fn hover_on_template_use_shows_expansion() {
     let src = r#"
@@ -21,10 +27,7 @@ module v : voice(n: 2)
 
     let pos = position_at(src, "v : voice", 0);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("expansion"), "{value}");
-    assert!(value.contains("Osc"), "{value}");
-    assert!(value.contains("Sum"), "{value}");
+    insta::assert_snapshot!("template_use_expansion", snapshot_hover(&h));
 }
 
 #[test]
@@ -51,9 +54,7 @@ module v : voice
 
     let pos = position_at(src, "v : voice", 0);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("env1.gate"), "{value}");
-    assert!(value.contains("env2.gate"), "missing fan-out target: {value}");
+    insta::assert_snapshot!("template_use_fanout_wiring", snapshot_hover(&h));
 }
 
 #[test]
@@ -80,15 +81,7 @@ module v : voice
 
     let pos = position_at(src, "v : voice", 0);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("**In:**"), "{value}");
-    assert!(value.contains("**Out:**"), "{value}");
-    assert!(value.contains("voct"), "{value}");
-    assert!(value.contains("osc.voct"), "{value}");
-    assert!(value.contains("gate"), "{value}");
-    assert!(value.contains("env.gate"), "{value}");
-    assert!(value.contains("audio"), "{value}");
-    assert!(value.contains("osc.sine"), "{value}");
+    insta::assert_snapshot!("template_use_port_wiring", snapshot_hover(&h));
 }
 
 #[test]
@@ -112,12 +105,7 @@ module v : voice(n: 3)
     // Hover on `mix` inside the template body.
     let pos = position_at(src, "module mix", 7);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("Sum"), "{value}");
-    assert!(
-        value.contains("channels = 3"),
-        "expected resolved channels in hover: {value}"
-    );
+    insta::assert_snapshot!("template_body_resolves_channels", snapshot_hover(&h));
 }
 
 #[test]
@@ -137,10 +125,7 @@ osc.sine -> out.in_left, out.in_right
 
     let pos = position_at(src, "osc.sine", 4);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("in_left"), "{value}");
-    assert!(value.contains("in_right"), "missing second target: {value}");
-    assert!(value.contains("fan-out"), "{value}");
+    insta::assert_snapshot!("top_level_fanout", snapshot_hover(&h));
 }
 
 #[test]
@@ -158,14 +143,9 @@ mix.out -> out.in_left
     let uri = tmp.uri("a.patches");
     let _ = ws.analyse_flat(&uri, src.to_string());
 
-    // Hover over `mix.out` — the connection's from side.
     let pos = position_at(src, "mix.out", 4);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(
-        value.contains("connection") || value.contains("port"),
-        "{value}"
-    );
+    insta::assert_snapshot!("port_expanded_index", snapshot_hover(&h));
 }
 
 #[test]
@@ -180,8 +160,7 @@ fn hover_falls_back_on_broken_syntax() {
     let pos = position_at(src, ": Osc", 2);
     // Must not panic; tolerant hover still produces info.
     let h = ws.hover(&uri, pos).expect("fallback hover");
-    let value = hover_value(&h);
-    assert!(value.contains("Osc"), "{value}");
+    insta::assert_snapshot!("fallback_on_broken_syntax", snapshot_hover(&h));
 }
 
 #[test]
@@ -200,7 +179,5 @@ fn hover_on_included_template_use_shows_expansion() {
 
     let pos = position_at(parent_src, "v : voice", 0);
     let h = ws.hover(&uri, pos).expect("hover");
-    let value = hover_value(&h);
-    assert!(value.contains("expansion"), "{value}");
-    assert!(value.contains("Osc"), "{value}");
+    insta::assert_snapshot!("included_template_use_expansion", snapshot_hover(&h));
 }

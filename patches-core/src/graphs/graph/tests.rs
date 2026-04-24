@@ -67,7 +67,14 @@ fn connect_valid_ports_succeeds() {
     let dst = NodeId::from("dst");
     g.add_module(src.clone(), stub_desc(&[], &["out"]), &no_params()).unwrap();
     g.add_module(dst.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
-    assert!(g.connect(&src, pref("out"), &dst, pref("in"), 1.0).is_ok());
+    g.connect(&src, pref("out"), &dst, pref("in"), 1.0).unwrap();
+    let edges = g.edge_list();
+    assert_eq!(edges.len(), 1);
+    let e = &edges[0];
+    assert_eq!(e.0, src);
+    assert_eq!(e.1, "out");
+    assert_eq!(e.3, dst);
+    assert_eq!(e.4, "in");
 }
 
 #[test]
@@ -149,8 +156,15 @@ fn fanout_one_output_to_multiple_inputs_succeeds() {
     g.add_module(src.clone(), stub_desc(&[], &["out"]), &no_params()).unwrap();
     g.add_module(dst1.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
     g.add_module(dst2.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
-    assert!(g.connect(&src, pref("out"), &dst1, pref("in"), 1.0).is_ok());
-    assert!(g.connect(&src, pref("out"), &dst2, pref("in"), 1.0).is_ok());
+    g.connect(&src, pref("out"), &dst1, pref("in"), 1.0).unwrap();
+    g.connect(&src, pref("out"), &dst2, pref("in"), 1.0).unwrap();
+    let edges = g.edge_list();
+    assert_eq!(edges.len(), 2);
+    let fanout_from_src = edges.iter().filter(|e| e.0 == src && e.1 == "out").count();
+    assert_eq!(fanout_from_src, 2, "src.out should fan out to two inputs");
+    let dests: std::collections::BTreeSet<_> =
+        edges.iter().map(|e| e.3.as_str().to_string()).collect();
+    assert_eq!(dests, ["dst1".to_string(), "dst2".to_string()].into_iter().collect());
 }
 
 #[test]
@@ -160,8 +174,12 @@ fn cycles_are_permitted() {
     let b = NodeId::from("b");
     g.add_module(a.clone(), stub_desc(&["in"], &["out"]), &no_params()).unwrap();
     g.add_module(b.clone(), stub_desc(&["in"], &["out"]), &no_params()).unwrap();
-    assert!(g.connect(&a, pref("out"), &b, pref("in"), 1.0).is_ok());
-    assert!(g.connect(&b, pref("out"), &a, pref("in"), 1.0).is_ok());
+    g.connect(&a, pref("out"), &b, pref("in"), 1.0).unwrap();
+    g.connect(&b, pref("out"), &a, pref("in"), 1.0).unwrap();
+    let edges = g.edge_list();
+    assert_eq!(edges.len(), 2, "cycle should have two edges");
+    assert!(edges.iter().any(|e| e.0 == a && e.3 == b));
+    assert!(edges.iter().any(|e| e.0 == b && e.3 == a));
 }
 
 #[test]
