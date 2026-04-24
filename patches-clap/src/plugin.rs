@@ -74,6 +74,9 @@ pub struct PatchesClapPlugin {
 
     // ── GUI ─────────────────────────────────────────────────────────
     pub(crate) gui_state: Arc<Mutex<GuiState>>,
+    /// Clonable handle for polling engine halt state (ADR 0051). Populated
+    /// in `activate` from the processor.
+    pub(crate) halt_handle: Option<patches_engine::HaltHandle>,
     pub(crate) gui_handle: Option<crate::gui_vizia::ViziaGuiHandle>,
     pub(crate) gui_scale: f64,
 
@@ -138,6 +141,21 @@ impl PatchesClapPlugin {
     pub(crate) fn request_callback(&self) {
         unsafe {
             if let Some(f) = (*self.host).request_callback {
+                f(self.host);
+            }
+        }
+    }
+
+    /// Ask the host to deactivate + reactivate this plugin. Used to
+    /// trigger the hard-stop rescan flow (ADR 0044 §3): host drives the
+    /// stop, and `activate` rebuilds the registry from `module_paths`
+    /// and recompiles `dsl_source`.
+    fn request_restart(&self) {
+        if self.host.is_null() {
+            return;
+        }
+        unsafe {
+            if let Some(f) = (*self.host).request_restart {
                 f(self.host);
             }
         }
@@ -264,6 +282,7 @@ unsafe extern "C" fn plugin_activate(
             return false;
         }
     };
+    p.halt_handle = Some(processor.halt_handle());
     p.processor = Some(processor);
     p.plan_rx = Some(plan_rx);
     p.runtime = Some(runtime);
@@ -274,8 +293,17 @@ unsafe extern "C" fn plugin_activate(
     if !p.module_paths.is_empty() {
         let scanner = patches_ffi::PluginScanner::new(p.module_paths.clone());
         let report = scanner.scan(&mut p.registry);
-        dlog!("activate: module scan {}", report.summary());
+        let summary = report.summary();
+        dlog!("activate: module scan {}", summary);
+        lock_gui_mut(&p.gui_state, |g| {
+            g.push_status(format!("Module scan: {summary}"));
+        });
     }
+    // Mirror persisted paths into the GUI so the editor reflects the
+    // authoritative list after state_load or host-driven restart.
+    lock_gui_mut(&p.gui_state, |g| {
+        g.module_paths = p.module_paths.clone();
+    });
 
     // If we already have DSL source (e.g. from state_load), compile now.
     if !p.dsl_source.is_empty() {
@@ -310,6 +338,7 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     // the cleanup thread.
     p.plan_rx.take();
     p.processor.take();
+    p.halt_handle = None;
     p.runtime.take();
 }
 
@@ -543,6 +572,33 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
 
     let mut gui_dirty = false;
 
+    // Sync halt state to GUI (ADR 0051).
+    if let Some(handle) = &p.halt_handle {
+        let observed = handle.halt_info();
+        let prev = lock_gui(&p.gui_state, |g| g.halt.clone());
+        let changed = match (&observed, &prev) {
+            (None, None) => false,
+            (Some(a), Some(b)) => a.slot != b.slot || a.module_name != b.module_name,
+            _ => true,
+        };
+        if changed {
+            let status = observed.as_ref().map(|info| {
+                let first = info.payload.lines().next().unwrap_or("");
+                format!(
+                    "Engine halted: module {:?} (slot {}) panicked: {} — reload the patch to recover.",
+                    info.module_name, info.slot, first
+                )
+            });
+            lock_gui_mut(&p.gui_state, |g| {
+                g.halt = observed;
+                if let Some(msg) = status {
+                    g.push_status(msg);
+                }
+            });
+            gui_dirty = true;
+        }
+    }
+
     // Handle GUI Browse request.
     let browse = lock_gui(&p.gui_state, |g| g.browse_requested);
     if browse {
@@ -569,12 +625,67 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         }
     }
 
+    // Handle GUI "Add module path" request — opens a directory picker.
+    let add_path = lock_gui(&p.gui_state, |g| g.add_path_requested);
+    if add_path {
+        lock_gui_mut(&p.gui_state, |g| g.add_path_requested = false);
+        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+            if !p.module_paths.iter().any(|existing| existing == &dir) {
+                p.module_paths.push(dir.clone());
+                lock_gui_mut(&p.gui_state, |g| {
+                    g.module_paths = p.module_paths.clone();
+                    g.push_status(format!(
+                        "Added module path: {} (press Rescan to load)",
+                        dir.display()
+                    ));
+                });
+                gui_dirty = true;
+            }
+        }
+    }
+
+    // Handle GUI "Remove module path" request.
+    let remove_index = lock_gui_mut_take(&p.gui_state, |g| g.remove_path_index.take());
+    if let Some(idx) = remove_index {
+        if idx < p.module_paths.len() {
+            let removed = p.module_paths.remove(idx);
+            lock_gui_mut(&p.gui_state, |g| {
+                g.module_paths = p.module_paths.clone();
+                g.push_status(format!(
+                    "Removed module path: {} (press Rescan to apply)",
+                    removed.display()
+                ));
+            });
+            gui_dirty = true;
+        }
+    }
+
+    // Handle GUI Rescan request — hard-stop reload via host restart.
+    let rescan = lock_gui(&p.gui_state, |g| g.rescan_requested);
+    if rescan {
+        lock_gui_mut(&p.gui_state, |g| {
+            g.rescan_requested = false;
+            g.push_status("Rescanning modules…");
+            // Clear stale diagnostics so the post-restart compile starts
+            // from a clean slate.
+            g.diagnostic_view = DiagnosticView::default();
+        });
+        p.request_restart();
+        gui_dirty = true;
+    }
+
     // Refresh the GUI labels if anything changed.
     if gui_dirty {
         if let Some(handle) = &p.gui_handle {
             handle.update(&p.gui_state);
         }
     }
+}
+
+/// Mutate GuiState under the lock and return a value produced from it.
+fn lock_gui_mut_take<T>(state: &Mutex<GuiState>, f: impl FnOnce(&mut GuiState) -> T) -> T {
+    let mut gui = state.lock().expect("gui_state mutex poisoned");
+    f(&mut gui)
 }
 
 /// Read from GuiState under the lock.
@@ -702,6 +813,7 @@ mod activate_scan_tests {
             sample_rate: 0.0,
             prev_beat: -1.0,
             prev_bar: -1,
+            halt_handle: None,
         });
         let data_ptr = Box::into_raw(data);
         let clap_plugin_box = Box::new(make_clap_plugin(
@@ -746,6 +858,106 @@ mod activate_scan_tests {
 
             // Clean shutdown.
             let deactivate = (*plugin_ptr).deactivate.expect("deactivate vtable");
+            deactivate(plugin_ptr);
+            let destroy = (*plugin_ptr).destroy.expect("destroy vtable");
+            destroy(plugin_ptr);
+        }
+    }
+
+    /// Ticket 0631: perform a hard-stop rescan while the plugin is
+    /// active — add a module path, cycle deactivate/activate (what the
+    /// host does in response to `request_restart`), and verify the new
+    /// module is registered and the engine keeps processing output.
+    #[test]
+    fn rescan_cycle_adds_module_and_preserves_audio() {
+        let dylib = gain_dylib_path();
+        assert!(dylib.exists(), "gain dylib missing at {}", dylib.display());
+
+        let data = Box::new(PatchesClapPlugin {
+            host: std::ptr::null(),
+            processor: None,
+            plan_rx: None,
+            runtime: None,
+            registry: default_registry(),
+            // Minimal patch that exercises the engine without needing
+            // the Gain module — we only verify audio continuity, not
+            // that the Gain module is in use.
+            dsl_source: "out_left = 0\nout_right = 0\n".to_string(),
+            module_paths: Vec::new(),
+            gui_state: Arc::new(Mutex::new(GuiState::default())),
+            gui_handle: None,
+            gui_scale: 1.0,
+            sample_rate: 0.0,
+            prev_beat: -1.0,
+            prev_bar: -1,
+            halt_handle: None,
+        });
+        let data_ptr = Box::into_raw(data);
+        let clap_plugin_box = Box::new(make_clap_plugin(
+            &PLUGIN_DESCRIPTOR,
+            std::ptr::null(),
+            data_ptr,
+        ));
+        let plugin_ptr: *const clap_plugin = Box::into_raw(clap_plugin_box);
+
+        unsafe {
+            let activate = (*plugin_ptr).activate.expect("activate vtable");
+            let deactivate = (*plugin_ptr).deactivate.expect("deactivate vtable");
+
+            // Initial activate with no module paths — registry is just
+            // the default set, Gain not present.
+            assert!(activate(plugin_ptr, 48_000.0, 32, 1024));
+            {
+                let names: Vec<&str> =
+                    (*data_ptr).registry.module_names().collect();
+                assert!(!names.contains(&"Gain"));
+            }
+
+            // Confirm the engine is live by ticking the processor —
+            // adopt the pending plan first.
+            let tick_once = |p: &mut PatchesClapPlugin| {
+                if let Some(rx) = &mut p.plan_rx {
+                    if let Ok(plan) = rx.pop() {
+                        if let Some(proc) = &mut p.processor {
+                            proc.adopt_plan(plan);
+                        }
+                    }
+                }
+                let proc = p.processor.as_mut().expect("processor");
+                proc.write_input(0.0, 0.0);
+                proc.tick()
+            };
+            let _before = tick_once(&mut *data_ptr);
+
+            // Simulate a GUI rescan: add a module path and run the
+            // host-side deactivate → activate cycle that `request_restart`
+            // would drive.
+            (*data_ptr).module_paths.push(dylib.clone());
+            deactivate(plugin_ptr);
+            assert!((*data_ptr).processor.is_none());
+            assert!(activate(plugin_ptr, 48_000.0, 32, 1024));
+
+            // Gain now in the registry.
+            let names: Vec<&str> =
+                (*data_ptr).registry.module_names().collect();
+            assert!(
+                names.contains(&"Gain"),
+                "Gain not in post-rescan registry: {names:?}",
+            );
+
+            // GUI mirror updated.
+            {
+                let gui = (*data_ptr)
+                    .gui_state
+                    .lock()
+                    .expect("gui_state mutex poisoned");
+                assert_eq!(gui.module_paths, vec![dylib.clone()]);
+            }
+
+            // Engine still ticks — dsl_source was recompiled and a plan
+            // was pushed.
+            let _after = tick_once(&mut *data_ptr);
+
             deactivate(plugin_ptr);
             let destroy = (*plugin_ptr).destroy.expect("destroy vtable");
             destroy(plugin_ptr);

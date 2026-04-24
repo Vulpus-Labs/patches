@@ -105,6 +105,7 @@ fn run(
     let dependencies = loaded.dependencies.clone();
     drop(loaded);
 
+    let halt_handle = runtime.halt_handle();
     let (processor, plan_rx) = runtime
         .take_audio_endpoints()
         .ok_or("audio endpoints already taken")?;
@@ -147,11 +148,27 @@ fn run(
     let mut watched: HashMap<PathBuf, SystemTime> = HashMap::new();
     refresh_watched(&mut watched, &dependencies);
 
+    let mut halt_reported = false;
     loop {
         thread::sleep(Duration::from_millis(500));
 
         if quit.load(Ordering::Acquire) {
             break;
+        }
+
+        match halt_handle.halt_info() {
+            Some(info) if !halt_reported => {
+                let first_line = info.payload.lines().next().unwrap_or("").to_string();
+                eprintln!(
+                    "engine halted: module {:?} (slot {}) panicked: {}\n  edit the patch to reload.",
+                    info.module_name, info.slot, first_line
+                );
+                halt_reported = true;
+            }
+            None if halt_reported => {
+                halt_reported = false;
+            }
+            _ => {}
         }
 
         let changed = watched.iter().any(|(p, last)| {

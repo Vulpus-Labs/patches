@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use patches_core::AudioEnvironment;
-use patches_engine::{PatchProcessor, Planner};
+use patches_engine::{HaltHandle, PatchProcessor, Planner};
 use patches_planner::ExecutionPlan;
 use patches_registry::Registry;
 use rtrb::{Consumer, Producer};
@@ -29,6 +29,7 @@ pub struct HostRuntime {
     /// cleanup_tx are dropped, signalling the cleanup thread to exit).
     cleanup_thread: Option<JoinHandle<()>>,
     env: AudioEnvironment,
+    halt_handle: HaltHandle,
 }
 
 impl HostRuntime {
@@ -40,6 +41,7 @@ impl HostRuntime {
         cleanup_thread: JoinHandle<()>,
         env: AudioEnvironment,
     ) -> Self {
+        let halt_handle = processor.halt_handle();
         Self {
             planner: Planner::new(),
             processor: Some(processor),
@@ -47,10 +49,17 @@ impl HostRuntime {
             plan_rx: Some(plan_rx),
             cleanup_thread: Some(cleanup_thread),
             env,
+            halt_handle,
         }
     }
 
     pub fn env(&self) -> &AudioEnvironment { &self.env }
+
+    /// Clonable handle to poll engine halt state (ADR 0051). Remains valid
+    /// after [`take_audio_endpoints`] has moved the processor.
+    pub fn halt_handle(&self) -> HaltHandle {
+        self.halt_handle.clone()
+    }
 
     /// Take the processor and plan consumer for installation in the
     /// audio callback. Subsequent calls return `None`.

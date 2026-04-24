@@ -1,8 +1,10 @@
 use std::ptr::NonNull;
+use std::sync::Arc;
 
-use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, Module, PeriodicUpdate};
+use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, Module};
 
 use patches_planner::ExecutionPlan;
+use crate::halt::{HaltState, NO_SLOT};
 use crate::pool::ModulePool;
 
 /// Number of samples per MIDI sub-block.
@@ -59,20 +61,6 @@ impl<T: ?Sized> PtrArray<T> {
         }
     }
 
-    /// Call `f` on every active pointer in order.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that [`rebuild`](Self::rebuild) was called after
-    /// the most recent plan adoption, and that no module referenced by this
-    /// array has been tombstoned from the pool since the last `rebuild`.
-    #[inline]
-    unsafe fn for_each(&mut self, mut f: impl FnMut(&mut T)) {
-        for nn in &self.ptrs {
-            f(unsafe { &mut *nn.as_ptr() });
-        }
-    }
-
     /// Return the current capacity of the underlying Vec.
     #[cfg(test)]
     fn capacity(&self) -> usize {
@@ -93,7 +81,11 @@ pub struct StaleState {
     sample_counter: u32,
     periodic_update_interval: u32,
     active_modules: PtrArray<dyn Module>,
-    periodic_modules: PtrArray<dyn PeriodicUpdate>,
+    periodic_modules: PtrArray<dyn Module>,
+    active_slots: Vec<usize>,
+    periodic_slots: Vec<usize>,
+    slot_names: Vec<Option<&'static str>>,
+    halt: Arc<HaltState>,
 }
 
 // SAFETY: `StaleState` lives exclusively on the audio thread.
@@ -104,7 +96,7 @@ impl StaleState {
     /// consuming this `StaleState` and returning a [`ReadyState`].
     ///
     /// `interval` is the number of inner ticks between successive
-    /// [`PeriodicUpdate::periodic_update`] calls, taken from
+    /// [`Module::periodic_update`] calls, taken from
     /// [`AudioEnvironment::periodic_update_interval`]. Must be a power of two.
     ///
     /// Resets the periodic-update sample counter so newly added periodic
@@ -116,13 +108,40 @@ impl StaleState {
         self.sample_counter = 0;
         self.periodic_update_interval = interval;
         self.active_modules.rebuild(&plan.active_indices, |idx| self.module_pool.as_ptr(idx));
-        self.periodic_modules.rebuild(&plan.periodic_indices, |idx| self.module_pool.as_periodic_ptr(idx));
+        self.periodic_modules.rebuild(&plan.periodic_indices, |idx| self.module_pool.as_ptr(idx));
+        self.active_slots.clear();
+        self.active_slots.extend_from_slice(&plan.active_indices);
+        self.periodic_slots.clear();
+        self.periodic_slots.extend_from_slice(&plan.periodic_indices);
+        let cap = self.module_pool.capacity();
+        if self.slot_names.len() != cap {
+            self.slot_names.resize(cap, None);
+        }
+        for n in self.slot_names.iter_mut() {
+            *n = None;
+        }
+        for &idx in &plan.active_indices {
+            if idx < cap {
+                self.slot_names[idx] = self.module_pool.module_name_at(idx);
+            }
+        }
+        for &idx in &plan.periodic_indices {
+            if idx < cap {
+                self.slot_names[idx] = self.module_pool.module_name_at(idx);
+            }
+        }
+        // Plan adoption clears any prior halt (ADR 0051).
+        self.halt.clear();
         ReadyState {
             module_pool: self.module_pool,
             sample_counter: self.sample_counter,
             periodic_update_interval: self.periodic_update_interval,
             active_modules: self.active_modules,
             periodic_modules: self.periodic_modules,
+            active_slots: self.active_slots,
+            periodic_slots: self.periodic_slots,
+            slot_names: self.slot_names,
+            halt: self.halt,
         }
     }
 
@@ -149,7 +168,11 @@ pub struct ReadyState {
     sample_counter: u32,
     periodic_update_interval: u32,
     active_modules: PtrArray<dyn Module>,
-    periodic_modules: PtrArray<dyn PeriodicUpdate>,
+    periodic_modules: PtrArray<dyn Module>,
+    active_slots: Vec<usize>,
+    periodic_slots: Vec<usize>,
+    slot_names: Vec<Option<&'static str>>,
+    halt: Arc<HaltState>,
 }
 
 // SAFETY: `ReadyState` lives exclusively on the audio thread.
@@ -168,8 +191,15 @@ impl ReadyState {
 
     /// Construct an initial `StaleState` from a fresh `ModulePool`.
     ///
-    /// The returned state must be rebuilt before ticking.
+    /// The returned state must be rebuilt before ticking. A fresh
+    /// [`HaltState`] is allocated; use [`new_stale_with_halt`] to share one.
     pub fn new_stale(module_pool: ModulePool) -> StaleState {
+        Self::new_stale_with_halt(module_pool, HaltState::new())
+    }
+
+    /// Variant that takes a shared [`HaltState`] so the audio processor and
+    /// control-thread observers see the same halt flag.
+    pub fn new_stale_with_halt(module_pool: ModulePool, halt: Arc<HaltState>) -> StaleState {
         let capacity = module_pool.capacity();
         StaleState {
             module_pool,
@@ -177,6 +207,10 @@ impl ReadyState {
             periodic_update_interval: BASE_PERIODIC_UPDATE_INTERVAL,
             active_modules: PtrArray::with_capacity(capacity),
             periodic_modules: PtrArray::with_capacity(capacity),
+            active_slots: Vec::with_capacity(capacity),
+            periodic_slots: Vec::with_capacity(capacity),
+            slot_names: vec![None; capacity],
+            halt,
         }
     }
 
@@ -187,12 +221,18 @@ impl ReadyState {
     pub fn make_stale(mut self) -> StaleState {
         self.active_modules.ptrs.clear();
         self.periodic_modules.ptrs.clear();
+        self.active_slots.clear();
+        self.periodic_slots.clear();
         StaleState {
             module_pool: self.module_pool,
             sample_counter: self.sample_counter,
             periodic_update_interval: self.periodic_update_interval,
             active_modules: self.active_modules,
             periodic_modules: self.periodic_modules,
+            active_slots: self.active_slots,
+            periodic_slots: self.periodic_slots,
+            slot_names: self.slot_names,
+            halt: self.halt,
         }
     }
 
@@ -208,16 +248,46 @@ impl ReadyState {
         if self.sample_counter == 0 {
             // SAFETY: pointer arrays were populated by rebuild() before this
             // ReadyState was created.
-            unsafe { self.periodic_modules.for_each(|m| m.periodic_update(cable_pool)); }
+            let halt = &self.halt;
+            let slots = &self.periodic_slots;
+            unsafe {
+                for (i, nn) in self.periodic_modules.ptrs.iter().enumerate() {
+                    halt.mark_slot(slots[i]);
+                    (&mut *nn.as_ptr()).periodic_update(cable_pool);
+                }
+            }
+            halt.clear_slot();
         }
         // `periodic_update_interval` is always a power of two, so the bitmask
         // trick is valid: `(counter + 1) & (interval - 1)` wraps at `interval`.
         self.sample_counter = (self.sample_counter + 1) & (self.periodic_update_interval - 1);
 
         // SAFETY: same.
-        unsafe { self.active_modules.for_each(|m| m.process(cable_pool)); }
+        let halt = &self.halt;
+        let slots = &self.active_slots;
+        unsafe {
+            for (i, nn) in self.active_modules.ptrs.iter().enumerate() {
+                halt.mark_slot(slots[i]);
+                (&mut *nn.as_ptr()).process(cable_pool);
+            }
+        }
+        halt.clear_slot();
     }
 
+    /// Shared halt state — cloned into the processor for post-panic recording
+    /// and into [`HaltHandle`] clones for control-thread polls.
+    pub fn halt_state(&self) -> Arc<HaltState> {
+        Arc::clone(&self.halt)
+    }
+
+    /// Look up the module name for a slot recorded by the breadcrumb. Safe
+    /// to call from the audio thread after a caught unwind.
+    pub fn slot_module_name(&self, slot: usize) -> Option<&'static str> {
+        if slot == NO_SLOT {
+            return None;
+        }
+        self.slot_names.get(slot).copied().flatten()
+    }
 }
 
 #[cfg(test)]

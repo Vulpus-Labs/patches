@@ -10,6 +10,8 @@
 //! - Plugin hosts (VST/AU/CLAP) — future callers that supply their own I/O.
 
 use std::mem;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
@@ -22,6 +24,7 @@ use patches_core::{
 use patches_planner::ExecutionPlan;
 use crate::cleanup::CleanupAction;
 use crate::execution_state::ReadyState;
+use crate::halt::{payload_summary, HaltHandle, HaltInfoSnapshot, HaltState};
 use crate::midi::EventQueueConsumer;
 use crate::pool::ModulePool;
 
@@ -68,6 +71,7 @@ pub struct PatchProcessor {
     /// cleanup-thread starvation. Bumped with `Relaxed` ordering on the
     /// audio thread.
     cleanup_overflow_count: AtomicU32,
+    halt: Arc<HaltState>,
 }
 
 impl PatchProcessor {
@@ -99,7 +103,8 @@ impl PatchProcessor {
     ) -> Self {
         let interval =
             patches_core::BASE_PERIODIC_UPDATE_INTERVAL * oversampling_factor as u32;
-        let state = ReadyState::new_stale(module_pool)
+        let halt = HaltState::new();
+        let state = ReadyState::new_stale_with_halt(module_pool, Arc::clone(&halt))
             .rebuild(&ExecutionPlan::empty(), interval);
         Self {
             state,
@@ -115,7 +120,18 @@ impl PatchProcessor {
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
             cleanup_overflow_count: AtomicU32::new(0),
+            halt,
         }
+    }
+
+    /// Shared halt handle, clonable and pollable from any thread.
+    pub fn halt_handle(&self) -> HaltHandle {
+        HaltHandle::from_arc(Arc::clone(&self.halt))
+    }
+
+    /// Non-blocking control-thread snapshot of halt state.
+    pub fn halt_info(&self) -> Option<HaltInfoSnapshot> {
+        self.halt.snapshot()
     }
 
     /// Number of `CleanupAction`s dropped inline because the cleanup ring
@@ -310,6 +326,16 @@ impl PatchProcessor {
     /// Returns `(left, right)` output.
     #[inline]
     pub fn tick(&mut self) -> (f32, f32) {
+        // Sticky halt: skip the module loop entirely once halted. Still flush
+        // the write index so the ping-pong buffer stays coherent for reads.
+        if self.halt.is_halted() {
+            let wi = self.wi;
+            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::Mono(0.0);
+            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::Mono(0.0);
+            self.wi = 1 - self.wi;
+            return (0.0, 0.0);
+        }
+
         let wi = self.wi;
 
         TransportFrame::set_sample_count(&mut self.transport_poly, self.sample_count as f32);
@@ -335,9 +361,24 @@ impl PatchProcessor {
         // Total count = events packed in this frame + events still in overflow.
         MidiFrame::set_event_count(&mut self.midi_poly, drain + self.midi_overflow_count);
 
-        {
-            let mut cable_pool = CablePool::new(&mut self.buffer_pool, wi);
-            self.state.tick(&mut cable_pool);
+        // ADR 0051: wrap the tick in catch_unwind so a module panic becomes a
+        // sticky halt rather than an unwind through FFI into the host.
+        // AssertUnwindSafe is justified because halt is sticky: the torn
+        // mid-tick state is never observed again.
+        let state = &mut self.state;
+        let buffer_pool = &mut self.buffer_pool;
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let mut cable_pool = CablePool::new(buffer_pool, wi);
+            state.tick(&mut cable_pool);
+        }));
+        if let Err(payload) = result {
+            let slot = self.halt.current_module_slot.load(Ordering::Relaxed);
+            let name = self.state.slot_module_name(slot).unwrap_or("<unknown>");
+            self.halt.record(slot, name, payload_summary(payload));
+            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::Mono(0.0);
+            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::Mono(0.0);
+            self.wi = 1 - self.wi;
+            return (0.0, 0.0);
         }
 
         let out_l = match self.buffer_pool[AUDIO_OUT_L][wi] {

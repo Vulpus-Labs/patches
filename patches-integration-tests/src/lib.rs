@@ -307,6 +307,11 @@ impl HeadlessEngine {
         self.processor.pool_slot(idx)
     }
 
+    /// Read the current halt state, if any (ADR 0051).
+    pub fn halt_info(&self) -> Option<patches_engine::HaltInfoSnapshot> {
+        self.processor.halt_info()
+    }
+
     /// Return the current periodic update interval (inner ticks).
     pub fn periodic_update_interval(&self) -> u32 {
         self.processor.periodic_update_interval()

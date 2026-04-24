@@ -127,6 +127,13 @@ When adding or changing a module, keep the comment in this form:
 - Control/modulation inputs use descriptive names:
   `"mix"`, `"feedback"`, `"voct"`, `"gate"`.
 
+## Panic policy
+
+ADR 0051 / E113 requires `panic = "unwind"` for the CLAP host and any crate
+loaded as an FFI plugin. `PatchProcessor::tick` catches module panics at the
+tick boundary and halts the engine cleanly; that only works with table-based
+unwinding. Do not add `panic = "abort"` to workspace or plugin profiles.
+
 ## General conventions
 
 - No `unwrap()` or `expect()` in library code — use proper error propagation.
