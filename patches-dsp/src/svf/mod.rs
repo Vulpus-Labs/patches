@@ -17,6 +17,12 @@
 
 use std::f32::consts::PI;
 
+use crate::coef_ramp::{CoefRamp, CoefTargets, PolyCoefRamp, PolyCoefTargets};
+
+// Coefficient index order: f=0, q=1.
+const F: usize = 0;
+const Q: usize = 1;
+
 // ── Coefficient helpers ──────────────────────────────────────────────────────
 
 /// Compute the Chamberlin SVF frequency coefficient from cutoff Hz.
@@ -111,27 +117,20 @@ impl SvfState {
 /// Holds all hot state (active coefficients, deltas, filter memory) so that the
 /// containing module's `process()` body is free of bookkeeping.
 pub struct SvfKernel {
-    f_coeff: f32,
-    f_target: f32,
-    df: f32,
-    q_damp: f32,
-    q_damp_target: f32,
-    dq: f32,
-    state: SvfState,
+    pub coefs: CoefRamp<2>,
+    pub state: SvfState,
+    pub targets: CoefTargets<2>,
 }
 
 impl SvfKernel {
     /// Create a new kernel with static (non-ramping) coefficients.
     pub fn new_static(f: f32, d: f32) -> Self {
         let f = stability_clamp(f, d);
+        let values = [f, d];
         Self {
-            f_coeff: f,
-            f_target: f,
-            df: 0.0,
-            q_damp: d,
-            q_damp_target: d,
-            dq: 0.0,
+            coefs: CoefRamp::new(values),
             state: SvfState::default(),
+            targets: CoefTargets::new(values),
         }
     }
 
@@ -144,27 +143,30 @@ impl SvfKernel {
     /// Immediately snap all coefficients to `f` / `d` with no ramp.
     pub fn set_static(&mut self, f: f32, d: f32) {
         let f = stability_clamp(f, d);
-        self.f_coeff = f;
-        self.f_target = f;
-        self.df = 0.0;
-        self.q_damp = d;
-        self.q_damp_target = d;
-        self.dq = 0.0;
+        let values = [f, d];
+        self.coefs.set_static(values);
+        self.targets.target = values;
     }
 
     /// Snap active coefficients to the previous targets, store new targets,
     /// and compute per-sample deltas for the next update window.
     ///
+    /// Applies `stability_clamp` both to the new target and to the snapped
+    /// active `f` (using previous targets) — this is the kernel-specific
+    /// twist on the generic snap-on-begin.
+    ///
     /// `interval_recip` is `1.0 / periodic_update_interval`, precomputed by
     /// the caller to avoid a division in the audio path.
+    #[inline]
     pub fn begin_ramp(&mut self, ft: f32, dt: f32, interval_recip: f32) {
         let ft = stability_clamp(ft, dt);
-        self.f_coeff = stability_clamp(self.f_target, self.q_damp_target);
-        self.q_damp = self.q_damp_target;
-        self.f_target = ft;
-        self.q_damp_target = dt;
-        self.df = (ft - self.f_coeff) * interval_recip;
-        self.dq = (dt - self.q_damp) * interval_recip;
+        let prev_f = self.targets.target[F];
+        let prev_q = self.targets.target[Q];
+        self.coefs.active[F] = stability_clamp(prev_f, prev_q);
+        self.coefs.active[Q] = prev_q;
+        self.targets.target = [ft, dt];
+        self.coefs.delta[F] = (ft - self.coefs.active[F]) * interval_recip;
+        self.coefs.delta[Q] = (dt - self.coefs.active[Q]) * interval_recip;
     }
 
     /// Reset integrator state to zero without touching coefficients.
@@ -176,13 +178,14 @@ impl SvfKernel {
     /// and return `(lp, hp, bp)`.
     #[inline]
     pub fn tick(&mut self, x: f32) -> (f32, f32, f32) {
-        let lp = self.state.lp + self.f_coeff * self.state.bp;
-        let hp = x - lp - self.q_damp * self.state.bp;
-        let bp = self.state.bp + self.f_coeff * hp;
+        let f = self.coefs.active[F];
+        let q = self.coefs.active[Q];
+        let lp = self.state.lp + f * self.state.bp;
+        let hp = x - lp - q * self.state.bp;
+        let bp = self.state.bp + f * hp;
         self.state.lp = sanitize(lp);
         self.state.bp = sanitize(bp);
-        self.f_coeff += self.df;
-        self.q_damp += self.dq;
+        self.coefs.advance();
         (lp, hp, bp)
     }
 }
@@ -199,32 +202,25 @@ impl SvfKernel {
 /// Cold target arrays sit after the hot fields to avoid polluting the cache
 /// lines read every sample.
 pub struct PolySvfKernel {
-    // ── Hot: active coefficients ─────────────────────────────────────────
-    f_coeff: [f32; 16],
-    df: [f32; 16],
-    q_damp: [f32; 16],
-    dq: [f32; 16],
+    // ── Hot: active coefficients + per-sample deltas ─────────────────────
+    pub coefs: PolyCoefRamp<2, 16>,
     // ── Hot: integrator state ─────────────────────────────────────────────
-    lp_state: [f32; 16],
-    bp_state: [f32; 16],
+    pub lp_state: [f32; 16],
+    pub bp_state: [f32; 16],
     // ── Cold: targets (read only at update boundaries) ────────────────────
-    f_target: [f32; 16],
-    q_damp_target: [f32; 16],
+    pub targets: PolyCoefTargets<2, 16>,
 }
 
 impl PolySvfKernel {
     /// Create a new kernel with all 16 voices set to the same static coefficients.
     pub fn new_static(f: f32, d: f32) -> Self {
         let f = stability_clamp(f, d);
+        let values = [f, d];
         Self {
-            f_coeff: [f; 16],
-            df: [0.0; 16],
-            q_damp: [d; 16],
-            dq: [0.0; 16],
+            coefs: PolyCoefRamp::new_static(values),
             lp_state: [0.0; 16],
             bp_state: [0.0; 16],
-            f_target: [f; 16],
-            q_damp_target: [d; 16],
+            targets: PolyCoefTargets::new_static(values),
         }
     }
 
@@ -237,26 +233,29 @@ impl PolySvfKernel {
     /// Immediately set all 16 voices to the same static coefficients, no ramp.
     pub fn set_static(&mut self, f: f32, d: f32) {
         let f = stability_clamp(f, d);
-        self.f_coeff = [f; 16];
-        self.df = [0.0; 16];
-        self.q_damp = [d; 16];
-        self.dq = [0.0; 16];
-        self.f_target = [f; 16];
-        self.q_damp_target = [d; 16];
+        let values = [f, d];
+        self.coefs.set_static(values);
+        self.targets.target[F] = [f; 16];
+        self.targets.target[Q] = [d; 16];
     }
 
     /// Snap voice `i` to its stored targets, store new targets, compute deltas.
+    /// Applies `stability_clamp` to both the new target `f` and the snapped
+    /// active `f` (using previous targets).
     ///
     /// `interval_recip` is `1.0 / periodic_update_interval`, precomputed by
     /// the caller.
+    #[inline]
     pub fn begin_ramp_voice(&mut self, i: usize, ft: f32, dt: f32, interval_recip: f32) {
         let ft = stability_clamp(ft, dt);
-        self.f_coeff[i] = stability_clamp(self.f_target[i], self.q_damp_target[i]);
-        self.q_damp[i] = self.q_damp_target[i];
-        self.f_target[i] = ft;
-        self.q_damp_target[i] = dt;
-        self.df[i] = (ft - self.f_coeff[i]) * interval_recip;
-        self.dq[i] = (dt - self.q_damp[i]) * interval_recip;
+        let prev_f = self.targets.target[F][i];
+        let prev_q = self.targets.target[Q][i];
+        self.coefs.active[F][i] = stability_clamp(prev_f, prev_q);
+        self.coefs.active[Q][i] = prev_q;
+        self.targets.target[F][i] = ft;
+        self.targets.target[Q][i] = dt;
+        self.coefs.delta[F][i] = (ft - self.coefs.active[F][i]) * interval_recip;
+        self.coefs.delta[Q][i] = (dt - self.coefs.active[Q][i]) * interval_recip;
     }
 
     /// Reset all 16 voices' integrator state to zero without touching coefficients.
@@ -277,24 +276,23 @@ impl PolySvfKernel {
         x: &[f32; 16],
         ramp: bool,
     ) -> ([f32; 16], [f32; 16], [f32; 16]) {
+        let f = &self.coefs.active[F];
+        let q = &self.coefs.active[Q];
         // Step 1: lp = lp_state + f_coeff * bp_state  — independent across voices
         let lp: [f32; 16] =
-            std::array::from_fn(|i| self.lp_state[i] + self.f_coeff[i] * self.bp_state[i]);
+            std::array::from_fn(|i| self.lp_state[i] + f[i] * self.bp_state[i]);
         // Step 2: hp = x - lp - q_damp * bp_state  — depends on lp[], not lp[i±1]
         let hp: [f32; 16] =
-            std::array::from_fn(|i| x[i] - lp[i] - self.q_damp[i] * self.bp_state[i]);
+            std::array::from_fn(|i| x[i] - lp[i] - q[i] * self.bp_state[i]);
         // Step 3: bp = bp_state + f_coeff * hp
         let bp: [f32; 16] =
-            std::array::from_fn(|i| self.bp_state[i] + self.f_coeff[i] * hp[i]);
+            std::array::from_fn(|i| self.bp_state[i] + f[i] * hp[i]);
         // State update (sanitize to prevent NaN/Inf propagation)
         self.lp_state = std::array::from_fn(|i| sanitize(lp[i]));
         self.bp_state = std::array::from_fn(|i| sanitize(bp[i]));
         // Step 4 (CV path only): advance active coefficients
         if ramp {
-            for i in 0..16 {
-                self.f_coeff[i] += self.df[i];
-                self.q_damp[i] += self.dq[i];
-            }
+            self.coefs.advance();
         }
         (lp, hp, bp)
     }

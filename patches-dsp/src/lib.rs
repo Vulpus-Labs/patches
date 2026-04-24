@@ -76,6 +76,9 @@ pub use limiter_core::LimiterCore;
 mod envelope_follower;
 pub use envelope_follower::EnvelopeFollower;
 
+pub mod coef_ramp;
+pub use coef_ramp::{CoefRamp, CoefTargets, PolyCoefRamp, PolyCoefTargets};
+
 pub mod time_utils;
 pub use time_utils::{ms_to_samples, compute_time_coeff};
 

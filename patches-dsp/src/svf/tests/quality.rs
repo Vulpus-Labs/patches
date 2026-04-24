@@ -137,8 +137,8 @@ fn poly_svf_voices_are_independent() {
 
     let mut poly = PolySvfKernel::new_static(f0, d);
     // Set voice 1 to a different frequency
-    poly.f_coeff[1] = f1;
-    poly.f_target[1] = f1;
+    poly.coefs.active[0][1] = f1;
+    poly.targets.target[0][1] = f1;
 
     let mut input = [0.0f32; 16];
     // Drive both voices with the same signal

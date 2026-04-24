@@ -9,16 +9,16 @@ fn set_static_fans_out_to_all_voices() {
     let mut pb = PolyBiquad::new_static(1.0, 2.0, 3.0, 4.0, 5.0);
     pb.set_static(0.1, 0.2, 0.3, 0.4, 0.5);
     for i in 0..16 {
-        assert_eq!(pb.b0[i], 0.1);
-        assert_eq!(pb.b1[i], 0.2);
-        assert_eq!(pb.b2[i], 0.3);
-        assert_eq!(pb.a1[i], 0.4);
-        assert_eq!(pb.a2[i], 0.5);
-        assert_eq!(pb.db0[i], 0.0);
-        assert_eq!(pb.db1[i], 0.0);
-        assert_eq!(pb.db2[i], 0.0);
-        assert_eq!(pb.da1[i], 0.0);
-        assert_eq!(pb.da2[i], 0.0);
+        assert_eq!(pb.coefs.active[0][i], 0.1);
+        assert_eq!(pb.coefs.active[1][i], 0.2);
+        assert_eq!(pb.coefs.active[2][i], 0.3);
+        assert_eq!(pb.coefs.active[3][i], 0.4);
+        assert_eq!(pb.coefs.active[4][i], 0.5);
+        assert_eq!(pb.coefs.delta[0][i], 0.0);
+        assert_eq!(pb.coefs.delta[1][i], 0.0);
+        assert_eq!(pb.coefs.delta[2][i], 0.0);
+        assert_eq!(pb.coefs.delta[3][i], 0.0);
+        assert_eq!(pb.coefs.delta[4][i], 0.0);
     }
     assert!(!pb.has_cv);
 }
@@ -34,14 +34,14 @@ fn begin_ramp_voice_snaps_then_ramps() {
     let approx_eq = |a: f32, b: f32| (a - b).abs() < 1e-7;
 
     assert!(
-        approx_eq(pb.db0[0], expected_delta),
-        "db0[0] should be {expected_delta}, got {}",
-        pb.db0[0]
+        approx_eq(pb.coefs.delta[0][0], expected_delta),
+        "delta[b0][0] should be {expected_delta}, got {}",
+        pb.coefs.delta[0][0]
     );
     // Other voices must be untouched.
     for i in 1..16 {
-        assert_eq!(pb.db0[i], 0.0);
-        assert_eq!(pb.b0[i], 0.0);
+        assert_eq!(pb.coefs.delta[0][i], 0.0);
+        assert_eq!(pb.coefs.active[0][i], 0.0);
     }
     assert!(pb.has_cv);
 }
@@ -51,13 +51,13 @@ fn tick_all_advances_deltas() {
     let mut pb = PolyBiquad::new_static(0.0, 0.0, 0.0, 0.0, 0.0);
     let recip = 1.0 / BASE_PERIODIC_UPDATE_INTERVAL as f32;
     pb.begin_ramp_voice(0, 1.0, 0.0, 0.0, 0.0, 0.0, recip);
-    let delta = pb.db0[0];
-    let b0_before = pb.b0[0];
+    let delta = pb.coefs.delta[0][0];
+    let b0_before = pb.coefs.active[0][0];
     pb.tick_all(&[0.0f32; 16], false, true);
     let approx_eq = |a: f32, b: f32| (a - b).abs() < 1e-7;
     assert!(
-        approx_eq(pb.b0[0], b0_before + delta),
-        "b0[0] should have advanced by one delta step"
+        approx_eq(pb.coefs.active[0][0], b0_before + delta),
+        "active[b0][0] should have advanced by one delta step"
     );
 }
 

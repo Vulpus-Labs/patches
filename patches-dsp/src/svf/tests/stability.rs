@@ -136,8 +136,8 @@ fn poly_svf_reset() {
         assert_eq!(poly.bp_state[v], 0.0, "voice {v} bp not reset");
     }
     // Coefficients should be untouched
-    assert_eq!(poly.f_coeff[0], f);
-    assert_eq!(poly.q_damp[0], d);
+    assert_eq!(poly.coefs.active[0][0], f);
+    assert_eq!(poly.coefs.active[1][0], d);
 }
 
 #[test]

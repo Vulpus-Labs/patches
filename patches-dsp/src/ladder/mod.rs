@@ -21,7 +21,13 @@
 //! Poly (16 voices): [`PolyLadderKernel`].
 
 use crate::approximate::fast_tanh;
+use crate::coef_ramp::{CoefRamp, CoefTargets, PolyCoefRamp, PolyCoefTargets};
 use std::f32::consts::PI;
+
+// Coefficient index order: g=0, k=1, drive=2.
+const G: usize = 0;
+const K: usize = 1;
+const DRIVE: usize = 2;
 
 // ── Variant ──────────────────────────────────────────────────────────────────
 
@@ -110,19 +116,9 @@ impl LadderCoeffs {
 
 /// Single-voice ladder kernel with per-sample coefficient interpolation.
 pub struct LadderKernel {
-    // Active (ramping) coefficients.
-    g: f32,
-    k: f32,
-    drive: f32,
+    pub coefs: CoefRamp<3>,
     variant: LadderVariant,
-    // Per-sample deltas.
-    dg: f32,
-    dk: f32,
-    dd: f32,
-    // Targets (snapped into active at begin_ramp).
-    g_target: f32,
-    k_target: f32,
-    drive_target: f32,
+    pub targets: CoefTargets<3>,
     // Stage state + delayed feedback sample.
     s: [f32; 4],
     y4_prev: f32,
@@ -131,17 +127,11 @@ pub struct LadderKernel {
 impl LadderKernel {
     /// Create a kernel with static (non-ramping) coefficients.
     pub fn new_static(c: LadderCoeffs) -> Self {
+        let values = [c.g, c.k, c.drive];
         Self {
-            g: c.g,
-            k: c.k,
-            drive: c.drive,
+            coefs: CoefRamp::new(values),
             variant: c.variant,
-            dg: 0.0,
-            dk: 0.0,
-            dd: 0.0,
-            g_target: c.g,
-            k_target: c.k,
-            drive_target: c.drive,
+            targets: CoefTargets::new(values),
             s: [0.0; 4],
             y4_prev: 0.0,
         }
@@ -149,32 +139,20 @@ impl LadderKernel {
 
     /// Snap every coefficient to `c` with no ramp.
     pub fn set_static(&mut self, c: LadderCoeffs) {
-        self.g = c.g;
-        self.k = c.k;
-        self.drive = c.drive;
+        let values = [c.g, c.k, c.drive];
+        self.coefs.set_static(values);
+        self.targets.target = values;
         self.variant = c.variant;
-        self.g_target = c.g;
-        self.k_target = c.k;
-        self.drive_target = c.drive;
-        self.dg = 0.0;
-        self.dk = 0.0;
-        self.dd = 0.0;
     }
 
     /// Snap to the previous targets, store new targets, compute deltas.
     ///
     /// `interval_recip = 1.0 / periodic_update_interval`.
+    #[inline]
     pub fn begin_ramp(&mut self, c: LadderCoeffs, interval_recip: f32) {
-        self.g = self.g_target;
-        self.k = self.k_target;
-        self.drive = self.drive_target;
         self.variant = c.variant;
-        self.g_target = c.g;
-        self.k_target = c.k;
-        self.drive_target = c.drive;
-        self.dg = (c.g - self.g) * interval_recip;
-        self.dk = (c.k - self.k) * interval_recip;
-        self.dd = (c.drive - self.drive) * interval_recip;
+        self.coefs
+            .begin_ramp([c.g, c.k, c.drive], &mut self.targets, interval_recip);
     }
 
     /// Reset stage state to silence without touching coefficients.
@@ -186,9 +164,11 @@ impl LadderKernel {
     /// Run one sample through the ladder and return the 4th-stage output.
     #[inline]
     pub fn tick(&mut self, x: f32) -> f32 {
-        let scale = input_scale(self.variant, self.k);
-        let u = fast_tanh(self.drive * x * scale - self.k * self.y4_prev);
-        let g = self.g;
+        let g = self.coefs.active[G];
+        let k = self.coefs.active[K];
+        let drive = self.coefs.active[DRIVE];
+        let scale = input_scale(self.variant, k);
+        let u = fast_tanh(drive * x * scale - k * self.y4_prev);
         let mut y = u;
         for i in 0..4 {
             let v = (y - self.s[i]) * g;
@@ -197,10 +177,7 @@ impl LadderKernel {
             y = yn;
         }
         self.y4_prev = sanitize(y);
-        // Advance ramping coefficients.
-        self.g += self.dg;
-        self.k += self.dk;
-        self.drive += self.dd;
+        self.coefs.advance();
         y
     }
 }
@@ -212,56 +189,39 @@ impl LadderKernel {
 /// Variant is shared across all voices (module-level parameter).
 /// Each voice has its own cutoff/resonance/drive and stage state.
 pub struct PolyLadderKernel {
-    g: [f32; 16],
-    k: [f32; 16],
-    drive: [f32; 16],
-    dg: [f32; 16],
-    dk: [f32; 16],
-    dd: [f32; 16],
-    g_target: [f32; 16],
-    k_target: [f32; 16],
-    drive_target: [f32; 16],
+    pub coefs: PolyCoefRamp<3, 16>,
     s0: [f32; 16],
     s1: [f32; 16],
     s2: [f32; 16],
     s3: [f32; 16],
     y4_prev: [f32; 16],
+    pub targets: PolyCoefTargets<3, 16>,
     variant: LadderVariant,
 }
 
 impl PolyLadderKernel {
     /// Create with all voices at the same static coefficients.
     pub fn new_static(c: LadderCoeffs) -> Self {
+        let values = [c.g, c.k, c.drive];
         Self {
-            g: [c.g; 16],
-            k: [c.k; 16],
-            drive: [c.drive; 16],
-            dg: [0.0; 16],
-            dk: [0.0; 16],
-            dd: [0.0; 16],
-            g_target: [c.g; 16],
-            k_target: [c.k; 16],
-            drive_target: [c.drive; 16],
+            coefs: PolyCoefRamp::new_static(values),
             s0: [0.0; 16],
             s1: [0.0; 16],
             s2: [0.0; 16],
             s3: [0.0; 16],
             y4_prev: [0.0; 16],
+            targets: PolyCoefTargets::new_static(values),
             variant: c.variant,
         }
     }
 
     /// Snap all voices to `c` with no ramp.
     pub fn set_static(&mut self, c: LadderCoeffs) {
-        self.g = [c.g; 16];
-        self.k = [c.k; 16];
-        self.drive = [c.drive; 16];
-        self.dg = [0.0; 16];
-        self.dk = [0.0; 16];
-        self.dd = [0.0; 16];
-        self.g_target = [c.g; 16];
-        self.k_target = [c.k; 16];
-        self.drive_target = [c.drive; 16];
+        let values = [c.g, c.k, c.drive];
+        self.coefs.set_static(values);
+        self.targets.target[G] = [c.g; 16];
+        self.targets.target[K] = [c.k; 16];
+        self.targets.target[DRIVE] = [c.drive; 16];
         self.variant = c.variant;
     }
 
@@ -271,17 +231,15 @@ impl PolyLadderKernel {
     }
 
     /// Begin a ramp on voice `i` toward `c`.
+    #[inline]
     pub fn begin_ramp_voice(&mut self, i: usize, c: LadderCoeffs, interval_recip: f32) {
-        self.g[i] = self.g_target[i];
-        self.k[i] = self.k_target[i];
-        self.drive[i] = self.drive_target[i];
-        self.g_target[i] = c.g;
-        self.k_target[i] = c.k;
-        self.drive_target[i] = c.drive;
-        self.dg[i] = (c.g - self.g[i]) * interval_recip;
-        self.dk[i] = (c.k - self.k[i]) * interval_recip;
-        self.dd[i] = (c.drive - self.drive[i]) * interval_recip;
         self.variant = c.variant;
+        self.coefs.begin_ramp_voice(
+            i,
+            [c.g, c.k, c.drive],
+            &mut self.targets,
+            interval_recip,
+        );
     }
 
     /// Reset integrator state for every voice.
@@ -297,11 +255,15 @@ impl PolyLadderKernel {
     #[inline]
     pub fn tick_all(&mut self, x: &[f32; 16], ramp: bool) -> [f32; 16] {
         let variant = self.variant;
+        let g_arr = &self.coefs.active[G];
+        let k_arr = &self.coefs.active[K];
+        let drive_arr = &self.coefs.active[DRIVE];
         let mut out = [0.0f32; 16];
         for i in 0..16 {
-            let scale = input_scale(variant, self.k[i]);
-            let u = fast_tanh(self.drive[i] * x[i] * scale - self.k[i] * self.y4_prev[i]);
-            let g = self.g[i];
+            let k = k_arr[i];
+            let scale = input_scale(variant, k);
+            let u = fast_tanh(drive_arr[i] * x[i] * scale - k * self.y4_prev[i]);
+            let g = g_arr[i];
 
             let v0 = (u - self.s0[i]) * g;
             let y0 = v0 + self.s0[i];
@@ -323,11 +285,7 @@ impl PolyLadderKernel {
             out[i] = y3;
         }
         if ramp {
-            for i in 0..16 {
-                self.g[i] += self.dg[i];
-                self.k[i] += self.dk[i];
-                self.drive[i] += self.dd[i];
-            }
+            self.coefs.advance();
         }
         out
     }
