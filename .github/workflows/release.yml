@@ -116,7 +116,7 @@ jobs:
           mkdir -p "${WIN_DIR}/examples"
           cp artifacts/release-windows-x86_64/patch_player.exe "${WIN_DIR}/"
           cp artifacts/release-docs-pdf/patches-manual.pdf "${WIN_DIR}/"
-          cp examples/* "${WIN_DIR}/examples/"
+          cp -r examples/* "${WIN_DIR}/examples/"
           zip -r "${WIN_DIR}.zip" "${WIN_DIR}"
 
           # macOS aarch64 tarball
@@ -125,7 +125,7 @@ jobs:
           cp artifacts/release-macos-aarch64-apple-darwin/patch_player "${MAC_ARM_DIR}/"
           chmod +x "${MAC_ARM_DIR}/patch_player"
           cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_ARM_DIR}/"
-          cp examples/* "${MAC_ARM_DIR}/examples/"
+          cp -r examples/* "${MAC_ARM_DIR}/examples/"
           tar -czf "${MAC_ARM_DIR}.tar.gz" "${MAC_ARM_DIR}"
 
           # macOS x86_64 tarball
@@ -134,7 +134,7 @@ jobs:
           cp artifacts/release-macos-x86_64-apple-darwin/patch_player "${MAC_X64_DIR}/"
           chmod +x "${MAC_X64_DIR}/patch_player"
           cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_X64_DIR}/"
-          cp examples/* "${MAC_X64_DIR}/examples/"
+          cp -r examples/* "${MAC_X64_DIR}/examples/"
           tar -czf "${MAC_X64_DIR}.tar.gz" "${MAC_X64_DIR}"
 
       - name: Create GitHub Release
