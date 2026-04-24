@@ -1,0 +1,38 @@
+name: test-ffi-plugins
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ffi-plugins:
+    name: FFI plugin smoke (ABI v5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: System audio deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Build test plugins
+        run: |
+          cargo build \
+            -p test-gain-plugin \
+            -p test-gain-bad-hash-plugin \
+            -p test-all-tags-plugin \
+            -p test-release-on-update-plugin
+
+      - name: patches-ffi smoke tests (load, describe, process, scan)
+        run: cargo test -p patches-ffi --test gain_plugin --test plugin_scanner
+
+      - name: FFI hash-mismatch + alloc-trap cycles
+        run: |
+          cargo test -p patches-integration-tests \
+            --test ffi_hash_mismatch \
+            --test ffi_alloc_trap_cycles

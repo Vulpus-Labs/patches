@@ -1,4 +1,4 @@
-//! One-off compile check for patches-vintage/patches/vintage_synth.patches.
+//! One-off compile check for patches-vintage/examples/vintage_synth.patches.
 //! Run with: cargo test -p patches-integration-tests --test vintage_synth_check
 
 use patches_ffi::scanner::PluginScanner;
@@ -19,7 +19,7 @@ fn vintage_synth_demo_compiles() {
 
     let src_path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent().unwrap()
-        .join("patches-vintage/patches/vintage_synth.patches");
+        .join("patches-vintage/examples/vintage_synth.patches");
     let src = std::fs::read_to_string(&src_path).expect("read patch");
     let file = patches_dsl::parse(&src).expect("parse");
     let result = patches_dsl::expand(&file).expect("expand");

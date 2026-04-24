@@ -24,9 +24,11 @@ patch {
         swing: 0.5
     }
     module player: PatternPlayer(channels: [kick])
+    module t2a: SyncToTrigger
     module out: AudioOut
 
     seq.clock[drums] -> player.clock
-    player.trigger[kick] -> out.in_left
+    player.trigger[kick] -> t2a.in
+    t2a.out -> out.in_left
     player.cv1[kick] -> out.in_right
 }

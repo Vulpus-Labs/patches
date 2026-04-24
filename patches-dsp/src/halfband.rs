@@ -212,7 +212,7 @@ mod tests {
         let peak_idx = outputs
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap())
+            .max_by(|(_, a), (_, b)| a.abs().total_cmp(&b.abs()))
             .map(|(i, _)| i)
             .unwrap();
         assert_eq!(

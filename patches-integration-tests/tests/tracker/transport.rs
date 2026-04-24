@@ -75,10 +75,12 @@ patch {
         loop: false, autostart: false, swing: 0.5
     }
     module player: PatternPlayer(channels: [ch])
+    module t2a: SyncToTrigger
     module out: AudioOut
 
     seq.clock[c] -> player.clock
-    player.trigger[ch] -> out.in_left
+    player.trigger[ch] -> t2a.in
+    t2a.out -> out.in_left
 }
 "#;
     let mut engine = build_engine(src);

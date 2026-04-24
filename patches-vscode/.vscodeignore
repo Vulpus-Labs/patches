@@ -4,3 +4,12 @@ tsconfig.json
 package-lock.json
 node_modules/@types/**
 node_modules/typescript/**
+node_modules/**/*.md
+node_modules/**/*.ts
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/example/**
+node_modules/**/examples/**
+node_modules/**/.github/**
+node_modules/**/.bin/**
+node_modules/**/*.map

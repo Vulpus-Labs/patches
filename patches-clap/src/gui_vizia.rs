@@ -190,6 +190,12 @@ pub(crate) unsafe fn create_gui(
         }
         .build(cx);
 
+        // Vizia defaults to light mode; our panels are painted dark, so
+        // switch to the dark-mode theme so label/text colours are light.
+        cx.emit(EnvironmentEvent::SetThemeMode(AppTheme::BuiltIn(
+            ThemeMode::DarkMode,
+        )));
+
         VStack::new(cx, |cx| {
             // Top toolbar.
             HStack::new(cx, |cx| {

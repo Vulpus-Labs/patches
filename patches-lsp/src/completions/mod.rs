@@ -151,8 +151,6 @@ pub(crate) fn cable_kind_str(kind: &patches_core::CableKind) -> &'static str {
     match kind {
         patches_core::CableKind::Mono => "mono",
         patches_core::CableKind::Poly => "poly",
-        patches_core::CableKind::Trigger => "trigger",
-        patches_core::CableKind::PolyTrigger => "poly_trigger",
     }
 }
 

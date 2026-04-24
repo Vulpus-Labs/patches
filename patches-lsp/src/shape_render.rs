@@ -125,6 +125,7 @@ mod tests {
             name,
             index,
             kind: CableKind::Mono,
+            mono_layout: patches_core::MonoLayout::Audio,
             poly_layout: patches_core::PolyLayout::Audio,
         };
         let ports = vec![p("out", 0), p("out", 1), p("out", 2), p("solo", 0)];
@@ -138,6 +139,7 @@ mod tests {
             name: "out",
             index: 0,
             kind: CableKind::Mono,
+            mono_layout: patches_core::MonoLayout::Audio,
             poly_layout: patches_core::PolyLayout::Audio,
         }];
         let rendered = render_indexed_ports(&ports);
