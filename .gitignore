@@ -5,3 +5,5 @@ target/
 *.aiff
 *.wav
 .claude
+mutants.out/
+mutants.out.old/
