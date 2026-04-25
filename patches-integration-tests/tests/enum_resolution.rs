@@ -48,7 +48,7 @@ fn resolve_enum(module_name: &str, param: &str, variant_name: &str) -> Parameter
         .expect("no nodes");
     let node = build_result.graph.get_node(&id).expect("module not found");
     node.parameter_map
-        .get_scalar(param)
+        .get(param, 0)
         .cloned()
         .unwrap_or_else(|| panic!("parameter {param} missing"))
 }

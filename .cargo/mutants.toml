@@ -1,0 +1,32 @@
+# cargo-mutants config for the E117 kernel mutation-testing epic.
+# Scope: kernel crates only (patches-core, patches-dsp, patches-dsl,
+# patches-interpreter, patches-engine). Non-kernel crates are excluded
+# as a safety net in case someone runs without `-p <kernel-crate>`.
+
+timeout_multiplier = 2.0
+minimum_test_timeout = 30
+
+exclude_globs = [
+    "**/tests.rs",
+    "**/tests/**",
+    "**/test_support/**",
+    "**/benches/**",
+    "**/examples/**",
+    "patches-clap-vizia/**",
+    "patches-clap-webview/**",
+    "patches-plugin-common/**",
+    "patches-lsp/**",
+    "patches-ffi/**",
+    "patches-ffi-common/**",
+    "patches-io/**",
+    "patches-player/**",
+    "patches-modules/**",
+    "patches-profiling/**",
+    "patches-integration-tests/**",
+    "patches-vscode/**",
+    "test-plugins/**",
+]
+
+# Skip slow/unstable workspace members that aren't part of the kernel audit.
+# Using nextest would be faster but keeps another moving part — stick with
+# default `cargo test` runner for now.

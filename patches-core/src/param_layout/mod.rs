@@ -128,37 +128,13 @@ pub fn compute_layout(descriptor: &ModuleDescriptor) -> ParamLayout {
     ParamLayout { scalar_size, scalars, buffer_slots, descriptor_hash }
 }
 
-/// Construct a [`ParameterMap`] pre-filled with the descriptor's declared
-/// defaults for every declared parameter. Used by the planner to satisfy
-/// [`pack_into`](crate::param_frame::pack::pack_into)'s completeness
-/// requirement when the user-supplied map doesn't cover every slot.
+/// Back-compat shim — delegates to [`ParameterMap::defaults`].
 ///
-/// `File` parameters are represented as an empty [`FloatBuffer`] stand-in;
-/// the planner is expected to resolve real file contents before frame build
-/// (ticket 0599). `SongName` is represented as `Int(0)`.
+/// Callers should migrate to the associated constructor directly.
 pub fn defaults_from_descriptor(
     desc: &crate::modules::module_descriptor::ModuleDescriptor,
 ) -> crate::modules::parameter_map::ParameterMap {
-    use crate::modules::module_descriptor::ParameterKind;
-    use crate::modules::parameter_map::{ParameterMap, ParameterValue};
-    let mut m = ParameterMap::new();
-    for p in &desc.parameters {
-        let v = match &p.parameter_type {
-            ParameterKind::Float { default, .. } => ParameterValue::Float(*default),
-            ParameterKind::Int { default, .. } => ParameterValue::Int(*default),
-            ParameterKind::Bool { default } => ParameterValue::Bool(*default),
-            ParameterKind::Enum { variants, default, .. } => {
-                let idx = variants.iter().position(|v| v == default).unwrap_or(0);
-                ParameterValue::Enum(idx as u32)
-            }
-            ParameterKind::File { .. } => ParameterValue::FloatBuffer(
-                std::sync::Arc::<[f32]>::from(Vec::<f32>::new().into_boxed_slice()),
-            ),
-            ParameterKind::SongName => ParameterValue::Int(0),
-        };
-        m.insert_param(p.name.to_string(), p.index, v);
-    }
-    m
+    crate::modules::parameter_map::ParameterMap::defaults(desc)
 }
 
 fn align_up(offset: u32, align: u32) -> u32 {

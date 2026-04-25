@@ -57,7 +57,7 @@ fn float_param_is_accepted() {
     assert_eq!(node.module_descriptor.module_name, "Osc");
     let freq = node
         .parameter_map
-        .get_scalar("frequency")
+        .get("frequency", 0)
         .expect("frequency param missing");
     match freq {
         patches_core::ParameterValue::Float(f) => {
@@ -87,7 +87,7 @@ fn enum_param_is_accepted() {
     let node = result.graph.get_node(&"osc1".into()).expect("osc1 missing");
     let fm = node
         .parameter_map
-        .get_scalar("fm_type")
+        .get("fm_type", 0)
         .expect("fm_type missing");
     match fm {
         patches_core::ParameterValue::Enum(idx) => {

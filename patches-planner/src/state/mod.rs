@@ -195,7 +195,7 @@ pub fn classify_nodes<'a>(
                 // Collect removed parameters: present in prev but absent from new.
                 // Reset each to its descriptor default so the module doesn't retain
                 // a stale value.
-                for (name, idx) in prev_ns.parameter_map.keys() {
+                for (name, idx, _) in prev_ns.parameter_map.iter() {
                     if node.parameter_map.get(name, idx).is_none() {
                         if let Some(param_desc) = desc
                             .parameters

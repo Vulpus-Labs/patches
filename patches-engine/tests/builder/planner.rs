@@ -118,7 +118,7 @@ fn parameter_only_change_produces_parameter_updates_no_new_modules() {
         .find(|(idx, _)| *idx == sine_slot)
         .expect("update entry for sine must be present");
     assert!(
-        matches!(update.1.get_scalar("frequency"), Some(ParameterValue::Float(f)) if (*f - hz_to_voct(880.0)).abs() < 1e-6),
+        matches!(update.1.get("frequency", 0), Some(ParameterValue::Float(f)) if (*f - hz_to_voct(880.0)).abs() < 1e-6),
         "diff must contain updated frequency"
     );
 }
@@ -209,7 +209,7 @@ fn topology_change_and_parameter_diff_coexist() {
         .iter()
         .any(|(idx, diff)| {
             *idx == s_a_slot
-                && matches!(diff.get_scalar("frequency"), Some(ParameterValue::Float(f)) if (*f - hz_to_voct(660.0)).abs() < 1e-6)
+                && matches!(diff.get("frequency", 0), Some(ParameterValue::Float(f)) if (*f - hz_to_voct(660.0)).abs() < 1e-6)
         });
     assert!(has_s_a_update, "s_a parameter update must appear in parameter_updates");
     // s_c must not appear in parameter_updates (it is new, not surviving).

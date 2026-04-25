@@ -133,7 +133,7 @@ fn relative_path_resolved_against_base_dir() {
 
     // The graph should have the resolved absolute path.
     let node = build_result.graph.get_node(&NodeId::from("verb".to_string())).expect("verb not found");
-    let ir_data = node.parameter_map.get_scalar("ir_data");
+    let ir_data = node.parameter_map.get("ir_data", 0);
     match ir_data {
         Some(patches_core::ParameterValue::File(p)) => {
             assert!(

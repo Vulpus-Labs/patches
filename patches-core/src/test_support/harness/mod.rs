@@ -90,7 +90,7 @@ impl ModuleHarness {
     ) -> Self {
         let param_map: ParameterMap = params
             .iter()
-            .map(|(name, value)| (name.to_string(), value.clone()))
+            .map(|(name, value)| (name.to_string(), 0, value.clone()))
             .collect();
 
         let module: Box<dyn Module> = Box::new(
@@ -187,10 +187,10 @@ impl ModuleHarness {
     /// `module.update_validated_parameters` with a `ParameterMap` built from
     /// the given slice. Used to test hot-reload / partial-update behaviour.
     pub fn update_validated_parameters(&mut self, params: &[(&str, ParameterValue)]) {
-        let mut map = ParameterMap::new();
-        for (k, v) in params {
-            map.insert((*k).into(), v.clone());
-        }
+        let map: ParameterMap = params
+            .iter()
+            .map(|(k, v)| (k.to_string(), 0, v.clone()))
+            .collect();
         self.update_params_map(&map);
     }
 
