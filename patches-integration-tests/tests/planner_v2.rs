@@ -273,7 +273,7 @@ fn parameter_only_change_produces_diffs_without_reinstantiation() {
         .map(|(_, params)| params);
     let update = update.expect("osc slot must have a parameter update");
     assert!(
-        matches!(update.get_scalar("frequency"), Some(ParameterValue::Float(f)) if (*f - 5.75).abs() < 1e-10),
+        matches!(update.get("frequency", 0), Some(ParameterValue::Float(f)) if (*f - 5.75).abs() < 1e-10),
         "parameter_updates must contain the new frequency (880 Hz)"
     );
 }

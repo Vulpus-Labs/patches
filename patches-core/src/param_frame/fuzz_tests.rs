@@ -101,7 +101,7 @@ fn defaults_map(slots: &[Slot]) -> ParameterMap {
                 )),
             ),
         };
-        let _ = m.insert(k, v);
+        m.insert(k, v);
     }
     m
 }
@@ -115,7 +115,7 @@ fn overrides_map(slots: &[Slot]) -> ParameterMap {
             Slot::Bool(k, v) => ((*k).to_string(), ParameterValue::Bool(*v)),
             Slot::Buffer(_) => continue,
         };
-        let _ = m.insert(k, v);
+        m.insert(k, v);
     }
     m
 }

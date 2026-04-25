@@ -595,12 +595,10 @@ impl ModuleBuilder for WasmModuleBuilder {
         };
 
         // 4. Fill defaults and validate+apply parameters
-        let mut filled = params.clone();
-        for param_desc in module.descriptor.parameters.iter() {
-            filled.get_or_insert(param_desc.name, param_desc.index, || {
-                param_desc.parameter_type.default_value()
-            });
-        }
+        let filled = patches_core::parameter_map::ParameterMap::with_overrides(
+            &patches_core::parameter_map::ParameterMap::declared_defaults(&module.descriptor),
+            params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
+        );
         module.update_parameters(&filled)?;
 
         Ok(Box::new(module))

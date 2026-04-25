@@ -163,7 +163,7 @@ fn validate_sequencer_songs(
         if resolved.type_name != "MasterSequencer" {
             continue;
         }
-        let song_idx = match resolved.params.get_scalar("song") {
+        let song_idx = match resolved.params.get("song", 0) {
             Some(ParameterValue::Int(idx)) if *idx >= 0 => *idx as usize,
             _ => continue,
         };

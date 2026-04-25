@@ -62,6 +62,33 @@ hotspot when 0681 runs in full.
 
 (Filled in as 0681–0685 complete.)
 
+### Sidebar — 0686 ParameterMap redesign
+
+The 0681 hotspot triage prompted ticket 0686: redesign ParameterMap
+around the two construction patterns its production callers actually
+use (`defaults(descriptor)` for descriptor-derived complete maps,
+`with_overrides(base, iter)` for layered overrides). All other
+mutating accessors are either deleted or marked transitional
+(`#[doc(hidden)]`) for legacy test construction (migration tracked
+by 0693).
+
+Mutation re-test on the redesigned file:
+
+|               | Mutants | Missed | Caught | Unviable |
+| ------------- | ------- | ------ | ------ | -------- |
+| Before (0681) | 45      | 21     | 8      | 16       |
+| After (0686)  | 30      | 4      | 15     | 11       |
+
+Catch rate on viable mutants jumped from 28% to 79%. The 4 remaining
+survivors are the categorically-benign ones flagged in the 0681
+rollup: `Display::fmt` and `ParameterValue::kind_name` — diagnostic
+output, not behavioural.
+
+Lesson worth keeping: mutation survivors ask two questions, not one
+— "untested?" *and* "needs to exist?" Several survivors disappeared
+not by writing tests but by deleting unused affordances. Saved as
+project memory `feedback_narrow_interface_to_semantics.md`.
+
 ### patches-core (0681)
 
 Run: `cargo mutants -p patches-core --jobs 4 --no-shuffle`.

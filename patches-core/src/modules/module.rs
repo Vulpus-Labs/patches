@@ -23,7 +23,7 @@ pub fn validate_parameters(
     descriptor: &ModuleDescriptor,
 ) -> Result<(), BuildError> {
     // Reject any key not declared in the descriptor.
-    for (name, idx) in params.keys() {
+    for (name, idx, _) in params.iter() {
         if !descriptor.parameters.iter().any(|p| p.matches(name, idx)) {
             return Err(unknown_parameter_error(descriptor, name, idx));
         }
@@ -250,14 +250,12 @@ pub trait Module: Send {
         let mut instance = Self::prepare(audio_environment, descriptor, instance_id);
 
         // Fill in any missing parameters using the descriptor's declared defaults.
-        let mut filled = params.clone();
-        for param_desc in instance.descriptor().parameters.iter() {
-            filled.get_or_insert(param_desc.name, param_desc.index, || {
-                param_desc.parameter_type.default_value()
-            });
-        }
+        let filled = ParameterMap::with_overrides(
+            &ParameterMap::declared_defaults(instance.descriptor()),
+            params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
+        );
 
-        instance.update_parameters(&filled)?;  // control thread — clone in default impl is fine
+        instance.update_parameters(&filled)?;  // control thread — allocation fine
         Ok(instance)
     }
 

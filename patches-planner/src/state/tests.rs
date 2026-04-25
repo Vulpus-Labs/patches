@@ -197,7 +197,7 @@ fn classify_surviving_param_changed_produces_diff() {
     match &decisions[0].1 {
         NodeDecision::Update { param_diff, .. } => {
             assert!(!param_diff.is_empty());
-            assert_eq!(param_diff.get_scalar("frequency"), Some(&ParameterValue::Float(880.0)));
+            assert_eq!(param_diff.get("frequency", 0), Some(&ParameterValue::Float(880.0)));
         }
         _ => panic!("expected Update"),
     }
@@ -350,7 +350,7 @@ fn classify_surviving_removed_param_produces_diff_with_default() {
                 "removed param must appear in diff to reset to default"
             );
             assert_eq!(
-                param_diff.get_scalar("gain"),
+                param_diff.get("gain", 0),
                 Some(&ParameterValue::Float(0.5)),
                 "removed param must be reset to descriptor default"
             );

@@ -182,10 +182,10 @@ impl ConvReverbCore {
         params: &ParameterMap,
         module_name: &'static str,
     ) -> Result<(), BuildError> {
-        if let Some(ParameterValue::Float(v)) = params.get_scalar("mix") {
+        if let Some(ParameterValue::Float(v)) = params.get("mix", 0) {
             self.base_mix = *v;
         }
-        if let Some(&ParameterValue::Enum(v)) = params.get_scalar("ir") {
+        if let Some(&ParameterValue::Enum(v)) = params.get("ir", 0) {
             let idx = v as u8;
             if (idx as usize) < IR_VARIANTS.len() {
                 self.ir_variant_idx = idx;
@@ -193,7 +193,7 @@ impl ConvReverbCore {
         }
 
         // Handle pre-processed file data (FloatBuffer from planner's FileProcessor).
-        if let Some(ParameterValue::FloatBuffer(data)) = params.get_scalar("ir_data") {
+        if let Some(ParameterValue::FloatBuffer(data)) = params.get("ir_data", 0) {
             let ready = if self.stereo {
                 let left_len = data[0] as usize;
                 let conv_l = NonUniformConvolver::from_pre_fft(&data[1..1 + left_len]);
