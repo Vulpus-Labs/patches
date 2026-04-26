@@ -15,7 +15,7 @@ use patches_core::MAX_TAPS;
 use patches_dsl::manifest::TapType;
 
 use crate::processor::ProcessorId;
-use patches_io_ring::TapRingShared;
+use patches_io_ring::{tap_ring, TapRingShared};
 
 /// Latest scalar value per `(slot, ProcessorId)`. Stored as `f32::to_bits`
 /// in `AtomicU32` so reads/writes are lock-free and wait-free.
@@ -152,5 +152,31 @@ impl Subscribers {
             latest: Arc::clone(&self.latest),
             drops: Arc::clone(&self.drops),
         }
+    }
+
+    /// Writer-side publish for bringup harnesses (e.g. patches-player TUI
+    /// fake-publisher in ticket 0704). The real observer pipeline writes
+    /// the same surface internally; this method is the one external way in.
+    pub fn publish_latest(&self, slot: usize, id: ProcessorId, value: f32) {
+        self.latest.publish(slot, id, value);
+    }
+
+    /// Writer-side diagnostic push for bringup harnesses.
+    pub fn push_diagnostic(&mut self, d: Diagnostic) {
+        self.diag_tx.push(d);
+    }
+
+    /// Bringup helper: build a self-contained `Subscribers` + reader handle
+    /// + diagnostic reader without a real audio-side ring. The internal
+    /// drop counters are owned by an unused `TapRingProducer` and remain
+    /// at zero. Used by `patches-player` (ticket 0704) to drive the TUI
+    /// from a fake publisher before the live observer plumbing lands in
+    /// ticket 0705.
+    pub fn for_bringup(diag_capacity: usize) -> (Self, SubscribersHandle, DiagnosticReader) {
+        let (producer, _consumer) = tap_ring(16);
+        let drops = producer.shared();
+        let (subs, diag_rx) = Self::new(drops, diag_capacity);
+        let handle = subs.handle();
+        (subs, handle, diag_rx)
     }
 }

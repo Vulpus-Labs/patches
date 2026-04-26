@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use cpal::traits::DeviceTrait;
@@ -47,6 +49,10 @@ pub(crate) struct AudioCallback {
     record_tx: Option<rtrb::Producer<[f32; 2]>>,
     /// Scratch buffer for recording, flushed once per callback.
     record_scratch: Vec<[f32; 2]>,
+    /// When set and `true`, suppress writes to `record_tx` (the WAV recorder
+    /// keeps running but receives silence-equivalent gaps). Owned by the
+    /// host (e.g. `patches-player` TUI) so a key can mute mid-stream.
+    record_muted: Option<Arc<AtomicBool>>,
     /// Optional ring-buffer consumer for audio input frames.
     input_rx: Option<rtrb::Consumer<[f32; 2]>>,
     /// Previous input frame for linear interpolation under oversampling.
@@ -68,6 +74,7 @@ impl AudioCallback {
         event_queue: Option<EventQueueConsumer>,
         clock: *const AudioClock,
         record_tx: Option<rtrb::Producer<[f32; 2]>>,
+        record_muted: Option<Arc<AtomicBool>>,
         oversampling_factor: usize,
         control_period_base: usize,
         input_rx: Option<rtrb::Consumer<[f32; 2]>>,
@@ -94,6 +101,7 @@ impl AudioCallback {
             decimator_r: Decimator::new(factor_enum),
             record_tx,
             record_scratch: Vec::with_capacity(8192),
+            record_muted,
             input_rx,
             prev_input_frame: [0.0, 0.0],
         }
@@ -215,8 +223,14 @@ impl AudioCallback {
         }
 
         if let Some(ref mut tx) = self.record_tx {
-            for &frame in &self.record_scratch {
-                let _ = tx.push(frame);
+            let muted = self
+                .record_muted
+                .as_ref()
+                .is_some_and(|m| m.load(Ordering::Relaxed));
+            if !muted {
+                for &frame in &self.record_scratch {
+                    let _ = tx.push(frame);
+                }
             }
         }
 

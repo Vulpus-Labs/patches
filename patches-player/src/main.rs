@@ -1,7 +1,7 @@
-//! `patch_player` — load a `.patches` file, play it, and hot-reload on change.
+//! `patch_player` — load a `.patches` file, play it, hot-reload on change.
 //!
-//! Usage:
-//!   patch_player <path-to-patch.patches>
+//! Default frontend: ratatui TUI (ticket 0704, ADR 0055 §5). Pass
+//! `--no-tui` for the legacy stdout flow (kept for headless smoke runs).
 
 #[cfg(feature = "audio-thread-allocator-trap")]
 #[global_allocator]
@@ -13,10 +13,8 @@ use std::fs;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -24,14 +22,25 @@ use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
 use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::{new_event_queue, EventScheduler, MidiConnector, OversamplingFactor};
 use patches_host::{CompileError, HostBuilder, LoadedPatch, PathSource};
+use patches_observation::subscribers::Subscribers;
 
 mod diagnostic_render;
+mod fake_publisher;
+mod tui;
 
 /// Render a [`CompileError`] to stderr using the source map it carries.
 fn render_compile_error(err: &CompileError) {
     for d in err.to_rendered_diagnostics() {
         diagnostic_render::render_to_stderr(&d, &err.source_map);
     }
+}
+
+/// Format compile errors as a list of one-line strings for the event log.
+fn compile_error_lines(err: &CompileError) -> Vec<String> {
+    err.to_rendered_diagnostics()
+        .iter()
+        .map(|d| format!("compile error: {}", d.message))
+        .collect()
 }
 
 /// Render the warnings carried by a successful load.
@@ -45,6 +54,19 @@ fn render_load_warnings(loaded: &LoadedPatch) {
     }
 }
 
+fn load_warning_lines(loaded: &LoadedPatch) -> Vec<String> {
+    let mut out: Vec<String> = loaded
+        .expand_warnings
+        .iter()
+        .map(|w| format!("dsl warning: {w}"))
+        .collect();
+    for w in &loaded.layering_warnings {
+        let d = RenderedDiagnostic::from_layering_warning(w);
+        out.push(format!("warning: {}", d.message));
+    }
+    out
+}
+
 fn refresh_watched(watched: &mut HashMap<PathBuf, SystemTime>, deps: &[PathBuf]) {
     watched.clear();
     for dep in deps {
@@ -54,14 +76,20 @@ fn refresh_watched(watched: &mut HashMap<PathBuf, SystemTime>, deps: &[PathBuf])
     }
 }
 
-fn run(
+struct CommonSetup {
+    sound: SoundEngine,
+    runtime: patches_host::HostRuntime,
+    source: PathSource,
+    registry: patches_registry::Registry,
+    sample_rate: f32,
+}
+
+fn common_setup(
     path: &str,
-    record_path: Option<&str>,
     oversampling: OversamplingFactor,
-    no_stdin: bool,
     device_config: DeviceConfig,
     module_paths: Vec<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<CommonSetup, Box<dyn std::error::Error>> {
     let mut registry = patches_modules::default_registry();
 
     if !module_paths.is_empty() {
@@ -82,17 +110,36 @@ fn run(
         }
     }
 
-    // Open the audio device first so we know the actual sample rate before
-    // building the planner / processor / patch.
     let mut sound = SoundEngine::new(oversampling);
     let env = sound.open(&device_config)?;
     let sample_rate = env.sample_rate;
 
-    let mut runtime = HostBuilder::new()
+    let runtime = HostBuilder::new()
         .oversampling_factor(oversampling.factor())
         .build(env)?;
 
     let source = PathSource::new(path);
+
+    Ok(CommonSetup {
+        sound,
+        runtime,
+        source,
+        registry,
+        sample_rate,
+    })
+}
+
+fn run_headless(
+    path: &str,
+    record_path: Option<&str>,
+    oversampling: OversamplingFactor,
+    no_stdin: bool,
+    device_config: DeviceConfig,
+    module_paths: Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let CommonSetup { mut sound, mut runtime, source, registry, sample_rate, .. } =
+        common_setup(path, oversampling, device_config, module_paths)?;
+
     let loaded = match runtime.compile_and_push_blocking(&source, &registry) {
         Ok(loaded) => loaded,
         Err(e) => {
@@ -111,7 +158,7 @@ fn run(
         .ok_or("audio endpoints already taken")?;
 
     let (midi_producer, midi_consumer) = new_event_queue(256);
-    sound.start(processor, plan_rx, Some(midi_consumer), record_path)?;
+    sound.start(processor, plan_rx, Some(midi_consumer), record_path, None)?;
 
     let scheduler = EventScheduler::new(sample_rate, 128);
     let _midi_connector = match MidiConnector::open(sound.clock(), midi_producer, scheduler) {
@@ -133,9 +180,6 @@ fn run(
         println!("Running (kill process to stop)…");
     } else {
         println!("Watching for changes… (press Enter to stop)");
-
-        // A clean shutdown via stdin lets all destructors run (e.g. the WAV
-        // recorder flushes its file) rather than relying on Ctrl-C / SIGKILL.
         let quit_flag = Arc::clone(&quit);
         thread::spawn(move || {
             let stdin = std::io::stdin();
@@ -188,7 +232,6 @@ fn run(
                 Err(e) => {
                     eprintln!("parse error (keeping current patch):");
                     render_compile_error(&e);
-                    // Update mtimes so we don't spam errors on every poll.
                     for (p, last) in watched.iter_mut() {
                         if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
                             *last = t;
@@ -203,6 +246,164 @@ fn run(
     Ok(())
 }
 
+fn run_tui(
+    path: &str,
+    record_path: Option<&str>,
+    oversampling: OversamplingFactor,
+    device_config: DeviceConfig,
+    module_paths: Vec<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let CommonSetup { mut sound, mut runtime, source, registry, sample_rate, .. } =
+        common_setup(path, oversampling, device_config, module_paths)?;
+
+    let initial = match runtime.compile_and_push_blocking(&source, &registry) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            render_compile_error(&e);
+            return Err("failed to load patch".into());
+        }
+    };
+    let initial_warnings = load_warning_lines(&initial);
+    let dependencies = initial.dependencies.clone();
+    drop(initial);
+
+    let halt_handle = runtime.halt_handle();
+    let (processor, plan_rx) = runtime
+        .take_audio_endpoints()
+        .ok_or("audio endpoints already taken")?;
+
+    let record_muted = record_path.map(|_| Arc::new(AtomicBool::new(true)));
+
+    let (midi_producer, midi_consumer) = new_event_queue(256);
+    sound.start(
+        processor,
+        plan_rx,
+        Some(midi_consumer),
+        record_path,
+        record_muted.clone(),
+    )?;
+
+    let scheduler = EventScheduler::new(sample_rate, 128);
+    let midi_status = match MidiConnector::open(sound.clock(), midi_producer, scheduler) {
+        Ok(c) => (Some(c), "MIDI input open".to_string()),
+        Err(e) => (None, format!("warn: could not open MIDI input: {e}")),
+    };
+    let (_midi_connector, midi_msg) = midi_status;
+
+    // Bringup observer surface + fake publisher (ticket 0704 stub; replaced
+    // by live observer plumbing in ticket 0705).
+    let (subs, handle, mut diag_rx) = Subscribers::for_bringup(16);
+    let fixture_taps: Vec<tui::TapEntry> = (0..8)
+        .map(|i| tui::TapEntry {
+            name: format!("t{i}"),
+            slot: i,
+        })
+        .collect();
+    let fake_stop = Arc::new(AtomicBool::new(false));
+    let publisher_handle = fake_publisher::spawn(
+        subs,
+        fixture_taps.iter().map(|t| t.slot).collect(),
+        Arc::clone(&fake_stop),
+    );
+
+    let header = tui::HeaderInfo {
+        patch_path: path.to_string(),
+        sample_rate: sample_rate as u32,
+        oversampling: oversampling.factor() as u32,
+    };
+    let record = tui::RecordState {
+        record_path: record_path.map(|s| s.to_string()),
+        muted: record_muted,
+    };
+    let mut view = tui::View::new(header, fixture_taps, record);
+    view.log.push(format!("loaded {path}"));
+    for w in initial_warnings {
+        view.log.push(w);
+    }
+    view.log.push(midi_msg);
+
+    let mut watched: HashMap<PathBuf, SystemTime> = HashMap::new();
+    refresh_watched(&mut watched, &dependencies);
+
+    let external_quit = Arc::new(AtomicBool::new(false));
+    let mut halt_reported = false;
+    let mut frame_counter: u64 = 0;
+
+    let mut terminal = tui::enter_terminal()?;
+    let outcome = tui::run(
+        &mut terminal,
+        &mut view,
+        &handle,
+        &external_quit,
+        |view| {
+            // Drain observer-side diagnostics into the event log.
+            for d in diag_rx.drain() {
+                view.log.push(format!("{d:?}"));
+            }
+
+            // Halt info → event log.
+            match halt_handle.halt_info() {
+                Some(info) if !halt_reported => {
+                    let first_line = info.payload.lines().next().unwrap_or("").to_string();
+                    view.log.push(format!(
+                        "engine halted: module {:?} (slot {}): {}",
+                        info.module_name, info.slot, first_line
+                    ));
+                    view.engine_state = tui::EngineState::Halted;
+                    halt_reported = true;
+                }
+                None if halt_reported => {
+                    view.engine_state = tui::EngineState::Running;
+                    halt_reported = false;
+                }
+                _ => {}
+            }
+
+            // Reload check, ~2 Hz to keep redraw cheap.
+            frame_counter = frame_counter.wrapping_add(1);
+            if frame_counter.is_multiple_of(15) {
+                let changed = watched.iter().any(|(p, last)| {
+                    fs::metadata(p)
+                        .and_then(|m| m.modified())
+                        .map(|t| t != *last)
+                        .unwrap_or(false)
+                });
+                if changed {
+                    match runtime.compile_and_push_blocking(&source, &registry) {
+                        Ok(loaded) => {
+                            for w in load_warning_lines(&loaded) {
+                                view.log.push(w);
+                            }
+                            view.log.push("reloaded");
+                            refresh_watched(&mut watched, &loaded.dependencies);
+                        }
+                        Err(e) => {
+                            view.log.push("parse error (keeping current patch):");
+                            for line in compile_error_lines(&e) {
+                                view.log.push(line);
+                            }
+                            for (p, last) in watched.iter_mut() {
+                                if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
+                                    *last = t;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    );
+
+    let restore = tui::leave_terminal(&mut terminal);
+    fake_stop.store(true, Ordering::Release);
+    publisher_handle.join().ok();
+    sound.stop();
+
+    outcome?;
+    restore?;
+    Ok(())
+}
+
 fn print_usage() {
     eprintln!("usage: patch_player [options] <path-to-patch.patches>");
     eprintln!();
@@ -212,7 +413,8 @@ fn print_usage() {
     eprintln!("  --output-device <name>     Use named output device (default: system default)");
     eprintln!("  --input-device <name>      Open named input device for audio capture");
     eprintln!("  --list-devices             List available audio devices and exit");
-    eprintln!("  --no-stdin                 Run without stdin (kill process to stop)");
+    eprintln!("  --no-stdin                 (legacy/--no-tui) run without stdin");
+    eprintln!("  --no-tui                   Use the legacy stdout frontend");
     eprintln!("  --module-path <DIR|FILE>   Scan directory or file for FFI plugin bundles (repeatable)");
 }
 
@@ -221,6 +423,7 @@ fn main() {
     let mut record_path: Option<String> = None;
     let mut oversampling = OversamplingFactor::None;
     let mut no_stdin = false;
+    let mut no_tui = false;
     let mut list_devices = false;
     let mut device_config = DeviceConfig::default();
     let mut module_paths: Vec<PathBuf> = Vec::new();
@@ -229,6 +432,7 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-stdin" => no_stdin = true,
+            "--no-tui" => no_tui = true,
             "--module-path" => match args.next() {
                 Some(p) => module_paths.push(PathBuf::from(p)),
                 None => {
@@ -302,11 +506,27 @@ fn main() {
         }
     };
 
-    if let Err(e) = run(&path, record_path.as_deref(), oversampling, no_stdin, device_config, module_paths) {
-        // Structured diagnostics (CompileError) have already been rendered
-        // to stderr at the source. Non-source errors surface as plain text.
+    let result = if no_tui {
+        run_headless(
+            &path,
+            record_path.as_deref(),
+            oversampling,
+            no_stdin,
+            device_config,
+            module_paths,
+        )
+    } else {
+        run_tui(
+            &path,
+            record_path.as_deref(),
+            oversampling,
+            device_config,
+            module_paths,
+        )
+    };
+
+    if let Err(e) = result {
         eprintln!("error: {e}");
         process::exit(1);
     }
 }
-

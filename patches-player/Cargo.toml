@@ -15,11 +15,15 @@ patches-engine      = { path = "../patches-engine" }
 patches-planner     = { path = "../patches-planner" }
 patches-dsl         = { path = "../patches-dsl" }
 patches-modules     = { path = "../patches-modules" }
+patches-registry    = { path = "../patches-registry" }
 patches-core        = { path = "../patches-core" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-ffi         = { path = "../patches-ffi" }
 patches-alloc-trap  = { path = "../patches-alloc-trap" }
+patches-observation = { path = "../patches-observation" }
 ariadne             = "0.6"
+ratatui             = "0.29"
+crossterm           = "0.28"
 
 [features]
 default = []

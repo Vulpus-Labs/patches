@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
@@ -221,6 +222,7 @@ impl SoundEngine {
         plan_rx: rtrb::Consumer<ExecutionPlan>,
         event_queue: Option<EventQueueConsumer>,
         record_path: Option<&str>,
+        record_muted: Option<Arc<AtomicBool>>,
     ) -> Result<(), EngineError> {
         if self.stream.is_some() {
             return Err(EngineError::AlreadyStarted);
@@ -250,7 +252,7 @@ impl SoundEngine {
         let input_rx = self.input_rx.take();
         let callback = AudioCallback::new(
             plan_rx, processor, channels,
-            event_queue, clock_ptr, record_tx,
+            event_queue, clock_ptr, record_tx, record_muted,
             self.oversampling_factor,
             self.control_period,
             input_rx,
