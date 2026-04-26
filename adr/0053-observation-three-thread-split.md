@@ -89,14 +89,24 @@ slot shape, eliminates per-voice analysis variants in the observer.
 ### 4. Backplane and frame stream
 
 The engine owns a single per-tick frame `[f32; MAX_TAPS]` (the
-"backplane") that tap modules write into during their tick. `MAX_TAPS`
-is a compile-time bound (initial value: 64; revisable).
+"backplane") that tap modules write into during their tick.
+
+`MAX_TAPS = 32`. Rationale: one backplane slot is one engine-side unit
+of bookkeeping; aligning the tap budget to a single slot keeps tap-id
+encoding (`u8` with room to spare), manifest packing, and ring sizing
+math uniform with the rest of the engine. The number is also generous
+relative to UI demand — no realistic plugin GUI displays more than ~32
+meters/LEDs/scopes simultaneously, and a "show me everything" debug
+overlay belongs to a different mechanism (debug tap-all mode), not the
+user-declared tap budget. Doubling later is a one-line change;
+shrinking would break patches, so 32 is chosen as the floor that meets
+demand without overprovisioning.
 
 The audio→observer bus is a single SPSC ring of frames:
 
 ```rust
-type Frame = [f32; MAX_TAPS];   // one cache line at MAX_TAPS=16,
-                                // four cache lines at MAX_TAPS=64
+const MAX_TAPS: usize = 32;
+type Frame = [f32; MAX_TAPS];   // 128 B = two cache lines
 type Bus   = rtrb::RingBuffer<Frame>;
 ```
 
@@ -106,11 +116,20 @@ advances to the next frame. At block end: commit the chunk (one
 Release store to the ring head). On full ring: drop the entire block
 (no per-sample retry path).
 
-Bandwidth: `MAX_TAPS × 4 B × sample_rate`. At MAX_TAPS=16, 48 kHz =
-3 MB/s; MAX_TAPS=64 = 12 MB/s. Comfortable.
+Bandwidth: `MAX_TAPS × 4 B × sample_rate`. At MAX_TAPS=32, 48 kHz =
+6 MB/s; at 192 kHz oversampled = 24 MB/s. Comfortable.
 
 Ring sizing: `≥ sample_rate × max_observer_lag × safety`. With observer
-waking at 100 Hz and 4× safety, `MAX_TAPS=64` → ~128 KB ring.
+waking at 100 Hz and 4× safety, `MAX_TAPS=32` → ~64 KB ring.
+
+Tap rate is engine rate (post-oversampling-up, pre-decimation-to-
+hardware). Taps live in the module domain and are not decimated.
+Decimation is reserved for the stereo output path (speakers + WAV
+recorder share the same FIR cost). Subscribers reduce as needed:
+meter accumulators, scope min/max bucketing, FFT windowing all run on
+the observer or subscriber side at engine rate. Decimating N taps
+through halfband filters would dominate audio-thread cost and is
+explicitly avoided.
 
 ### 5. Drop policy
 

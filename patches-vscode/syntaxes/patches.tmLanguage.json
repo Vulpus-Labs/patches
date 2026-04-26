@@ -7,6 +7,7 @@
     { "include": "#scaled-forward-arrow" },
     { "include": "#scaled-backward-arrow" },
     { "include": "#plain-arrow" },
+    { "include": "#tap-target" },
     { "include": "#enum-declaration" },
     { "include": "#template-declaration" },
     { "include": "#patch-declaration" },
@@ -47,6 +48,46 @@
     "plain-arrow": {
       "match": "->|<-",
       "name": "keyword.control.arrow.patches"
+    },
+    "tap-target": {
+      "comment": "ADR 0054 cable tap targets: ~taptype(name, ...) and compound ~a+b+c(name, ...). Highlights the leading `~`, the closed set of component names, and the tap name; parameter k:v pairs fall through to the regular literal/punctuation rules.",
+      "begin": "(~)((?:meter|osc|spectrum|gate_led|trigger_led)(?:\\+(?:meter|osc|spectrum|gate_led|trigger_led))*)\\s*\\(\\s*([a-zA-Z_][a-zA-Z0-9_-]*)?",
+      "end": "\\)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tap.patches" },
+        "2": { "name": "support.function.tap-type.patches" },
+        "3": { "name": "variable.other.tap-name.patches" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.patches" }
+      },
+      "patterns": [
+        {
+          "comment": "Qualified tap parameter key: `qualifier.key:`. The qualifier and key get distinct scopes so themes can colour them differently.",
+          "match": "([a-zA-Z_][a-zA-Z0-9_-]*)(\\.)([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.other.tap-qualifier.patches" },
+            "2": { "name": "punctuation.separator.dot.patches" },
+            "3": { "name": "variable.parameter.tap-key.patches" },
+            "4": { "name": "punctuation.separator.colon.patches" }
+          }
+        },
+        {
+          "comment": "Unqualified tap parameter key: `key:`.",
+          "match": "([a-zA-Z_][a-zA-Z0-9_-]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.parameter.tap-key.patches" },
+            "2": { "name": "punctuation.separator.colon.patches" }
+          }
+        },
+        { "include": "#string" },
+        { "include": "#note-literal" },
+        { "include": "#unit-literal" },
+        { "include": "#number" },
+        { "include": "#boolean" },
+        { "include": "#param-ref" },
+        { "include": "#punctuation" }
+      ]
     },
     "enum-declaration": {
       "match": "\\b(enum)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)\\b",

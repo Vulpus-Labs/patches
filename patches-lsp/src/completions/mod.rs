@@ -71,7 +71,11 @@ pub(crate) fn compute_completions(
         CursorContext::SongRow { .. } => {
             return complete_pattern_names(model);
         }
-        CursorContext::ModuleName { .. } | CursorContext::Unknown => {}
+        CursorContext::ModuleName { .. }
+        | CursorContext::TapType { .. }
+        | CursorContext::TapParamKey { .. }
+        | CursorContext::TapName { .. }
+        | CursorContext::Unknown => {}
     }
 
     // Incomplete-input fallback: tree-sitter produced no classifiable node

@@ -1,0 +1,234 @@
+================================================================================
+Tap target: simple, unqualified param
+================================================================================
+
+patch {
+    module osc : Osc
+    osc.out -> ~meter(level, window: 25)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (tap_target
+          (tap_components (tap_type))
+          (tap_name (ident))
+          (tap_params
+            (tap_param
+              (tap_param_key (ident))
+              (value (scalar (int_lit))))))))))
+
+================================================================================
+Tap target: qualified param
+================================================================================
+
+patch {
+    module osc : Osc
+    osc.out -> ~meter(level, meter.window: 25)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (tap_target
+          (tap_components (tap_type))
+          (tap_name (ident))
+          (tap_params
+            (tap_param
+              (tap_param_key
+                (tap_qualifier (ident))
+                (ident))
+              (value (scalar (int_lit))))))))))
+
+================================================================================
+Tap target: compound
+================================================================================
+
+patch {
+    module mix : Mix
+    mix.out -> ~meter+spectrum+osc(out, meter.window: 25, spectrum.fft: 1024, osc.length: 2048)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (tap_target
+          (tap_components (tap_type) (tap_type) (tap_type))
+          (tap_name (ident))
+          (tap_params
+            (tap_param
+              (tap_param_key (tap_qualifier (ident)) (ident))
+              (value (scalar (int_lit))))
+            (tap_param
+              (tap_param_key (tap_qualifier (ident)) (ident))
+              (value (scalar (int_lit))))
+            (tap_param
+              (tap_param_key (tap_qualifier (ident)) (ident))
+              (value (scalar (int_lit))))))))))
+
+================================================================================
+Tap target: no params
+================================================================================
+
+patch {
+    module clk : Clock
+    clk.tick -> ~trigger_led(beat)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (tap_target
+          (tap_components (tap_type))
+          (tap_name (ident)))))))
+
+================================================================================
+Tap target: with cable gain
+================================================================================
+
+patch {
+    module f : Filter
+    f.out -[0.3]-> ~meter(level, window: 25)
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow (scale_val (scale_num))))
+        (tap_target
+          (tap_components (tap_type))
+          (tap_name (ident))
+          (tap_params
+            (tap_param
+              (tap_param_key (ident))
+              (value (scalar (int_lit))))))))))
+
+================================================================================
+Tap target: error recovery — partial component prefix
+================================================================================
+
+patch {
+    module o : Osc
+    o.out -> ~me
+    module x : Y
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (ERROR
+      (port_ref (module_ident (ident)) (port_label (ident)))
+      (arrow (forward_arrow))
+      (ident))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))))
+
+================================================================================
+Tap target: error recovery — unknown component
+================================================================================
+
+patch {
+    module o : Osc
+    o.out -> ~bogus(name)
+    module x : Y
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (ERROR
+      (port_ref (module_ident (ident)) (port_label (ident)))
+      (arrow (forward_arrow))
+      (ERROR (ident))
+      (module_ident (ident)))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))))
+
+================================================================================
+Tap target: error recovery — unclosed parens
+================================================================================
+
+patch {
+    module o : Osc
+    o.out -> ~meter(level
+    module x : Y
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (port_ref (module_ident (ident)) (port_label (ident)))
+        (arrow (forward_arrow))
+        (tap_target
+          (tap_components (tap_type))
+          (tap_name (ident))
+          (MISSING ")"))))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))))

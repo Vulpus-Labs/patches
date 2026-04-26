@@ -109,9 +109,24 @@ forward_arrow  = ${ ("-[" ~ scale_val ~ "]->") | "->" }
 backward_arrow = ${ ("<-[" ~ scale_val ~ "]-") | "<-" }
 arrow          = { forward_arrow | backward_arrow }
 
+// ─── Tap targets (ADR 0054) ──────────────────────────────────────────────────
+// Cable RHS form: `~taptype(name, k: v, ...)` and compound `~a+b+c(name, ...)`.
+// Component set is closed and grammar-enforced so unknown components fail with
+// a parse-level diagnostic at the `~` site.
+tap_component  = @{ ("meter" | "osc" | "spectrum" | "gate_led" | "trigger_led")
+                    ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+tap_components = { tap_component ~ ("+" ~ tap_component)* }
+// Parameter key: bare `key` or qualified `qualifier.key`. Two idents = qualified.
+tap_param_key  = { ident ~ ("." ~ ident)? }
+tap_param      = { tap_param_key ~ ":" ~ value }
+tap_target     = { "~" ~ tap_components ~ "(" ~ ident ~ ("," ~ tap_param)* ~ ","? ~ ")" }
+
 // ─── Connections ──────────────────────────────────────────────────────────────
+// A cable endpoint is either a port reference or a tap target. tap_target must
+// come first so the leading `~` disambiguates from a bare ident.
+cable_endpoint = { tap_target | port_ref }
 // Fan-out: `a.out -> b.in, c.in` desugars to two connections.
-connection = { port_ref ~ arrow ~ port_ref ~ ("," ~ port_ref)* }
+connection = { cable_endpoint ~ arrow ~ cable_endpoint ~ ("," ~ cable_endpoint)* }
 
 // ─── Statements ───────────────────────────────────────────────────────────────
 statement = { module_decl | song_block | pattern_block | connection }

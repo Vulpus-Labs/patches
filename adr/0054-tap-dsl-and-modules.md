@@ -33,9 +33,12 @@ Two constraints shape the design:
 Tap declarations appear inline in cable expressions:
 
 ```text
-filter.out      -[0.3]-> ~rms(filter, window: 25)
+filter.out      -[0.3]-> ~meter(filter, window: 25)
 delay.out_left  ->        ~spectrum(delay_left, fft: 2048)
-mix.out         ->        ~peak(out, decay: 1.5)
+mix.out         ->        ~meter+spectrum+osc(out,
+                            meter.window: 25,
+                            spectrum.fft: 1024,
+                            osc.length: 2048)
 env.gate        ->        ~gate_led(gate, threshold: 0.1)
 clock.tick      ->        ~trigger_led(beat)
 ```
@@ -46,7 +49,17 @@ clock.tick      ->        ~trigger_led(beat)
   expressions and names of expander-generated module instances (see
   §2). User-written module declarations may not use `~` in their
   names; the parser rejects it.
-- Tap types: `osc | spectrum | peak | rms | gate_led | trigger_led`.
+- Tap types: `meter | osc | spectrum | gate_led | trigger_led`.
+  `meter` is a fused peak + RMS pipeline — the two are always wanted
+  together for a level display, so a single name and a single set of
+  observer-side state covers both.
+- Compound tap types are written `~a+b+c(name, ...)` and produce a
+  **single tap slot** consumed by multiple observer-side pipelines.
+  The audio side still writes one scalar per sample; the observer
+  fans out to each named pipeline. All component types must agree on
+  the input cable kind (e.g. `meter+spectrum+osc` is fine — all
+  consume audio cables; `meter+trigger_led` is rejected at parse
+  time because `trigger_led` requires a different cable kind).
 - Tap parameters following the name are **observer-side** analysis
   configuration. They are parsed as typed literals (k/v pairs) and
   forwarded verbatim to the observer via the manifest; the observer
@@ -55,6 +68,17 @@ clock.tick      ->        ~trigger_led(beat)
   arbitrary param vocabularies are not a requirement, so DSL-level
   validation (and LSP diagnostics on tap params) can be added later
   without rework. They are never seen by the audio thread.
+- Parameter keys may be **qualified by tap type**: `meter.window`,
+  `spectrum.fft`, `osc.length`, `gate_led.threshold`. Qualifiers are
+  required on compound taps (`~a+b+c(...)`) to disambiguate which
+  component a parameter targets. On simple (single-component) taps
+  qualifiers are optional — `~meter(out, window: 25)` and
+  `~meter(out, meter.window: 25)` are equivalent. Adding a second
+  component later forces qualification of any previously-unqualified
+  keys; the parser diagnoses the ambiguity at the call site. When
+  present, the qualifier must match a component of the tap type or
+  the parser rejects it (e.g. `osc.length` on a `~meter(...)` target
+  is an error).
 - Cable gain (`-[0.3]->`) applies as on any cable: the tap sees
   post-gain signal.
 - `name` is the tap's identifier within the patch scope. Names must be
@@ -203,12 +227,15 @@ correct underlying module. The mapping is fixed by tap type:
 
 | Tap type      | Module       | Cable type required |
 | ------------- | ------------ | ------------------- |
+| `meter`       | `AudioTap`   | `Mono` + `Audio`    |
 | `osc`         | `AudioTap`   | `Mono` + `Audio`    |
 | `spectrum`    | `AudioTap`   | `Mono` + `Audio`    |
-| `peak`        | `AudioTap`   | `Mono` + `Audio`    |
-| `rms`         | `AudioTap`   | `Mono` + `Audio`    |
 | `gate_led`    | `AudioTap`   | `Mono` + `Audio`    |
 | `trigger_led` | `TriggerTap` | `Mono` + `Trigger`  |
+
+For compound types (`~a+b+c(name, ...)`) every component must map to
+the same underlying module (same cable type required). Mixed-cable
+compounds are a parse error.
 
 The two LED variants disambiguate the underlying signal:
 `gate_led` thresholds an ordinary mono audio/cv signal (configurable
@@ -262,8 +289,9 @@ parameterised by the slot's `TapParams`:
 
 - `osc` → scope windowing + trigger search.
 - `spectrum` → windowed FFT (size, overlap from params).
-- `peak` → running max-abs with ballistic decay (decay from params).
-- `rms` → rolling-window RMS (window length in ms from params).
+- `meter` → fused running max-abs (with ballistic decay) plus
+  rolling-window RMS. Parameters: `meter.decay` (ms), `meter.window`
+  (ms). Both peak and RMS are surfaced together to subscribers.
 - `gate_led` → threshold + latch with decay (threshold from params).
 - `trigger_led` → edge detect on the trigger time series + latch with
   decay.
@@ -355,11 +383,12 @@ from names alone, without knowing the internal module decomposition.
 
 ### Multi-pipeline taps (`osc+spectrum(name)`)
 
-A single raw-sample slot could feed multiple observer-side pipelines.
-Considered but deferred: needs a grammar extension and risks confusion
-with the audio-side reduction split (`peak`/`rms` cannot combine with
-each other since they reduce differently). Revisit if real usage shows
-demand.
+Adopted in §1: compound tap types `~a+b+c(name, ...)` produce one
+backplane slot consumed by multiple observer-side pipelines. The
+audio-side concern that motivated the original deferral (`peak`/`rms`
+reduce differently) is dissolved by fusing them into a single `meter`
+type — all observer-side derivation already lives on the observer
+thread (§7), so fan-out from one raw-sample slot is free.
 
 ## Cross-references
 

@@ -149,10 +149,15 @@ fn collect_port_wires(
             dsl_ast::Direction::Forward => (&c.lhs, &c.rhs),
             dsl_ast::Direction::Backward => (&c.rhs, &c.lhs),
         };
-        if input && is_dollar_port(dollar_side, port) {
-            out.push(other_side.clone());
-        } else if !input && is_dollar_port(other_side, port) {
-            out.push(dollar_side.clone());
+        // Tap endpoints (ADR 0054) are not template-port wires; skip them.
+        let (Some(dollar_pr), Some(other_pr)) = (dollar_side.as_port(), other_side.as_port())
+        else {
+            continue;
+        };
+        if input && is_dollar_port(dollar_pr, port) {
+            out.push(other_pr.clone());
+        } else if !input && is_dollar_port(other_pr, port) {
+            out.push(dollar_pr.clone());
         }
     }
     out

@@ -166,6 +166,10 @@
         {
           "type": "port_ref",
           "named": true
+        },
+        {
+          "type": "tap_target",
+          "named": true
         }
       ]
     }
@@ -1204,6 +1208,132 @@
     }
   },
   {
+    "type": "tap_components",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tap_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_name",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ident",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_param",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tap_param_key",
+          "named": true
+        },
+        {
+          "type": "value",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_param_key",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "ident",
+          "named": true
+        },
+        {
+          "type": "tap_qualifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_params",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tap_param",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_qualifier",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "ident",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_target",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tap_components",
+          "named": true
+        },
+        {
+          "type": "tap_name",
+          "named": true
+        },
+        {
+          "type": "tap_params",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tap_type",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "template",
     "named": true,
     "fields": {
@@ -1275,6 +1405,10 @@
   },
   {
     "type": "*",
+    "named": false
+  },
+  {
+    "type": "+",
     "named": false
   },
   {
@@ -1371,6 +1505,10 @@
     "named": true
   },
   {
+    "type": "gate_led",
+    "named": false
+  },
+  {
     "type": "ident",
     "named": true
   },
@@ -1395,6 +1533,10 @@
     "named": true
   },
   {
+    "type": "meter",
+    "named": false
+  },
+  {
     "type": "module",
     "named": false
   },
@@ -1405,6 +1547,10 @@
   {
     "type": "note_lit",
     "named": true
+  },
+  {
+    "type": "osc",
+    "named": false
   },
   {
     "type": "out",
@@ -1443,6 +1589,10 @@
     "named": false
   },
   {
+    "type": "spectrum",
+    "named": false
+  },
+  {
     "type": "step_rest",
     "named": true
   },
@@ -1467,6 +1617,10 @@
     "named": false
   },
   {
+    "type": "trigger_led",
+    "named": false
+  },
+  {
     "type": "true",
     "named": false
   },
@@ -1484,6 +1638,10 @@
   },
   {
     "type": "}",
+    "named": false
+  },
+  {
+    "type": "~",
     "named": false
   }
 ]

@@ -171,12 +171,74 @@ pub struct Arrow {
     pub span: Span,
 }
 
+/// A cable tap target: `~taptype(name, k: v, ...)` or compound
+/// `~a+b+c(name, ...)`. ADR 0054 §1.
+///
+/// Tap targets appear as cable endpoints (typically the destination side).
+/// They are sugar: the desugarer (ticket 0697) collects them, groups by
+/// underlying tap module, and rewrites cables to land on synthetic
+/// `~audio_tap` / `~trigger_tap` instances.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TapTarget {
+    /// The tap component(s): `meter`, `osc`, `spectrum`, `gate_led`,
+    /// `trigger_led`. Length 1 for simple, ≥2 for compound `~a+b+c(...)`.
+    pub components: Vec<Ident>,
+    /// The tap's identifier within the patch scope. Must be unique across
+    /// all tap targets in the patch (validated in 0696).
+    pub name: Ident,
+    /// Observer-side analysis parameters. Forwarded verbatim to the
+    /// observer via the manifest; not interpreted here.
+    pub params: Vec<TapParam>,
+    pub span: Span,
+}
+
+/// One observer-side analysis parameter on a tap target.
+///
+/// `qualifier` is `Some` for `qualifier.key: value` and `None` for the bare
+/// `key: value` form. Qualifier-vs-component matching is validated in 0696.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TapParam {
+    pub qualifier: Option<Ident>,
+    pub key: Ident,
+    pub value: Value,
+    pub span: Span,
+}
+
+/// One end of a cable: either a port reference or a tap target.
+///
+/// Tap endpoints carry their `TapTarget` payload through to the desugarer
+/// (0697); existing consumers that expect a port ref pattern-match the
+/// `Port` variant and either skip or error on `Tap` at this stage.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CableEndpoint {
+    Port(PortRef),
+    Tap(TapTarget),
+}
+
+impl CableEndpoint {
+    /// Returns the contained `PortRef`, or `None` if this endpoint is a tap.
+    pub fn as_port(&self) -> Option<&PortRef> {
+        match self {
+            CableEndpoint::Port(p) => Some(p),
+            CableEndpoint::Tap(_) => None,
+        }
+    }
+
+    /// Span of the endpoint (delegates to the inner node).
+    pub fn span(&self) -> Span {
+        match self {
+            CableEndpoint::Port(p) => p.span,
+            CableEndpoint::Tap(t) => t.span,
+        }
+    }
+}
+
 /// `<lhs> <arrow> <rhs>`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Connection {
-    pub lhs: PortRef,
+    pub lhs: CableEndpoint,
     pub arrow: Arrow,
-    pub rhs: PortRef,
+    pub rhs: CableEndpoint,
     pub span: Span,
 }
 

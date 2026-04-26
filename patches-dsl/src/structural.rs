@@ -82,6 +82,13 @@ structural_codes! {
     MissingDefaultParam     => ("ST0020", "missing default"),
     MissingPatchBlock       => ("ST0021", "missing patch block"),
     MultiplePatchBlocks     => ("ST0022", "multiple patch blocks"),
+    TapNotYetDesugared      => ("ST0023", "tap target not yet supported"),
+    TapInTemplate           => ("ST0024", "tap target inside template"),
+    TapDuplicateName        => ("ST0025", "duplicate tap name"),
+    TapUnknownQualifier     => ("ST0026", "unknown tap qualifier"),
+    TapAmbiguousUnqualified => ("ST0027", "ambiguous tap parameter key"),
+    TapDuplicateParam       => ("ST0028", "duplicate tap parameter"),
+    TapMixedCableKinds      => ("ST0029", "mixed cable kinds in compound tap"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

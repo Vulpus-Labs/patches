@@ -136,21 +136,21 @@ fn scaled_and_indexed_ast_scales_and_indices() {
         c.arrow.direction == Direction::Forward
             && c.arrow.scale == Some(Scalar::Float(0.8))
     }).expect("expected forward connection with scale 0.8");
-    assert_eq!(c0.rhs.index, Some(patches_dsl::PortIndex::Literal(0)));
+    assert_eq!(c0.rhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(0)));
 
     // lfo.sine -[0.3]-> mix.in[1]
     let c1 = conns.iter().find(|c| {
         c.arrow.direction == Direction::Forward
             && c.arrow.scale == Some(Scalar::Float(0.3))
     }).expect("expected forward connection with scale 0.3");
-    assert_eq!(c1.rhs.index, Some(patches_dsl::PortIndex::Literal(1)));
+    assert_eq!(c1.rhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(1)));
 
     // mix.in[2] <-[-0.5]- osc.sawtooth
     let c2 = conns.iter().find(|c| {
         c.arrow.direction == Direction::Backward
             && c.arrow.scale == Some(Scalar::Float(-0.5))
     }).expect("expected backward connection with scale -0.5");
-    assert_eq!(c2.lhs.index, Some(patches_dsl::PortIndex::Literal(2)));
+    assert_eq!(c2.lhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(2)));
 }
 
 // ─── T-0247: dB literal edge cases ──────────────────────────────────────────

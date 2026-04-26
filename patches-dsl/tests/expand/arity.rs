@@ -166,7 +166,9 @@ fn ast_port_index_variants() {
     // Find the three connections with explicit indices on the to-side (m.in[...])
     let find_conn = |expected_index: &patches_dsl::PortIndex| {
         conns.iter().find(|c| {
-            let to_side = if c.lhs.module != "$" { &c.lhs } else { &c.rhs };
+            let lhs = c.lhs.as_port().unwrap();
+            let rhs = c.rhs.as_port().unwrap();
+            let to_side = if lhs.module != "$" { lhs } else { rhs };
             to_side.index.as_ref() == Some(expected_index)
         }).is_some()
     };

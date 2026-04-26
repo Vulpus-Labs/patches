@@ -1,7 +1,7 @@
 # ADR 0043 — Cable-tap observation
 
 **Date:** 2026-04-17
-**Status:** Proposed
+**Status:** Superseded by [ADR 0053 — Observation three-thread split](0053-observation-three-thread-split.md)
 **Supersedes:** [ADR 0021 — Observation event bus](0021-control-event-bus.md)
 **Related:** [ADR 0015 — Polyphonic cables](0015-polyphonic-cables.md), [ADR 0016 — MIDI as the sole external control mechanism](0016-midi-only-control-architecture.md)
 

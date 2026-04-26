@@ -111,6 +111,15 @@ pub(crate) enum CursorContext<'tree> {
         #[allow(dead_code)]
         module_decl: Node<'tree>,
     },
+    /// Cursor sits on a tap component name (`meter`, `osc`, ...).
+    TapType { node: Node<'tree> },
+    /// Cursor sits on a `tap_param_key` (qualified or unqualified key
+    /// inside `~taptype(name, ...)`). The handler reads the key's
+    /// children to recover qualifier (if present) and resolve the
+    /// implicit qualifier on simple taps.
+    TapParamKey { node: Node<'tree> },
+    /// Cursor sits on the tap name (the first ident inside `~...(...)`).
+    TapName { node: Node<'tree> },
     /// Inside a song/section/pattern-row structure where pattern names are
     /// the relevant completion set.
     SongRow {
@@ -157,6 +166,12 @@ pub(crate) fn classify_cursor(tree: &Tree, byte_offset: usize) -> CursorContext<
 }
 
 fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>> {
+    // Tap-target tokens (ADR 0054 §1). Tested before port_ref since a
+    // tap_target sits in the same syntactic slot as a port_ref endpoint.
+    if let Some(tap_ctx) = classify_tap_node(node) {
+        return Some(tap_ctx);
+    }
+
     // Module type / name identifier: `module v : Type`.
     if let Some(parent) = node.parent() {
         if parent.kind() == "module_decl" {
@@ -235,6 +250,39 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
         };
     }
 
+    None
+}
+
+/// Tap-target sub-tokens (`tap_type`, `tap_param_key`, `tap_name`).
+///
+/// The cursor often lands on the inner `ident` rather than on the
+/// wrapper rule, so we accept either: walk up at most one parent to
+/// reach the wrapper.
+fn classify_tap_node(node: Node<'_>) -> Option<CursorContext<'_>> {
+    if node.kind() == "tap_type" {
+        return Some(CursorContext::TapType { node });
+    }
+    if let Some(parent) = node.parent() {
+        match parent.kind() {
+            "tap_type" => return Some(CursorContext::TapType { node: parent }),
+            "tap_name" => return Some(CursorContext::TapName { node: parent }),
+            "tap_qualifier" => {
+                // tap_qualifier is a child of tap_param_key; classify as
+                // the param-key context so the hover handler can render
+                // the qualified-key documentation.
+                if let Some(key) = parent.parent() {
+                    if key.kind() == "tap_param_key" {
+                        return Some(CursorContext::TapParamKey { node: key });
+                    }
+                }
+            }
+            "tap_param_key" => {
+                // Cursor on the bare `ident` inside a `tap_param_key`.
+                return Some(CursorContext::TapParamKey { node: parent });
+            }
+            _ => {}
+        }
+    }
     None
 }
 

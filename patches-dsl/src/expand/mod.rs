@@ -66,6 +66,17 @@ pub(in crate::expand) type AliasMap = HashMap<String, HashMap<String, u32>>;
 /// instances and port-to-port connections.
 ///
 pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
+    // Pre-expansion validation: tap-target rules from ADR 0054 §1
+    // (top-level only, name uniqueness, qualifier matching, etc.).
+    crate::validate::validate(file)?;
+
+    // Tap desugaring (ADR 0054 §§2, 3): rewrite the patch body so every
+    // tap-endpoint cable lands on a synthetic `~audio_tap` /
+    // `~trigger_tap` module instance, and capture the observer manifest.
+    // The expander runs against the rewritten file from here on.
+    let (rewritten, manifest) = crate::desugar::desugar_taps(file);
+    let file = &rewritten;
+
     let templates: HashMap<&str, &Template> =
         file.templates.iter().map(|t| (t.name.name.as_str(), t)).collect();
 
@@ -119,6 +130,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
             },
         },
         warnings: vec![],
+        manifest,
     })
 }
 

@@ -68,12 +68,14 @@ impl std::fmt::Display for Warning {
     }
 }
 
-/// The result of a successful expansion: the flat patch plus any non-fatal
-/// diagnostics collected during expansion.
+/// The result of a successful expansion: the flat patch, any non-fatal
+/// diagnostics collected during expansion, and the observer-side tap
+/// manifest (empty when the patch declares no tap targets).
 #[derive(Debug)]
 pub struct ExpandResult {
     pub patch: FlatPatch,
     pub warnings: Vec<Warning>,
+    pub manifest: crate::manifest::Manifest,
 }
 
 pub(super) fn param_type_name(ty: &ParamType) -> &'static str {

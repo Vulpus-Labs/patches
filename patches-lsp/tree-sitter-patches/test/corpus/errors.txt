@@ -7,14 +7,15 @@ patch {
 
 --------------------------------------------------------------------------------
 
-(ERROR
-  (ident)
-  (ident)
-  (param_entry
+(file
+  (ERROR
     (ident)
-    (value
-      (scalar
-        (float_unit)))))
+    (ident)
+    (param_entry
+      (ident)
+      (value
+        (scalar
+          (float_unit))))))
 
 ================================================================================
 Error recovery: missing arrow in connection

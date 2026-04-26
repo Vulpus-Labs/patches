@@ -5,8 +5,9 @@
 use pest::iterators::Pair;
 
 use crate::ast::{
-    Arrow, AtBlockIndex, Connection, Direction, Ident, ParamEntry, ParamIndex, PortIndex,
-    PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, Statement, Value,
+    Arrow, AtBlockIndex, CableEndpoint, Connection, Direction, Ident, ParamEntry, ParamIndex,
+    PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, Statement, TapParam,
+    TapTarget, Value,
 };
 
 use super::decls::build_module_decl;
@@ -296,9 +297,58 @@ pub(super) fn build_arrow(pair: Pair<'_, Rule>) -> Result<Arrow, ParseError> {
     }
 }
 
+/// Build a `tap_target` pair into a [`TapTarget`].
+///
+/// Grammar: `"~" ~ tap_components ~ "(" ~ ident ~ ("," ~ tap_param)* ~ ","? ~ ")"`.
+/// Component identifiers are emitted with their own spans so 0696 / 0698 can
+/// point diagnostics and hover at the exact component token.
+pub(super) fn build_tap_target(pair: Pair<'_, Rule>) -> Result<TapTarget, ParseError> {
+    // pair.as_rule() == Rule::tap_target
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+
+    // tap_components — one or more tap_component children.
+    let comps_pair = it.next().unwrap();
+    let components: Vec<Ident> = comps_pair
+        .into_inner()
+        .map(|c| Ident { name: c.as_str().to_owned(), span: span_of(&c) })
+        .collect();
+
+    let name = build_ident(it.next().unwrap());
+
+    let mut params = Vec::new();
+    for entry in it {
+        // entry.as_rule() == Rule::tap_param
+        let param_span = span_of(&entry);
+        let mut pit = entry.into_inner();
+        // tap_param_key = { ident ~ ("." ~ ident)? }
+        let key_pair = pit.next().unwrap();
+        let mut key_inner = key_pair.into_inner();
+        let first = build_ident(key_inner.next().unwrap());
+        let (qualifier, key) = match key_inner.next() {
+            Some(second) => (Some(first), build_ident(second)),
+            None => (None, first),
+        };
+        let value = build_value(pit.next().unwrap())?;
+        params.push(TapParam { qualifier, key, value, span: param_span });
+    }
+
+    Ok(TapTarget { components, name, params, span })
+}
+
+fn build_cable_endpoint(pair: Pair<'_, Rule>) -> Result<CableEndpoint, ParseError> {
+    // pair.as_rule() == Rule::cable_endpoint
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::tap_target => Ok(CableEndpoint::Tap(build_tap_target(inner)?)),
+        Rule::port_ref => Ok(CableEndpoint::Port(build_port_ref(inner)?)),
+        _ => unreachable!("unexpected rule in cable_endpoint: {:?}", inner.as_rule()),
+    }
+}
+
 pub(super) fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, ParseError> {
     // pair.as_rule() == Rule::connection
-    // Grammar: port_ref ~ arrow ~ port_ref ~ ("," ~ port_ref)*
+    // Grammar: cable_endpoint ~ arrow ~ cable_endpoint ~ ("," ~ cable_endpoint)*
     // Fan-out (`a -> b, c, d`) desugars to one Connection per rhs,
     // sharing the rule's span — `PatchReferences::connection_groups`
     // keys on that shared span to reunite the fan-out targets. `span_of`
@@ -307,16 +357,16 @@ pub(super) fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, 
     // to `a.port -> b.port, c.port, d.port`.
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let lhs = build_port_ref(it.next().unwrap())?;
+    let lhs = build_cable_endpoint(it.next().unwrap())?;
     let arrow = build_arrow(it.next().unwrap())?;
-    let first_rhs = build_port_ref(it.next().unwrap())?;
+    let first_rhs = build_cable_endpoint(it.next().unwrap())?;
 
     let mut connections = vec![Connection { lhs: lhs.clone(), arrow: arrow.clone(), rhs: first_rhs, span }];
     for extra in it {
         connections.push(Connection {
             lhs: lhs.clone(),
             arrow: arrow.clone(),
-            rhs: build_port_ref(extra)?,
+            rhs: build_cable_endpoint(extra)?,
             span,
         });
     }

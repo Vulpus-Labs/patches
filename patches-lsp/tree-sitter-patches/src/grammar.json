@@ -1053,20 +1053,109 @@
         }
       ]
     },
-    "connection": {
+    "tap_type": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "meter"
+        },
+        {
+          "type": "STRING",
+          "value": "osc"
+        },
+        {
+          "type": "STRING",
+          "value": "spectrum"
+        },
+        {
+          "type": "STRING",
+          "value": "gate_led"
+        },
+        {
+          "type": "STRING",
+          "value": "trigger_led"
+        }
+      ]
+    },
+    "tap_components": {
       "type": "SEQ",
       "members": [
         {
           "type": "SYMBOL",
-          "name": "port_ref"
+          "name": "tap_type"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "+"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "tap_type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "tap_qualifier": {
+      "type": "SYMBOL",
+      "name": "ident"
+    },
+    "tap_param_key": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "tap_qualifier"
+            },
+            {
+              "type": "STRING",
+              "value": "."
+            },
+            {
+              "type": "SYMBOL",
+              "name": "ident"
+            }
+          ]
         },
         {
           "type": "SYMBOL",
-          "name": "arrow"
+          "name": "ident"
+        }
+      ]
+    },
+    "tap_param": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "tap_param_key"
+        },
+        {
+          "type": "STRING",
+          "value": ":"
         },
         {
           "type": "SYMBOL",
-          "name": "port_ref"
+          "name": "value"
+        }
+      ]
+    },
+    "tap_params": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "tap_param"
         },
         {
           "type": "REPEAT",
@@ -1079,7 +1168,115 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "port_ref"
+                "name": "tap_param"
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": ","
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
+    "tap_name": {
+      "type": "SYMBOL",
+      "name": "ident"
+    },
+    "tap_target": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "~"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "tap_components"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "tap_name"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": ","
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "tap_params"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "_cable_endpoint": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "tap_target"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "port_ref"
+        }
+      ]
+    },
+    "connection": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_cable_endpoint"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "arrow"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_cable_endpoint"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_cable_endpoint"
               }
             ]
           }

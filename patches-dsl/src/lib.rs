@@ -23,6 +23,9 @@ mod expand;
 pub mod flat;
 mod parser;
 pub mod structural;
+pub mod desugar;
+pub mod manifest;
+pub mod validate;
 
 // Provenance, SourceId, Span, and SourceMap are owned by `patches-core` so
 // they can appear in core types like `BuildError`. Re-exported here for the

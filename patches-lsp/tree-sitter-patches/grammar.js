@@ -142,8 +142,43 @@ module.exports = grammar({
 
     arrow: ($) => choice($.forward_arrow, $.backward_arrow),
 
+    // ─── Tap targets (ADR 0054) ─────────────────────────────────────────
+    // Cable RHS form: `~taptype(name, k: v, ...)` and compound
+    // `~a+b+c(name, ...)`. The component set is closed; non-listed
+    // components produce an ERROR node localised to the tap target.
+    tap_type: (_) =>
+      choice("meter", "osc", "spectrum", "gate_led", "trigger_led"),
+    tap_components: ($) => seq($.tap_type, repeat(seq("+", $.tap_type))),
+    tap_qualifier: ($) => $.ident,
+    tap_param_key: ($) =>
+      choice(seq($.tap_qualifier, ".", $.ident), $.ident),
+    tap_param: ($) => seq($.tap_param_key, ":", $.value),
+    tap_params: ($) =>
+      seq($.tap_param, repeat(seq(",", $.tap_param)), optional(",")),
+    tap_name: ($) => $.ident,
+    tap_target: ($) =>
+      seq(
+        "~",
+        $.tap_components,
+        "(",
+        $.tap_name,
+        optional(seq(",", $.tap_params)),
+        ")"
+      ),
+
     // ─── Connections ────────────────────────────────────────────────────
-    connection: ($) => seq($.port_ref, $.arrow, $.port_ref, repeat(seq(",", $.port_ref))),
+    // _cable_endpoint is a hidden alias (leading underscore) so the
+    // existing port_ref-under-connection tree shape is preserved when no
+    // tap target is involved. With a tap target on either side, the
+    // tap_target node appears directly under connection.
+    _cable_endpoint: ($) => choice($.tap_target, $.port_ref),
+    connection: ($) =>
+      seq(
+        $._cable_endpoint,
+        $.arrow,
+        $._cable_endpoint,
+        repeat(seq(",", $._cable_endpoint))
+      ),
 
     // ─── Statements ─────────────────────────────────────────────────────
     statement: ($) => choice($.module_decl, $.song_block, $.pattern_block, $.connection),

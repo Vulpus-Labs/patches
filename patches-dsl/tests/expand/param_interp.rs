@@ -114,7 +114,9 @@ fn ast_port_label_literal_and_param_variants_parse() {
         if let patches_dsl::Statement::Connection(c) = s { Some(c) } else { None }
     }).expect("expected a connection in template body");
     // Find the `osc.sine` side (module != "$")
-    let osc_side = if conn_stmt.lhs.module != "$" { &conn_stmt.lhs } else { &conn_stmt.rhs };
+    let lhs = conn_stmt.lhs.as_port().unwrap();
+    let rhs = conn_stmt.rhs.as_port().unwrap();
+    let osc_side = if lhs.module != "$" { lhs } else { rhs };
     assert_eq!(osc_side.port, PortLabel::Literal("sine".to_owned()));
 }
 

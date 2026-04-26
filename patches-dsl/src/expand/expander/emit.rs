@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use super::frame::BodyFrame;
 use super::Expander;
-use crate::ast::{Connection, Direction, PortRef, Span};
+use crate::ast::{CableEndpoint, Connection, Direction, PortRef, Span};
 use crate::flat::{FlatConnection, FlatPortRef, PortDirection};
 use crate::provenance::Provenance;
 use crate::structural::StructuralCode as Code;
@@ -42,9 +42,24 @@ impl<'a> Expander<'a> {
             eval_scale(conn.arrow.scale.as_ref(), param_env, &conn.arrow.span)?;
 
         // Normalise direction so signal always flows from → to.
-        let (from_ref, to_ref) = match conn.arrow.direction {
+        let (from_endpoint, to_endpoint) = match conn.arrow.direction {
             Direction::Forward => (&conn.lhs, &conn.rhs),
             Direction::Backward => (&conn.rhs, &conn.lhs),
+        };
+
+        // Tap-endpoint cables are sugar (ADR 0054): the desugarer (ticket
+        // 0697) rewrites them onto synthetic `~audio_tap` / `~trigger_tap`
+        // module instances before they reach this expander. Until that
+        // pass lands, encountering a tap endpoint here is a hard error.
+        let (from_ref, to_ref) = match (from_endpoint, to_endpoint) {
+            (CableEndpoint::Port(f), CableEndpoint::Port(t)) => (f, t),
+            _ => {
+                return Err(ExpandError::new(
+                    Code::TapNotYetDesugared,
+                    conn.span,
+                    "tap targets are not yet supported by the expander",
+                ));
+            }
         };
 
         // Fail-fast: the highest-level structural error in a port reference
