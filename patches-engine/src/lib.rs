@@ -15,6 +15,7 @@ pub use midi::{new_event_queue, AudioClock, ClockAnchor, EventQueueConsumer, Eve
 pub use oversampling::OversamplingFactor;
 pub use pool::ModulePool;
 pub use processor::PatchProcessor;
+pub use patches_io_ring::{tap_ring, TapRingConsumer, TapRingProducer, TapRingShared};
 
 // ── Re-exports from patches-planner ──
 // Kept temporarily to ease the kernel carve migration; downstream crates

@@ -39,6 +39,25 @@ If a block-of-blocks layout (one ring entry = one block) is simpler
 than per-sample frames, choose that — observer pipelines work the
 same way. Document the choice in code.
 
+## Close-out notes
+
+- `patches-engine/src/tap_ring.rs`: `tap_ring(capacity_frames)` returns
+  `(TapRingProducer, TapRingConsumer)`. Each entry is one
+  `TapFrame = [f32; MAX_TAPS]`. SPSC over `rtrb::RingBuffer<TapFrame>`.
+- **Layout choice:** per-sample frames, one push per `PatchProcessor::tick`.
+  Block-chunked writes deferred — per-sample push is allocation-free,
+  matches the existing tick loop, and oversampling is handled implicitly
+  (engine sample rate already incorporates it).
+- **Drop counter semantics:** per-slot `AtomicU64`, but on a dropped frame
+  every slot's counter advances by one, since the producer drops whole
+  frames and has no manifest-time knowledge of which slots are active.
+  The per-slot API is preserved for forward compatibility (e.g. selective
+  drop policies), but observers should treat the counters as per-frame
+  drop counts in this revision.
+- Producer wired into `PatchProcessor` via `set_tap_producer(Option<…>)`;
+  push happens after the module-tick `catch_unwind` block, before the
+  `wi` flip. Halted ticks skip the push.
+
 ## Cross-references
 
 - ADR 0053 §5 — ring sizing rationale.

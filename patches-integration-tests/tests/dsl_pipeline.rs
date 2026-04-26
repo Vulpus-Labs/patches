@@ -34,6 +34,30 @@ fn zero_span() -> Span {
 
 // ── Fixture pipeline tests ─────────────────────────────────────────────────────
 
+/// Tap targets desugar into synthetic `~audio_tap` / `~trigger_tap` module
+/// instances bound to `AudioTap` / `TriggerTap`. Expand → bind succeeds end
+/// to end (E118 §0697 left this broken; ticket 0703 closes it).
+#[test]
+fn tap_target_expand_and_bind() {
+    let src = "patch { \
+                  module osc : Osc() \
+                  module clk : Clock() \
+                  osc.sine -> ~meter(level, window: 25) \
+                  clk.beat -> ~trigger_led(beat) \
+              }";
+    let file = patches_dsl::parse(src).expect("parse failed");
+    let result = patches_dsl::expand(&file).expect("expand failed");
+    assert_eq!(result.manifest.len(), 2, "manifest must list both taps");
+    let names: Vec<_> = result.manifest.iter().map(|d| d.name.as_str()).collect();
+    assert!(names.contains(&"level"));
+    assert!(names.contains(&"beat"));
+
+    let built = patches_interpreter::build(&result.patch, &registry(), &env())
+        .expect("bind failed: AudioTap/TriggerTap missing from registry");
+    assert!(built.graph.get_node(&NodeId::from("~audio_tap".to_string())).is_some());
+    assert!(built.graph.get_node(&NodeId::from("~trigger_tap".to_string())).is_some());
+}
+
 /// Parse, expand, and build `simple.patches`; assert expected node IDs and edge.
 #[test]
 fn flat_patch_round_trip() {

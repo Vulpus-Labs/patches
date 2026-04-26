@@ -2,9 +2,10 @@
 //!
 //! Walks a parsed [`File`], collects every top-level tap target,
 //! synthesises one `~audio_tap` and/or one `~trigger_tap` module
-//! instance carrying per-channel `tap_name` / `slot_offset` parameters,
+//! instance carrying a per-channel `slot_offset: int` parameter,
 //! rewrites each cable to land on the synthetic instance, and returns
-//! the [`Manifest`] for the observer side.
+//! the [`Manifest`] for the observer side. Tap names live in the
+//! manifest only — the audio thread never sees them.
 //!
 //! The synthetic module names use the reserved `~` prefix that user
 //! source can't write; the lexer in `grammar.pest` rejects `~` in
@@ -137,7 +138,7 @@ pub fn desugar_taps(file: &File) -> (File, Manifest) {
 }
 
 /// Build a synthetic `module ~audio_tap : AudioTap(channels: [a, b, ...]) {
-/// @a: { tap_name: "a", slot_offset: <slot> }, @b: { ... } }` declaration.
+/// @a: { slot_offset: <slot> }, @b: { ... } }` declaration.
 fn synth_module(
     inst_name: &str,
     type_name: &str,
@@ -161,17 +162,11 @@ fn synth_module(
         .map(|&i| {
             let alias = taps[i].name.name.clone();
             ParamEntry::AtBlock {
-                index: AtBlockIndex::Alias(alias.clone()),
-                entries: vec![
-                    (
-                        Ident { name: "tap_name".into(), span },
-                        Value::Scalar(Scalar::Str(alias)),
-                    ),
-                    (
-                        Ident { name: "slot_offset".into(), span },
-                        Value::Scalar(Scalar::Int(slot_of[i] as i64)),
-                    ),
-                ],
+                index: AtBlockIndex::Alias(alias),
+                entries: vec![(
+                    Ident { name: "slot_offset".into(), span },
+                    Value::Scalar(Scalar::Int(slot_of[i] as i64)),
+                )],
                 span,
             }
         })

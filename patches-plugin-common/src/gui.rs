@@ -107,6 +107,10 @@ pub struct GuiSnapshot {
     pub remove_path_index: Option<usize>,
     pub halt_message: Option<String>,
     pub diagnostics: Vec<DiagnosticSummary>,
+    /// Raw text of the loaded `.patches` file, if readable. Spike: the
+    /// webview Source tab renders this with Shiki. None when no file is
+    /// loaded or the file can't be read.
+    pub patch_source: Option<String>,
 }
 
 /// Compact, webview-facing projection of a [`RenderedDiagnostic`].
@@ -123,7 +127,7 @@ pub struct DiagnosticSummary {
 }
 
 impl GuiSnapshot {
-    pub const VERSION: u32 = 2;
+    pub const VERSION: u32 = 3;
 
     /// Project a `GuiState` into the webview-facing shape.
     pub fn from_state(state: &GuiState) -> Self {
@@ -146,6 +150,10 @@ impl GuiSnapshot {
             remove_path_index: state.remove_path_index,
             halt_message: state.halt.as_ref().map(format_halt),
             diagnostics: summarise_diagnostics(&state.diagnostic_view),
+            patch_source: state
+                .file_path
+                .as_ref()
+                .and_then(|p| std::fs::read_to_string(p).ok()),
         }
     }
 }
@@ -255,6 +263,6 @@ mod tests {
         assert_eq!(snap.status_log, vec!["hello".to_string()]);
         assert_eq!(snap.module_paths, vec!["/tmp/a".to_string()]);
         let json = serde_json::to_string(&snap).unwrap();
-        assert!(json.contains("\"v\":2"));
+        assert!(json.contains("\"v\":3"));
     }
 }

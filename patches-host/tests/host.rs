@@ -123,3 +123,124 @@ fn load_helper_accepts_arbitrary_host_file_source_impl() {
     let stub = StubSource { source: TINY_PATCH.to_string(), base: None };
     let _ = load_patch(&stub, &registry, &env()).expect("stub source feeds the pipeline");
 }
+
+// ── Manifest plumbing (ticket 0702) ────────────────────────────────────
+
+const TAPS_AB: &str = r#"
+patch {
+    module osc : Osc
+    osc.sine -> ~meter(alpha, window: 25)
+    osc.sine -> ~meter(bravo, window: 25)
+}
+"#;
+
+const TAPS_AC: &str = r#"
+patch {
+    module osc : Osc
+    osc.sine -> ~meter(alpha, window: 25)
+    osc.sine -> ~meter(charlie, window: 25)
+}
+"#;
+
+const TAPS_NONE: &str = r#"
+patch {
+    module osc : Osc
+    module out : AudioOut
+    out.in_left  <- osc.sine
+    out.in_right <- osc.sine
+}
+"#;
+
+#[test]
+fn loaded_patch_carries_manifest_in_alphabetical_slot_order() {
+    let registry = patches_modules::default_registry();
+    let source = InMemorySource::new(TAPS_AB.to_string());
+    let loaded = load_patch(&source, &registry, &env()).expect("load");
+    let names: Vec<&str> = loaded.manifest.iter().map(|d| d.name.as_str()).collect();
+    let slots: Vec<usize> = loaded.manifest.iter().map(|d| d.slot).collect();
+    assert_eq!(names, vec!["alpha", "bravo"]);
+    assert_eq!(slots, vec![0, 1]);
+}
+
+#[test]
+fn compile_and_push_publishes_manifest_to_attached_observer() {
+    use patches_core::{TapBlockFrame, TAP_BLOCK};
+    use patches_observation::{spawn_observer, tap_ring, ProcessorId};
+    use std::time::{Duration, Instant};
+
+    fn wait_for<F: FnMut() -> bool>(timeout: Duration, mut f: F) -> bool {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if f() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        false
+    }
+
+    fn dc_frame(value: f32, lane: usize, sample_time: u64) -> TapBlockFrame {
+        let mut f = TapBlockFrame::zeroed();
+        f.sample_time = sample_time;
+        for s in 0..TAP_BLOCK {
+            f.samples[s][lane] = value;
+        }
+        f
+    }
+
+    let registry = patches_modules::default_registry();
+    let mut runtime = HostBuilder::new()
+        .oversampling_factor(2)
+        .build(env())
+        .expect("build runtime");
+    assert!((runtime.tap_rate() - 88_200.0).abs() < 1e-3, "tap_rate = host × oversampling");
+
+    let (mut tap_tx, tap_rx) = tap_ring(32);
+    let (mut handle, _diag) = spawn_observer(tap_rx, Duration::from_millis(1));
+    runtime.attach_observer(handle.take_replans().expect("replans present"));
+
+    // Plan 1: alpha@0, bravo@1.
+    runtime
+        .compile_and_push(&InMemorySource::new(TAPS_AB.to_string()), &registry)
+        .expect("compile 1");
+
+    // Push DC=1.0 to slot 0 (alpha). Peak should rise.
+    for i in 0..32u64 {
+        while !tap_tx.try_push_frame(&dc_frame(1.0, 0, i * TAP_BLOCK as u64)) {
+            std::thread::yield_now();
+        }
+    }
+    assert!(
+        wait_for(Duration::from_secs(2), || {
+            (handle.subscribers.read(0, ProcessorId::MeterPeak) - 1.0).abs() < 1e-3
+        }),
+        "alpha peak never settled after first manifest publication"
+    );
+
+    // Plan 2: alpha@0, charlie@1. Alpha should keep its identity (same
+    // tap name + params) so its peak stays where it was. Slot 1 reseats
+    // bravo→charlie — identity differs, fresh state.
+    runtime
+        .compile_and_push(&InMemorySource::new(TAPS_AC.to_string()), &registry)
+        .expect("compile 2");
+    // Give the observer a tick to drain the publication.
+    assert!(
+        wait_for(Duration::from_millis(500), || {
+            // Alpha still observable on slot 0 with no new frames pushed.
+            handle.subscribers.read(0, ProcessorId::MeterPeak) > 0.5
+        }),
+        "alpha state lost across rename of sibling tap"
+    );
+
+    // Plan 3: no taps. Slots clear.
+    runtime
+        .compile_and_push(&InMemorySource::new(TAPS_NONE.to_string()), &registry)
+        .expect("compile 3");
+    assert!(
+        wait_for(Duration::from_secs(1), || {
+            handle.subscribers.read(0, ProcessorId::MeterPeak) == 0.0
+                && handle.subscribers.read(1, ProcessorId::MeterPeak) == 0.0
+        }),
+        "slots never cleared after tap-less manifest"
+    );
+}

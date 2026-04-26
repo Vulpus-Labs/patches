@@ -43,6 +43,7 @@ pub struct ModuleHarness {
     output_kinds: Vec<CableKind>,
     pub(crate) wi: usize,
     sample_counter: u32,
+    backplane: Option<Vec<f32>>,
 }
 
 impl ModuleHarness {
@@ -160,6 +161,7 @@ impl ModuleHarness {
             output_kinds,
             wi: 0,
             sample_counter: 0,
+            backplane: None,
         };
 
         harness.rebuild_ports();
@@ -313,9 +315,31 @@ impl ModuleHarness {
         if self.sample_counter >= COEFF_UPDATE_INTERVAL {
             self.sample_counter = 0;
         }
-        self.module.process(&mut CablePool::new(&mut self.pool, self.wi));
+        let mut pool = match self.backplane.as_deref_mut() {
+            Some(bp) => CablePool::with_backplane(&mut self.pool, self.wi, bp),
+            None => CablePool::new(&mut self.pool, self.wi),
+        };
+        self.module.process(&mut pool);
         self.wi = 1 - self.wi;
         self
+    }
+
+    /// Attach a tap backplane for this module's `process()` calls. Sized to
+    /// [`crate::MAX_TAPS`] and zeroed. Subsequent ticks will pass it via
+    /// [`CablePool::with_backplane`].
+    pub fn enable_backplane(&mut self) -> &mut Self {
+        self.backplane = Some(vec![0.0; crate::MAX_TAPS]);
+        self
+    }
+
+    /// Read-only view of the attached tap backplane.
+    ///
+    /// # Panics
+    /// Panics if [`enable_backplane`](Self::enable_backplane) was not called.
+    pub fn backplane(&self) -> &[f32] {
+        self.backplane
+            .as_deref()
+            .expect("ModuleHarness::backplane requires enable_backplane()")
     }
 
     // ── Mono outputs ─────────────────────────────────────────────────────────

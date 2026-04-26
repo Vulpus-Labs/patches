@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use patches_core::{source_map::SourceMap, AudioEnvironment};
+use patches_dsl::manifest::Manifest;
 use patches_dsl::pipeline::{LayeringWarning, PipelineAudit};
 use patches_interpreter::BuildResult;
 use patches_registry::Registry;
@@ -23,6 +24,10 @@ pub struct LoadedPatch {
     pub dependencies: Vec<PathBuf>,
     pub layering_warnings: Vec<LayeringWarning>,
     pub expand_warnings: Vec<patches_dsl::Warning>,
+    /// Tap manifest emitted by DSL desugaring (ADR 0054 §6). Carried
+    /// alongside the build result so the runtime can publish it to the
+    /// observer's replan ring whenever it ships a new module graph.
+    pub manifest: Manifest,
 }
 
 /// Run the post-load DSL pipeline against a host source: expand, bind,
@@ -41,6 +46,7 @@ pub fn load_patch(
     let expanded = patches_dsl::pipeline::expand_file(&loaded.file)
         .map_err(|e| CompileError::from(e).with_source_map(sm.clone()))?;
     let flat = expanded.patch;
+    let manifest = expanded.manifest;
 
     let bound = patches_interpreter::bind_with_base_dir(&flat, registry, source.base_dir());
     let layering_warnings = bound.layering_warnings();
@@ -58,5 +64,6 @@ pub fn load_patch(
         dependencies: loaded.dependencies,
         layering_warnings,
         expand_warnings: expanded.warnings,
+        manifest,
     })
 }

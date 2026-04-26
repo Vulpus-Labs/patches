@@ -28,12 +28,43 @@ use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput};
 pub struct CablePool<'a> {
     pool: &'a mut [[CableValue; 2]],
     wi: usize,
+    backplane: Option<&'a mut [f32]>,
 }
 
 impl<'a> CablePool<'a> {
     /// Create a new `CablePool` wrapping `pool` with write index `wi`.
+    ///
+    /// No tap backplane is attached; [`write_backplane`](Self::write_backplane)
+    /// calls are silently ignored. Use [`with_backplane`](Self::with_backplane)
+    /// to attach one.
     pub fn new(pool: &'a mut [[CableValue; 2]], wi: usize) -> Self {
-        Self { pool, wi }
+        Self { pool, wi, backplane: None }
+    }
+
+    /// Create a `CablePool` carrying a tap backplane the audio thread
+    /// (specifically tap modules) can write into via
+    /// [`write_backplane`](Self::write_backplane). The slice length must equal
+    /// [`crate::MAX_TAPS`]; the engine pre-allocates one such buffer per
+    /// processor and passes it on every tick.
+    pub fn with_backplane(
+        pool: &'a mut [[CableValue; 2]],
+        wi: usize,
+        backplane: &'a mut [f32],
+    ) -> Self {
+        Self { pool, wi, backplane: Some(backplane) }
+    }
+
+    /// Write `value` into backplane slot `slot`. No-op if no backplane is
+    /// attached, or if `slot` is out of bounds (defensive — the planner
+    /// guarantees in-bounds slots, but a stale plan crossing a backplane
+    /// shrink must not corrupt the audio thread).
+    #[inline(always)]
+    pub fn write_backplane(&mut self, slot: usize, value: f32) {
+        if let Some(bp) = self.backplane.as_deref_mut() {
+            if slot < bp.len() {
+                bp[slot] = value;
+            }
+        }
     }
 
     /// Extract the raw parts needed to pass this pool across an FFI boundary.

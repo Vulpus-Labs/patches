@@ -33,6 +33,15 @@ This ticket is small but has to land before any patches-player or
 TUI work can run patches with taps. Treat it as a milestone that
 flips taps from "parses, does nothing" to "parses, binds, runs".
 
+## Close-out notes
+
+- `patches-modules::default_registry()` now registers `AudioTap` and
+  `TriggerTap`. Integration test in
+  `patches-integration-tests/tests/dsl_pipeline.rs::tap_target_expand_and_bind`
+  exercises a parse → expand → bind round-trip on a patch with two tap
+  targets (`~meter(level, ...)` and `~trigger_led(beat)`) and asserts
+  the synthetic `~audio_tap` / `~trigger_tap` nodes land in the graph.
+
 ## Cross-references
 
 - E118 ticket 0697 — desugarer emitting these synthetic instances.

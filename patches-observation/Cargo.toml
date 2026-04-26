@@ -1,0 +1,15 @@
+[package]
+name = "patches-observation"
+version = "0.6.0"
+edition = "2021"
+
+[lib]
+name = "patches_observation"
+path = "src/lib.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsl = { path = "../patches-dsl" }
+patches-io-ring = { path = "../patches-io-ring" }
+rtrb = "0.3"
+

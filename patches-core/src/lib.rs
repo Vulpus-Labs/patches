@@ -10,6 +10,69 @@ pub const BASE_PERIODIC_UPDATE_INTERVAL: u32 = 32;
 /// Alias for [`BASE_PERIODIC_UPDATE_INTERVAL`] retained for backwards compatibility.
 pub const COEFF_UPDATE_INTERVAL: u32 = BASE_PERIODIC_UPDATE_INTERVAL;
 
+/// Maximum number of observation backplane slots (ADR 0053 §4).
+///
+/// Tap modules write into a fixed-width `[f32; MAX_TAPS]` frame each tick;
+/// the same value bounds the audio→observer ring frame layout and the
+/// observer-side per-slot pipeline state.
+pub const MAX_TAPS: usize = 32;
+
+/// Per-tick observation frame: one `f32` per backplane slot (ADR 0053 §4).
+///
+/// This is the *live* backplane that Tap modules write into every tick.
+/// For audio-thread → observer transport, multiple `TapFrame`s are
+/// accumulated into a [`TapBlockFrame`].
+pub type TapFrame = [f32; MAX_TAPS];
+
+/// Number of per-sample backplane snapshots accumulated into one
+/// [`TapBlockFrame`] before it is pushed to the observer ring (ticket
+/// 0706). Independent of host audio block size; chosen for SIMD lane
+/// ergonomics on the consumer side.
+pub const TAP_BLOCK: usize = 64;
+
+/// Audio-thread → observer ring transport frame (ticket 0706, ADR 0056).
+///
+/// **Sample-major within a block.** Row `i` (`samples[i]`) is the full
+/// backplane snapshot for sample `i` of this block. The producer copies
+/// the live `TapFrame` into `samples[idx]` once per tick — a contiguous
+/// 128 B memcpy (two cache lines), which is the cache-friendliest
+/// per-sample layout.
+///
+/// The consumer (`patches-observation`, ticket 0701) transposes into
+/// lane-major work buffers off the audio thread, so per-lane reductions
+/// (peak, RMS, FFT, scope) see contiguous `&[f32; TAP_BLOCK]` per lane
+/// for SIMD.
+///
+/// Unused lanes are zeroed in the live backplane by the Tap module;
+/// those zeros fall through into the block frame for free.
+///
+/// `sample_time` is the monotonic sample index of `samples[0]`. It
+/// resets on engine rebuild (the only time the sample rate can change).
+/// At 96 kHz a `u64` survives ~6 million years; wraparound is a
+/// non-issue.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct TapBlockFrame {
+    pub samples: [[f32; MAX_TAPS]; TAP_BLOCK],
+    pub sample_time: u64,
+}
+
+impl TapBlockFrame {
+    /// All-zero block with `sample_time = 0`.
+    pub const fn zeroed() -> Self {
+        Self {
+            samples: [[0.0; MAX_TAPS]; TAP_BLOCK],
+            sample_time: 0,
+        }
+    }
+}
+
+impl Default for TapBlockFrame {
+    fn default() -> Self {
+        Self::zeroed()
+    }
+}
+
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 

@@ -20,6 +20,21 @@
     font-size: 12px; white-space: pre-wrap;
   }
   #halt.visible { display: block; }
+  /* Tabs */
+  #tabs {
+    display: flex; gap: 0; background: #14161a;
+    border-bottom: 1px solid #23262c; flex: 0 0 auto;
+  }
+  #tabs button {
+    background: transparent; border: 0; border-right: 1px solid #23262c;
+    color: #8a909b; padding: 8px 14px; font-size: 12px; cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  #tabs button.active { color: #d0d4dc; border-bottom-color: #6ad06a; }
+  #tabs button:hover { background: #1c1f24; }
+  .panel { flex: 1 1 auto; display: none; overflow: auto; min-height: 0; }
+  .panel.active { display: flex; flex-direction: column; }
+
   header {
     padding: 10px 12px 6px; border-bottom: 1px solid #23262c;
     display: flex; flex-direction: column; gap: 6px;
@@ -30,12 +45,12 @@
     color: #8a909b; word-break: break-all;
   }
   .row { display: flex; gap: 6px; flex-wrap: wrap; }
-  button {
+  button.btn {
     background: #282c33; color: #d0d4dc; border: 1px solid #3a3f48;
     padding: 4px 10px; font-size: 12px; border-radius: 3px; cursor: pointer;
   }
-  button:hover { background: #323742; }
-  button.small { padding: 2px 6px; font-size: 11px; }
+  button.btn:hover { background: #323742; }
+  button.btn.small { padding: 2px 6px; font-size: 11px; }
   section {
     padding: 8px 12px; border-bottom: 1px solid #23262c;
     display: flex; flex-direction: column; gap: 4px;
@@ -51,10 +66,7 @@
     font-family: ui-monospace, Menlo, monospace; font-size: 11px;
   }
   .path-row .text { flex: 1; color: #b0b6c0; word-break: break-all; }
-  #diagnostics {
-    flex: 0 1 auto; max-height: 40%; overflow: auto;
-    padding: 0;
-  }
+  #diagnostics { flex: 0 1 auto; max-height: 40%; overflow: auto; padding: 0; }
   #diagnostics.empty { display: none; }
   #diagnostics .d {
     padding: 6px 12px; border-bottom: 1px solid #1f2228;
@@ -68,73 +80,125 @@
   #diagnostics .d.warning .head { color: #e8c070; }
   #diagnostics .d.note .head { color: #a0c0ff; }
   #diagnostics .d .loc { color: #7a808b; margin-top: 2px; }
-  #status-wrap {
-    flex: 1 1 auto; display: flex; flex-direction: column;
-    min-height: 80px;
-  }
+  #status-wrap { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 80px; }
   #status {
     flex: 1; overflow: auto;
     font-family: ui-monospace, Menlo, monospace; font-size: 11px;
     background: #14161a; padding: 6px 12px;
     white-space: pre-wrap; color: #a8aeb8;
   }
+  /* Source panel */
+  #source-host {
+    flex: 1; overflow: auto; padding: 8px 12px;
+    background: #14161a; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; line-height: 1.45;
+  }
+  #source-host pre { margin: 0; padding: 0; background: transparent !important; }
+  #source-host code { font-family: inherit; }
+  #source-empty { color: #5a606b; padding: 12px; }
+  /* Diagram panel */
+  #diagram-host {
+    flex: 1; overflow: auto; padding: 12px; background: #14161a;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #diagram-host svg { max-width: 100%; height: auto; }
 </style>
 </head>
 <body>
 <main>
   <div id="halt"></div>
-  <header>
-    <h1>Patches</h1>
-    <div id="file">(no file)</div>
-    <div class="row">
-      <button id="btn-browse">Browse</button>
-      <button id="btn-reload">Reload</button>
-      <button id="btn-rescan">Rescan</button>
-    </div>
-  </header>
 
-  <section>
-    <h2>Module paths</h2>
-    <div id="paths"></div>
-    <div class="row">
-      <button id="btn-add" class="small">Add path</button>
-    </div>
-  </section>
+  <div id="tabs">
+    <button data-tab="controls" class="active">Controls</button>
+    <button data-tab="source">Source</button>
+    <button data-tab="diagram">Diagram</button>
+  </div>
 
-  <section id="meters-sec">
-    <h2>Master</h2>
-    <canvas id="meters" width="320" height="40"></canvas>
-  </section>
+  <div id="panel-controls" class="panel active">
+    <header>
+      <h1>Patches</h1>
+      <div id="file">(no file)</div>
+      <div class="row">
+        <button class="btn" id="btn-browse">Browse</button>
+        <button class="btn" id="btn-reload">Reload</button>
+        <button class="btn" id="btn-rescan">Rescan</button>
+      </div>
+    </header>
 
-  <section id="diagnostics" class="empty"></section>
+    <section>
+      <h2>Module paths</h2>
+      <div id="paths"></div>
+      <div class="row">
+        <button class="btn small" id="btn-add">Add path</button>
+      </div>
+    </section>
 
-  <section id="status-wrap">
-    <h2>Status</h2>
-    <div id="status"></div>
-  </section>
+    <section id="meters-sec">
+      <h2>Master</h2>
+      <canvas id="meters" width="320" height="40"></canvas>
+    </section>
+
+    <section id="diagnostics" class="empty"></section>
+
+    <section id="status-wrap">
+      <h2>Status</h2>
+      <div id="status"></div>
+    </section>
+  </div>
+
+  <div id="panel-source" class="panel">
+    <div id="source-host"><div id="source-empty">(no source)</div></div>
+  </div>
+
+  <div id="panel-diagram" class="panel">
+    <div id="diagram-host"></div>
+  </div>
 </main>
 
-<!--
-  Bridge surface exposed to the Rust side (ticket 0671).
+<script type="module">
+  // Shiki via ESM CDN. Spike only — vendor for offline use later.
+  // MIT licensed.
+  import { codeToHtml } from 'https://esm.sh/shiki@1.24.0';
 
-  window.__patches.applyState(snapshot)
-    Called by Rust via evaluate_script. `snapshot` matches the
-    `GuiSnapshot` Rust struct (v=2): { v, file_path, module_paths,
-    status_log, halt_message, diagnostics, *_requested flags,
-    remove_path_index }. Bump `v` on breaking shape changes.
+  const sourceHost = document.getElementById('source-host');
+  let lastRendered = null;
 
-  window.__patches.send(intent)
-    Posts an intent to Rust via wry's ipc_handler. `intent` is one of:
-      { kind: "browse" }
-      { kind: "reload" }
-      { kind: "rescan" }
-      { kind: "add_path" }
-      { kind: "remove_path", index: <usize> }
-    Matches the `Intent` enum in patches-plugin-common.
--->
+  window.__shiki = {
+    render: async function (text) {
+      if (text == null) {
+        sourceHost.innerHTML = '<div id="source-empty">(no source)</div>';
+        lastRendered = null;
+        return;
+      }
+      if (text === lastRendered) return;
+      lastRendered = text;
+      try {
+        // No `.patches` grammar yet — fall back to a similar lexer.
+        const html = await codeToHtml(text, { lang: 'lisp', theme: 'github-dark' });
+        sourceHost.innerHTML = html;
+      } catch (e) {
+        sourceHost.textContent = text;
+        console.error('shiki render failed', e);
+      }
+    },
+  };
+</script>
+
 <script>
 (function () {
   var el = function (id) { return document.getElementById(id); };
+
+  // Tabs
+  var tabs = document.querySelectorAll('#tabs button');
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      var name = t.getAttribute('data-tab');
+      tabs.forEach(function (x) { x.classList.toggle('active', x === t); });
+      ['controls','source','diagram'].forEach(function (n) {
+        el('panel-' + n).classList.toggle('active', n === name);
+      });
+    });
+  });
 
   function send(intent) {
     if (window.ipc && window.ipc.postMessage) {
@@ -164,7 +228,7 @@
       text.className = 'text';
       text.textContent = p;
       var btn = document.createElement('button');
-      btn.className = 'small';
+      btn.className = 'btn small';
       btn.textContent = 'Remove';
       btn.addEventListener('click', function () {
         send({kind:'remove_path', index: i});
@@ -178,10 +242,7 @@
   function renderDiagnostics(diags) {
     var root = el('diagnostics');
     root.textContent = '';
-    if (!diags || diags.length === 0) {
-      root.classList.add('empty');
-      return;
-    }
+    if (!diags || diags.length === 0) { root.classList.add('empty'); return; }
     root.classList.remove('empty');
     diags.forEach(function (d) {
       var wrap = document.createElement('div');
@@ -213,53 +274,57 @@
 
   function renderHalt(msg) {
     var root = el('halt');
-    if (msg) {
-      root.textContent = msg;
-      root.classList.add('visible');
-    } else {
-      root.textContent = '';
-      root.classList.remove('visible');
-    }
+    if (msg) { root.textContent = msg; root.classList.add('visible'); }
+    else { root.textContent = ''; root.classList.remove('visible'); }
   }
 
-  // Master-output meters (ticket 0673). Rust pushes frames via applyMeter;
-  // we poll at 20 Hz to request a new frame and redraw on rAF.
-  // Target values come from Rust at ~10 Hz; displayed values ease toward
-  // them every frame so the bars don't jerk. Peak snaps up instantly
-  // (transients should read crisply), eases down.
+  function renderDiagram(file) {
+    // Spike stub: placeholder SVG. Replace once Rust ships diagram_svg.
+    var host = el('diagram-host');
+    var label = file || '(no file)';
+    host.innerHTML =
+      '<svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect x="10" y="10" width="300" height="160" rx="6" ' +
+      'fill="#1c1f24" stroke="#3a3f48"/>' +
+      '<text x="160" y="80" text-anchor="middle" fill="#8a909b" ' +
+      'font-family="ui-monospace,Menlo,monospace" font-size="11">' +
+      'patch diagram (spike stub)</text>' +
+      '<text x="160" y="100" text-anchor="middle" fill="#6a707b" ' +
+      'font-family="ui-monospace,Menlo,monospace" font-size="10">' +
+      escapeXml(label) + '</text>' +
+      '</svg>';
+  }
+
+  function escapeXml(s) {
+    return String(s).replace(/[<>&"]/g, function (c) {
+      return { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c];
+    });
+  }
+
+  // Meters (unchanged from previous spike)
   var meter = {
     tgt: { pl: 0, pr: 0, rl: 0, rr: 0 },
     cur: { pl: 0, pr: 0, rl: 0, rr: 0 },
   };
   function drawMeters() {
-    var cv = el('meters');
-    if (!cv) return;
+    var cv = el('meters'); if (!cv) return;
     var ctx = cv.getContext('2d');
     var w = cv.width, h = cv.height;
-    // RMS easing — first-order toward target. ~60 fps * 0.2 ≈ 80 ms.
     var a = 0.2;
     meter.cur.rl += (meter.tgt.rl - meter.cur.rl) * a;
     meter.cur.rr += (meter.tgt.rr - meter.cur.rr) * a;
-    // Peaks: snap up, ease down.
     meter.cur.pl = meter.tgt.pl > meter.cur.pl
       ? meter.tgt.pl : meter.cur.pl + (meter.tgt.pl - meter.cur.pl) * a;
     meter.cur.pr = meter.tgt.pr > meter.cur.pr
       ? meter.tgt.pr : meter.cur.pr + (meter.tgt.pr - meter.cur.pr) * a;
-
-    ctx.fillStyle = '#14161a';
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#14161a'; ctx.fillRect(0, 0, w, h);
     var barH = (h - 6) / 2;
     function bar(y, peak, rms) {
       var pw = Math.min(1, peak) * w;
       var rw = Math.min(1, rms) * w;
-      ctx.fillStyle = '#2a4a2a';
-      ctx.fillRect(0, y, pw, barH);
-      ctx.fillStyle = '#6ad06a';
-      ctx.fillRect(0, y, rw, barH);
-      if (peak >= 0.98) {
-        ctx.fillStyle = '#ff6060';
-        ctx.fillRect(w - 3, y, 3, barH);
-      }
+      ctx.fillStyle = '#2a4a2a'; ctx.fillRect(0, y, pw, barH);
+      ctx.fillStyle = '#6ad06a'; ctx.fillRect(0, y, rw, barH);
+      if (peak >= 0.98) { ctx.fillStyle = '#ff6060'; ctx.fillRect(w - 3, y, 3, barH); }
     }
     bar(2, meter.cur.pl, meter.cur.rl);
     bar(4 + barH, meter.cur.pr, meter.cur.rr);
@@ -280,6 +345,10 @@
         renderPaths(snapshot.module_paths);
         renderDiagnostics(snapshot.diagnostics);
         renderStatus(snapshot.status_log);
+        renderDiagram(snapshot.file_path);
+        if (window.__shiki) {
+          window.__shiki.render(snapshot.patch_source || null);
+        }
       } catch (e) {
         console.error('applyState failed', e);
       }

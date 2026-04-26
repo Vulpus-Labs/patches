@@ -44,6 +44,22 @@ ADR 0054's per-tick formula `backplane[slot_offset + i]` reads as
 `slot_offset[i]`. Implement the per-channel form; it generalises to
 non-contiguous global slot orderings (interleaved audio/trigger taps).
 
+## Close-out notes
+
+- Backplane lives on `PatchProcessor` as `tap_backplane: TapFrame`;
+  reachable from modules via `CablePool::write_backplane`. `MAX_TAPS = 32`
+  and `TapFrame = [f32; MAX_TAPS]` are exported from `patches-core` so
+  observer and ring share one source of truth.
+- Modules: `AudioTap` (mono inputs) and `TriggerTap` (trigger inputs).
+  Both declare `channels` shape and `slot_offset[i]: int` per channel.
+- **Deviation from acceptance criteria:** `tap_name[i]: str` was dropped.
+  No `ParameterKind::String` exists in the parameter system, and the
+  audio thread has no use for the names — they live in the observer
+  manifest only. The desugarer was updated to omit `tap_name`. Re-add
+  iff a future need surfaces audio-side.
+- `ModuleHarness::enable_backplane()` / `backplane()` lets module unit
+  tests inspect backplane writes without standing up an engine.
+
 ## Cross-references
 
 - ADR 0053 §4 — `MAX_TAPS`.

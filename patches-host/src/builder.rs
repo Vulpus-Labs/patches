@@ -71,8 +71,9 @@ impl HostBuilder {
 
         let (plan_tx, plan_rx) = RingBuffer::<ExecutionPlan>::new(self.plan_ring);
 
+        let tap_rate = env.sample_rate * self.oversampling_factor as f32;
         Ok(HostRuntime::from_parts(
-            processor, plan_tx, plan_rx, cleanup_thread, env,
+            processor, plan_tx, plan_rx, cleanup_thread, env, tap_rate,
         ))
     }
 }

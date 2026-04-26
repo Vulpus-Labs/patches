@@ -9,6 +9,7 @@ patches-registry = { path = "../patches-registry" }
 patches-planner = { path = "../patches-planner" }
 patches-ffi-common = { path = "../patches-ffi-common" }
 patches-dsp = { path = "../patches-dsp" }
+patches-io-ring = { path = "../patches-io-ring" }
 rtrb = "0.3"
 midir = "0.10"
 

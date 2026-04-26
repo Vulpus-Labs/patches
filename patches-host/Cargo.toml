@@ -11,11 +11,14 @@ patches-interpreter = { path = "../patches-interpreter" }
 patches-registry = { path = "../patches-registry" }
 patches-planner = { path = "../patches-planner" }
 patches-engine = { path = "../patches-engine" }
+patches-observation = { path = "../patches-observation" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 rtrb = "0.3"
 
 [dev-dependencies]
 patches-modules = { path = "../patches-modules" }
+patches-observation = { path = "../patches-observation" }
+patches-core = { path = "../patches-core" }
 
 [lib]
 name = "patches_host"

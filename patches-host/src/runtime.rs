@@ -2,11 +2,13 @@
 //! cleanup thread. Construction lives in [`crate::builder`];
 //! `HostRuntime` is what that builder produces.
 
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use patches_core::AudioEnvironment;
 use patches_engine::{HaltHandle, PatchProcessor, Planner};
+use patches_observation::{ManifestPublication, ReplanProducer};
 use patches_planner::ExecutionPlan;
 use patches_registry::Registry;
 use rtrb::{Consumer, Producer};
@@ -29,6 +31,13 @@ pub struct HostRuntime {
     /// cleanup_tx are dropped, signalling the cleanup thread to exit).
     cleanup_thread: Option<JoinHandle<()>>,
     env: AudioEnvironment,
+    /// Tap publication rate (host rate × oversampling). Injected into
+    /// each [`ManifestPublication`] sent to the observer (ADR 0054 §6).
+    tap_rate: f32,
+    /// Optional planner→observer control ring producer (ADR 0053 §6).
+    /// Set via [`HostRuntime::attach_observer`]; if `None`, manifest
+    /// publication is a no-op (hosts that never spawn an observer).
+    replans: Option<ReplanProducer>,
     halt_handle: HaltHandle,
 }
 
@@ -40,6 +49,7 @@ impl HostRuntime {
         plan_rx: Consumer<ExecutionPlan>,
         cleanup_thread: JoinHandle<()>,
         env: AudioEnvironment,
+        tap_rate: f32,
     ) -> Self {
         let halt_handle = processor.halt_handle();
         Self {
@@ -49,7 +59,29 @@ impl HostRuntime {
             plan_rx: Some(plan_rx),
             cleanup_thread: Some(cleanup_thread),
             env,
+            tap_rate,
+            replans: None,
             halt_handle,
+        }
+    }
+
+    /// Attach the planner→observer control ring producer obtained from
+    /// [`patches_observation::spawn_observer`]. Once set, every
+    /// successful `compile_and_push` will also publish the new manifest
+    /// to the observer.
+    pub fn attach_observer(&mut self, replans: ReplanProducer) {
+        self.replans = Some(replans);
+    }
+
+    /// Tap publication rate (host sample rate × oversampling factor).
+    pub fn tap_rate(&self) -> f32 { self.tap_rate }
+
+    fn publish_manifest(&mut self, loaded: &LoadedPatch) {
+        if let Some(tx) = self.replans.as_mut() {
+            let _ = tx.submit(ManifestPublication {
+                manifest: Arc::new(loaded.manifest.clone()),
+                sample_rate: self.tap_rate,
+            });
         }
     }
 
@@ -110,6 +142,7 @@ impl HostRuntime {
     ) -> Result<LoadedPatch, CompileError> {
         let (loaded, plan) = self.compile(source, registry)?;
         let _ = self.plan_tx.push(plan);
+        self.publish_manifest(&loaded);
         Ok(loaded)
     }
 
@@ -125,7 +158,10 @@ impl HostRuntime {
         let (loaded, mut plan) = self.compile(source, registry)?;
         loop {
             match self.plan_tx.push(plan) {
-                Ok(()) => return Ok(loaded),
+                Ok(()) => {
+                    self.publish_manifest(&loaded);
+                    return Ok(loaded);
+                }
                 Err(rtrb::PushError::Full(returned)) => {
                     plan = returned;
                     thread::sleep(Duration::from_millis(10));

@@ -15,10 +15,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
-    BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TransportFrame,
+    BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TapBlockFrame, TapFrame,
+    TransportFrame,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
-    MAX_STASH,
+    MAX_STASH, MAX_TAPS,
 };
 
 use patches_planner::ExecutionPlan;
@@ -72,6 +73,29 @@ pub struct PatchProcessor {
     /// audio thread.
     cleanup_overflow_count: AtomicU32,
     halt: Arc<HaltState>,
+    /// ADR 0053 §4 observation backplane. Tap modules write here per
+    /// channel; the observer ring (ticket 0700) drains a snapshot per tick.
+    tap_backplane: TapFrame,
+    /// Audio-thread end of the observer ring (ADR 0053 §5, ADR 0056).
+    /// When set, every `TAP_BLOCK` ticks the accumulated `tap_block` is
+    /// pushed; on full ring the block frame is dropped and per-slot
+    /// counters advance.
+    tap_tx: Option<patches_io_ring::TapRingProducer>,
+    /// Block-accumulator for the observer ring. Each tick: copy the live
+    /// `tap_backplane` into `tap_block.samples[tap_block_idx]` (a
+    /// 128 B / 2-cache-line memcpy). On `idx == TAP_BLOCK` push the
+    /// frame and reset.
+    tap_block: TapBlockFrame,
+    /// Index of the next per-sample row to fill in `tap_block.samples`.
+    /// Wraps at `TAP_BLOCK`.
+    tap_block_idx: usize,
+    /// Monotonic sample counter feeding `TapBlockFrame::sample_time`.
+    /// Increments once per tick, resets only on processor construction
+    /// (which is the only time the engine's sample rate can change).
+    /// `u64` survives ~6 million years at 96 kHz; wraparound is a
+    /// non-issue. Distinct from `sample_count`, which wraps at 2^16 for
+    /// transport.
+    tap_sample_counter: u64,
 }
 
 impl PatchProcessor {
@@ -121,7 +145,19 @@ impl PatchProcessor {
             periodic_update_interval: interval,
             cleanup_overflow_count: AtomicU32::new(0),
             halt,
+            tap_backplane: [0.0; MAX_TAPS],
+            tap_tx: None,
+            tap_block: TapBlockFrame::zeroed(),
+            tap_block_idx: 0,
+            tap_sample_counter: 0,
         }
+    }
+
+    /// Attach an observer-ring producer. Called by the engine builder once
+    /// the observer thread is up. Replaces any prior producer; pass `None`
+    /// to disconnect.
+    pub fn set_tap_producer(&mut self, tx: Option<patches_io_ring::TapRingProducer>) {
+        self.tap_tx = tx;
     }
 
     /// Shared halt handle, clonable and pollable from any thread.
@@ -367,8 +403,9 @@ impl PatchProcessor {
         // mid-tick state is never observed again.
         let state = &mut self.state;
         let buffer_pool = &mut self.buffer_pool;
+        let backplane = &mut self.tap_backplane[..];
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut cable_pool = CablePool::new(buffer_pool, wi);
+            let mut cable_pool = CablePool::with_backplane(buffer_pool, wi, backplane);
             state.tick(&mut cable_pool);
         }));
         if let Err(payload) = result {
@@ -379,6 +416,21 @@ impl PatchProcessor {
             self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::Mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
+        }
+
+        // Accumulate per-sample backplane snapshot into the block frame.
+        // sample_time stamps the first sample in the block (idx == 0).
+        if self.tap_block_idx == 0 {
+            self.tap_block.sample_time = self.tap_sample_counter;
+        }
+        self.tap_block.samples[self.tap_block_idx] = self.tap_backplane;
+        self.tap_block_idx += 1;
+        self.tap_sample_counter = self.tap_sample_counter.wrapping_add(1);
+        if self.tap_block_idx == patches_core::TAP_BLOCK {
+            if let Some(tx) = self.tap_tx.as_mut() {
+                tx.try_push_frame(&self.tap_block);
+            }
+            self.tap_block_idx = 0;
         }
 
         let out_l = match self.buffer_pool[AUDIO_OUT_L][wi] {
@@ -423,6 +475,12 @@ impl PatchProcessor {
         self.buffer_pool[idx]
     }
 
+    /// Snapshot of the observation backplane after the most recent tick.
+    /// Intended for tests and the (yet-to-land) frame ring producer.
+    pub fn tap_backplane(&self) -> &TapFrame {
+        &self.tap_backplane
+    }
+
     /// Return the current periodic update interval (inner ticks).
     pub fn periodic_update_interval(&self) -> u32 {
         self.periodic_update_interval
@@ -446,5 +504,63 @@ impl PatchProcessor {
         // a fresh zero-capacity ring buffer.
         let (dummy_tx, _dummy_rx) = rtrb::RingBuffer::<CleanupAction>::new(1);
         std::mem::replace(&mut self.cleanup_tx, dummy_tx)
+    }
+}
+
+#[cfg(test)]
+mod tap_block_tests {
+    use super::*;
+    use patches_io_ring::tap_ring;
+    use patches_core::TAP_BLOCK;
+
+    fn fresh_processor() -> PatchProcessor {
+        let (cleanup_tx, _cleanup_rx) = rtrb::RingBuffer::<CleanupAction>::new(8);
+        PatchProcessor::new(64, 8, 1, cleanup_tx)
+    }
+
+    #[test]
+    fn block_boundary_emits_once_per_tap_block() {
+        let mut p = fresh_processor();
+        let (tx, mut rx) = tap_ring(4);
+        p.set_tap_producer(Some(tx));
+
+        // No frame until TAP_BLOCK ticks have accumulated.
+        for _ in 0..(TAP_BLOCK - 1) {
+            p.tick();
+        }
+        let mut count = 0;
+        rx.drain(|_| count += 1);
+        assert_eq!(count, 0, "no block frame until TAP_BLOCK ticks");
+
+        // The TAP_BLOCK-th tick triggers the push.
+        p.tick();
+        let mut frames: Vec<u64> = Vec::new();
+        rx.drain(|f| frames.push(f.sample_time));
+        assert_eq!(frames, vec![0]);
+
+        // Next TAP_BLOCK ticks emit one more frame, sample_time at the
+        // boundary.
+        for _ in 0..TAP_BLOCK {
+            p.tick();
+        }
+        let mut frames: Vec<u64> = Vec::new();
+        rx.drain(|f| frames.push(f.sample_time));
+        assert_eq!(frames, vec![TAP_BLOCK as u64]);
+    }
+
+    #[test]
+    fn sample_time_is_monotonic_at_tap_block_stride() {
+        let mut p = fresh_processor();
+        let (tx, mut rx) = tap_ring(8);
+        p.set_tap_producer(Some(tx));
+
+        for _ in 0..(TAP_BLOCK * 4) {
+            p.tick();
+        }
+        let mut times: Vec<u64> = Vec::new();
+        rx.drain(|f| times.push(f.sample_time));
+        let expected: Vec<u64> =
+            (0..4).map(|i| (i as u64) * TAP_BLOCK as u64).collect();
+        assert_eq!(times, expected);
     }
 }

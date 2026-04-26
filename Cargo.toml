@@ -20,6 +20,8 @@ members = [
     "patches-plugin-common",
     "patches-lsp",
     "patches-svg",
+    "patches-observation",
+    "patches-io-ring",
     "patches-tracker-core",
     "patches-vintage",
     "patches-ffi",
