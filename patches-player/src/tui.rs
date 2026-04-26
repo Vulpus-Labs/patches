@@ -10,7 +10,7 @@
 //! `fake_publisher`). Ticket 0705 swaps the publisher for the live
 //! engine→observer plumbing — the `View` shape doesn't change.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Stdout};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,8 +28,30 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 
+use patches_dsl::manifest::Manifest;
 use patches_observation::processor::ProcessorId;
-use patches_observation::subscribers::SubscribersHandle;
+use patches_observation::subscribers::{Diagnostic, SubscribersHandle};
+
+/// Build the TUI's tap list from a manifest snapshot. Sort by slot so
+/// the meter pane order is deterministic.
+pub fn taps_from_manifest(manifest: &Manifest) -> Vec<TapEntry> {
+    let mut taps: Vec<TapEntry> = manifest
+        .iter()
+        .map(|d| TapEntry { name: d.name.clone(), slot: d.slot })
+        .collect();
+    taps.sort_by_key(|t| t.slot);
+    taps
+}
+
+/// Format an observer diagnostic for the event log per ticket 0705
+/// acceptance criteria.
+pub fn format_diagnostic(d: &Diagnostic) -> String {
+    match d {
+        Diagnostic::NotYetImplemented { tap_name, component, .. } => {
+            format!("tap `{tap_name}` (`{}`): not yet implemented", component.as_str())
+        }
+    }
+}
 
 /// Conventional dBFS thresholds for meter colouring.
 pub const DB_AMBER_FLOOR: f32 = -18.0;
@@ -53,6 +75,11 @@ impl EventLog {
             self.lines.pop_front();
         }
         self.lines.push_back(msg.into());
+    }
+
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
     }
 }
 
@@ -86,6 +113,10 @@ pub enum EngineState {
     Halted,
 }
 
+/// Minimum interval between successive drop-count log entries for the
+/// same slot. Keeps the event log readable when the observer is slow.
+pub const DROP_LOG_INTERVAL: Duration = Duration::from_secs(2);
+
 /// Mutable view state shared between the input loop and the draw loop.
 pub struct View {
     pub header: HeaderInfo,
@@ -95,6 +126,10 @@ pub struct View {
     pub engine_state: EngineState,
     /// Horizontal scroll offset (in tap columns) for the meter pane.
     pub meter_scroll: usize,
+    /// Last observed drop counter per slot; used to detect advances.
+    drop_seen: HashMap<usize, u64>,
+    /// Last time a drop-count line was logged per slot (rate-limit).
+    drop_logged_at: HashMap<usize, Instant>,
 }
 
 impl View {
@@ -106,6 +141,50 @@ impl View {
             record,
             engine_state: EngineState::Running,
             meter_scroll: 0,
+            drop_seen: HashMap::new(),
+            drop_logged_at: HashMap::new(),
+        }
+    }
+
+    /// Replace the active tap list (e.g. on patch reload). Drop-counter
+    /// baselines for slots that survive the change are preserved so a
+    /// reload doesn't generate spurious "drops" log lines.
+    pub fn set_taps(&mut self, taps: Vec<TapEntry>) {
+        let surviving: std::collections::HashSet<usize> =
+            taps.iter().map(|t| t.slot).collect();
+        self.drop_seen.retain(|slot, _| surviving.contains(slot));
+        self.drop_logged_at.retain(|slot, _| surviving.contains(slot));
+        let max_scroll = taps.len().saturating_sub(1);
+        if self.meter_scroll > max_scroll {
+            self.meter_scroll = max_scroll;
+        }
+        self.taps = taps;
+    }
+
+    /// Surface advancing per-slot drop counters as event-log lines,
+    /// rate-limited per slot. Slot → tap-name resolution uses the
+    /// current tap list (the latest manifest snapshot).
+    pub fn poll_drops(&mut self, handle: &SubscribersHandle, now: Instant) {
+        for tap in &self.taps {
+            let cur = handle.dropped(tap.slot);
+            let prev = self.drop_seen.get(&tap.slot).copied().unwrap_or(0);
+            if cur <= prev {
+                continue;
+            }
+            let allow = self
+                .drop_logged_at
+                .get(&tap.slot)
+                .map(|t| now.duration_since(*t) >= DROP_LOG_INTERVAL)
+                .unwrap_or(true);
+            if allow {
+                let delta = cur - prev;
+                self.log.push(format!(
+                    "tap `{}` (slot {}): {delta} dropped block(s) (total {cur})",
+                    tap.name, tap.slot
+                ));
+                self.drop_logged_at.insert(tap.slot, now);
+                self.drop_seen.insert(tap.slot, cur);
+            }
         }
     }
 
@@ -379,5 +458,123 @@ pub fn run<F: FnMut(&mut View)>(
             }
         }
         last_frame = Instant::now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use patches_core::provenance::Provenance;
+    use patches_core::Span;
+    use patches_dsl::manifest::{TapDescriptor, TapType};
+    use patches_core::TapBlockFrame;
+    use patches_observation::subscribers::Subscribers;
+    use patches_observation::tap_ring;
+
+    fn header() -> HeaderInfo {
+        HeaderInfo {
+            patch_path: "x.patches".into(),
+            sample_rate: 48_000,
+            oversampling: 1,
+        }
+    }
+
+    fn record() -> RecordState {
+        RecordState { record_path: None, muted: None }
+    }
+
+    fn desc(slot: usize, name: &str, comp: TapType) -> TapDescriptor {
+        TapDescriptor {
+            slot,
+            name: name.into(),
+            components: vec![comp],
+            params: vec![],
+            source: Provenance::root(Span::synthetic()),
+        }
+    }
+
+    #[test]
+    fn taps_from_manifest_sorts_by_slot() {
+        let m = vec![
+            desc(2, "b", TapType::Meter),
+            desc(0, "a", TapType::Meter),
+        ];
+        let taps = taps_from_manifest(&m);
+        assert_eq!(taps[0].slot, 0);
+        assert_eq!(taps[0].name, "a");
+        assert_eq!(taps[1].slot, 2);
+    }
+
+    #[test]
+    fn format_diagnostic_renders_unsupported_component() {
+        let d = Diagnostic::NotYetImplemented {
+            slot: 3,
+            tap_name: "scope".into(),
+            component: TapType::Spectrum,
+        };
+        assert_eq!(
+            format_diagnostic(&d),
+            "tap `scope` (`spectrum`): not yet implemented"
+        );
+    }
+
+    #[test]
+    fn poll_drops_logs_advance_and_rate_limits_repeats() {
+        // Real ring with capacity 1. Pushing twice increments drops.
+        let (mut tx, _rx) = tap_ring(1);
+        let (subs, _diag) = Subscribers::new(tx.shared(), 8);
+        let handle = subs.handle();
+
+        let mut view = View::new(
+            header(),
+            vec![TapEntry { name: "a".into(), slot: 0 }],
+            record(),
+        );
+        let t0 = Instant::now();
+        view.poll_drops(&handle, t0);
+        assert!(view.log.is_empty(), "no advance yet, no log");
+
+        // Fill ring then overflow → per-slot drops increment.
+        let frame = TapBlockFrame::zeroed();
+        assert!(tx.try_push_frame(&frame));
+        assert!(!tx.try_push_frame(&frame));
+        assert!(handle.dropped(0) > 0);
+
+        view.poll_drops(&handle, t0);
+        assert_eq!(view.log.lines.len(), 1, "first advance logs");
+
+        // Overflow again at the same `now` — rate-limited, no new line.
+        assert!(!tx.try_push_frame(&frame));
+        view.poll_drops(&handle, t0);
+        assert_eq!(view.log.lines.len(), 1, "rate-limited, still one line");
+
+        // Past the interval — new advance logs.
+        let later = t0 + DROP_LOG_INTERVAL + Duration::from_millis(1);
+        assert!(!tx.try_push_frame(&frame));
+        view.poll_drops(&handle, later);
+        assert_eq!(view.log.lines.len(), 2, "second advance logs after interval");
+    }
+
+    #[test]
+    fn set_taps_clamps_meter_scroll_and_keeps_baseline_for_surviving_slots() {
+        let mut view = View::new(
+            header(),
+            vec![
+                TapEntry { name: "a".into(), slot: 0 },
+                TapEntry { name: "b".into(), slot: 1 },
+                TapEntry { name: "c".into(), slot: 2 },
+            ],
+            record(),
+        );
+        view.meter_scroll = 2;
+        view.drop_seen.insert(0, 7);
+        view.drop_seen.insert(1, 11);
+
+        view.set_taps(vec![TapEntry { name: "a".into(), slot: 0 }]);
+        assert_eq!(view.taps.len(), 1);
+        assert_eq!(view.meter_scroll, 0);
+        // slot 0 baseline preserved, slot 1 dropped.
+        assert_eq!(view.drop_seen.get(&0).copied(), Some(7));
+        assert!(!view.drop_seen.contains_key(&1));
     }
 }

@@ -22,10 +22,9 @@ use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
 use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::{new_event_queue, EventScheduler, MidiConnector, OversamplingFactor};
 use patches_host::{CompileError, HostBuilder, LoadedPatch, PathSource};
-use patches_observation::subscribers::Subscribers;
+use patches_observation::{spawn_observer, tap_ring};
 
 mod diagnostic_render;
-mod fake_publisher;
 mod tui;
 
 /// Render a [`CompileError`] to stderr using the source map it carries.
@@ -256,6 +255,15 @@ fn run_tui(
     let CommonSetup { mut sound, mut runtime, source, registry, sample_rate, .. } =
         common_setup(path, oversampling, device_config, module_paths)?;
 
+    // Stand up the observer thread + tap ring before the first compile so
+    // the planner's manifest publication reaches the observer (ADR 0056).
+    let (tap_tx, tap_rx) = tap_ring(64);
+    let (mut observer, mut diag_rx) = spawn_observer(tap_rx, Duration::from_millis(2));
+    runtime.attach_observer(
+        observer.take_replans().ok_or("observer replan producer missing")?,
+    );
+    let subs_handle = observer.subscribers.clone();
+
     let initial = match runtime.compile_and_push_blocking(&source, &registry) {
         Ok(loaded) => loaded,
         Err(e) => {
@@ -264,13 +272,15 @@ fn run_tui(
         }
     };
     let initial_warnings = load_warning_lines(&initial);
+    let initial_taps = tui::taps_from_manifest(&initial.manifest);
     let dependencies = initial.dependencies.clone();
     drop(initial);
 
     let halt_handle = runtime.halt_handle();
-    let (processor, plan_rx) = runtime
+    let (mut processor, plan_rx) = runtime
         .take_audio_endpoints()
         .ok_or("audio endpoints already taken")?;
+    processor.set_tap_producer(Some(tap_tx));
 
     let record_muted = record_path.map(|_| Arc::new(AtomicBool::new(true)));
 
@@ -290,22 +300,6 @@ fn run_tui(
     };
     let (_midi_connector, midi_msg) = midi_status;
 
-    // Bringup observer surface + fake publisher (ticket 0704 stub; replaced
-    // by live observer plumbing in ticket 0705).
-    let (subs, handle, mut diag_rx) = Subscribers::for_bringup(16);
-    let fixture_taps: Vec<tui::TapEntry> = (0..8)
-        .map(|i| tui::TapEntry {
-            name: format!("t{i}"),
-            slot: i,
-        })
-        .collect();
-    let fake_stop = Arc::new(AtomicBool::new(false));
-    let publisher_handle = fake_publisher::spawn(
-        subs,
-        fixture_taps.iter().map(|t| t.slot).collect(),
-        Arc::clone(&fake_stop),
-    );
-
     let header = tui::HeaderInfo {
         patch_path: path.to_string(),
         sample_rate: sample_rate as u32,
@@ -315,7 +309,7 @@ fn run_tui(
         record_path: record_path.map(|s| s.to_string()),
         muted: record_muted,
     };
-    let mut view = tui::View::new(header, fixture_taps, record);
+    let mut view = tui::View::new(header, initial_taps, record);
     view.log.push(format!("loaded {path}"));
     for w in initial_warnings {
         view.log.push(w);
@@ -333,13 +327,16 @@ fn run_tui(
     let outcome = tui::run(
         &mut terminal,
         &mut view,
-        &handle,
+        &subs_handle,
         &external_quit,
         |view| {
             // Drain observer-side diagnostics into the event log.
             for d in diag_rx.drain() {
-                view.log.push(format!("{d:?}"));
+                view.log.push(tui::format_diagnostic(&d));
             }
+
+            // Per-slot drop counters → event log (rate-limited per slot).
+            view.poll_drops(&subs_handle, std::time::Instant::now());
 
             // Halt info → event log.
             match halt_handle.halt_info() {
@@ -374,6 +371,7 @@ fn run_tui(
                             for w in load_warning_lines(&loaded) {
                                 view.log.push(w);
                             }
+                            view.set_taps(tui::taps_from_manifest(&loaded.manifest));
                             view.log.push("reloaded");
                             refresh_watched(&mut watched, &loaded.dependencies);
                         }
@@ -395,9 +393,8 @@ fn run_tui(
     );
 
     let restore = tui::leave_terminal(&mut terminal);
-    fake_stop.store(true, Ordering::Release);
-    publisher_handle.join().ok();
     sound.stop();
+    observer.stop();
 
     outcome?;
     restore?;

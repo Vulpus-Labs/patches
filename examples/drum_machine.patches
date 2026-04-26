@@ -259,6 +259,6 @@ patch {
     reverb.out_right -> lim_r.in
 
     module out: AudioOut
-    lim_l.out -> out.in_left
-    lim_r.out -> out.in_right
+    lim_l.out -> out.in_left, ~meter(left)
+    lim_r.out -> out.in_right, ~meter(right)
 }
