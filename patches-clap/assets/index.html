@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Patches</title>
+    <style>__APP_CSS__</style>
+  </head>
+  <body>
+    <div class="halt-banner" id="halt-banner" hidden></div>
+    <header class="file-header">
+      <span class="file-path" id="file-path">no patch loaded</span>
+      <span class="file-actions">
+        <button class="btn" data-intent="browse">Browse…</button>
+        <button class="btn" data-intent="reload">Reload</button>
+      </span>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" role="tab" data-pane="patch">Patch</button>
+      <button class="tab" role="tab" data-pane="modules">Modules</button>
+      <button class="tab" role="tab" data-pane="diagnostics">Diagnostics</button>
+    </nav>
+    <main>
+      <section class="pane is-active" data-pane="patch">
+        <div class="taps" id="taps">
+          <div class="empty">waiting for patch…</div>
+        </div>
+      </section>
+      <section class="pane" data-pane="modules">
+        <div class="intent-bar">
+          <button class="btn" data-intent="add_path">Add path…</button>
+          <button class="btn" data-intent="rescan">Rescan</button>
+        </div>
+        <h3 class="section-title">Module scan paths</h3>
+        <div class="module-paths" id="module-paths">
+          <div class="empty">no scan paths configured</div>
+        </div>
+      </section>
+      <section class="pane" data-pane="diagnostics">
+        <h3 class="section-title">Diagnostics</h3>
+        <div class="diagnostics" id="diagnostics">
+          <div class="empty">No diagnostics.</div>
+        </div>
+        <h3 class="section-title">Event log</h3>
+        <div class="event-log" id="event-log"></div>
+      </section>
+    </main>
+    <script>__APP_JS__</script>
+  </body>
+</html>

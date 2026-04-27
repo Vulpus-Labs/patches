@@ -82,10 +82,15 @@ unsafe extern "C" fn create_plugin(
         gui_state: std::sync::Arc::new(std::sync::Mutex::new(GuiState::default())),
         gui_handle: None,
         gui_scale: 1.0,
+        gui_width: crate::extensions::GUI_WIDTH,
+        gui_height: crate::extensions::GUI_HEIGHT,
         sample_rate: 0.0,
         prev_beat: -1.0,
         prev_bar: -1,
         halt_handle: None,
+        observer: None,
+        subscribers: None,
+        diagnostics: None,
         meter: std::sync::Arc::new(patches_plugin_common::MeterTap::new()),
     });
     let data_ptr = Box::into_raw(plugin_data);

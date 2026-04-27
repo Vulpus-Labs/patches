@@ -23,7 +23,7 @@ fn simple_meter_emits_audio_tap_and_manifest() {
     let src = "\
 patch {
     module osc : Osc
-    osc.out -> ~meter(level, window: 25)
+    osc.out -> ~meter(level)
 }
 ";
     let r = run(src);
@@ -31,16 +31,12 @@ patch {
     assert!(module_names.contains(&SYNTH_AUDIO_TAP), "expected synthetic audio_tap");
     assert!(!module_names.contains(&SYNTH_TRIGGER_TAP));
 
-    // Manifest: one descriptor, slot 0, components [Meter], one param.
+    // Manifest: one descriptor, slot 0, components [Meter].
     assert_eq!(r.manifest.len(), 1);
     let d = &r.manifest[0];
     assert_eq!(d.slot, 0);
     assert_eq!(d.name, "level");
     assert_eq!(d.components, vec![TapType::Meter]);
-    assert_eq!(d.params.len(), 1);
-    let ((qual, key), _val) = &d.params[0];
-    assert_eq!(qual, "meter");
-    assert_eq!(key, "window");
 
     // The cable now lands on ~audio_tap.in[level] and there's no tap
     // endpoint surviving in the FlatPatch.
@@ -56,18 +52,13 @@ fn compound_meter_spectrum_one_synth_module() {
     let src = "\
 patch {
     module mix : Mix
-    mix.out -> ~meter+spectrum(out, meter.window: 25, spectrum.fft: 1024)
+    mix.out -> ~meter+osc(out)
 }
 ";
     let r = run(src);
     assert_eq!(r.manifest.len(), 1);
     let d = &r.manifest[0];
-    assert_eq!(d.components, vec![TapType::Meter, TapType::Spectrum]);
-    assert_eq!(d.params.len(), 2);
-    // Both params keep their author-given qualifier.
-    let qualifiers: Vec<&str> = d.params.iter().map(|((q, _), _)| q.as_str()).collect();
-    assert!(qualifiers.contains(&"meter"));
-    assert!(qualifiers.contains(&"spectrum"));
+    assert_eq!(d.components, vec![TapType::Meter, TapType::Osc]);
 }
 
 #[test]
@@ -76,7 +67,7 @@ fn mixed_audio_and_trigger_emits_two_synth_modules() {
 patch {
     module osc : Osc
     module clk : Clock
-    osc.out  -> ~meter(audible, window: 25)
+    osc.out  -> ~meter(audible)
     clk.tick -> ~trigger_led(beat)
 }
 ";
@@ -103,9 +94,9 @@ fn alphabetical_sort_across_modules() {
 patch {
     module osc : Osc
     module clk : Clock
-    osc.out  -> ~meter(zebra, window: 25)
+    osc.out  -> ~meter(zebra)
     clk.tick -> ~trigger_led(alpha)
-    osc.out  -> ~meter(mango, window: 25)
+    osc.out  -> ~meter(mango)
 }
 ";
     let r = run(src);
@@ -120,7 +111,7 @@ fn cable_gain_preserved_through_desugar() {
     let src = "\
 patch {
     module f : Filter
-    f.out -[0.3]-> ~meter(level, window: 25)
+    f.out -[0.3]-> ~meter(level)
 }
 ";
     let r = run(src);
@@ -152,7 +143,7 @@ fn slot_offset_baked_per_channel() {
 patch {
     module osc : Osc
     module clk : Clock
-    osc.out  -> ~meter(zebra, window: 25)
+    osc.out  -> ~meter(zebra)
     clk.tick -> ~trigger_led(alpha)
 }
 ";

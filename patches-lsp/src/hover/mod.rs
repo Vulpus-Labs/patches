@@ -52,9 +52,6 @@ pub(crate) fn compute_hover(
         crate::tree_nav::CursorContext::TapType { node } => {
             tap::hover_for_tap_type(node, source, line_index)
         }
-        crate::tree_nav::CursorContext::TapParamKey { node } => {
-            tap::hover_for_tap_param_key(node, source, line_index)
-        }
         crate::tree_nav::CursorContext::TapName { node } => {
             tap::hover_for_tap_name(node, source, line_index)
         }
@@ -254,7 +251,7 @@ mod tests {
 
     #[test]
     fn hover_on_tap_type_meter() {
-        let source = "patch {\n    module osc : Osc\n    osc.out -> ~meter(level, window: 25)\n}";
+        let source = "patch {\n    module osc : Osc\n    osc.out -> ~meter(level)\n}";
         let (tree, model, registry, line_index) = setup(source);
         let off = source.find("~meter").unwrap() + 1; // inside `meter`
         let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
@@ -262,36 +259,11 @@ mod tests {
         let s = markup(h);
         assert!(s.contains("meter"), "hover should mention component: {s}");
         assert!(s.contains("RMS") || s.contains("peak"), "hover should describe pipeline: {s}");
-        assert!(s.contains("window"), "hover should list window param: {s}");
-    }
-
-    #[test]
-    fn hover_on_qualified_tap_param_key() {
-        let source = "patch {\n    module mix : Mix\n    mix.out -> ~meter+spectrum(out, meter.window: 25, spectrum.fft: 1024)\n}";
-        let (tree, model, registry, line_index) = setup(source);
-        let off = source.find("meter.window").unwrap() + "meter.".len(); // inside `window`
-        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
-            .expect("hover for qualified key");
-        let s = markup(h);
-        assert!(s.contains("window"), "hover should mention key: {s}");
-        assert!(s.contains("ms"), "hover should show unit: {s}");
-    }
-
-    #[test]
-    fn hover_on_unqualified_tap_param_key_simple_tap() {
-        let source = "patch {\n    module osc : Osc\n    osc.out -> ~meter(level, window: 25)\n}";
-        let (tree, model, registry, line_index) = setup(source);
-        let off = source.find(", window:").unwrap() + 2; // inside `window`
-        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
-            .expect("hover for unqualified key on simple tap");
-        let s = markup(h);
-        assert!(s.contains("window"));
-        assert!(s.contains("meter.window"), "should resolve qualifier: {s}");
     }
 
     #[test]
     fn hover_on_tap_name_lists_components_and_source() {
-        let source = "patch {\n    module osc : Osc\n    osc.out -> ~meter+spectrum(level, meter.window: 25, spectrum.fft: 1024)\n}";
+        let source = "patch {\n    module osc : Osc\n    osc.out -> ~meter+spectrum(level)\n}";
         let (tree, model, registry, line_index) = setup(source);
         let off = source.find("(level").unwrap() + 1; // on `level`
         let h = compute_hover(&tree, source, off, &model, &registry, &line_index)

@@ -224,6 +224,6 @@ patch {
     module lim_r : Limiter { threshold: -3db, attack_ms: 2.0 }
     sum.out_left  -> lim_l.in
     sum.out_right -> lim_r.in
-    lim_l.out -> out.in_left
-    lim_r.out -> out.in_right
+    lim_l.out -> out.in_left, ~meter+spectrum+osc(master_left)
+    lim_r.out -> out.in_right, ~meter(master_right)
 }

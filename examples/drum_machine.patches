@@ -125,20 +125,20 @@ patch {
     module kick_drum: Kick {
         pitch: 50, sweep: 3000, sweep_time: 0.04, decay: 0.4, drive: 0.2, click: 0.4
     }
-    kick_pp.trigger[hit] -> kick_drum.trigger
+    kick_pp.trigger[hit] -> kick_drum.trigger, ~trigger_led(kick_t)
     kick_pp.cv2[hit]     -> kick_drum.velocity
 
     module snare_drum: Snare {
         pitch: 190, tone: 0.55, body_decay: 0.12, noise_decay: 0.18,
         noise_freq: 3500, noise_q: 0.25, snap: 0.6
     }
-    snare_pp.trigger[hit] -> snare_drum.trigger
+    snare_pp.trigger[hit] -> snare_drum.trigger, ~trigger_led(snare_t)
     snare_pp.cv2[hit]     -> snare_drum.velocity
 
     module closed_hat: ClosedHiHat {
         pitch: 420, decay: 0.035, tone: 0.6, filter: 9000
     }
-    hat_pp.trigger[hit] -> closed_hat.trigger
+    hat_pp.trigger[hit] -> closed_hat.trigger, ~trigger_led(closed_hat)
     hat_pp.cv2[hit]     -> closed_hat.velocity
 
     module open_hat: OpenHiHat {
@@ -234,6 +234,10 @@ patch {
     claves_drum.out -> mix.in[6]
     cymbal_drum.out -> mix.in[7]
 
+    kick_trans.out -> ~spectrum+osc+meter(kick)
+    snare_trans.out -> ~spectrum(snare)
+    cymbal_drum.out -> ~spectrum(cymbal)
+
     # ── FX: stereo delay on send A (clap + claves + cymbal) ──────────────
     module delay: StereoDelay(channels: 2) {
         delay_ms: 375,
@@ -261,4 +265,5 @@ patch {
     module out: AudioOut
     lim_l.out -> out.in_left, ~meter(left)
     lim_r.out -> out.in_right, ~meter(right)
+
 }

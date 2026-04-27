@@ -25,6 +25,7 @@ mod parser;
 pub mod structural;
 pub mod desugar;
 pub mod manifest;
+pub mod tap_schema;
 pub mod validate;
 
 // Provenance, SourceId, Span, and SourceMap are owned by `patches-core` so

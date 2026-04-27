@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }
+patches-dsp = { path = "../patches-dsp" }
 patches-io-ring = { path = "../patches-io-ring" }
 rtrb = "0.3"
 

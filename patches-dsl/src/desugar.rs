@@ -12,7 +12,7 @@
 //! identifiers, so these names are guaranteed unique.
 
 use crate::ast::*;
-use crate::manifest::{Manifest, TapDescriptor, TapParamMap, TapType};
+use crate::manifest::{Manifest, TapDescriptor, TapType};
 use crate::provenance::Provenance;
 
 /// Synthetic instance name for the audio-cable tap module.
@@ -120,7 +120,6 @@ pub fn desugar_taps(file: &File) -> (File, Manifest) {
                 .iter()
                 .map(|c| TapType::from_ast_name(&c.name).expect("validated component"))
                 .collect(),
-            params: build_param_map(tap),
             source: Provenance::root(tap.span),
         });
     }
@@ -210,23 +209,6 @@ fn rewrite_endpoint(
             })
         }
     }
-}
-
-/// Canonicalise tap params: every key surfaces as `((qualifier, key), value)`.
-/// Unqualified keys on simple taps adopt the lone component as their
-/// qualifier (matching the validation pass's canonicalisation).
-fn build_param_map(tap: &TapTarget) -> TapParamMap {
-    let comp = tap.components.first().map(|c| c.name.as_str()).unwrap_or("");
-    tap.params
-        .iter()
-        .map(|p| {
-            let qualifier = match &p.qualifier {
-                Some(q) => q.name.clone(),
-                None => comp.to_owned(),
-            };
-            ((qualifier, p.key.name.clone()), p.value.clone())
-        })
-        .collect()
 }
 
 fn synth_span() -> Span {

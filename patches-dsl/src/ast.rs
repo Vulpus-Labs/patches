@@ -186,21 +186,6 @@ pub struct TapTarget {
     /// The tap's identifier within the patch scope. Must be unique across
     /// all tap targets in the patch (validated in 0696).
     pub name: Ident,
-    /// Observer-side analysis parameters. Forwarded verbatim to the
-    /// observer via the manifest; not interpreted here.
-    pub params: Vec<TapParam>,
-    pub span: Span,
-}
-
-/// One observer-side analysis parameter on a tap target.
-///
-/// `qualifier` is `Some` for `qualifier.key: value` and `None` for the bare
-/// `key: value` form. Qualifier-vs-component matching is validated in 0696.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TapParam {
-    pub qualifier: Option<Ident>,
-    pub key: Ident,
-    pub value: Value,
     pub span: Span,
 }
 

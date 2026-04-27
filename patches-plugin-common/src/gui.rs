@@ -24,6 +24,40 @@ pub struct DiagnosticView {
     pub source_map: Option<SourceMap>,
 }
 
+/// Compact projection of one `TapDescriptor` for the webview shell.
+///
+/// `kind` is `"compound"` for taps with two or more components, otherwise
+/// the single component's name (e.g. `"meter"`, `"osc"`). `components`
+/// preserves the full ordered list so the UI can pick a richer rendering
+/// when more than one is present.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TapSummary {
+    pub name: String,
+    pub slot: usize,
+    pub kind: String,
+    pub components: Vec<String>,
+}
+
+/// Per-tap display configuration controlled by the webview. The
+/// observer holds raw sample buffers; these values pick the
+/// FFT size / decimation / window the next read uses.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TapDisplayOpts {
+    pub spectrum_fft_size: usize,
+    pub scope_decimation: usize,
+    pub scope_window_samples: usize,
+}
+
+impl Default for TapDisplayOpts {
+    fn default() -> Self {
+        Self {
+            spectrum_fft_size: 1024,
+            scope_decimation: 16,
+            scope_window_samples: 512,
+        }
+    }
+}
+
 /// Shared state between the plugin and the embedded GUI.
 #[derive(Default, Serialize)]
 pub struct GuiState {
@@ -46,11 +80,10 @@ pub struct GuiState {
     /// Set to true by the Rescan button; triggers the hard-stop reload
     /// flow (ADR 0044 §3).
     pub rescan_requested: bool,
-    /// Set to true by the webview's meter poll; consumed by `on_main_thread`
-    /// which reads the MeterTap and pushes a frame to JS. Not part of the
-    /// snapshot.
-    #[serde(skip)]
-    pub meter_poll_requested: bool,
+    /// Tap manifest projection from the most recent successful compile,
+    /// ordered by slot. Cleared on a failed compile and replaced on the
+    /// next successful one.
+    pub taps: Vec<TapSummary>,
     /// Rolling log of the most recent status messages (newest last).
     pub status_log: VecDeque<String>,
     /// Current diagnostics plus the source map needed to render them.
@@ -63,6 +96,11 @@ pub struct GuiState {
     /// reports no halt. Skipped in the default serialisation.
     #[serde(skip)]
     pub halt: Option<HaltInfoSnapshot>,
+    /// Per-slot display options (FFT size, scope decimation/window). The
+    /// webview drives these via `Intent::SetTapOpts`; the plugin's
+    /// `push_taps` reads them on each frame and forwards to
+    /// `SubscribersHandle::read_*_into_with`.
+    pub tap_opts: std::collections::HashMap<usize, TapDisplayOpts>,
 }
 
 impl GuiState {
@@ -107,10 +145,7 @@ pub struct GuiSnapshot {
     pub remove_path_index: Option<usize>,
     pub halt_message: Option<String>,
     pub diagnostics: Vec<DiagnosticSummary>,
-    /// Raw text of the loaded `.patches` file, if readable. Spike: the
-    /// webview Source tab renders this with Shiki. None when no file is
-    /// loaded or the file can't be read.
-    pub patch_source: Option<String>,
+    pub taps: Vec<TapSummary>,
 }
 
 /// Compact, webview-facing projection of a [`RenderedDiagnostic`].
@@ -127,7 +162,7 @@ pub struct DiagnosticSummary {
 }
 
 impl GuiSnapshot {
-    pub const VERSION: u32 = 3;
+    pub const VERSION: u32 = 4;
 
     /// Project a `GuiState` into the webview-facing shape.
     pub fn from_state(state: &GuiState) -> Self {
@@ -150,10 +185,7 @@ impl GuiSnapshot {
             remove_path_index: state.remove_path_index,
             halt_message: state.halt.as_ref().map(format_halt),
             diagnostics: summarise_diagnostics(&state.diagnostic_view),
-            patch_source: state
-                .file_path
-                .as_ref()
-                .and_then(|p| std::fs::read_to_string(p).ok()),
+            taps: state.taps.clone(),
         }
     }
 }
@@ -194,6 +226,55 @@ fn format_halt(h: &HaltInfoSnapshot) -> String {
     )
 }
 
+/// Per-slot live tap data pushed to the webview at frame rate, separate
+/// from [`GuiSnapshot`] so it bypasses snapshot dedupe throttling.
+///
+/// Field names are deliberately short — every byte is serialised at
+/// ~30 Hz. `w` (waveform) and `m` (magnitudes) are omitted when the tap
+/// has no scope / spectrum component.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TapSlotFrame {
+    /// Tap slot index (matches `TapDescriptor::slot`).
+    pub s: usize,
+    /// Peak amplitude (linear).
+    pub p: f32,
+    /// RMS amplitude (linear).
+    pub r: f32,
+    /// Scope waveform samples (length `SCOPE_BUFFER_LEN` when present).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub w: Option<Vec<f32>>,
+    /// Spectrum magnitudes (length `SPECTRUM_BIN_COUNT` when present).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m: Option<Vec<f32>>,
+    /// Gate LED scalar (0..1). Present only for taps with a `gate_led`
+    /// component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub g: Option<f32>,
+    /// Trigger fired since last poll. `Some(true)` exactly when the
+    /// observer's latching trigger cell held a non-zero value at read
+    /// time (and was cleared by the read). Present only for taps with
+    /// a `trigger_led` component. The visual flash + decay lives in
+    /// the UI, since the audio side has no concept of UI cadence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t: Option<bool>,
+}
+
+/// Versioned per-tick projection of live tap data. Bump [`TapFrame::VERSION`]
+/// on breaking shape changes.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TapFrame {
+    pub v: u32,
+    pub slots: Vec<TapSlotFrame>,
+}
+
+impl TapFrame {
+    pub const VERSION: u32 = 1;
+
+    pub fn new(slots: Vec<TapSlotFrame>) -> Self {
+        Self { v: Self::VERSION, slots }
+    }
+}
+
 /// Intents posted by the webview via `window.ipc.postMessage(JSON)`.
 /// Tagged by a `kind` discriminator matching the `*_requested` flags in
 /// [`GuiState`]. Ticket 0671.
@@ -205,9 +286,15 @@ pub enum Intent {
     Rescan,
     AddPath,
     RemovePath { index: usize },
-    /// Webview asks for a meter frame. Handled directly by the GUI shell,
-    /// not via `GuiState` — kept in this enum for a single JSON surface.
-    PollMeter,
+    /// Update per-slot display options. Any field left `None` keeps
+    /// its current value. Posted by the webview when the user picks
+    /// an FFT size, decimation, or window length.
+    SetTapOpts {
+        slot: usize,
+        spectrum_fft_size: Option<usize>,
+        scope_decimation: Option<usize>,
+        scope_window_samples: Option<usize>,
+    },
 }
 
 impl Intent {
@@ -220,7 +307,17 @@ impl Intent {
             Intent::Rescan => state.rescan_requested = true,
             Intent::AddPath => state.add_path_requested = true,
             Intent::RemovePath { index } => state.remove_path_index = Some(index),
-            Intent::PollMeter => state.meter_poll_requested = true,
+            Intent::SetTapOpts {
+                slot,
+                spectrum_fft_size,
+                scope_decimation,
+                scope_window_samples,
+            } => {
+                let entry = state.tap_opts.entry(slot).or_insert_with(TapDisplayOpts::default);
+                if let Some(n) = spectrum_fft_size { entry.spectrum_fft_size = n; }
+                if let Some(d) = scope_decimation { entry.scope_decimation = d; }
+                if let Some(w) = scope_window_samples { entry.scope_window_samples = w; }
+            }
         }
     }
 }
@@ -260,9 +357,122 @@ mod tests {
         g.module_paths.push("/tmp/a".into());
         let snap = GuiSnapshot::from_state(&g);
         assert_eq!(snap.v, GuiSnapshot::VERSION);
+        assert_eq!(snap.v, 4);
         assert_eq!(snap.status_log, vec!["hello".to_string()]);
         assert_eq!(snap.module_paths, vec!["/tmp/a".to_string()]);
         let json = serde_json::to_string(&snap).unwrap();
-        assert!(json.contains("\"v\":3"));
+        assert!(json.contains("\"v\":4"));
+    }
+
+    #[test]
+    fn snapshot_carries_taps_in_slot_order() {
+        let g = GuiState {
+            taps: vec![
+                TapSummary {
+                    name: "kick".into(),
+                    slot: 0,
+                    kind: "meter".into(),
+                    components: vec!["meter".into()],
+                },
+                TapSummary {
+                    name: "snare".into(),
+                    slot: 1,
+                    kind: "compound".into(),
+                    components: vec!["meter".into(), "osc".into()],
+                },
+            ],
+            ..Default::default()
+        };
+        let snap = GuiSnapshot::from_state(&g);
+        assert_eq!(snap.taps.len(), 2);
+        assert_eq!(snap.taps[0].slot, 0);
+        assert_eq!(snap.taps[1].kind, "compound");
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let taps = parsed.get("taps").unwrap().as_array().unwrap();
+        assert_eq!(taps.len(), 2);
+        assert_eq!(taps[0].get("name").unwrap(), "kick");
+        assert_eq!(taps[1].get("components").unwrap().as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn tap_frame_meter_only_round_trip() {
+        let f = TapFrame::new(vec![TapSlotFrame {
+            s: 0,
+            p: 0.5,
+            r: 0.25,
+            ..Default::default()
+        }]);
+        let json = serde_json::to_string(&f).unwrap();
+        // Optional fields elided.
+        assert!(!json.contains("\"w\""));
+        assert!(!json.contains("\"m\""));
+        assert!(!json.contains("\"g\""));
+        assert!(!json.contains("\"t\""));
+        let back: TapFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
+        assert_eq!(back.v, TapFrame::VERSION);
+    }
+
+    #[test]
+    fn tap_frame_scope_round_trip() {
+        let f = TapFrame::new(vec![TapSlotFrame {
+            s: 2,
+            p: 0.9,
+            r: 0.6,
+            w: Some(vec![0.0, 0.1, -0.1, 0.0]),
+            ..Default::default()
+        }]);
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(json.contains("\"w\""));
+        let back: TapFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
+    }
+
+    #[test]
+    fn tap_frame_spectrum_round_trip() {
+        let f = TapFrame::new(vec![TapSlotFrame {
+            s: 1,
+            p: 0.0,
+            r: 0.0,
+            m: Some(vec![0.0; 8]),
+            ..Default::default()
+        }]);
+        let json = serde_json::to_string(&f).unwrap();
+        let back: TapFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
+    }
+
+    #[test]
+    fn tap_frame_compound_round_trip() {
+        let f = TapFrame::new(vec![
+            TapSlotFrame { s: 0, p: 0.4, r: 0.2, ..Default::default() },
+            TapSlotFrame {
+                s: 1,
+                p: 0.7,
+                r: 0.5,
+                w: Some(vec![0.1, 0.2]),
+                m: Some(vec![0.3, 0.4, 0.5]),
+                ..Default::default()
+            },
+        ]);
+        let json = serde_json::to_string(&f).unwrap();
+        let back: TapFrame = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
+        assert_eq!(back.slots.len(), 2);
+    }
+
+    #[test]
+    fn tap_summary_json_round_trip() {
+        let original = TapSummary {
+            name: "lead".into(),
+            slot: 3,
+            kind: "osc".into(),
+            components: vec!["osc".into()],
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: TapSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, original);
     }
 }

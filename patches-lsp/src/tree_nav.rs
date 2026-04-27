@@ -113,11 +113,6 @@ pub(crate) enum CursorContext<'tree> {
     },
     /// Cursor sits on a tap component name (`meter`, `osc`, ...).
     TapType { node: Node<'tree> },
-    /// Cursor sits on a `tap_param_key` (qualified or unqualified key
-    /// inside `~taptype(name, ...)`). The handler reads the key's
-    /// children to recover qualifier (if present) and resolve the
-    /// implicit qualifier on simple taps.
-    TapParamKey { node: Node<'tree> },
     /// Cursor sits on the tap name (the first ident inside `~...(...)`).
     TapName { node: Node<'tree> },
     /// Inside a song/section/pattern-row structure where pattern names are
@@ -266,20 +261,6 @@ fn classify_tap_node(node: Node<'_>) -> Option<CursorContext<'_>> {
         match parent.kind() {
             "tap_type" => return Some(CursorContext::TapType { node: parent }),
             "tap_name" => return Some(CursorContext::TapName { node: parent }),
-            "tap_qualifier" => {
-                // tap_qualifier is a child of tap_param_key; classify as
-                // the param-key context so the hover handler can render
-                // the qualified-key documentation.
-                if let Some(key) = parent.parent() {
-                    if key.kind() == "tap_param_key" {
-                        return Some(CursorContext::TapParamKey { node: key });
-                    }
-                }
-            }
-            "tap_param_key" => {
-                // Cursor on the bare `ident` inside a `tap_param_key`.
-                return Some(CursorContext::TapParamKey { node: parent });
-            }
             _ => {}
         }
     }

@@ -13,7 +13,9 @@ use std::collections::HashMap;
 
 use crate::ast::{CableEndpoint, File, Statement, TapTarget};
 use crate::expand::ExpandError;
+use crate::manifest::TapType;
 use crate::structural::StructuralCode as Code;
+use crate::tap_schema::{cable_kind, CableKind, TAP_SCHEMA};
 
 /// Run every pre-expansion validation pass on `file`. Fail-fast: returns
 /// the first violation encountered.
@@ -44,7 +46,9 @@ fn reject_taps_in_templates(file: &File) -> Result<(), ExpandError> {
 }
 
 /// Walk every top-level cable endpoint, enforce name uniqueness across
-/// all taps, and validate each tap's parameter list.
+/// all taps, and validate each tap's parameter list. The name
+/// identifies the tap; observation types multiplex on it via the
+/// compound declaration form (`~meter+spectrum(foo)`).
 fn validate_top_level_taps(file: &File) -> Result<(), ExpandError> {
     let mut seen_names: HashMap<String, ()> = HashMap::new();
     for stmt in &file.patch.body {
@@ -55,35 +59,50 @@ fn validate_top_level_taps(file: &File) -> Result<(), ExpandError> {
                     return Err(ExpandError::new(
                         Code::TapDuplicateName,
                         t.name.span,
-                        format!("duplicate tap name {:?}", t.name.name),
+                        format!(
+                            "duplicate tap name {:?}; use the compound form \
+                             (e.g. `~meter+spectrum({})`) to attach multiple \
+                             observation types",
+                            t.name.name, t.name.name
+                        ),
                     ));
                 }
                 seen_names.insert(t.name.name.clone(), ());
-                validate_tap_params(t)?;
+                validate_tap_components(t)?;
             }
         }
     }
     Ok(())
 }
 
-/// Validate qualifier/component matching and key uniqueness on a single
-/// tap target.
-///
-/// - On simple (single-component) taps an unqualified key is treated as
-///   if it were qualified by the lone component, so `~meter(x, window: 25)`
-///   and `~meter(x, meter.window: 25)` collide on duplicate detection.
-/// - On compound taps every key must be qualified, and the qualifier
-///   must match one of the listed components.
-fn validate_tap_params(tap: &TapTarget) -> Result<(), ExpandError> {
-    let comps: Vec<&str> = tap.components.iter().map(|c| c.name.as_str()).collect();
-    let is_compound = comps.len() > 1;
+/// Validate component names and (for compound taps) cable-kind agreement.
+fn validate_tap_components(tap: &TapTarget) -> Result<(), ExpandError> {
+    let mut typed: Vec<TapType> = Vec::with_capacity(tap.components.len());
+    for c in &tap.components {
+        match TapType::from_ast_name(&c.name) {
+            Some(ty) => typed.push(ty),
+            None => {
+                let valid: Vec<&'static str> =
+                    TAP_SCHEMA.iter().map(|s| s.ty.as_str()).collect();
+                return Err(ExpandError::new(
+                    Code::TapUnknownComponent,
+                    c.span,
+                    format!(
+                        "unknown tap component {:?}; valid components are {}",
+                        c.name,
+                        valid.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
 
     // ADR 0054 §5: every component of a compound tap must agree on its
-    // input cable kind. `trigger_led` consumes a trigger cable; everything
-    // else consumes an audio cable. Mixing the two is a parse-time error.
-    if is_compound {
-        let any_trigger = comps.contains(&"trigger_led");
-        let any_audio = comps.iter().any(|c| *c != "trigger_led");
+    // input cable kind. Mixing audio- and trigger-cable components is a
+    // parse-time error.
+    if typed.len() > 1 {
+        let any_trigger = typed.iter().any(|t| cable_kind(*t) == CableKind::Trigger);
+        let any_audio = typed.iter().any(|t| cable_kind(*t) == CableKind::Audio);
         if any_trigger && any_audio {
             return Err(ExpandError::new(
                 Code::TapMixedCableKinds,
@@ -91,49 +110,6 @@ fn validate_tap_params(tap: &TapTarget) -> Result<(), ExpandError> {
                 "compound tap mixes audio-cable and trigger-cable components",
             ));
         }
-    }
-    let mut seen: HashMap<(String, String), ()> = HashMap::new();
-
-    for p in &tap.params {
-        let canonical_qual: String = match &p.qualifier {
-            Some(q) => {
-                if !comps.contains(&q.name.as_str()) {
-                    return Err(ExpandError::new(
-                        Code::TapUnknownQualifier,
-                        q.span,
-                        format!(
-                            "qualifier {:?} does not match any component of this tap (components: {})",
-                            q.name,
-                            comps.join(", ")
-                        ),
-                    ));
-                }
-                q.name.clone()
-            }
-            None => {
-                if is_compound {
-                    return Err(ExpandError::new(
-                        Code::TapAmbiguousUnqualified,
-                        p.key.span,
-                        format!(
-                            "ambiguous parameter key on compound tap; qualify with one of {{{}}}",
-                            comps.join(", ")
-                        ),
-                    ));
-                }
-                comps[0].to_owned()
-            }
-        };
-
-        let key = (canonical_qual, p.key.name.clone());
-        if seen.contains_key(&key) {
-            return Err(ExpandError::new(
-                Code::TapDuplicateParam,
-                p.key.span,
-                format!("duplicate tap parameter {:?}", p.key.name),
-            ));
-        }
-        seen.insert(key, ());
     }
     Ok(())
 }

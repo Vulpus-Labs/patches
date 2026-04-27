@@ -50,19 +50,31 @@ pub const TAP_BLOCK: usize = 64;
 /// resets on engine rebuild (the only time the sample rate can change).
 /// At 96 kHz a `u64` survives ~6 million years; wraparound is a
 /// non-issue.
+///
+/// `manifest_generation` is the tap-manifest generation in force when
+/// this block was emitted (ticket 0707). The host runtime increments a
+/// counter on every plan push; the value is plumbed through
+/// `ExecutionPlan` to the audio thread, stamped on each emitted block,
+/// and mirrored on the corresponding `ManifestPublication`. The
+/// observer drops frames whose generation does not match the current
+/// manifest, preventing stale-slot misinterpretation across replans.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct TapBlockFrame {
     pub samples: [[f32; MAX_TAPS]; TAP_BLOCK],
     pub sample_time: u64,
+    pub manifest_generation: u32,
+    _pad: u32,
 }
 
 impl TapBlockFrame {
-    /// All-zero block with `sample_time = 0`.
+    /// All-zero block with `sample_time = 0` and `manifest_generation = 0`.
     pub const fn zeroed() -> Self {
         Self {
             samples: [[0.0; MAX_TAPS]; TAP_BLOCK],
             sample_time: 0,
+            manifest_generation: 0,
+            _pad: 0,
         }
     }
 }

@@ -91,9 +91,9 @@ patch {
     mix.send_a_left -> del.in_left
     mix.send_a_right -> del.in_right
     mix.return_a_left <- del.out_left
-    mix.return_a_right <- del.out_right
+    mix.return_a_right, ~meter(bar) <- del.out_right
 
     # ── Stereo output (attenuated: oscillators + ring mod sum loud) ───────────
-    mix.out_left  -[0.1]-> out.in_left
-    mix.out_right -[0.1]-> out.in_right
+    mix.out_left  -[0.5]-> out.in_left, ~meter+spectrum+osc(out)
+    mix.out_right -[0.5]-> out.in_right
 }

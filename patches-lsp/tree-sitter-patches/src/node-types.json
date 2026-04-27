@@ -1238,74 +1238,6 @@
     }
   },
   {
-    "type": "tap_param",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "tap_param_key",
-          "named": true
-        },
-        {
-          "type": "value",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "tap_param_key",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "ident",
-          "named": true
-        },
-        {
-          "type": "tap_qualifier",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "tap_params",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "tap_param",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "tap_qualifier",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "ident",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "tap_target",
     "named": true,
     "fields": {},
@@ -1319,10 +1251,6 @@
         },
         {
           "type": "tap_name",
-          "named": true
-        },
-        {
-          "type": "tap_params",
           "named": true
         }
       ]

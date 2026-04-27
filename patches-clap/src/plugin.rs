@@ -34,6 +34,8 @@ use clap_sys::process::{
 };
 
 use patches_core::{AudioEnvironment, MidiEvent, BASE_PERIODIC_UPDATE_INTERVAL};
+use patches_observation::{spawn_observer, tap_ring, ObserverHandle};
+use patches_observation::subscribers::{DiagnosticReader, SubscribersHandle};
 use patches_registry::Registry;
 use patches_planner::ExecutionPlan;
 use patches_engine::PatchProcessor;
@@ -41,7 +43,8 @@ use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 
 use crate::error::CompileError;
 use crate::extensions;
-use patches_plugin_common::{DiagnosticView, GuiState, MeterTap};
+use patches_dsl::manifest::{Manifest, TapDescriptor};
+use patches_plugin_common::{DiagnosticView, GuiState, MeterTap, TapSummary};
 
 /// The runtime state of a single plugin instance.
 ///
@@ -77,8 +80,21 @@ pub struct PatchesClapPlugin {
     /// Clonable handle for polling engine halt state (ADR 0051). Populated
     /// in `activate` from the processor.
     pub(crate) halt_handle: Option<patches_engine::HaltHandle>,
+    /// Observer thread handle. Started in `activate`, joined in `deactivate`.
+    pub(crate) observer: Option<ObserverHandle>,
+    /// Reader handle into the observer's atomic-scalar tap surface
+    /// (ADR 0053 §7). Cloned for the GUI's main-thread tap pump.
+    pub(crate) subscribers: Option<SubscribersHandle>,
+    /// Observer-side diagnostic ring reader. Drained on `on_main_thread`
+    /// and surfaced through the GUI status log (ticket 0725).
+    pub(crate) diagnostics: Option<DiagnosticReader>,
     pub(crate) gui_handle: Option<crate::gui::WebviewGuiHandle>,
     pub(crate) gui_scale: f64,
+    /// Current window size in logical pixels. Updated via
+    /// `gui.set_size`; persisted between `gui_destroy` and `gui_create`
+    /// so reopen restores the previous size.
+    pub(crate) gui_width: u32,
+    pub(crate) gui_height: u32,
     /// Lock-free master-output meter tap. Audio thread writes, GUI reads.
     pub(crate) meter: Arc<MeterTap>,
 
@@ -115,6 +131,9 @@ impl PatchesClapPlugin {
         }
 
         let loaded = runtime.compile_and_push(&source, &self.registry)?;
+
+        let taps = project_manifest(&loaded.manifest);
+        lock_gui_mut(&self.gui_state, |g| g.taps = taps);
 
         if !loaded.layering_warnings.is_empty() {
             let rendered: Vec<_> = loaded
@@ -277,17 +296,34 @@ unsafe extern "C" fn plugin_activate(
             return false;
         }
     };
-    let (processor, plan_rx) = match runtime.take_audio_endpoints() {
+
+    // Stand up the observer thread + tap ring before taking the audio
+    // endpoints, so the planner's manifest publication reaches the
+    // observer (ADR 0056). Mirrors `patches-player::run_tui`.
+    let (tap_tx, tap_rx) = tap_ring(64);
+    let (mut observer, diag_rx) = spawn_observer(tap_rx, std::time::Duration::from_millis(2));
+    if let Some(replans) = observer.take_replans() {
+        runtime.attach_observer(replans);
+    } else {
+        eprintln!("patches-clap: observer replan producer missing");
+    }
+    let subs_handle = observer.subscribers.clone();
+
+    let (mut processor, plan_rx) = match runtime.take_audio_endpoints() {
         Some(pair) => pair,
         None => {
             eprintln!("patches-clap: host runtime missing audio endpoints");
             return false;
         }
     };
+    processor.set_tap_producer(Some(tap_tx));
     p.halt_handle = Some(processor.halt_handle());
     p.processor = Some(processor);
     p.plan_rx = Some(plan_rx);
     p.runtime = Some(runtime);
+    p.observer = Some(observer);
+    p.subscribers = Some(subs_handle);
+    p.diagnostics = Some(diag_rx);
 
     // Rebuild the registry from scratch: default set plus a fresh scan
     // of any module paths the host persisted. Ticket 0566.
@@ -342,6 +378,11 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     p.processor.take();
     p.halt_handle = None;
     p.runtime.take();
+    p.subscribers = None;
+    p.diagnostics = None;
+    if let Some(obs) = p.observer.take() {
+        obs.stop();
+    }
 }
 
 unsafe extern "C" fn plugin_start_processing(_plugin: *const clap_plugin) -> bool {
@@ -691,14 +732,16 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         gui_dirty = true;
     }
 
-    // Meter poll — read atomics and push a frame. Not gated by gui_dirty
-    // since meter has its own JS channel.
-    let meter_poll = lock_gui(&p.gui_state, |g| g.meter_poll_requested);
-    if meter_poll {
-        lock_gui_mut(&p.gui_state, |g| g.meter_poll_requested = false);
-        if let Some(handle) = &p.gui_handle {
-            let (pl, pr, rl, rr) = p.meter.read();
-            handle.push_meter(pl, pr, rl, rr);
+    // Drain observer diagnostics into the status log (ticket 0725).
+    if let Some(reader) = p.diagnostics.as_mut() {
+        let drained = reader.drain();
+        if !drained.is_empty() {
+            lock_gui_mut(&p.gui_state, |g| {
+                for d in &drained {
+                    g.push_status(d.render());
+                }
+            });
+            gui_dirty = true;
         }
     }
 
@@ -707,6 +750,34 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         if let Some(handle) = &p.gui_handle {
             handle.update(&p.gui_state);
         }
+    }
+
+    // Push a TapFrame at most once per `TAP_PUSH_INTERVAL`. Frames flow
+    // through a separate channel from `applyState` so snapshot dedupe
+    // doesn't suppress live tap updates.
+    if let (Some(handle), Some(subs)) = (&p.gui_handle, &p.subscribers) {
+        handle.push_taps(subs, &p.gui_state);
+    }
+}
+
+/// Project the DSL tap manifest into the webview-facing summary list,
+/// preserving slot order. `kind` collapses to the single component name
+/// for simple taps and to `"compound"` for multi-component taps.
+fn project_manifest(manifest: &Manifest) -> Vec<TapSummary> {
+    manifest.iter().map(tap_summary).collect()
+}
+
+fn tap_summary(d: &TapDescriptor) -> TapSummary {
+    let kind = if d.components.len() == 1 {
+        d.components[0].as_str().to_string()
+    } else {
+        "compound".to_string()
+    };
+    TapSummary {
+        name: d.name.clone(),
+        slot: d.slot,
+        kind,
+        components: d.components.iter().map(|c| c.as_str().to_string()).collect(),
     }
 }
 
@@ -838,10 +909,15 @@ mod activate_scan_tests {
             gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
+            gui_width: crate::extensions::GUI_WIDTH,
+            gui_height: crate::extensions::GUI_HEIGHT,
             sample_rate: 0.0,
             prev_beat: -1.0,
             prev_bar: -1,
             halt_handle: None,
+            observer: None,
+            subscribers: None,
+            diagnostics: None,
             meter: Arc::new(MeterTap::new()),
         });
         let data_ptr = Box::into_raw(data);
@@ -916,10 +992,15 @@ mod activate_scan_tests {
             gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
+            gui_width: crate::extensions::GUI_WIDTH,
+            gui_height: crate::extensions::GUI_HEIGHT,
             sample_rate: 0.0,
             prev_beat: -1.0,
             prev_bar: -1,
             halt_handle: None,
+            observer: None,
+            subscribers: None,
+            diagnostics: None,
             meter: Arc::new(MeterTap::new()),
         });
         let data_ptr = Box::into_raw(data);

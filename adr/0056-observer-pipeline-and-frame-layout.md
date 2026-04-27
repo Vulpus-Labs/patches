@@ -6,7 +6,8 @@
 [ADR 0043 — Cable tap observation](0043-cable-tap-observation.md),
 [ADR 0053 — Observation three-thread split](0053-observation-three-thread-split.md),
 [ADR 0054 — Tap DSL and modules](0054-tap-dsl-and-modules.md),
-[ADR 0055 — Observation bringup via ratatui patches-player](0055-observation-bringup-via-ratatui-player.md)
+[ADR 0055 — Observation bringup via ratatui patches-player](0055-observation-bringup-via-ratatui-player.md),
+[ADR 0058 — Subscriber surface and UI decoupling](0058-subscriber-surface-and-ui-decoupling.md)
 
 ## Context
 
@@ -150,10 +151,11 @@ unsupported components, future variants) and forwarded drop counters
 share a small SPSC ringbuf alongside the scalar surface. Adding a new
 diagnostic kind = adding a variant, not a new channel.
 
-Spectrum and scope outputs (non-scalar) need their own publish
-mechanism (per-slot double buffer or seqlock) parallel to the scalar
-surface. Out of scope for the meter-only bringup; the surface module
-must leave room for it.
+Spectrum and scope outputs (non-scalar) live in a parallel
+`[Mutex<Option<Vec<f32>>>; MAX_TAPS]` surface alongside the scalar
+cells. The choice between mutex, `ArcSwap`, and seqlock is closed in
+[ADR 0058 §2](0058-subscriber-surface-and-ui-decoupling.md); mutex
+wins because both sides are off the audio thread.
 
 ### 7. Sample timing & UI sync
 

@@ -3,7 +3,8 @@
 **Date:** 2026-04-25
 **Status:** Accepted
 **Supersedes (in part):** [ADR 0043 — Cable-tap observation](0043-cable-tap-observation.md)
-**Related:** [ADR 0051 — Module panic halt policy](0051-module-panic-halt-policy.md)
+**Related:** [ADR 0051 — Module panic halt policy](0051-module-panic-halt-policy.md),
+[ADR 0058 — Subscriber surface and UI decoupling](0058-subscriber-surface-and-ui-decoupling.md)
 
 ## Context
 
@@ -173,18 +174,20 @@ module that writes peak-hold), the observer's pipeline can be the
 identity. The tap-module / observer-pipeline split is a free design
 parameter per tap.
 
-### 8. Observer → UI handoff (speculative)
+### 8. Observer → UI handoff
 
-Recommended starting design, not load-bearing for this ADR:
+> **Superseded by [ADR 0058](0058-subscriber-surface-and-ui-decoupling.md).**
+> The summary below is preserved for historical context; the load-
+> bearing decisions (vector storage, event vs state split, coalescing
+> semantics) are now in 0058.
 
-- **Latest scalars:** `Arc<[AtomicU32; MAX_TAPS]>` of `f32` bits. UI
-  reads atomically per slot. Tearing across slots is invisible at UI
-  rates.
-- **Latest scope/spectrum frames:** per-slot triple-buffer
-  (`arc-swap::ArcSwap<Frame>`) or `Arc<Mutex<Frame>>`. Mutex is fine —
-  contention is observer ↔ UI, not audio ↔ anything.
-- **Frame history (waterfall, scrolling scope):** per-slot SPSC ring
-  observer → UI of completed frames. Consumer drains on paint.
+- **Latest scalars:** `[AtomicU32; ProcessorId::COUNT]` per slot of
+  `f32` bits. UI reads atomically per slot.
+- **Latest scope/spectrum frames:** `Mutex<Option<Vec<f32>>>` per slot
+  (chosen over `ArcSwap` triple-buffer; rationale in ADR 0058 §2).
+  Mutex is fine — contention is observer ↔ UI, not audio ↔ anything.
+- **Event-shaped observations** (diagnostics, future trigger fires):
+  SPSC `rtrb` ring, drained per UI frame. See ADR 0058 §1.
 
 UI poll rate is independent of observer wake rate; observer publishes
 on its own clock and UI samples whenever it repaints.

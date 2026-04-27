@@ -1,11 +1,9 @@
 //! Parser tests for cable tap targets (ADR 0054 §1, ticket 0694).
 //!
-//! These tests exercise the surface syntax only: simple, compound,
-//! qualified/unqualified parameters, mixing with cable gain, etc.
-//! Validation (top-level scope, name uniqueness, qualifier-component
-//! match) lands in 0696; desugaring lands in 0697.
+//! Tap parameters were retired in ticket 0734; only the component list
+//! and tap name remain in the syntax.
 
-use patches_dsl::ast::{CableEndpoint, Direction, Scalar, Statement, Value};
+use patches_dsl::ast::{CableEndpoint, Direction, Scalar, Statement};
 use patches_dsl::parse;
 
 fn first_connection(src: &str) -> patches_dsl::ast::Connection {
@@ -24,8 +22,8 @@ fn first_connection(src: &str) -> patches_dsl::ast::Connection {
 }
 
 #[test]
-fn simple_tap_target_unqualified() {
-    let src = "patch { module osc : Osc() osc.out -> ~meter(level, window: 25) }";
+fn simple_tap_target() {
+    let src = "patch { module osc : Osc() osc.out -> ~meter(level) }";
     let conn = first_connection(src);
     let CableEndpoint::Tap(tap) = &conn.rhs else {
         panic!("expected tap rhs, got {:?}", conn.rhs);
@@ -33,76 +31,34 @@ fn simple_tap_target_unqualified() {
     assert_eq!(tap.components.len(), 1);
     assert_eq!(tap.components[0].name, "meter");
     assert_eq!(tap.name.name, "level");
-    assert_eq!(tap.params.len(), 1);
-    let p = &tap.params[0];
-    assert!(p.qualifier.is_none());
-    assert_eq!(p.key.name, "window");
-    assert_eq!(p.value, Value::Scalar(Scalar::Int(25)));
-}
-
-#[test]
-fn simple_tap_target_qualified_param() {
-    let src = "patch { module osc : Osc() osc.out -> ~meter(level, meter.window: 25) }";
-    let conn = first_connection(src);
-    let CableEndpoint::Tap(tap) = &conn.rhs else { panic!() };
-    let p = &tap.params[0];
-    assert_eq!(p.qualifier.as_ref().unwrap().name, "meter");
-    assert_eq!(p.key.name, "window");
 }
 
 #[test]
 fn compound_tap_target() {
-    let src = "patch { module mix : Mix() mix.out -> ~meter+spectrum+osc(out, \
-              meter.window: 25, spectrum.fft: 1024, osc.length: 2048) }";
+    let src = "patch { module mix : Mix() mix.out -> ~meter+spectrum+osc(out) }";
     let conn = first_connection(src);
     let CableEndpoint::Tap(tap) = &conn.rhs else { panic!() };
     let names: Vec<&str> = tap.components.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, ["meter", "spectrum", "osc"]);
     assert_eq!(tap.name.name, "out");
-    assert_eq!(tap.params.len(), 3);
-    for p in &tap.params {
-        assert!(p.qualifier.is_some(), "expected qualifier on every param");
-    }
 }
 
 #[test]
-fn tap_target_no_params() {
+fn tap_target_trigger_led() {
     let src = "patch { module clk : Clock() clk.tick -> ~trigger_led(beat) }";
     let conn = first_connection(src);
     let CableEndpoint::Tap(tap) = &conn.rhs else { panic!() };
     assert_eq!(tap.components[0].name, "trigger_led");
     assert_eq!(tap.name.name, "beat");
-    assert!(tap.params.is_empty());
 }
 
 #[test]
 fn tap_target_with_cable_gain() {
-    let src = "patch { module f : Filter() f.out -[0.3]-> ~meter(level, window: 25) }";
+    let src = "patch { module f : Filter() f.out -[0.3]-> ~meter(level) }";
     let conn = first_connection(src);
     assert_eq!(conn.arrow.direction, Direction::Forward);
     assert_eq!(conn.arrow.scale, Some(Scalar::Float(0.3)));
     assert!(matches!(conn.rhs, CableEndpoint::Tap(_)));
-}
-
-#[test]
-fn tap_target_multiple_param_value_kinds() {
-    let src = "patch { module g : Gate() g.out -> \
-              ~gate_led(g, threshold: 0.1, label: \"hi\", invert: true) }";
-    let conn = first_connection(src);
-    let CableEndpoint::Tap(tap) = &conn.rhs else { panic!() };
-    assert_eq!(tap.params.len(), 3);
-    assert_eq!(tap.params[0].value, Value::Scalar(Scalar::Float(0.1)));
-    assert_eq!(
-        tap.params[1].value,
-        Value::Scalar(Scalar::Str("hi".to_owned()))
-    );
-    assert_eq!(tap.params[2].value, Value::Scalar(Scalar::Bool(true)));
-}
-
-#[test]
-fn tap_target_trailing_comma_after_params() {
-    let src = "patch { module o : Osc() o.out -> ~meter(level, window: 25,) }";
-    assert!(parse(src).is_ok());
 }
 
 // ─── Negative parses ─────────────────────────────────────────────────────────
@@ -114,26 +70,25 @@ fn negative_bare_tilde() {
 }
 
 #[test]
-fn negative_unknown_component() {
+fn unknown_component_parses_validation_rejects() {
     let src = "patch { module o : Osc() o.out -> ~bogus(name) }";
-    assert!(parse(src).is_err(), "unknown tap component must not parse");
+    let file = parse(src).expect("parse ok");
+    let err = patches_dsl::validate::validate(&file).expect_err("validate fails");
+    assert_eq!(err.code, patches_dsl::StructuralCode::TapUnknownComponent);
 }
 
 #[test]
-fn negative_compound_with_unknown_component() {
+fn compound_with_unknown_component_rejected_by_validate() {
     let src = "patch { module o : Osc() o.out -> ~meter+bogus(name) }";
-    assert!(parse(src).is_err());
+    let file = parse(src).expect("parse ok");
+    let err = patches_dsl::validate::validate(&file).expect_err("validate fails");
+    assert_eq!(err.code, patches_dsl::StructuralCode::TapUnknownComponent);
 }
 
 #[test]
-fn negative_malformed_param_missing_colon() {
-    let src = "patch { module o : Osc() o.out -> ~meter(level, window 25) }";
-    assert!(parse(src).is_err());
-}
-
-#[test]
-fn negative_malformed_param_missing_value() {
-    let src = "patch { module o : Osc() o.out -> ~meter(level, window:) }";
+fn negative_tap_with_param_no_longer_parses() {
+    // Param syntax retired (ticket 0734).
+    let src = "patch { module o : Osc() o.out -> ~meter(level, window: 25) }";
     assert!(parse(src).is_err());
 }
 
@@ -145,8 +100,6 @@ fn negative_tap_missing_name() {
 
 #[test]
 fn negative_tilde_in_module_name() {
-    // `~foo` in a module-decl ident slot. The lexer's `ident` rule already
-    // forbids `~`, so this must fail at parse time.
     let src = "patch { module ~foo : Osc() }";
     assert!(parse(src).is_err());
 }

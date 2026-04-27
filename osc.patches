@@ -1,0 +1,6 @@
+patch {
+
+  module osc: Osc { frequency: 440Hz drift: 0.0 }
+  osc.sine -> ~osc+spectrum(osc)
+
+}

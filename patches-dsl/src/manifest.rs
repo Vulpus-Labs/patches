@@ -18,7 +18,6 @@
 //! shared crate once non-DSL consumers exist. Keep it self-contained so
 //! that move is a rename rather than a redesign.
 
-use crate::ast::Value;
 use crate::provenance::Provenance;
 
 /// One of the tap component types accepted by ADR 0054 §1.
@@ -56,14 +55,6 @@ impl TapType {
     }
 }
 
-/// Untyped k/v map of observer-side analysis parameters.
-///
-/// Keys are canonicalised `(qualifier, key)` pairs: an unqualified
-/// `window: 25` on a `~meter(...)` target surfaces as
-/// `(("meter".into(), "window".into()), 25)`. The observer interprets
-/// each component's keys per its own pipeline.
-pub type TapParamMap = Vec<((String, String), Value)>;
-
 /// One tap target's manifest entry.
 #[derive(Debug, Clone)]
 pub struct TapDescriptor {
@@ -73,8 +64,6 @@ pub struct TapDescriptor {
     pub name: String,
     /// Tap components (length 1 for simple, ≥2 for compound).
     pub components: Vec<TapType>,
-    /// Observer-side analysis parameters (qualifier-resolved).
-    pub params: TapParamMap,
     /// Source provenance pointing at the `~` site of this tap target,
     /// for navigation and observer-side error messages.
     pub source: Provenance,

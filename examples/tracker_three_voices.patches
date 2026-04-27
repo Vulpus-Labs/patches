@@ -164,7 +164,7 @@ patch {
         @2: { level: 0.5, pan: 0.4,  send_a: 0.3 }
     }
 
-    bass_v.audio  -> mix.in[0]
+    bass_v.audio  -> mix.in[0], ~meter+osc+spectrum(bass)
     lead1_v.audio -> mix.in[1]
     lead2_v.audio -> mix.in[2]
 

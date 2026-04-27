@@ -222,6 +222,14 @@ pub struct ExecutionPlan {
     /// On plan adoption, `receive_tracker_data(arc.clone())` is called on each
     /// module in this list. Empty for non-tracker patches.
     pub tracker_receiver_indices: Vec<usize>,
+    /// Tap-manifest generation in force for this plan (ticket 0707).
+    /// Set by the host runtime; mirrored on the corresponding
+    /// `ManifestPublication`. The audio thread stores it on
+    /// `PatchProcessor` on adopt; subsequent emitted block frames carry
+    /// the value so the observer can drop frames whose slot semantics
+    /// don't match the current manifest. `0` means "no manifest yet" /
+    /// "unset"; the host runtime starts at 1 on first publication.
+    pub tap_manifest_generation: u32,
 }
 
 impl ExecutionPlan {
@@ -241,6 +249,7 @@ impl ExecutionPlan {
             port_updates: vec![],
             tracker_data: None,
             tracker_receiver_indices: vec![],
+            tap_manifest_generation: 0,
         }
     }
 }
@@ -560,6 +569,7 @@ impl PatchBuilder {
                 port_updates,
                 tracker_data: None,
                 tracker_receiver_indices: Vec::new(),
+                tap_manifest_generation: 0,
             },
             PlannerState {
                 nodes: node_states,

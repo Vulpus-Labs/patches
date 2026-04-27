@@ -25,6 +25,11 @@ ariadne             = "0.6"
 ratatui             = "0.29"
 crossterm           = "0.28"
 
+[build-dependencies]
+# Splash image is decoded at compile time and baked into the binary as
+# a const RGB array (see build.rs). No runtime image dep.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
 [features]
 default = []
 # Install the audio-thread allocator trap (ADR 0045 spike 4). Debug-only.

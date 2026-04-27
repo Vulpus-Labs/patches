@@ -248,8 +248,19 @@ const NATIVE_WINDOW_API: &CStr = CLAP_WINDOW_API_COCOA;
 #[cfg(target_os = "windows")]
 const NATIVE_WINDOW_API: &CStr = CLAP_WINDOW_API_WIN32;
 
-const GUI_WIDTH: u32 = 800;
-const GUI_HEIGHT: u32 = 600;
+pub(crate) const GUI_WIDTH: u32 = 800;
+pub(crate) const GUI_HEIGHT: u32 = 600;
+const GUI_MIN_WIDTH: u32 = 480;
+const GUI_MIN_HEIGHT: u32 = 360;
+const GUI_MAX_WIDTH: u32 = 3840;
+const GUI_MAX_HEIGHT: u32 = 2400;
+
+fn clamp_size(width: u32, height: u32) -> (u32, u32) {
+    (
+        width.clamp(GUI_MIN_WIDTH, GUI_MAX_WIDTH),
+        height.clamp(GUI_MIN_HEIGHT, GUI_MAX_HEIGHT),
+    )
+}
 
 static GUI: clap_plugin_gui = clap_plugin_gui {
     is_api_supported: Some(gui_is_api_supported),
@@ -316,17 +327,18 @@ unsafe extern "C" fn gui_set_scale(
 }
 
 unsafe extern "C" fn gui_get_size(
-    _plugin: *const clap_plugin,
+    plugin: *const clap_plugin,
     width: *mut u32,
     height: *mut u32,
 ) -> bool {
-    *width = GUI_WIDTH;
-    *height = GUI_HEIGHT;
+    let p = plugin::plugin_ref_pub(plugin);
+    *width = p.gui_width;
+    *height = p.gui_height;
     true
 }
 
 unsafe extern "C" fn gui_can_resize(_plugin: *const clap_plugin) -> bool {
-    false
+    true
 }
 
 unsafe extern "C" fn gui_get_resize_hints(
@@ -334,8 +346,8 @@ unsafe extern "C" fn gui_get_resize_hints(
     hints: *mut clap_gui_resize_hints,
 ) -> bool {
     let hints = &mut *hints;
-    hints.can_resize_horizontally = false;
-    hints.can_resize_vertically = false;
+    hints.can_resize_horizontally = true;
+    hints.can_resize_vertically = true;
     hints.preserve_aspect_ratio = false;
     hints.aspect_ratio_width = 0;
     hints.aspect_ratio_height = 0;
@@ -347,17 +359,24 @@ unsafe extern "C" fn gui_adjust_size(
     width: *mut u32,
     height: *mut u32,
 ) -> bool {
-    *width = GUI_WIDTH;
-    *height = GUI_HEIGHT;
+    let (w, h) = clamp_size(*width, *height);
+    *width = w;
+    *height = h;
     true
 }
 
 unsafe extern "C" fn gui_set_size(
-    _plugin: *const clap_plugin,
-    _width: u32,
-    _height: u32,
+    plugin: *const clap_plugin,
+    width: u32,
+    height: u32,
 ) -> bool {
-    // Fixed size — ignore.
+    let (w, h) = clamp_size(width, height);
+    let p = plugin::plugin_mut_pub(plugin);
+    p.gui_width = w;
+    p.gui_height = h;
+    if let Some(handle) = &p.gui_handle {
+        handle.set_bounds(w, h);
+    }
     true
 }
 
@@ -378,8 +397,8 @@ unsafe extern "C" fn gui_set_parent(
         parent,
         p.gui_state.clone(),
         p.host,
-        GUI_WIDTH,
-        GUI_HEIGHT,
+        p.gui_width,
+        p.gui_height,
         p.gui_scale,
     ) {
         Some(handle) => {
@@ -404,13 +423,19 @@ unsafe extern "C" fn gui_suggest_title(
     // Not a floating window — ignore.
 }
 
-unsafe extern "C" fn gui_show(_plugin: *const clap_plugin) -> bool {
-    // TODO: show baseview window
+unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {
+    let p = plugin::plugin_mut_pub(plugin);
+    if let Some(handle) = &p.gui_handle {
+        handle.set_visible(true);
+    }
     true
 }
 
-unsafe extern "C" fn gui_hide(_plugin: *const clap_plugin) -> bool {
-    // TODO: hide baseview window
+unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
+    let p = plugin::plugin_mut_pub(plugin);
+    if let Some(handle) = &p.gui_handle {
+        handle.set_visible(false);
+    }
     true
 }
 

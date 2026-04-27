@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 patches-core = { path = "../patches-core" }
+patches-dsl = { path = "../patches-dsl" }
 patches-host = { path = "../patches-host" }
 patches-registry = { path = "../patches-registry" }
 patches-engine = { path = "../patches-engine" }
@@ -18,6 +19,7 @@ patches-modules = { path = "../patches-modules" }
 patches-ffi = { path = "../patches-ffi" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-plugin-common = { path = "../patches-plugin-common" }
+patches-observation = { path = "../patches-observation" }
 patches-alloc-trap = { path = "../patches-alloc-trap" }
 clap-sys = "0.5"
 rfd = "0.17"

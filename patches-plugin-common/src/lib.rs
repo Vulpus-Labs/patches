@@ -8,5 +8,8 @@
 pub mod gui;
 pub mod meter;
 
-pub use gui::{DiagnosticView, GuiSnapshot, GuiState, Intent, STATUS_LOG_CAPACITY};
+pub use gui::{
+    DiagnosticView, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,
+    TapSummary, STATUS_LOG_CAPACITY,
+};
 pub use meter::MeterTap;

@@ -149,22 +149,9 @@ module.exports = grammar({
     tap_type: (_) =>
       choice("meter", "osc", "spectrum", "gate_led", "trigger_led"),
     tap_components: ($) => seq($.tap_type, repeat(seq("+", $.tap_type))),
-    tap_qualifier: ($) => $.ident,
-    tap_param_key: ($) =>
-      choice(seq($.tap_qualifier, ".", $.ident), $.ident),
-    tap_param: ($) => seq($.tap_param_key, ":", $.value),
-    tap_params: ($) =>
-      seq($.tap_param, repeat(seq(",", $.tap_param)), optional(",")),
     tap_name: ($) => $.ident,
     tap_target: ($) =>
-      seq(
-        "~",
-        $.tap_components,
-        "(",
-        $.tap_name,
-        optional(seq(",", $.tap_params)),
-        ")"
-      ),
+      seq("~", $.tap_components, "(", $.tap_name, ")"),
 
     // ─── Connections ────────────────────────────────────────────────────
     // _cable_endpoint is a hidden alias (leading underscore) so the
@@ -175,6 +162,7 @@ module.exports = grammar({
     connection: ($) =>
       seq(
         $._cable_endpoint,
+        repeat(seq(",", $._cable_endpoint)),
         $.arrow,
         $._cable_endpoint,
         repeat(seq(",", $._cable_endpoint))

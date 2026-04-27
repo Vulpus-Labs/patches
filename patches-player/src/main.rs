@@ -25,6 +25,7 @@ use patches_host::{CompileError, HostBuilder, LoadedPatch, PathSource};
 use patches_observation::{spawn_observer, tap_ring};
 
 mod diagnostic_render;
+mod splash;
 mod tui;
 
 /// Render a [`CompileError`] to stderr using the source map it carries.
@@ -324,6 +325,11 @@ fn run_tui(
     let mut frame_counter: u64 = 0;
 
     let mut terminal = tui::enter_terminal()?;
+    let _ = splash::show_until_dismissed(
+        &mut terminal,
+        Duration::from_secs(5),
+        &external_quit,
+    );
     let outcome = tui::run(
         &mut terminal,
         &mut view,
@@ -372,6 +378,7 @@ fn run_tui(
                                 view.log.push(w);
                             }
                             view.set_taps(tui::taps_from_manifest(&loaded.manifest));
+                            view.seed_drop_baselines(&subs_handle);
                             view.log.push("reloaded");
                             refresh_watched(&mut watched, &loaded.dependencies);
                         }

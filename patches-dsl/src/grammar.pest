@@ -113,20 +113,22 @@ arrow          = { forward_arrow | backward_arrow }
 // Cable RHS form: `~taptype(name, k: v, ...)` and compound `~a+b+c(name, ...)`.
 // Component set is closed and grammar-enforced so unknown components fail with
 // a parse-level diagnostic at the `~` site.
-tap_component  = @{ ("meter" | "osc" | "spectrum" | "gate_led" | "trigger_led")
-                    ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+// Open ident; the closed component set is enforced at validate-time so
+// the structural diagnostic can suggest valid alternatives (ticket 0711).
+tap_component  = { ident }
 tap_components = { tap_component ~ ("+" ~ tap_component)* }
-// Parameter key: bare `key` or qualified `qualifier.key`. Two idents = qualified.
-tap_param_key  = { ident ~ ("." ~ ident)? }
-tap_param      = { tap_param_key ~ ":" ~ value }
-tap_target     = { "~" ~ tap_components ~ "(" ~ ident ~ ("," ~ tap_param)* ~ ","? ~ ")" }
+tap_target     = { "~" ~ tap_components ~ "(" ~ ident ~ ")" }
 
 // ─── Connections ──────────────────────────────────────────────────────────────
 // A cable endpoint is either a port reference or a tap target. tap_target must
 // come first so the leading `~` disambiguates from a bare ident.
 cable_endpoint = { tap_target | port_ref }
-// Fan-out: `a.out -> b.in, c.in` desugars to two connections.
-connection = { cable_endpoint ~ arrow ~ cable_endpoint ~ ("," ~ cable_endpoint)* }
+// Fan-out / fan-in: lists allowed on either side of the arrow. Forward
+// (`->`) lists fan out from a single source on the LHS; backward (`<-`)
+// lists fan in to a single source on the RHS. The builder rejects lists
+// on the side opposite the arrow direction.
+connection = { cable_endpoint ~ ("," ~ cable_endpoint)* ~ arrow
+              ~ cable_endpoint ~ ("," ~ cable_endpoint)* }
 
 // ─── Statements ───────────────────────────────────────────────────────────────
 statement = { module_decl | song_block | pattern_block | connection }

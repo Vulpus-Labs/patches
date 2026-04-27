@@ -1,7 +1,7 @@
 //! Tap-target validation pass coverage (ticket 0696, ADR 0054 §1).
 //!
-//! Each test exercises one rejection rule and asserts the
-//! [`StructuralCode`], message substring, and primary span placement.
+//! Tap parameters were retired in ticket 0734; only component-level and
+//! name-uniqueness rules remain.
 
 use patches_dsl::{parse, validate::validate, StructuralCode};
 
@@ -25,7 +25,7 @@ fn tap_in_template_rejected() {
 template t {
     in: x
     out: y
-    $.x -> ~meter(level, window: 25)
+    $.x -> ~meter(level)
 }
 
 patch {
@@ -37,7 +37,7 @@ patch {
     let err = validate_err(src);
     assert_eq!(err.code, StructuralCode::TapInTemplate);
     assert!(err.message.contains("top level"));
-    assert_span_covers(src, err.span, "~meter(level, window: 25)");
+    assert_span_covers(src, err.span, "~meter(level)");
 }
 
 #[test]
@@ -46,86 +46,40 @@ fn duplicate_tap_name_rejected() {
 patch {
     module a : Osc
     module b : Osc
-    a.out -> ~meter(level, window: 25)
-    b.out -> ~meter(level, window: 50)
+    a.out -> ~meter(level)
+    b.out -> ~meter(level)
 }
 ";
     let err = validate_err(src);
     assert_eq!(err.code, StructuralCode::TapDuplicateName);
     assert!(err.message.contains("duplicate tap name"));
-    // Span points at the second occurrence's name token.
     assert_span_covers(src, err.span, "level");
 }
 
 #[test]
-fn unknown_qualifier_rejected() {
+fn duplicate_name_with_different_components_still_rejected() {
     let src = "\
 patch {
-    module o : Osc
-    o.out -> ~meter(level, osc.length: 2048)
+    module a : Osc
+    a.out -> ~meter(level)
+    a.out -> ~spectrum(level)
 }
 ";
     let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapUnknownQualifier);
-    assert!(err.message.contains("does not match"));
-    assert_span_covers(src, err.span, "osc");
+    assert_eq!(err.code, StructuralCode::TapDuplicateName);
+    assert!(err.message.contains("compound"));
 }
 
 #[test]
-fn ambiguous_unqualified_on_compound_rejected() {
+fn compound_form_multiplexes_observations() {
     let src = "\
 patch {
-    module m : Mix
-    m.out -> ~meter+spectrum(out, window: 25)
+    module a : Osc
+    a.out -> ~meter+spectrum(level)
 }
 ";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapAmbiguousUnqualified);
-    assert!(err.message.contains("ambiguous"));
-    assert_span_covers(src, err.span, "window");
-}
-
-#[test]
-fn duplicate_param_simple_rejected() {
-    let src = "\
-patch {
-    module o : Osc
-    o.out -> ~meter(level, window: 25, window: 50)
-}
-";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapDuplicateParam);
-    // The duplicate is the second `window`; span points at the second key.
-    assert_span_covers(src, err.span, "window");
-    // Sanity: the second `window` lives later in the source than the first.
-    let first = src.find("window").unwrap();
-    assert!(err.span.start > first);
-}
-
-#[test]
-fn duplicate_param_qualified_collides_with_unqualified() {
-    // On a simple tap, unqualified `window` and qualified `meter.window`
-    // refer to the same key; the second instance must be rejected.
-    let src = "\
-patch {
-    module o : Osc
-    o.out -> ~meter(level, window: 25, meter.window: 50)
-}
-";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapDuplicateParam);
-}
-
-#[test]
-fn duplicate_param_compound_qualified_rejected() {
-    let src = "\
-patch {
-    module m : Mix
-    m.out -> ~meter+spectrum(out, meter.window: 25, meter.window: 50)
-}
-";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapDuplicateParam);
+    let file = parse(src).expect("parse should succeed");
+    validate(&file).expect("compound tap should validate");
 }
 
 #[test]
@@ -133,7 +87,7 @@ fn valid_simple_tap_accepts() {
     let src = "\
 patch {
     module o : Osc
-    o.out -> ~meter(level, window: 25)
+    o.out -> ~meter(level)
 }
 ";
     let file = parse(src).unwrap();
@@ -145,7 +99,7 @@ fn valid_compound_tap_accepts() {
     let src = "\
 patch {
     module m : Mix
-    m.out -> ~meter+spectrum+osc(out, meter.window: 25, spectrum.fft: 1024, osc.length: 2048)
+    m.out -> ~meter+spectrum+osc(out)
 }
 ";
     let file = parse(src).unwrap();
@@ -153,26 +107,26 @@ patch {
 }
 
 #[test]
-fn valid_simple_tap_qualified_form_accepts() {
+fn unknown_component_rejected() {
     let src = "\
 patch {
     module o : Osc
-    o.out -> ~meter(level, meter.window: 25)
+    o.out -> ~unknown(level)
 }
 ";
-    let file = parse(src).unwrap();
-    validate(&file).expect("qualified key on simple tap should validate");
+    let err = validate_err(src);
+    assert_eq!(err.code, StructuralCode::TapUnknownComponent);
+    assert_span_covers(src, err.span, "unknown");
 }
 
 #[test]
-fn distinct_keys_distinct_qualifiers_accept() {
-    // Different qualifiers, same key — distinct on a compound tap.
+fn mixed_cable_kinds_rejected() {
     let src = "\
 patch {
-    module m : Mix
-    m.out -> ~meter+spectrum(out, meter.window: 25, spectrum.window: 50)
+    module o : Osc
+    o.out -> ~meter+trigger_led(mixed)
 }
 ";
-    let file = parse(src).unwrap();
-    validate(&file).expect("distinct (qualifier, key) pairs are not duplicates");
+    let err = validate_err(src);
+    assert_eq!(err.code, StructuralCode::TapMixedCableKinds);
 }

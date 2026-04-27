@@ -39,6 +39,12 @@ pub struct HostRuntime {
     /// publication is a no-op (hosts that never spawn an observer).
     replans: Option<ReplanProducer>,
     halt_handle: HaltHandle,
+    /// Tap-manifest generation counter (ticket 0707). Bumped on every
+    /// successful `compile_and_push`; the same value is stamped on the
+    /// emitted `ExecutionPlan` and on the corresponding
+    /// `ManifestPublication` so the observer can drop frames whose
+    /// slot semantics are stale across a replan.
+    next_tap_generation: u32,
 }
 
 impl HostRuntime {
@@ -62,6 +68,7 @@ impl HostRuntime {
             tap_rate,
             replans: None,
             halt_handle,
+            next_tap_generation: 0,
         }
     }
 
@@ -76,13 +83,24 @@ impl HostRuntime {
     /// Tap publication rate (host sample rate × oversampling factor).
     pub fn tap_rate(&self) -> f32 { self.tap_rate }
 
-    fn publish_manifest(&mut self, loaded: &LoadedPatch) {
+    fn publish_manifest(&mut self, loaded: &LoadedPatch, generation: u32) {
         if let Some(tx) = self.replans.as_mut() {
             let _ = tx.submit(ManifestPublication {
                 manifest: Arc::new(loaded.manifest.clone()),
                 sample_rate: self.tap_rate,
+                generation,
             });
         }
+    }
+
+    /// Allocate the next tap-manifest generation. Starts at 1 (generation
+    /// `0` reserved for "no manifest yet"). `wrapping_add(1)` is harmless
+    /// in practice — 2^32 replans is effectively never.
+    fn next_generation(&mut self) -> u32 {
+        let g = self.next_tap_generation.wrapping_add(1);
+        // Skip 0 on wraparound so it never collides with the "unset" sentinel.
+        self.next_tap_generation = if g == 0 { 1 } else { g };
+        self.next_tap_generation
     }
 
     pub fn env(&self) -> &AudioEnvironment { &self.env }
@@ -140,9 +158,11 @@ impl HostRuntime {
         source: &dyn HostFileSource,
         registry: &Registry,
     ) -> Result<LoadedPatch, CompileError> {
-        let (loaded, plan) = self.compile(source, registry)?;
+        let (loaded, mut plan) = self.compile(source, registry)?;
+        let g = self.next_generation();
+        plan.tap_manifest_generation = g;
         let _ = self.plan_tx.push(plan);
-        self.publish_manifest(&loaded);
+        self.publish_manifest(&loaded, g);
         Ok(loaded)
     }
 
@@ -156,10 +176,12 @@ impl HostRuntime {
         registry: &Registry,
     ) -> Result<LoadedPatch, CompileError> {
         let (loaded, mut plan) = self.compile(source, registry)?;
+        let g = self.next_generation();
+        plan.tap_manifest_generation = g;
         loop {
             match self.plan_tx.push(plan) {
                 Ok(()) => {
-                    self.publish_manifest(&loaded);
+                    self.publish_manifest(&loaded, g);
                     return Ok(loaded);
                 }
                 Err(rtrb::PushError::Full(returned)) => {

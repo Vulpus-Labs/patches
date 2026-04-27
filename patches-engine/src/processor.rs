@@ -96,6 +96,11 @@ pub struct PatchProcessor {
     /// non-issue. Distinct from `sample_count`, which wraps at 2^16 for
     /// transport.
     tap_sample_counter: u64,
+    /// Tap-manifest generation in force on the audio side (ticket 0707).
+    /// Read from each adopted `ExecutionPlan`'s `tap_manifest_generation`
+    /// field; stamped onto every emitted `TapBlockFrame` so the observer
+    /// can drop frames whose slot semantics are stale.
+    tap_manifest_generation: u32,
 }
 
 impl PatchProcessor {
@@ -150,6 +155,7 @@ impl PatchProcessor {
             tap_block: TapBlockFrame::zeroed(),
             tap_block_idx: 0,
             tap_sample_counter: 0,
+            tap_manifest_generation: 0,
         }
     }
 
@@ -264,6 +270,12 @@ impl PatchProcessor {
         }
 
         self.state = stale.rebuild(&plan, self.periodic_update_interval);
+
+        // Adopt tap-manifest generation from the plan (ticket 0707). Only
+        // bump on non-zero — empty/initial plans carry 0.
+        if plan.tap_manifest_generation != 0 {
+            self.tap_manifest_generation = plan.tap_manifest_generation;
+        }
 
         let old_plan = self.previous_plan.replace(plan);
         if let Some(old) = old_plan {
@@ -422,6 +434,7 @@ impl PatchProcessor {
         // sample_time stamps the first sample in the block (idx == 0).
         if self.tap_block_idx == 0 {
             self.tap_block.sample_time = self.tap_sample_counter;
+            self.tap_block.manifest_generation = self.tap_manifest_generation;
         }
         self.tap_block.samples[self.tap_block_idx] = self.tap_backplane;
         self.tap_block_idx += 1;

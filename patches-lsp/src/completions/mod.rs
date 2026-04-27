@@ -26,6 +26,7 @@ mod module_types;
 mod params;
 mod ports;
 mod shape;
+mod tap;
 
 use patches_registry::Registry;
 use tower_lsp::lsp_types::*;
@@ -55,6 +56,16 @@ pub(crate) fn compute_completions(
     model: &SemanticModel,
     registry: &Registry,
 ) -> Vec<CompletionItem> {
+    // Tap-context fast path: `~|`, `~comp+|`, and `~...(|` aren't reliably
+    // classifiable by tree-sitter (they live in ERROR-recovered nodes), so
+    // dispatch via a textual scan first.
+    if let Some(ctx) = tap::scan_tap_context(source, byte_offset) {
+        return match ctx {
+            tap::TapCursor::AfterTilde => tap::complete_components_initial(),
+            tap::TapCursor::AfterPlus { listed } => tap::complete_components_continuing(&listed),
+        };
+    }
+
     match classify_cursor(tree, byte_offset) {
         CursorContext::ModuleType { .. } | CursorContext::ModuleTypeSlot { .. } => {
             return complete_module_types(model, registry);
@@ -73,7 +84,6 @@ pub(crate) fn compute_completions(
         }
         CursorContext::ModuleName { .. }
         | CursorContext::TapType { .. }
-        | CursorContext::TapParamKey { .. }
         | CursorContext::TapName { .. }
         | CursorContext::Unknown => {}
     }
@@ -315,6 +325,34 @@ mod tests {
             !labels.is_empty() && items.iter().all(|i| i.kind == Some(CompletionItemKind::ENUM_MEMBER)),
             "expected enum-member completions, got: {labels:?}"
         );
+    }
+
+    #[test]
+    fn completions_after_tilde_returns_all_components() {
+        let source = "patch {\n    module o : Osc\n    o.out -> ~\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find('~').unwrap() + 1;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels.len(), 5, "got: {labels:?}");
+        for c in ["meter", "osc", "spectrum", "gate_led", "trigger_led"] {
+            assert!(labels.contains(&c), "missing {c}: {labels:?}");
+        }
+    }
+
+    #[test]
+    fn completions_after_plus_filters_listed_and_trigger_led() {
+        let source = "patch {\n    module o : Osc\n    o.out -> ~meter+\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find('+').unwrap() + 1;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels.len(), 3, "got: {labels:?}");
+        for c in ["osc", "spectrum", "gate_led"] {
+            assert!(labels.contains(&c), "missing {c}: {labels:?}");
+        }
+        assert!(!labels.contains(&"trigger_led"), "trigger_led must be excluded");
+        assert!(!labels.contains(&"meter"), "meter already listed");
     }
 
     #[test]

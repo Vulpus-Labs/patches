@@ -13,7 +13,7 @@ pub mod subscribers;
 pub mod observer;
 
 pub use patches_io_ring::{tap_ring, TapRingConsumer, TapRingProducer, TapRingShared};
-pub use processor::{Observation, Processor, ProcessorId, build_pipeline};
+pub use processor::{Processor, ProcessorId, build_pipeline};
 pub use subscribers::{
     Diagnostic, DiagnosticReader, LatestValues, Subscribers, SubscribersHandle,
 };

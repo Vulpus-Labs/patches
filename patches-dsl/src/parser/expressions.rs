@@ -6,8 +6,8 @@ use pest::iterators::Pair;
 
 use crate::ast::{
     Arrow, AtBlockIndex, CableEndpoint, Connection, Direction, Ident, ParamEntry, ParamIndex,
-    PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, Statement, TapParam,
-    TapTarget, Value,
+    PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, Statement, TapTarget,
+    Value,
 };
 
 use super::decls::build_module_decl;
@@ -299,7 +299,7 @@ pub(super) fn build_arrow(pair: Pair<'_, Rule>) -> Result<Arrow, ParseError> {
 
 /// Build a `tap_target` pair into a [`TapTarget`].
 ///
-/// Grammar: `"~" ~ tap_components ~ "(" ~ ident ~ ("," ~ tap_param)* ~ ","? ~ ")"`.
+/// Grammar: `"~" ~ tap_components ~ "(" ~ ident ~ ")"`.
 /// Component identifiers are emitted with their own spans so 0696 / 0698 can
 /// point diagnostics and hover at the exact component token.
 pub(super) fn build_tap_target(pair: Pair<'_, Rule>) -> Result<TapTarget, ParseError> {
@@ -307,7 +307,6 @@ pub(super) fn build_tap_target(pair: Pair<'_, Rule>) -> Result<TapTarget, ParseE
     let span = span_of(&pair);
     let mut it = pair.into_inner();
 
-    // tap_components — one or more tap_component children.
     let comps_pair = it.next().unwrap();
     let components: Vec<Ident> = comps_pair
         .into_inner()
@@ -316,24 +315,7 @@ pub(super) fn build_tap_target(pair: Pair<'_, Rule>) -> Result<TapTarget, ParseE
 
     let name = build_ident(it.next().unwrap());
 
-    let mut params = Vec::new();
-    for entry in it {
-        // entry.as_rule() == Rule::tap_param
-        let param_span = span_of(&entry);
-        let mut pit = entry.into_inner();
-        // tap_param_key = { ident ~ ("." ~ ident)? }
-        let key_pair = pit.next().unwrap();
-        let mut key_inner = key_pair.into_inner();
-        let first = build_ident(key_inner.next().unwrap());
-        let (qualifier, key) = match key_inner.next() {
-            Some(second) => (Some(first), build_ident(second)),
-            None => (None, first),
-        };
-        let value = build_value(pit.next().unwrap())?;
-        params.push(TapParam { qualifier, key, value, span: param_span });
-    }
-
-    Ok(TapTarget { components, name, params, span })
+    Ok(TapTarget { components, name, span })
 }
 
 fn build_cable_endpoint(pair: Pair<'_, Rule>) -> Result<CableEndpoint, ParseError> {
@@ -348,27 +330,85 @@ fn build_cable_endpoint(pair: Pair<'_, Rule>) -> Result<CableEndpoint, ParseErro
 
 pub(super) fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, ParseError> {
     // pair.as_rule() == Rule::connection
-    // Grammar: cable_endpoint ~ arrow ~ cable_endpoint ~ ("," ~ cable_endpoint)*
-    // Fan-out (`a -> b, c, d`) desugars to one Connection per rhs,
-    // sharing the rule's span — `PatchReferences::connection_groups`
-    // keys on that shared span to reunite the fan-out targets. `span_of`
-    // already trims trailing whitespace/comments consumed by pest while
-    // attempting the optional repetition, so the shared span stays tight
-    // to `a.port -> b.port, c.port, d.port`.
+    // Grammar: cable_endpoint ("," cable_endpoint)* arrow
+    //          cable_endpoint ("," cable_endpoint)*
+    //
+    // Forward (`->`) — list goes on the RHS (fan-out from one source).
+    // Backward (`<-`) — list goes on the LHS (fan-in to one source).
+    // Lists on the side opposite the arrow direction are rejected: that
+    // would mean multiple sources driving the same sink, which the
+    // engine has no semantics for.
+    //
+    // Each emitted Connection shares the rule's span so
+    // `PatchReferences::connection_groups` can reunite the fan endpoints.
     let span = span_of(&pair);
-    let mut it = pair.into_inner();
-    let lhs = build_cable_endpoint(it.next().unwrap())?;
-    let arrow = build_arrow(it.next().unwrap())?;
-    let first_rhs = build_cable_endpoint(it.next().unwrap())?;
 
-    let mut connections = vec![Connection { lhs: lhs.clone(), arrow: arrow.clone(), rhs: first_rhs, span }];
-    for extra in it {
-        connections.push(Connection {
-            lhs: lhs.clone(),
-            arrow: arrow.clone(),
-            rhs: build_cable_endpoint(extra)?,
-            span,
-        });
+    // Walk children, collecting the LHS list, then the arrow, then the
+    // RHS list. The arrow is the only non-cable_endpoint child.
+    let mut lhs_list: Vec<CableEndpoint> = Vec::new();
+    let mut rhs_list: Vec<CableEndpoint> = Vec::new();
+    let mut arrow_opt: Option<Arrow> = None;
+    for child in pair.into_inner() {
+        match child.as_rule() {
+            Rule::arrow => arrow_opt = Some(build_arrow(child)?),
+            Rule::cable_endpoint => {
+                let ep = build_cable_endpoint(child)?;
+                if arrow_opt.is_none() {
+                    lhs_list.push(ep);
+                } else {
+                    rhs_list.push(ep);
+                }
+            }
+            other => unreachable!("unexpected rule in connection: {other:?}"),
+        }
+    }
+    let arrow = arrow_opt.expect("grammar guarantees an arrow child");
+
+    match arrow.direction {
+        Direction::Forward => {
+            if lhs_list.len() > 1 {
+                return Err(ParseError {
+                    span: arrow.span,
+                    message: "forward arrow `->` requires a single source on the left; \
+                              for fan-in use backward arrow `<-`".to_string(),
+                });
+            }
+        }
+        Direction::Backward => {
+            if rhs_list.len() > 1 {
+                return Err(ParseError {
+                    span: arrow.span,
+                    message: "backward arrow `<-` requires a single source on the right; \
+                              for fan-out use forward arrow `->`".to_string(),
+                });
+            }
+        }
+    }
+
+    let mut connections: Vec<Connection> = Vec::new();
+    match arrow.direction {
+        Direction::Forward => {
+            let lhs = lhs_list.into_iter().next().expect("at least one lhs");
+            for rhs in rhs_list {
+                connections.push(Connection {
+                    lhs: lhs.clone(),
+                    arrow: arrow.clone(),
+                    rhs,
+                    span,
+                });
+            }
+        }
+        Direction::Backward => {
+            let rhs = rhs_list.into_iter().next().expect("at least one rhs");
+            for lhs in lhs_list {
+                connections.push(Connection {
+                    lhs,
+                    arrow: arrow.clone(),
+                    rhs: rhs.clone(),
+                    span,
+                });
+            }
+        }
     }
     Ok(connections)
 }
