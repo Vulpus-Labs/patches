@@ -640,8 +640,18 @@
       return box;
     }
 
-    for (var i = 0; i < sorted.length; i++) {
-      var t = sorted[i];
+    // Fold `~stereo_meter(foo)` halves (manifest names `foo/left` and
+    // `foo/right` at consecutive slots) into one paired row labelled
+    // by stem (ADR 0059 §7). Mono taps stay as before.
+    var foldedRows = foldStereoPairs(sorted);
+
+    for (var i = 0; i < foldedRows.length; i++) {
+      var entry = foldedRows[i];
+      if (entry.stereo) {
+        renderStereoMeterRow(root, entry.stem, entry.left, entry.right);
+        continue;
+      }
+      var t = entry.tap;
       var compsRaw = t.components || [];
       var bundle = {};
       var rowsRendered = 0;
@@ -655,9 +665,6 @@
         row.className = "tap-row";
         var label = document.createElement("div");
         label.className = "tap-name";
-        // Tap name on the first row of the tap; subsequent rows get a
-        // visually quieter continuation label so the grouping is clear
-        // without repeating the full name.
         if (rowsRendered === 0) {
           label.textContent = t.name + " (" + compsRaw.join("+") + ")";
         } else {
@@ -676,6 +683,73 @@
         rowsRendered++;
       }
       if (rowsRendered > 0) slotWidgets[t.slot] = bundle;
+    }
+
+    function foldStereoPairs(sorted) {
+      var out = [];
+      var k = 0;
+      while (k < sorted.length) {
+        var cur = sorted[k];
+        var comps = cur.components || [];
+        var hasStereo = comps.indexOf("stereo_meter") !== -1;
+        var endsLeft = typeof cur.name === "string"
+          && cur.name.length > 5
+          && cur.name.slice(-5) === "/left";
+        var next = sorted[k + 1];
+        if (hasStereo && endsLeft && next) {
+          var nextComps = next.components || [];
+          var endsRight = typeof next.name === "string"
+            && next.name.length > 6
+            && next.name.slice(-6) === "/right";
+          var stem = cur.name.slice(0, -5);
+          var nextStem = endsRight ? next.name.slice(0, -6) : null;
+          if (
+            nextComps.indexOf("stereo_meter") !== -1
+            && nextStem === stem
+            && next.slot === cur.slot + 1
+          ) {
+            out.push({ stereo: true, stem: stem, left: cur, right: next });
+            k += 2;
+            continue;
+          }
+        }
+        out.push({ stereo: false, tap: cur });
+        k += 1;
+      }
+      return out;
+    }
+
+    function renderStereoMeterRow(root, stem, left, right) {
+      // Build one row holding two horizontally-laid meter canvases
+      // stacked vertically (L on top, R below). The stem is the only
+      // label — the pair reads as a single widget.
+      var row = document.createElement("div");
+      row.className = "tap-row tap-row-stereo";
+      var label = document.createElement("div");
+      label.className = "tap-name";
+      label.textContent = stem + " (stereo_meter)";
+      row.appendChild(label);
+
+      var widgets = document.createElement("div");
+      widgets.className = "tap-widgets tap-widgets-stereo";
+      row.appendChild(widgets);
+
+      var bundleL = {};
+      var bundleR = {};
+      var lBox = buildWidgetBox("meter", left, bundleL);
+      var rBox = buildWidgetBox("meter", right, bundleR);
+      if (lBox) {
+        lBox.classList.add("stereo-half", "stereo-l");
+        widgets.appendChild(lBox);
+      }
+      if (rBox) {
+        rBox.classList.add("stereo-half", "stereo-r");
+        widgets.appendChild(rBox);
+      }
+      root.appendChild(row);
+
+      slotWidgets[left.slot] = bundleL;
+      slotWidgets[right.slot] = bundleR;
     }
   }
 

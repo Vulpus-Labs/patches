@@ -214,7 +214,7 @@ template t() {
 patch {
     module x : t
     module out : AudioOut
-    out.in_left <- x.audio
+    out.in <- x.audio
 }
 "#;
     let root = std::path::PathBuf::from("/virtual/x.patches");
@@ -307,7 +307,7 @@ fn unknown_port_returns_error() {
             from_port: "no_such_port".to_string(),
             from_index: 0,
             to_module: "out".into(),
-            to_port: "in_left".to_string(),
+            to_port: "in".to_string(),
             to_index: 0,
             scale: 1.0,
             provenance: prov.clone(),

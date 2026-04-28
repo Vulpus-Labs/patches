@@ -10,7 +10,8 @@ use crate::lsp_util::byte_offset_to_position;
 
 fn summary_for(name: &str) -> &'static str {
     match name {
-        "meter" => "Fused peak + RMS level meter (ADR 0054 §7).\n\nObserver-side: rolling-window RMS plus running max-abs with ballistic decay. Both surfaced together to subscribers.",
+        "meter" => "Fused peak + RMS level meter on a mono audio/CV cable (ADR 0054 §7).\n\nObserver-side: rolling-window RMS plus running max-abs with ballistic decay. Both surfaced together to subscribers.",
+        "stereo_meter" => "Fused peak + RMS level meter on a stereo cable (ADR 0059 §4, §7).\n\nManifest publishes two scalar tracks named `<name>/left` and `<name>/right` at consecutive backplane slots; UI subscribers group them into one paired widget by stem. Mono Audio sources are silently broadcast across both bars.",
         "osc" => "Oscilloscope view (ADR 0054 §7). Decimated ring buffer with optional zero-cross alignment.",
         "spectrum" => "Windowed FFT magnitude spectrum (ADR 0054 §7).",
         "gate_led" => "Gate-style LED on a mono audio/CV signal (ADR 0054 §7).",

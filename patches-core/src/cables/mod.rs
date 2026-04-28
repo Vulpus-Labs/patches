@@ -2,11 +2,21 @@
 //! [`crate::cable_pool::CablePool`]. Port struct definitions are split across
 //! sibling submodules by kind; this file keeps the foundational enums and the
 //! pool-slot / backplane indexing constants.
+//!
+//! Producer-side and consumer-side shape almost always agree; the one
+//! exception is the mono→stereo broadcast coercion (ADR 0059 §2). When the
+//! planner observes a mono Audio source feeding a stereo input it sets
+//! [`StereoInput::broadcast_from_mono`], leaves `cable_idx` pointing at the
+//! producer's mono slot, and the consumer's `read()` returns `(s, s)` from
+//! the underlying [`CableValue::Mono`] sample. No synthetic broadcaster
+//! module, no extra audio-thread work, and `CableValue` keeps its two
+//! variants — only the consuming port reinterprets.
 
 mod gate;
 mod mono;
 mod poly;
 mod ports;
+mod stereo;
 mod trigger;
 
 pub use gate::{GateEdge, GateInput, PolyGateInput};
@@ -14,6 +24,7 @@ pub use mono::{MonoInput, MonoOutput};
 pub use mono::MonoLayout;
 pub use poly::{PolyInput, PolyLayout, PolyOutput};
 pub use ports::{InputPort, OutputPort};
+pub use stereo::{StereoInput, StereoOutput, StereoSample};
 pub use trigger::{PolyTriggerInput, TriggerInput};
 
 /// Buffer pool index of the permanent mono read-null slot.
@@ -115,12 +126,23 @@ pub const TRIGGER_THRESHOLD: f32 = 0.5;
 pub enum CableKind {
     Mono,
     Poly,
+    /// Two-channel audio/CV (`L`, `R`). Storage reuses [`CableValue::Poly`]
+    /// with only lanes 0–1 occupied (ADR 0059 §1). Layouts (`MonoLayout` /
+    /// `PolyLayout`) do not apply.
+    Stereo,
 }
 
 impl CableKind {
     /// Returns `true` for poly-arity cables.
     pub fn is_poly(&self) -> bool {
         matches!(self, CableKind::Poly)
+    }
+
+    /// Returns `true` if the cable's storage slot is `CableValue::Poly`
+    /// (true for `Poly` and `Stereo`). Used by allocators to pick the
+    /// right null slot and initial value shape.
+    pub fn uses_poly_storage(&self) -> bool {
+        matches!(self, CableKind::Poly | CableKind::Stereo)
     }
 }
 

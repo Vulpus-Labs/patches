@@ -21,8 +21,7 @@ patch {
     osc_a.sine -> vca.in
     vca.out -> to_mono.in
     to_mono.out -[0.05]-> filter.in
-    filter.out -> out.in_left
-    filter.out -> out.in_right
+    filter.out -> out.in
 
     mod_adsr.out -> mod_vca.cv
     osc_b.sine -> mod_vca.in

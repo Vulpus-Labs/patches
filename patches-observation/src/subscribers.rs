@@ -103,13 +103,7 @@ impl Diagnostic {
     pub fn render(&self) -> String {
         match self {
             Diagnostic::NotYetImplemented { tap_name, component, .. } => {
-                let comp = match component {
-                    TapType::Meter => "meter",
-                    TapType::Osc => "osc",
-                    TapType::Spectrum => "spectrum",
-                    TapType::GateLed => "gate_led",
-                    TapType::TriggerLed => "trigger_led",
-                };
+                let comp = component.as_str();
                 format!("tap `{tap_name}` (`{comp}`): not yet implemented")
             }
             Diagnostic::InvalidSlot { slot, tap_name } => {

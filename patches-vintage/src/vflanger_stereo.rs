@@ -1,17 +1,17 @@
 //! Stereo BBD flanger.
 //!
 //! Two [`crate::bbd::Bbd`] chains share one triangle LFO; the right
-//! channel is swept with the inverted LFO. A mono input routed to one
-//! side produces an anti-phase comb across L/R (wide but mono-safe);
-//! a true stereo input is summed to mono before the BBD chains, so the
-//! output spread comes from the modulation, not the source.
+//! channel is swept with the inverted LFO. A mono input routed via
+//! mono→stereo broadcast (ADR 0059 §2) produces an anti-phase comb
+//! across L/R (wide but mono-safe); a true stereo input is summed to
+//! mono before the BBD chains, so the output spread comes from the
+//! modulation, not the source.
 //!
 //! # Inputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input |
 //! | `rate_cv` | mono | Additive CV offset for LFO rate |
 //! | `depth_cv` | mono | Additive CV offset for sweep depth |
 //! | `manual_cv` | mono | Additive CV (ms) for centre delay |
@@ -21,8 +21,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Left output |
-//! | `out_right` | mono | Right output |
+//! | `out` | stereo | Stereo output |
 //!
 //! # Parameters
 //!
@@ -39,7 +38,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort,
+    MonoInput, OutputPort, StereoInput, StereoOutput,
 };
 
 mod core;
@@ -63,27 +62,23 @@ pub struct VFlangerStereo {
     descriptor: ModuleDescriptor,
     core: VFlangerStereoCore,
 
-    in_l: MonoInput,
-    in_r: MonoInput,
+    in_stereo: StereoInput,
     rate_cv: MonoInput,
     depth_cv: MonoInput,
     manual_cv: MonoInput,
     fb_cv: MonoInput,
-    out_l: MonoOutput,
-    out_r: MonoOutput,
+    out_stereo: StereoOutput,
 }
 
 impl Module for VFlangerStereo {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("VFlangerStereo", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
             .mono_in("rate_cv")
             .mono_in("depth_cv")
             .mono_in("manual_cv")
             .mono_in("feedback_cv")
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_out("out")
             .float_param(params::rate_hz, 0.05, 12.0, 0.5)
             .float_param(params::depth, 0.0, 1.0, 0.5)
             .float_param(params::manual_ms, 0.3, 8.0, 2.0)
@@ -106,14 +101,12 @@ impl Module for VFlangerStereo {
                 c.set_jitter_seed_base((instance_id.as_u64() ^ 0xBBD0_0030) as u32);
                 c
             },
-            in_l: MonoInput::default(),
-            in_r: MonoInput::default(),
+            in_stereo: StereoInput::default(),
             rate_cv: MonoInput::default(),
             depth_cv: MonoInput::default(),
             manual_cv: MonoInput::default(),
             fb_cv: MonoInput::default(),
-            out_l: MonoOutput::default(),
-            out_r: MonoOutput::default(),
+            out_stereo: StereoOutput::default(),
         }
     }
 
@@ -136,27 +129,24 @@ impl Module for VFlangerStereo {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_l = MonoInput::from_ports(inputs, 0);
-        self.in_r = MonoInput::from_ports(inputs, 1);
-        self.rate_cv = MonoInput::from_ports(inputs, 2);
-        self.depth_cv = MonoInput::from_ports(inputs, 3);
-        self.manual_cv = MonoInput::from_ports(inputs, 4);
-        self.fb_cv = MonoInput::from_ports(inputs, 5);
-        self.out_l = MonoOutput::from_ports(outputs, 0);
-        self.out_r = MonoOutput::from_ports(outputs, 1);
+        self.in_stereo = StereoInput::from_ports(inputs, 0);
+        self.rate_cv = MonoInput::from_ports(inputs, 1);
+        self.depth_cv = MonoInput::from_ports(inputs, 2);
+        self.manual_cv = MonoInput::from_ports(inputs, 3);
+        self.fb_cv = MonoInput::from_ports(inputs, 4);
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let l = pool.read_mono(&self.in_l);
-        let r = pool.read_mono(&self.in_r);
-        let both = self.in_l.is_connected() && self.in_r.is_connected();
+        let (l, r) = pool.read_stereo(&self.in_stereo);
+        let both =
+            self.in_stereo.is_connected() && !self.in_stereo.broadcast_from_mono;
         let ro = pool.read_mono(&self.rate_cv);
         let d = pool.read_mono(&self.depth_cv);
         let m = pool.read_mono(&self.manual_cv);
         let fb = pool.read_mono(&self.fb_cv);
         let (yl, yr) = self.core.process(l, r, both, ro, d, m, fb);
-        pool.write_mono(&self.out_l, yl);
-        pool.write_mono(&self.out_r, yr);
+        pool.write_stereo(&self.out_stereo, yl, yr);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -187,15 +177,12 @@ mod tests {
         let h = ModuleHarness::build::<VFlangerStereo>(&[]);
         let d = h.descriptor();
         assert_eq!(d.module_name, "VFlangerStereo");
-        assert_eq!(d.inputs.len(), 6);
-        assert_eq!(d.outputs.len(), 2);
+        assert_eq!(d.inputs.len(), 5);
+        assert_eq!(d.outputs.len(), 1);
     }
 
     #[test]
     fn l_r_decorrelate_under_modulation() {
-        // Inverse-LFO flanger: L and R sweep in opposite directions, so
-        // with sizable depth the two output streams should be less
-        // correlated than the identical mono source.
         let mut h = ModuleHarness::build_full::<VFlangerStereo>(
             params![
                 "rate_hz" => 1.0_f32,
@@ -214,11 +201,11 @@ mod tests {
         for i in 0..n {
             let t = i as f32 / SR;
             let x = 0.3 * (std::f32::consts::TAU * 440.0 * t).sin();
-            h.set_mono("in_left", x);
-            h.set_mono("in_right", x);
+            h.set_stereo("in", x, x);
             h.tick();
-            l.push(h.read_mono("out_left"));
-            r.push(h.read_mono("out_right"));
+            let (lo, ro) = h.read_stereo("out");
+            l.push(lo);
+            r.push(ro);
         }
         let ml = l.iter().sum::<f32>() / n as f32;
         let mr = r.iter().sum::<f32>() / n as f32;
@@ -248,11 +235,11 @@ mod tests {
         for i in 0..((SR * 0.5) as usize) {
             let t = i as f32 / SR;
             let x = 0.3 * (std::f32::consts::TAU * 220.0 * t).sin();
-            h.set_mono("in_left", x);
-            h.set_mono("in_right", x);
+            h.set_stereo("in", x, x);
             h.tick();
-            assert!(h.read_mono("out_left").is_finite());
-            assert!(h.read_mono("out_right").is_finite());
+            let (lo, ro) = h.read_stereo("out");
+            assert!(lo.is_finite());
+            assert!(ro.is_finite());
         }
     }
 }

@@ -24,6 +24,7 @@ use crate::provenance::Provenance;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TapType {
     Meter,
+    StereoMeter,
     Osc,
     Spectrum,
     GateLed,
@@ -36,6 +37,7 @@ impl TapType {
     pub fn from_ast_name(name: &str) -> Option<Self> {
         match name {
             "meter" => Some(Self::Meter),
+            "stereo_meter" => Some(Self::StereoMeter),
             "osc" => Some(Self::Osc),
             "spectrum" => Some(Self::Spectrum),
             "gate_led" => Some(Self::GateLed),
@@ -47,6 +49,7 @@ impl TapType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Meter => "meter",
+            Self::StereoMeter => "stereo_meter",
             Self::Osc => "osc",
             Self::Spectrum => "spectrum",
             Self::GateLed => "gate_led",
@@ -58,9 +61,13 @@ impl TapType {
 /// One tap target's manifest entry.
 #[derive(Debug, Clone)]
 pub struct TapDescriptor {
-    /// Position in the global alphabetical sort of all tap names — also
-    /// the index into the observer's frame ring slots.
+    /// Index of the channel's first backplane slot. Mono and trigger
+    /// channels publish one value at `slot`; stereo channels publish
+    /// `L` at `slot` and `R` at `slot + 1` (ADR 0059 §5).
     pub slot: usize,
+    /// Slot count claimed by this channel (1 for mono / trigger, 2 for
+    /// stereo). Observers use this to size per-slot pipeline state.
+    pub width: u8,
     pub name: String,
     /// Tap components (length 1 for simple, ≥2 for compound).
     pub components: Vec<TapType>,

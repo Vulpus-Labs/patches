@@ -122,9 +122,9 @@ fn mixer_return_added_to_output() {
 fn stereo_mixer_descriptor_shape_n2() {
     let h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(2));
     let desc = h.descriptor();
-    // 5 groups × 2 + 4 fixed returns = 14 inputs, 6 outputs
-    assert_eq!(desc.inputs.len(), 14);
-    assert_eq!(desc.outputs.len(), 6);
+    // 5 mono groups × 2 + 2 stereo returns = 12 inputs, 3 stereo outputs
+    assert_eq!(desc.inputs.len(), 12);
+    assert_eq!(desc.outputs.len(), 3);
 }
 
 #[test]
@@ -132,9 +132,9 @@ fn stereo_mixer_centre_pan_splits_equally() {
     let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(1));
     h.set_mono_at("in", 0, 1.0);
     h.tick();
-    // pan=0: left_gain = right_gain = 0.5
-    assert_nearly!(0.5, h.read_mono("out_left"));
-    assert_nearly!(0.5, h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.5, l);
+    assert_nearly!(0.5, r);
 }
 
 #[test]
@@ -143,8 +143,9 @@ fn stereo_mixer_full_left_pan() {
     h.update_params_map(&indexed_params(&[("pan", 0, ParameterValue::Float(-1.0))]));
     h.set_mono_at("in", 0, 1.0);
     h.tick();
-    assert_nearly!(1.0, h.read_mono("out_left"));
-    assert_nearly!(0.0, h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(1.0, l);
+    assert_nearly!(0.0, r);
 }
 
 #[test]
@@ -153,19 +154,20 @@ fn stereo_mixer_full_right_pan() {
     h.update_params_map(&indexed_params(&[("pan", 0, ParameterValue::Float(1.0))]));
     h.set_mono_at("in", 0, 1.0);
     h.tick();
-    assert_nearly!(0.0, h.read_mono("out_left"));
-    assert_nearly!(1.0, h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.0, l);
+    assert_nearly!(1.0, r);
 }
 
 #[test]
 fn stereo_mixer_pan_cv_clamps() {
     let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(1));
-    // pan=0.0, pan_cv=2.0 → clamped to 1.0 → full right
     h.set_mono_at("in", 0, 1.0);
     h.set_mono_at("pan_cv", 0, 2.0);
     h.tick();
-    assert_nearly!(0.0, h.read_mono("out_left"));
-    assert_nearly!(1.0, h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.0, l);
+    assert_nearly!(1.0, r);
 }
 
 #[test]
@@ -175,21 +177,20 @@ fn stereo_mixer_mute_and_solo_mirror_mixer() {
     h.set_mono_at("in", 0, 0.4);
     h.set_mono_at("in", 1, 0.6);
     h.tick();
-    // ch0 soloed, centre pan: out_left = 0.4*0.5 = 0.2
-    assert_nearly!(0.2, h.read_mono("out_left"));
-    assert_nearly!(0.2, h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.2, l);
+    assert_nearly!(0.2, r);
 }
 
 #[test]
 fn stereo_mixer_returns_added_to_correct_bus() {
     let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(1));
-    h.set_mono("return_a_left",  0.1);
-    h.set_mono("return_a_right", 0.2);
-    h.set_mono("return_b_left",  0.05);
-    h.set_mono("return_b_right", 0.1);
+    h.set_stereo("return_a", 0.1, 0.2);
+    h.set_stereo("return_b", 0.05, 0.1);
     h.tick();
-    assert_nearly!(0.15, h.read_mono("out_left"));
-    assert_nearly!(0.3,  h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.15, l);
+    assert_nearly!(0.3,  r);
 }
 
 // ── PolyMixer tests ───────────────────────────────────────────────────────

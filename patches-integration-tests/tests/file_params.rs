@@ -45,8 +45,7 @@ fn file_syntax_parses_to_value_file() {
 patch {
     module verb : StereoConvReverb { ir_data: file("test.wav") }
     module out : AudioOut
-    verb.out_left -> out.in_left
-    verb.out_right -> out.in_right
+    verb.out -> out.in
 }
 "#;
     let file = patches_dsl::parse(src).expect("parse failed");

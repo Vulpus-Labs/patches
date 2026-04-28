@@ -168,6 +168,28 @@ main {
   align-items: stretch;
 }
 
+/* Stereo meter row: two meter canvases stacked vertically (L over R)
+   under a single stem label. Reads as one paired widget per
+   ADR 0059 §7. */
+.tap-widgets.tap-widgets-stereo {
+  flex-direction: column;
+  gap: 2px;
+}
+.tap-widgets-stereo .stereo-half {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.tap-widgets-stereo .stereo-half::before {
+  color: var(--muted);
+  font-size: 10px;
+  width: 12px;
+  text-align: right;
+}
+.tap-widgets-stereo .stereo-l::before { content: "L"; }
+.tap-widgets-stereo .stereo-r::before { content: "R"; }
+
 .tap-widget canvas {
   display: block;
   background: #0f0f0f;

@@ -35,10 +35,7 @@ patch {
     module lim   : StereoLimiter
     module out   : AudioOut
 
-    vca.out -> delay.in_left
-    vca.out -> delay.in_right
-    delay.out_left  -> lim.in_left
-    delay.out_right -> lim.in_right
-    lim.out_left  -> out.in_left
-    lim.out_right -> out.in_right
+    vca.out -> delay.in
+    delay.out  -> lim.in
+    lim.out  -> out.in
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::cables::{CableKind, PolyLayout};
+use crate::cables::{CableKind, MonoLayout, PolyLayout};
 use crate::modules::{ModuleDescriptor, ParameterMap, PortRef};
 
 /// Stable identifier for a module node in the graph.
@@ -276,8 +276,16 @@ impl ModuleGraph {
                 })?
         };
 
-        // Reject connections that cross cable arities.
-        if output_kind != input_kind {
+        // Reject connections that cross cable arities, with one
+        // exception: a mono Audio source feeding a stereo input is the
+        // mono→stereo broadcast coercion (ADR 0059 §2). The planner sets
+        // `StereoInput::broadcast_from_mono` so the consumer reads the
+        // mono slot and replicates `(s, s)`. Stereo→mono and any
+        // poly↔stereo combination still reject.
+        let mono_to_stereo_broadcast = output_kind == CableKind::Mono
+            && input_kind == CableKind::Stereo
+            && output_mono_layout == MonoLayout::Audio;
+        if output_kind != input_kind && !mono_to_stereo_broadcast {
             return Err(GraphError::CableKindMismatch {
                 from_port: format!("{}/{}", output.name, output.index),
                 to_port: format!("{}/{}", input.name, input.index),
@@ -295,6 +303,9 @@ impl ModuleGraph {
                 to_layout: input_poly_layout,
             });
         }
+
+        // Stereo cables carry no MonoLayout / PolyLayout; kind equality
+        // (checked above) is the only constraint (ADR 0059 §1).
 
         // Reject mono connections with incompatible layouts (ADR 0047).
         if output_kind == CableKind::Mono && !output_mono_layout.compatible_with(input_mono_layout) {

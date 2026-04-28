@@ -6,6 +6,5 @@ patch {
     module filt : Lowpass { cutoff: 500Hz }
     lfo.triangle -[0.8]-> osc.pulse_width_cv
     osc.square -[0.8]-> filt.in
-    filt.out -> audio.in_left
-    filt.out -> audio.in_right
+    filt.out -> audio.in
 }

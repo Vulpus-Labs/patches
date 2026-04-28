@@ -19,6 +19,7 @@ fn kind_str(p: &PortDescriptor) -> &'static str {
         (CableKind::Poly, _, PolyLayout::Midi) => "midi",
         (CableKind::Poly, _, PolyLayout::Transport) => "transport",
         (CableKind::Poly, _, PolyLayout::Audio) => "poly",
+        (CableKind::Stereo, _, _) => "stereo",
     }
 }
 

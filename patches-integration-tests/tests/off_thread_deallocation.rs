@@ -108,16 +108,7 @@ fn sine_out_graph() -> patches_core::ModuleGraph {
             &NodeId::from("osc"),
             PortRef { name: "sine", index: 0 },
             &NodeId::from("out"),
-            PortRef { name: "in_left", index: 0 },
-            1.0,
-        )
-        .unwrap();
-    graph
-        .connect(
-            &NodeId::from("osc"),
-            PortRef { name: "sine", index: 0 },
-            &NodeId::from("out"),
-            PortRef { name: "in_right", index: 0 },
+            PortRef { name: "in", index: 0 },
             1.0,
         )
         .unwrap();

@@ -4,7 +4,8 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, };
+    MonoInput, OutputPort, StereoInput, StereoOutput,
+};
 use patches_dsp::MonoBiquad;
 
 use crate::common::approximate::fast_sine;
@@ -57,14 +58,12 @@ impl FdnReverb {
 impl Module for FdnReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("FdnReverb", ModuleShape { channels: 0, length: 0, ..Default::default() })
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
             .mono_in("size_cv")
             .mono_in("brightness_cv")
             .mono_in("pre_delay_cv")
             .mono_in("mix_cv")
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_out("out")
             .float_param(params::size,       0.0, 1.0, 0.5)
             .float_param(params::brightness, 0.0, 1.0, 0.5)
             .float_param(params::pre_delay,  0.0, 1.0, 0.0)
@@ -108,14 +107,12 @@ impl Module for FdnReverb {
         Self {
             instance_id,
             descriptor,
-            in_l:             MonoInput::default(),
-            in_r:             MonoInput::default(),
+            in_stereo:        StereoInput::default(),
             in_size_cv:       MonoInput::default(),
             in_brightness_cv: MonoInput::default(),
             in_pre_delay_cv:  MonoInput::default(),
             in_mix_cv:        MonoInput::default(),
-            out_l:            MonoOutput::default(),
-            out_r:            MonoOutput::default(),
+            out_stereo:       StereoOutput::default(),
             size_param:       0.5,
             bright_param:     0.5,
             pre_delay_param:  0.0,
@@ -136,8 +133,6 @@ impl Module for FdnReverb {
             last_eff_size:   0.5,
             last_eff_bright: 0.5,
             last_character:  char_idx,
-            stereo_in:  false,
-            stereo_out: false,
         }
     }
 
@@ -173,17 +168,12 @@ impl Module for FdnReverb {
     fn instance_id(&self) -> InstanceId { self.instance_id }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_l             = inputs[0].expect_mono();
-        self.in_r             = inputs[1].expect_mono();
-        self.in_size_cv       = inputs[2].expect_mono();
-        self.in_brightness_cv = inputs[3].expect_mono();
-        self.in_pre_delay_cv  = inputs[4].expect_mono();
-        self.in_mix_cv        = inputs[5].expect_mono();
-        self.out_l = outputs[0].expect_mono();
-        self.out_r = outputs[1].expect_mono();
-        // Derive connectivity flags from port state; set_connectivity may override.
-        self.stereo_in  = self.in_r.is_connected();
-        self.stereo_out = self.out_r.is_connected();
+        self.in_stereo        = inputs[0].expect_stereo();
+        self.in_size_cv       = inputs[1].expect_mono();
+        self.in_brightness_cv = inputs[2].expect_mono();
+        self.in_pre_delay_cv  = inputs[3].expect_mono();
+        self.in_mix_cv        = inputs[4].expect_mono();
+        self.out_stereo       = outputs[0].expect_stereo();
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -215,20 +205,23 @@ impl Module for FdnReverb {
         }
 
         // ── Pre-delay ─────────────────────────────────────────────────────────
-        let in_l    = if self.in_l.is_connected() { pool.read_mono(&self.in_l) } else { 0.0 };
-        let in_r    = if self.stereo_in           { pool.read_mono(&self.in_r) } else { in_l };
+        // Stereo input handles mono-source broadcast at the port level
+        // (ADR 0059 §2): if a mono cable is wired to `in`, both channels
+        // already carry the same sample, so the per-line pre-delay paths
+        // are uniformly stereo here.
+        let (in_l, in_r) = if self.in_stereo.is_connected() {
+            pool.read_stereo(&self.in_stereo)
+        } else {
+            (0.0, 0.0)
+        };
         let pre_cap = self.pre_l.capacity() - 1;
         let pre_s   = (((eff_size + eff_pre_delay) * self.sc.max_pre_delay_samp) as usize)
                       .clamp(1, pre_cap);
 
         self.pre_l.push(in_l);
+        self.pre_r.push(in_r);
         let x_l = self.pre_l.read_nearest(pre_s);
-        let x_r = if self.stereo_in {
-            self.pre_r.push(in_r);
-            self.pre_r.read_nearest(pre_s)
-        } else {
-            x_l
-        };
+        let x_r = self.pre_r.read_nearest(pre_s);
 
         // ── LFO-modulated delay reads via Thiran ──────────────────────────────
         let scale   = self.cached_scale;
@@ -262,19 +255,17 @@ impl Module for FdnReverb {
         // ── Dry/wet mix and outputs ──────────────────────────────────────────
         let dry = 1.0 - eff_mix;
         let wet = eff_mix;
-        if self.stereo_out {
-            let mut wet_l = 0.0_f32;
-            let mut wet_r = 0.0_f32;
-            for i in 0..LINES {
-                wet_l += OUT_L[i] * damp[i];
-                wet_r += OUT_R[i] * damp[i];
-            }
-            if self.out_l.is_connected() { pool.write_mono(&self.out_l, dry * in_l + wet * wet_l); }
-            if self.out_r.is_connected() { pool.write_mono(&self.out_r, dry * in_r + wet * wet_r); }
-        } else {
-            let wet_mono: f32 = damp.iter().sum::<f32>() * INV_SQRT8;
-            if self.out_l.is_connected() { pool.write_mono(&self.out_l, dry * in_l + wet * wet_mono); }
+        let mut wet_l = 0.0_f32;
+        let mut wet_r = 0.0_f32;
+        for i in 0..LINES {
+            wet_l += OUT_L[i] * damp[i];
+            wet_r += OUT_R[i] * damp[i];
         }
+        pool.write_stereo(
+            &self.out_stereo,
+            dry * in_l + wet * wet_l,
+            dry * in_r + wet * wet_r,
+        );
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

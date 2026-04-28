@@ -21,16 +21,14 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input |
 //! | `mix` | mono | Dry/wet CV (0--1 added to parameter) |
 //!
 //! # Outputs (StereoConvReverb / stereo)
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Left audio output |
-//! | `out_right` | mono | Right audio output |
+//! | `out` | stereo | Stereo audio output |
 //!
 //! # Parameters (both variants)
 //!

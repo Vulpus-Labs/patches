@@ -10,7 +10,6 @@ fn pattern_switching_at_row_boundary() {
     // "a_pat" kick: x .   (cv1=0.0 for x)
     // "b_pat" kick: 0.5 . (cv1=0.5)
     // Song: a_pat then b_pat, each 2 steps.
-    // Wire cv1 to out.in_right.
     let src = r#"
 pattern a_pat {
     kick: x .
@@ -37,9 +36,8 @@ patch {
     module out: AudioOut
 
     seq.clock[ch1] -> player.clock
-    player.cv1[kick] -> out.in_left
+    player.cv1[kick] -> out.in
     player.trigger[kick] -> t2a.in
-    t2a.out -> out.in_right
 }
 "#;
     let mut engine = build_engine(src);

@@ -21,11 +21,11 @@ fn run_sine(h: &mut ModuleHarness, n: usize) -> (Vec<f32>, Vec<f32>) {
     for i in 0..n {
         let t = i as f32 / SR;
         let x = (std::f32::consts::TAU * 440.0 * t).sin();
-        h.set_mono("in_left", x);
-        h.set_mono("in_right", x);
+        h.set_stereo("in", x, x);
         h.tick();
-        l.push(h.read_mono("out_left"));
-        r.push(h.read_mono("out_right"));
+        let (lo, ro) = h.read_stereo("out");
+        l.push(lo);
+        r.push(ro);
     }
     (l, r)
 }
@@ -53,8 +53,8 @@ fn descriptor_shape() {
     let h = ModuleHarness::build::<VChorus>(&[]);
     let d = h.descriptor();
     assert_eq!(d.module_name, "VChorus");
-    assert_eq!(d.inputs.len(), 4);
-    assert_eq!(d.outputs.len(), 2);
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.outputs.len(), 1);
 }
 
 #[test]
@@ -68,30 +68,26 @@ fn off_on_bright_bypasses_signal() {
         ENV,
         shape(),
     );
-    h.set_mono("in_left", 0.42);
-    h.set_mono("in_right", -0.17);
+    h.set_stereo("in", 0.42, -0.17);
     h.tick();
-    // Bright + off = full bypass.
-    assert!((h.read_mono("out_left") - 0.42).abs() < 1.0e-5);
-    assert!((h.read_mono("out_right") + 0.17).abs() < 1.0e-5);
+    let (lo, ro) = h.read_stereo("out");
+    assert!((lo - 0.42).abs() < 1.0e-5);
+    assert!((ro + 0.17).abs() < 1.0e-5);
 }
 
 #[test]
 fn hiss_silent_at_zero_and_bounded_at_one() {
-    // hiss=0: silent input stays silent (steady state).
     let mut h = ModuleHarness::build_full::<VChorus>(
         params!["mode" => Mode::One, "hiss" => 0.0_f32],
         ENV,
         shape(),
     );
-    h.set_mono("in_left", 0.0);
-    h.set_mono("in_right", 0.0);
+    h.set_stereo("in", 0.0, 0.0);
     for _ in 0..((SR * 0.2) as usize) {
         h.tick();
     }
-    assert!(h.read_mono("out_left").abs() < 1.0e-4);
+    assert!(h.read_stereo("out").0.abs() < 1.0e-4);
 
-    // hiss=1: noise present but not huge.
     let mut h2 = ModuleHarness::build_full::<VChorus>(
         params!["mode" => Mode::One, "hiss" => 1.0_f32],
         ENV,
@@ -99,18 +95,10 @@ fn hiss_silent_at_zero_and_bounded_at_one() {
     );
     let mut peak = 0.0_f32;
     for _ in 0..((SR * 0.1) as usize) {
-        h2.set_mono("in_left", 0.0);
-        h2.set_mono("in_right", 0.0);
+        h2.set_stereo("in", 0.0, 0.0);
         h2.tick();
-        peak = peak.max(h2.read_mono("out_left").abs());
+        peak = peak.max(h2.read_stereo("out").0.abs());
     }
-    // Bright hiss_floor = 0.0020 (see `VChorusCore::hiss_floor`). Uniform PRNG
-    // output is in [-1, 1], so the raw noise peak is ~0.002. The reconstruction
-    // low-pass softens it slightly but does not amplify — peak settles in the
-    // 0.001–0.005 range. Tight upper bound of 0.02 leaves one order of
-    // magnitude of headroom for run-to-run variation without masking a
-    // regression where the floor is misapplied (e.g. driven by hiss=1 directly,
-    // which would push peak toward 1.0).
     assert!(
         peak > 0.0 && peak < 0.02,
         "hiss peak {peak} out of expected range [0, 0.02]"
@@ -119,10 +107,6 @@ fn hiss_silent_at_zero_and_bounded_at_one() {
 
 #[test]
 fn mode_both_on_bright_more_modulated_than_mode_one() {
-    // FM index ≈ f_carrier * delay_depth * lfo_rate. Mode I+II on
-    // bright has depth=0.2 ms, rate=9.75 Hz → index bigger than mode I
-    // (depth=1.85 ms, rate=0.513 Hz) despite the tighter sweep, so L/R
-    // decorrelate more under the inverse-LFO trick.
     let mut h1 = ModuleHarness::build_full::<VChorus>(
         params![
             "variant" => Variant::Bright,
@@ -156,8 +140,6 @@ fn mode_both_on_bright_more_modulated_than_mode_one() {
 
 #[test]
 fn dark_variant_does_not_bypass_when_off() {
-    // Dark + off: signal still traverses the BBD with zero modulation,
-    // so it is *not* bit-identical to the input (unlike bright).
     let mut h = ModuleHarness::build_full::<VChorus>(
         params![
             "variant" => Variant::Dark,
@@ -171,10 +153,9 @@ fn dark_variant_does_not_bypass_when_off() {
     for i in 0..((SR * 0.1) as usize) {
         let t = i as f32 / SR;
         let x = 0.5 * (std::f32::consts::TAU * 440.0 * t).sin();
-        h.set_mono("in_left", x);
-        h.set_mono("in_right", x);
+        h.set_stereo("in", x, x);
         h.tick();
-        let out = h.read_mono("out_left");
+        let out = h.read_stereo("out").0;
         if (out - x).abs() > 1.0e-4 {
             all_equal = false;
             break;

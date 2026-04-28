@@ -38,6 +38,7 @@ pub mod poly_svf;
 pub mod fdn_reverb;
 pub mod delay;
 pub mod stereo_delay;
+pub mod stereo_split;
 pub mod sah;
 pub mod poly_sah;
 pub mod poly_tuner;
@@ -65,7 +66,7 @@ pub mod host_transport;
 pub mod tempo_sync;
 pub mod ms_ticker;
 pub mod trigger_sync_conv;
-pub mod audio_tap;
+pub mod tap;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -133,7 +134,7 @@ pub use host_transport::HostTransport;
 pub use tempo_sync::TempoSync;
 pub use ms_ticker::MsTicker;
 pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
-pub use audio_tap::{AudioTap, TriggerTap};
+pub use tap::{Tap, TapKind};
 
 pub fn default_registry() -> patches_registry::Registry {
     let mut r = patches_registry::Registry::new();
@@ -181,6 +182,8 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<FdnReverb>();
     r.register::<Delay>();
     r.register::<StereoDelay>();
+    r.register::<crate::stereo_split::StereoSplitter>();
+    r.register::<crate::stereo_split::StereoJoiner>();
     r.register::<Sah>();
     r.register::<PolySah>();
     r.register::<Quant>();
@@ -211,8 +214,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<MsTicker>();
     r.register::<TriggerToSync>();
     r.register::<SyncToTrigger>();
-    r.register::<AudioTap>();
-    r.register::<TriggerTap>();
+    r.register::<Tap>();
     // `patches-vintage` is no longer in the default registry (ADR 0045 Spike 8
     // Phase C / ticket 0570). Load its cdylib via `PluginScanner`.
     r

@@ -120,13 +120,29 @@ When adding or changing a module, keep the comment in this form:
 
 ## Port naming conventions
 
+ADR 0059 retired the paired `_left`/`_right` convention for symmetric
+stereo modules. The current rules:
+
 - Mono modules use simple names: `"in"`, `"out"`, `"cv"`.
-- Stereo modules use `_left`/`_right` suffixes:
-  `"in_left"`, `"in_right"`, `"out_left"`, `"out_right"`.
-- Compound stereo ports follow the same pattern:
-  `"send_a_left"`, `"return_b_right"`, etc.
+- Stereo modules use a single stereo port: `"in"`, `"out"`. The
+  underlying cable carries `(L, R)` as a `CableKind::Stereo` value;
+  module code reads `(f32, f32)` via `pool.read_stereo(&self.in)`.
+- Compound stereo ports likewise collapse to one name per role:
+  `"send_a"`, `"return_b"`, etc.
+- A mono Audio source feeding a stereo input is silently broadcast
+  (`L = R = source`) at cable-builder time, with no synthetic node and
+  no warning. Stereo→mono is rejected with `CableKindMismatch`; users
+  who want the two halves apart wire through `StereoSplitter` /
+  `StereoJoiner`.
 - Control/modulation inputs use descriptive names:
   `"mix"`, `"feedback"`, `"voct"`, `"gate"`.
+
+`_left`/`_right` survives in exactly two places:
+
+1. `StereoSplitter` / `StereoJoiner`, whose port asymmetry is the
+   point of the module.
+2. Mid/side or other genuinely-asymmetric pair processors (none in
+   tree today). For those, the descriptor declares paired mono ports.
 
 ## Panic policy
 

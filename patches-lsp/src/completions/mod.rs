@@ -165,6 +165,7 @@ pub(crate) fn cable_kind_str(kind: &patches_core::CableKind) -> &'static str {
     match kind {
         patches_core::CableKind::Mono => "mono",
         patches_core::CableKind::Poly => "poly",
+        patches_core::CableKind::Stereo => "stereo",
     }
 }
 
@@ -334,25 +335,37 @@ mod tests {
         let byte_offset = source.find('~').unwrap() + 1;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(labels.len(), 5, "got: {labels:?}");
-        for c in ["meter", "osc", "spectrum", "gate_led", "trigger_led"] {
+        assert_eq!(labels.len(), 6, "got: {labels:?}");
+        for c in ["meter", "stereo_meter", "osc", "spectrum", "gate_led", "trigger_led"] {
             assert!(labels.contains(&c), "missing {c}: {labels:?}");
         }
     }
 
     #[test]
-    fn completions_after_plus_filters_listed_and_trigger_led() {
+    fn completions_after_plus_filters_listed_and_incompatible_kinds() {
         let source = "patch {\n    module o : Osc\n    o.out -> ~meter+\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find('+').unwrap() + 1;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        // Audio components remaining after `meter`: osc, spectrum, gate_led.
         assert_eq!(labels.len(), 3, "got: {labels:?}");
         for c in ["osc", "spectrum", "gate_led"] {
             assert!(labels.contains(&c), "missing {c}: {labels:?}");
         }
-        assert!(!labels.contains(&"trigger_led"), "trigger_led must be excluded");
+        assert!(!labels.contains(&"trigger_led"), "trigger_led excluded (cable kind)");
+        assert!(!labels.contains(&"stereo_meter"), "stereo_meter excluded (compound mono-only)");
         assert!(!labels.contains(&"meter"), "meter already listed");
+    }
+
+    #[test]
+    fn completions_after_stereo_meter_plus_returns_empty() {
+        // ADR 0059 §8: stereo_meter cannot share a compound tap.
+        let source = "patch {\n    module m : Mix\n    m.out -> ~stereo_meter+\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find('+').unwrap() + 1;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        assert!(items.is_empty(), "stereo_meter+ must offer no continuations");
     }
 
     #[test]

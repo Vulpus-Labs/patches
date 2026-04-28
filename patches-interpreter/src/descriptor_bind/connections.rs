@@ -157,8 +157,18 @@ pub(super) fn bind_connection(
         }
     };
 
-    // Cable kind must match exactly.
-    if from_port_desc.kind != to_port_desc.kind {
+    // Cable kind must match exactly, except for the mono→stereo
+    // broadcast coercion (ADR 0059 §2): a mono Audio source feeding a
+    // stereo input is accepted; the planner replicates the sample on
+    // read.
+    let mono_to_stereo_broadcast = matches!(
+        (&from_port_desc.kind, &to_port_desc.kind),
+        (CableKind::Mono, CableKind::Stereo),
+    ) && matches!(
+        from_port_desc.mono_layout,
+        patches_core::cables::MonoLayout::Audio,
+    );
+    if from_port_desc.kind != to_port_desc.kind && !mono_to_stereo_broadcast {
         errors.push(BindError::new(
             BindErrorCode::CableKindMismatch,
             conn.provenance.clone(),

@@ -184,8 +184,7 @@ fn connected_graph() -> ModuleGraph {
     graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("poly_out"), &NodeId::from("probe"), p("poly_in"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 
@@ -200,8 +199,7 @@ fn disconnected_graph() -> ModuleGraph {
     graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &osc_params).unwrap();
     graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
 
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 

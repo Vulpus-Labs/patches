@@ -10,8 +10,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input (mono sources auto-broadcast per ADR 0059 §2) |
 //! | `size_cv` | mono | Additive CV for size |
 //! | `brightness_cv` | mono | Additive CV for brightness |
 //! | `pre_delay_cv` | mono | Additive CV for pre-delay |
@@ -21,8 +20,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Left reverb output |
-//! | `out_right` | mono | Right reverb output |
+//! | `out` | stereo | Stereo reverb output |
 //!
 //! # Parameters
 //!
@@ -41,7 +39,7 @@ mod processor;
 
 use crate::common::delay_buffer::{DelayBuffer, ThiranInterp};
 use crate::common::phase_accumulator::MonoPhaseAccumulator;
-use patches_core::{InstanceId, ModuleDescriptor, MonoInput, MonoOutput};
+use patches_core::{InstanceId, ModuleDescriptor, MonoInput, StereoInput, StereoOutput};
 use patches_dsp::MonoBiquad;
 
 use matrix::LINES;
@@ -55,14 +53,12 @@ pub struct FdnReverb {
     pub(in crate::fdn_reverb) instance_id:  InstanceId,
     pub(in crate::fdn_reverb) descriptor:   ModuleDescriptor,
     // Ports
-    pub(in crate::fdn_reverb) in_l:             MonoInput,
-    pub(in crate::fdn_reverb) in_r:             MonoInput,
+    pub(in crate::fdn_reverb) in_stereo:        StereoInput,
     pub(in crate::fdn_reverb) in_size_cv:       MonoInput,
     pub(in crate::fdn_reverb) in_brightness_cv: MonoInput,
     pub(in crate::fdn_reverb) in_pre_delay_cv:  MonoInput,
     pub(in crate::fdn_reverb) in_mix_cv:        MonoInput,
-    pub(in crate::fdn_reverb) out_l: MonoOutput,
-    pub(in crate::fdn_reverb) out_r: MonoOutput,
+    pub(in crate::fdn_reverb) out_stereo:       StereoOutput,
     // Parameters
     pub(in crate::fdn_reverb) size_param:      f32,
     pub(in crate::fdn_reverb) bright_param:    f32,
@@ -91,9 +87,6 @@ pub struct FdnReverb {
     pub(in crate::fdn_reverb) last_eff_size:   f32,
     pub(in crate::fdn_reverb) last_eff_bright: f32,
     pub(in crate::fdn_reverb) last_character:  usize,
-    // Connectivity flags (derived from set_connectivity and set_ports)
-    pub(in crate::fdn_reverb) stereo_in:  bool,
-    pub(in crate::fdn_reverb) stereo_out: bool,
 }
 
 #[cfg(test)]

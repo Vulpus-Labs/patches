@@ -18,8 +18,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input |
 //! | `rate_cv` | mono | Additive CV offset for LFO rate |
 //! | `depth_cv` | mono | Additive CV offset for LFO depth |
 //!
@@ -27,8 +26,7 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Left output (dry + wet) |
-//! | `out_right` | mono | Right output (dry + wet) |
+//! | `out` | stereo | Stereo output (dry + wet) |
 //!
 //! # Parameters
 //!
@@ -42,7 +40,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, MonoInput, OutputPort, StereoInput, StereoOutput,
 };
 
 mod core;
@@ -67,23 +65,19 @@ pub struct VChorus {
     descriptor: ModuleDescriptor,
     core: VChorusCore,
 
-    in_l: MonoInput,
-    in_r: MonoInput,
+    in_stereo: StereoInput,
     rate_cv: MonoInput,
     depth_cv: MonoInput,
-    out_l: MonoOutput,
-    out_r: MonoOutput,
+    out_stereo: StereoOutput,
 }
 
 impl Module for VChorus {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("VChorus", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
             .mono_in("rate_cv")
             .mono_in("depth_cv")
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_out("out")
             .enum_param(params::variant, Variant::Bright)
             .enum_param(params::mode, Mode::One)
             .float_param(params::hiss, 0.0, 1.0, 1.0)
@@ -104,12 +98,10 @@ impl Module for VChorus {
                 c.set_jitter_seed_base((instance_id.as_u64() ^ 0xBBD0_0010) as u32);
                 c
             },
-            in_l: MonoInput::default(),
-            in_r: MonoInput::default(),
+            in_stereo: StereoInput::default(),
             rate_cv: MonoInput::default(),
             depth_cv: MonoInput::default(),
-            out_l: MonoOutput::default(),
-            out_r: MonoOutput::default(),
+            out_stereo: StereoOutput::default(),
         }
     }
 
@@ -129,26 +121,26 @@ impl Module for VChorus {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_l = MonoInput::from_ports(inputs, 0);
-        self.in_r = MonoInput::from_ports(inputs, 1);
-        self.rate_cv = MonoInput::from_ports(inputs, 2);
-        self.depth_cv = MonoInput::from_ports(inputs, 3);
-        self.out_l = MonoOutput::from_ports(outputs, 0);
-        self.out_r = MonoOutput::from_ports(outputs, 1);
+        self.in_stereo = StereoInput::from_ports(inputs, 0);
+        self.rate_cv = MonoInput::from_ports(inputs, 1);
+        self.depth_cv = MonoInput::from_ports(inputs, 2);
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let l_in = pool.read_mono(&self.in_l);
-        let r_in = pool.read_mono(&self.in_r);
-        let both_connected = self.in_l.is_connected() && self.in_r.is_connected();
+        let (l_in, r_in) = pool.read_stereo(&self.in_stereo);
+        // The Juno-106 mono-compatibility trick depends on whether the two
+        // halves carry distinct material. Mono-source broadcast signals this
+        // explicitly; otherwise treat any connected stereo cable as "stereo".
+        let both_connected =
+            self.in_stereo.is_connected() && !self.in_stereo.broadcast_from_mono;
         let rate_offset = pool.read_mono(&self.rate_cv);
         let depth_offset = pool.read_mono(&self.depth_cv);
 
         let (ol, or) = self
             .core
             .process(l_in, r_in, both_connected, rate_offset, depth_offset);
-        pool.write_mono(&self.out_l, ol);
-        pool.write_mono(&self.out_r, or);
+        pool.write_stereo(&self.out_stereo, ol, or);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

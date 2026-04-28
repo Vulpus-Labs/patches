@@ -22,10 +22,7 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
         graph_a.add_module("sine_b", sine_b, &pb).unwrap();
         graph_a.add_module("out", out_desc, &ParameterMap::new()).unwrap();
         graph_a
-            .connect(&NodeId::from("sine_a"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0)
-            .unwrap();
-        graph_a
-            .connect(&NodeId::from("sine_b"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0)
+            .connect(&NodeId::from("sine_a"), p("sine"), &NodeId::from("out"), p("in"), 1.0)
             .unwrap();
     }
 
@@ -44,10 +41,7 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
         graph_b.add_module("sine_a", sine_a, &pa).unwrap();
         graph_b.add_module("out", out_desc, &ParameterMap::new()).unwrap();
         graph_b
-            .connect(&NodeId::from("sine_a"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0)
-            .unwrap();
-        graph_b
-            .connect(&NodeId::from("sine_a"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0)
+            .connect(&NodeId::from("sine_a"), p("sine"), &NodeId::from("out"), p("in"), 1.0)
             .unwrap();
     }
 
@@ -88,16 +82,7 @@ fn parameter_only_change_produces_parameter_updates_no_new_modules() {
         graph_b.add_module("a_sine", sine_desc, &sine_params).unwrap();
         graph_b.add_module("b_out", out_desc, &ParameterMap::new()).unwrap();
         graph_b
-            .connect(&NodeId::from("a_sine"), p("sine"), &NodeId::from("b_out"), p("in_left"), 1.0)
-            .unwrap();
-        graph_b
-            .connect(
-                &NodeId::from("a_sine"),
-                p("sine"),
-                &NodeId::from("b_out"),
-                p("in_right"),
-                1.0,
-            )
+            .connect(&NodeId::from("a_sine"), p("sine"), &NodeId::from("b_out"), p("in"), 1.0)
             .unwrap();
     }
 
@@ -166,10 +151,7 @@ fn topology_change_and_parameter_diff_coexist() {
         graph_a.add_module("s_b", s_b, &pb).unwrap();
         graph_a.add_module("out", out, &ParameterMap::new()).unwrap();
         graph_a
-            .connect(&NodeId::from("s_a"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0)
-            .unwrap();
-        graph_a
-            .connect(&NodeId::from("s_b"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0)
+            .connect(&NodeId::from("s_a"), p("sine"), &NodeId::from("out"), p("in"), 1.0)
             .unwrap();
     }
     let (_plan_a, state_a) =
@@ -190,10 +172,7 @@ fn topology_change_and_parameter_diff_coexist() {
         graph_b.add_module("s_c", s_c, &pc).unwrap();
         graph_b.add_module("out", out, &ParameterMap::new()).unwrap();
         graph_b
-            .connect(&NodeId::from("s_a"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0)
-            .unwrap();
-        graph_b
-            .connect(&NodeId::from("s_c"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0)
+            .connect(&NodeId::from("s_a"), p("sine"), &NodeId::from("out"), p("in"), 1.0)
             .unwrap();
     }
     let (plan_b, _state_b) =

@@ -29,7 +29,7 @@ song drums(drums) {
 
 template drumz {
     in: clock
-    out: out_left, out_right
+    out: out
 
     module player : PatternPlayer(channels: [kick, snare, ch, oh])
     player.clock <- $.clock
@@ -55,43 +55,48 @@ template drumz {
     snare.out -> mixer.in[snare]
     ch.out -> mixer.in[ch]
     oh.out -> mixer.in[oh]
-    
-    module drive_l : Drive { mode: clip, drive: 8.0 }
-    module drive_r : Drive { mode: clip, drive: 8.0 }
-    mixer.out_left -> drive_l.in
-    mixer.out_right -> drive_r.in
+
+    # Stereo bus: split for mono drive characterisation, then back to stereo
+    # via reverb. The template's `out` port is the L channel post-reverb;
+    # callers wanting both halves should split themselves.
+    module mix_split : StereoSplitter
+    mixer.out -> mix_split.in
+
+    module drive : Drive { mode: clip, drive: 8.0 }
+    mix_split.out_left -> drive.in
 
     module verb : FdnReverb { mix: 0.2 }
-    drive_l.out ->  verb.in_left
-    drive_r.out -> verb.in_right
+    drive.out -> verb.in
 
-    verb.out_left -> $.out_left
-    verb.out_right -> $.out_right
+    module verb_split : StereoSplitter
+    verb.out -> verb_split.in
+    verb_split.out_left -> $.out
 }
 
 template digital_delay(time: int) {
-    in: in_left, in_right
-    out: out_left, out_right
-    
+    in: in
+    out: out
+
     module delay : StereoDelay(channels: 1) {
         pingpong: true
         delay_ms: <time>
         feedback: 0.4
     }
 
+    module send_split : StereoSplitter
+    module return_join : StereoJoiner
     module crusher_l : Bitcrusher{depth: 15, rate: 1.0}
     module crusher_r : Bitcrusher{depth: 15, rate: 1.0}
 
-    delay.send_left -> crusher_l.in
-    delay.send_right -> crusher_r.in
-    delay.return_left <- crusher_l.out
-    delay.return_right <- crusher_r.out
+    delay.send[0] -> send_split.in
+    send_split.out_left  -> crusher_l.in
+    send_split.out_right -> crusher_r.in
+    crusher_l.out -> return_join.in_left
+    crusher_r.out -> return_join.in_right
+    return_join.out -> delay.return[0]
 
-    delay.in_left <- $.in_left
-    delay.in_right <- $.in_right
-
-    delay.out_left -> $.out_left
-    delay.out_right -> $.out_right
+    delay.in <- $.in
+    delay.out -> $.out
 }
 
 template voice {
@@ -168,18 +173,14 @@ patch {
         @right { pan: 0.9, level: 0.5, send_a: 0.8 }
     }
 
-    mix.send_a_left -> delay.in_left
-    mix.send_a_right -> delay.in_right
-    delay.out_left -> mix.return_a_left
-    delay.out_right -> mix.return_a_right
+    mix.send_a -> delay.in
+    delay.out -> mix.return_a
 
-    drumkit.out_left -> mix.in[drums_l]
-    drumkit.out_right -> mix.in[drums_r]
+    drumkit.out -> mix.in[drums_l]
     left.signal -> mix.in[left]
     right.signal -> mix.in[right]
 
-    mix.out_left -> out.in_left
-    mix.out_right -> out.in_right
+    mix.out -> out.in
 
     module out : AudioOut
 }

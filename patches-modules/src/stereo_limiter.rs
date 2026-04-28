@@ -10,15 +10,13 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Limited left audio output |
-//! | `out_right` | mono | Limited right audio output |
+//! | `out` | stereo | Limited stereo audio output |
 //!
 //! # Parameters
 //!
@@ -37,7 +35,7 @@
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleShape, OutputPort, StereoInput, StereoOutput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -65,19 +63,15 @@ pub struct StereoLimiter {
     interpolator_l: HalfbandInterpolator,
     interpolator_r: HalfbandInterpolator,
     core: LimiterCore,
-    in_l: MonoInput,
-    in_r: MonoInput,
-    out_l: MonoOutput,
-    out_r: MonoOutput,
+    in_stereo: StereoInput,
+    out_stereo: StereoOutput,
 }
 
 impl Module for StereoLimiter {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("StereoLimiter", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_in("in")
+            .stereo_out("out")
             .float_param(params::threshold, 0.0, 2.0, 0.9)
             .float_param(params::attack_ms, 0.1, MAX_ATTACK_MS, 2.0)
             .float_param(params::release_ms, 1.0, 5000.0, 100.0)
@@ -96,10 +90,8 @@ impl Module for StereoLimiter {
             interpolator_l: HalfbandInterpolator::default(),
             interpolator_r: HalfbandInterpolator::default(),
             core,
-            in_l: MonoInput::default(),
-            in_r: MonoInput::default(),
-            out_l: MonoOutput::default(),
-            out_r: MonoOutput::default(),
+            in_stereo: StereoInput::default(),
+            out_stereo: StereoOutput::default(),
         }
     }
 
@@ -118,15 +110,12 @@ impl Module for StereoLimiter {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_l  = MonoInput::from_ports(inputs, 0);
-        self.in_r  = MonoInput::from_ports(inputs, 1);
-        self.out_l = MonoOutput::from_ports(outputs, 0);
-        self.out_r = MonoOutput::from_ports(outputs, 1);
+        self.in_stereo  = StereoInput::from_ports(inputs, 0);
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let input_l = pool.read_mono(&self.in_l);
-        let input_r = pool.read_mono(&self.in_r);
+        let (input_l, input_r) = pool.read_stereo(&self.in_stereo);
 
         self.dry_delay_l.push(input_l);
         self.dry_delay_r.push(input_r);
@@ -142,8 +131,11 @@ impl Module for StereoLimiter {
         let gain = self.core.current_gain();
         let delayed_l = self.dry_delay_l.read_nearest(read_offset);
         let delayed_r = self.dry_delay_r.read_nearest(read_offset);
-        pool.write_mono(&self.out_l, (delayed_l * gain).clamp(-1.0, 1.0));
-        pool.write_mono(&self.out_r, (delayed_r * gain).clamp(-1.0, 1.0));
+        pool.write_stereo(
+            &self.out_stereo,
+            (delayed_l * gain).clamp(-1.0, 1.0),
+            (delayed_r * gain).clamp(-1.0, 1.0),
+        );
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -178,15 +170,12 @@ mod tests {
         );
         let warmup = warmup_samples(2.0, SR);
         for _ in 0..warmup {
-            h.set_mono("in_left", 0.5);
-            h.set_mono("in_right", 0.3);
+            h.set_stereo("in", 0.5, 0.3);
             h.tick();
         }
-        h.set_mono("in_left", 0.5);
-        h.set_mono("in_right", 0.3);
+        h.set_stereo("in", 0.5, 0.3);
         h.tick();
-        let out_l = h.read_mono("out_left");
-        let out_r = h.read_mono("out_right");
+        let (out_l, out_r) = h.read_stereo("out");
         assert!(
             (out_l - 0.5).abs() < 0.05,
             "expected ~0.5 on left, got {out_l}"
@@ -208,12 +197,12 @@ mod tests {
         // Drive only the left channel hard; right is quiet.
         // With linked sidechain, both channels should be gain-reduced.
         for _ in 0..24_000 {
-            h.set_mono("in_left", 2.0);
-            h.set_mono("in_right", 0.4);
+            h.set_stereo("in", 2.0, 0.4);
             h.tick();
         }
-        let out_l = h.read_mono("out_left").abs();
-        let out_r = h.read_mono("out_right").abs();
+        let (out_l, out_r) = h.read_stereo("out");
+        let out_l = out_l.abs();
+        let out_r = out_r.abs();
         assert!(
             out_l <= 1.05,
             "left output {out_l} exceeds threshold"
@@ -239,12 +228,10 @@ mod tests {
 
         // Feed identical signal to both channels; outputs should track each other.
         for _ in 0..24_000 {
-            h.set_mono("in_left", 1.0);
-            h.set_mono("in_right", 1.0);
+            h.set_stereo("in", 1.0, 1.0);
             h.tick();
         }
-        let out_l = h.read_mono("out_left");
-        let out_r = h.read_mono("out_right");
+        let (out_l, out_r) = h.read_stereo("out");
         assert!(
             (out_l - out_r).abs() < 0.001,
             "stereo image shifted: L={out_l}, R={out_r}"
@@ -272,16 +259,14 @@ mod tests {
         for i in 0..2_000 {
             let t = i as f32 / SR;
             let sig = 2.0 * (std::f32::consts::TAU * freq * t).sin();
-            h.set_mono("in_left", sig);
-            h.set_mono("in_right", sig);
+            h.set_stereo("in", sig, sig);
             h.tick();
         }
 
         // Phase 2: silence to recover
         let settle = (release_samples * 3).max(500);
         for _ in 0..settle {
-            h.set_mono("in_left", 0.0);
-            h.set_mono("in_right", 0.0);
+            h.set_stereo("in", 0.0, 0.0);
             h.tick();
         }
 
@@ -290,10 +275,9 @@ mod tests {
         for i in 0..200 {
             let t = i as f32 / SR;
             let sig = 0.5 * (std::f32::consts::TAU * freq * t).sin();
-            h.set_mono("in_left", sig);
-            h.set_mono("in_right", sig);
+            h.set_stereo("in", sig, sig);
             h.tick();
-            max_out = max_out.max(h.read_mono("out_left").abs());
+            max_out = max_out.max(h.read_stereo("out").0.abs());
         }
 
         assert!(

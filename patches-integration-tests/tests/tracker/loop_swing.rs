@@ -32,7 +32,7 @@ patch {
 
     seq.clock[c] -> player.clock
     player.trigger[ch] -> t2a.in
-    t2a.out -> out.in_left
+    t2a.out -> out.in
 }
 "#;
     let mut engine = build_engine(src);
@@ -97,9 +97,8 @@ patch {
     module out: AudioOut
 
     seq.clock[c] -> player.clock
-    player.cv1[ch] -> out.in_left
+    player.cv1[ch] -> out.in
     player.trigger[ch] -> t2a.in
-    t2a.out -> out.in_right
 }
 "#;
     let mut engine = build_engine(src);
@@ -159,7 +158,7 @@ patch {
 
     seq.clock[c] -> player.clock
     player.trigger[ch] -> t2a.in
-    t2a.out -> out.in_left
+    t2a.out -> out.in
 }
 "#;
     let mut engine = build_engine(src);

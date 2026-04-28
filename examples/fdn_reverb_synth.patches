@@ -45,9 +45,8 @@ patch {
 
     # Collapse poly voices to mono and feed the reverb
     vca.out        -> collapse.in
-    collapse.out  -[0.4]-> reverb.in_left
+    collapse.out  -[0.4]-> reverb.in
 
     # Stereo reverb output → audio out
-    reverb.out_left  -> out.in_left
-    reverb.out_right -> out.in_right
+    reverb.out  -> out.in
 }

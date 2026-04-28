@@ -5,7 +5,7 @@ use patches_core::{
     Provenance,
     AudioEnvironment, CableKind, InputPort, InstanceId,
     MonoInput, MonoOutput, Module, ModuleGraph, NodeId,
-    OutputPort, PolyInput, PolyOutput, TrackerData,
+    OutputPort, PolyInput, PolyOutput, StereoInput, StereoOutput, TrackerData,
 };
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
@@ -263,10 +263,10 @@ type PartitionedInputs = (Vec<(usize, usize)>, Vec<(usize, usize, f32)>);
 /// Entries with `scale == 1.0` go into the unscaled list as `(scratch_index, buf_index)`.
 /// Entries with any other scale go into the scaled list as `(scratch_index, buf_index, scale)`.
 /// The scratch index is the position of each entry in `resolved` (0-based).
-fn partition_inputs(resolved: Vec<(usize, f32)>) -> PartitionedInputs {
+fn partition_inputs(resolved: Vec<(usize, f32, bool)>) -> PartitionedInputs {
     let mut unscaled = Vec::new();
     let mut scaled = Vec::new();
-    for (j, (buf_idx, scale)) in resolved.into_iter().enumerate() {
+    for (j, (buf_idx, scale, _broadcast)) in resolved.into_iter().enumerate() {
         if scale == 1.0 {
             unscaled.push((j, buf_idx));
         } else {
@@ -436,11 +436,15 @@ impl PatchBuilder {
                 .iter()
                 .enumerate()
                 .map(|(i, port_desc)| {
-                    let (buf_idx, scale) = resolved_inputs[i];
+                    let (buf_idx, scale, broadcast) = resolved_inputs[i];
                     let connected = connectivity.inputs[i];
                     match port_desc.kind {
                         CableKind::Mono => InputPort::Mono(MonoInput { cable_idx: buf_idx, scale, connected }),
                         CableKind::Poly => InputPort::Poly(PolyInput { cable_idx: buf_idx, scale, connected }),
+                        CableKind::Stereo => InputPort::Stereo(StereoInput {
+                            cable_idx: buf_idx, scale, connected,
+                            broadcast_from_mono: broadcast,
+                        }),
                     }
                 })
                 .collect();
@@ -459,6 +463,12 @@ impl PatchBuilder {
                                 to_zero_poly.push(buf_idx);
                             }
                             OutputPort::Poly(PolyOutput { cable_idx: buf_idx, connected })
+                        }
+                        CableKind::Stereo => {
+                            if to_zero_set.contains(&buf_idx) {
+                                to_zero_poly.push(buf_idx);
+                            }
+                            OutputPort::Stereo(StereoOutput { cable_idx: buf_idx, connected })
                         }
                     }
                 })

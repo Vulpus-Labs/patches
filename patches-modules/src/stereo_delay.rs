@@ -9,24 +9,20 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `in_left` | mono | Left audio input |
-//! | `in_right` | mono | Right audio input |
+//! | `in` | stereo | Stereo audio input |
 //! | `drywet_cv` | mono | Additive CV for dry/wet |
 //! | `delay_cv[i]` | mono | Additive CV for delay time (i in 0..N-1, N = channels) |
 //! | `gain_cv[i]` | mono | Additive CV for tap gain (i in 0..N-1, N = channels) |
 //! | `fb_cv[i]` | mono | Additive CV for feedback amount (i in 0..N-1, N = channels) |
 //! | `pan_cv[i]` | mono | Additive CV for pan (i in 0..N-1, N = channels) |
-//! | `return_left[i]` | mono | Pre-gain L return per tap (i in 0..N-1, N = channels) |
-//! | `return_right[i]` | mono | Pre-gain R return per tap (i in 0..N-1, N = channels) |
+//! | `return[i]` | stereo | Pre-gain stereo return per tap (i in 0..N-1, N = channels) |
 //!
 //! # Outputs
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `out_left` | mono | Wet/dry mixed left output |
-//! | `out_right` | mono | Wet/dry mixed right output |
-//! | `send_left[i]` | mono | Pre-gain L tap signal per tap (i in 0..N-1, N = channels) |
-//! | `send_right[i]` | mono | Pre-gain R tap signal per tap (i in 0..N-1, N = channels) |
+//! | `out` | stereo | Wet/dry mixed stereo output |
+//! | `send[i]` | stereo | Pre-gain tap signal per tap (i in 0..N-1, N = channels) |
 //!
 //! # Parameters
 //!
@@ -47,7 +43,7 @@
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, ModuleShape, OutputPort, StereoInput, StereoOutput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -104,40 +100,32 @@ pub struct StereoDelay {
     pingpong:  Vec<bool>,
 
     // Global port fields
-    in_l:      MonoInput,
-    in_r:      MonoInput,
+    in_stereo: StereoInput,
     drywet_cv: MonoInput,
-    out_l:     MonoOutput,
-    out_r:     MonoOutput,
+    out_stereo: StereoOutput,
 
     // Per-tap port fields
     delay_cv:   Vec<MonoInput>,
     gain_cv:    Vec<MonoInput>,
     fb_cv:      Vec<MonoInput>,
     pan_cv:     Vec<MonoInput>,
-    return_l:   Vec<MonoInput>,
-    return_r:   Vec<MonoInput>,
-    send_l:     Vec<MonoOutput>,
-    send_r:     Vec<MonoOutput>,
+    return_st:  Vec<StereoInput>,
+    send_st:    Vec<StereoOutput>,
 }
 
 impl Module for StereoDelay {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         let n = shape.channels;
         ModuleDescriptor::new("StereoDelay", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
             .mono_in("drywet_cv")
             .mono_in_multi("delay_cv",  n)
             .mono_in_multi("gain_cv",   n)
             .mono_in_multi("fb_cv",     n)
             .mono_in_multi("pan_cv",    n)
-            .mono_in_multi("return_left",  n)
-            .mono_in_multi("return_right",  n)
-            .mono_out("out_left")
-            .mono_out("out_right")
-            .mono_out_multi("send_left", n)
-            .mono_out_multi("send_right", n)
+            .stereo_in_multi("return",  n)
+            .stereo_out("out")
+            .stereo_out_multi("send", n)
             .float_param(params::dry_wet, 0.0, 1.0, 1.0)
             .int_param_multi(params::delay_ms, n, 0, 2000, 500)
             .float_param_multi(params::gain,     n, 0.0,  1.0,  1.0)
@@ -194,19 +182,15 @@ impl Module for StereoDelay {
             drives:    vec![1.0; taps],
             pans:      vec![0.0; taps],
             pingpong:  vec![false; taps],
-            in_l:      MonoInput::default(),
-            in_r:      MonoInput::default(),
+            in_stereo: StereoInput::default(),
             drywet_cv: MonoInput::default(),
-            out_l:     MonoOutput::default(),
-            out_r:     MonoOutput::default(),
+            out_stereo: StereoOutput::default(),
             delay_cv:  vec![MonoInput::default(); taps],
             gain_cv:   vec![MonoInput::default(); taps],
             fb_cv:     vec![MonoInput::default(); taps],
             pan_cv:    vec![MonoInput::default(); taps],
-            return_l:  vec![MonoInput::default(); taps],
-            return_r:  vec![MonoInput::default(); taps],
-            send_l:    vec![MonoOutput::default(); taps],
-            send_r:    vec![MonoOutput::default(); taps],
+            return_st: vec![StereoInput::default(); taps],
+            send_st:   vec![StereoOutput::default(); taps],
         }
     }
 
@@ -234,31 +218,26 @@ impl Module for StereoDelay {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         let n = self.taps;
-        // Global inputs: in_l(0), in_r(1), drywet_cv(2)
-        self.in_l      = MonoInput::from_ports(inputs, 0);
-        self.in_r      = MonoInput::from_ports(inputs, 1);
-        self.drywet_cv = MonoInput::from_ports(inputs, 2);
-        // Per-tap inputs: delay_cv, gain_cv, fb_cv, pan_cv, return_l, return_r
+        // Global inputs: in(0, stereo), drywet_cv(1)
+        self.in_stereo = StereoInput::from_ports(inputs, 0);
+        self.drywet_cv = MonoInput::from_ports(inputs, 1);
+        // Per-tap inputs: delay_cv, gain_cv, fb_cv, pan_cv, return (stereo)
         for i in 0..n {
-            self.delay_cv[i] = MonoInput::from_ports(inputs, 3 + i);
-            self.gain_cv[i]  = MonoInput::from_ports(inputs, 3 + n + i);
-            self.fb_cv[i]    = MonoInput::from_ports(inputs, 3 + 2 * n + i);
-            self.pan_cv[i]   = MonoInput::from_ports(inputs, 3 + 3 * n + i);
-            self.return_l[i] = MonoInput::from_ports(inputs, 3 + 4 * n + i);
-            self.return_r[i] = MonoInput::from_ports(inputs, 3 + 5 * n + i);
+            self.delay_cv[i]  = MonoInput::from_ports(inputs, 2 + i);
+            self.gain_cv[i]   = MonoInput::from_ports(inputs, 2 + n + i);
+            self.fb_cv[i]     = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            self.pan_cv[i]    = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            self.return_st[i] = StereoInput::from_ports(inputs, 2 + 4 * n + i);
         }
-        // Outputs: out_l(0), out_r(1), send_l[0..n], send_r[0..n]
-        self.out_l = MonoOutput::from_ports(outputs, 0);
-        self.out_r = MonoOutput::from_ports(outputs, 1);
+        // Outputs: out(0, stereo), send[0..n] (stereo)
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
         for i in 0..n {
-            self.send_l[i] = MonoOutput::from_ports(outputs, 2 + i);
-            self.send_r[i] = MonoOutput::from_ports(outputs, 2 + n + i);
+            self.send_st[i] = StereoOutput::from_ports(outputs, 1 + i);
         }
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let in_l = pool.read_mono(&self.in_l);
-        let in_r = pool.read_mono(&self.in_r);
+        let (in_l, in_r) = pool.read_stereo(&self.in_stereo);
 
         // ── Write: input + pre-routed feedbacks from previous tick ────────────
         // Routing (pingpong or straight) was applied when storing routed_l/r at
@@ -286,12 +265,12 @@ impl Module for StereoDelay {
             };
 
             // Send outputs (pre-gain, pre-pan, pre-return)
-            pool.write_mono(&self.send_l[i], tap_raw_l);
-            pool.write_mono(&self.send_r[i], tap_raw_r);
+            pool.write_stereo(&self.send_st[i], tap_raw_l, tap_raw_r);
 
             // Mix in returns
-            let sig_l = tap_raw_l + pool.read_mono(&self.return_l[i]);
-            let sig_r = tap_raw_r + pool.read_mono(&self.return_r[i]);
+            let (ret_l, ret_r) = pool.read_stereo(&self.return_st[i]);
+            let sig_l = tap_raw_l + ret_l;
+            let sig_r = tap_raw_r + ret_r;
 
             // Tone filter
             let toned_l = self.tone_filters_l[i].process(sig_l);
@@ -321,8 +300,11 @@ impl Module for StereoDelay {
 
         // ── Dry/wet mix ───────────────────────────────────────────────────────
         let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);
-        pool.write_mono(&self.out_l, in_l + eff_dw * (wet_l - in_l));
-        pool.write_mono(&self.out_r, in_r + eff_dw * (wet_r - in_r));
+        pool.write_stereo(
+            &self.out_stereo,
+            in_l + eff_dw * (wet_l - in_l),
+            in_r + eff_dw * (wet_r - in_r),
+        );
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
@@ -350,11 +332,11 @@ mod tests {
             params!["dry_wet" => 0.0_f32],
             ENV, shape(0),
         );
-        h.set_mono("in_left", 0.5);
-        h.set_mono("in_right", 0.3);
+        h.set_stereo("in", 0.5, 0.3);
         h.tick();
-        assert_eq!(h.read_mono("out_left"), 0.5);
-        assert_eq!(h.read_mono("out_right"), 0.3);
+        let (l, r) = h.read_stereo("out");
+        assert_eq!(l, 0.5);
+        assert_eq!(r, 0.3);
     }
 
     #[test]
@@ -372,17 +354,16 @@ mod tests {
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
         h.disconnect_input_at("pan_cv", 0);
-        h.disconnect_input_at("return_left", 0);
-        h.disconnect_input_at("return_right", 0);
+        h.disconnect_input_at("return", 0);
 
         // Prime with a known signal
-        h.set_mono("in_left", 1.0);
-        h.set_mono("in_right", 1.0);
+        h.set_stereo("in", 1.0, 1.0);
         for _ in 0..50 { h.tick(); }
 
         // With pan=1: left gain = (1-1)*0.5 = 0; right gain = (1+1)*0.5 = 1
-        let out_l = h.read_mono("out_left").abs();
-        let out_r = h.read_mono("out_right").abs();
+        let (out_l, out_r) = h.read_stereo("out");
+        let out_l = out_l.abs();
+        let out_r = out_r.abs();
         assert!(out_l < 1e-6, "out_l should be 0 at pan=1, got {out_l}");
         assert!(out_r > 0.0, "out_r should be non-zero at pan=1, got {out_r}");
     }
@@ -406,14 +387,12 @@ mod tests {
         h.disconnect_input_at("gain_cv", 0);
         h.disconnect_input_at("fb_cv", 0);
         h.disconnect_input_at("pan_cv", 0);
-        h.disconnect_input_at("return_left", 0);
-        h.disconnect_input_at("return_right", 0);
+        h.disconnect_input_at("return", 0);
 
         // Fire impulse on L only; R is silent (disconnected → 0)
-        h.set_mono("in_left", 1.0);
-        h.set_mono("in_right", 0.0);
+        h.set_stereo("in", 1.0, 0.0);
         h.tick();
-        h.set_mono("in_left", 0.0);
+        h.set_stereo("in", 0.0, 0.0);
 
         // Collect enough samples for several ping-pong bounces
         let total = period * 5;
@@ -421,8 +400,9 @@ mod tests {
         let mut right_samples = Vec::with_capacity(total);
         for _ in 0..total {
             h.tick();
-            left_samples.push(h.read_mono("out_left"));
-            right_samples.push(h.read_mono("out_right"));
+            let (l, r) = h.read_stereo("out");
+            left_samples.push(l);
+            right_samples.push(r);
         }
 
         // Period 1: impulse arrives on L

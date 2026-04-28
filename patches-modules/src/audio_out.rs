@@ -1,15 +1,16 @@
 use patches_core::{
     AUDIO_OUT_L, AUDIO_OUT_R,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoOutput, ModuleShape, OutputPort, StereoInput,
 };
 use patches_core::param_frame::ParamView;
 
 /// Stereo audio output to the hardware backplane.
 ///
-/// Receives left and right audio samples via its two input ports and writes
-/// them to the `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots each tick.
-/// The audio callback reads those slots directly after each `tick()` call.
+/// Receives a stereo audio signal via its single stereo input port and
+/// splits it onto the `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots
+/// each tick. The audio callback reads those slots directly after each
+/// `tick()` call.
 ///
 /// `AudioOut` does not call any audio API; it knows nothing about the backend.
 ///
@@ -17,13 +18,11 @@ use patches_core::param_frame::ParamView;
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `in_left` | mono | Left channel to send to the hardware audio output |
-/// | `in_right` | mono | Right channel to send to the hardware audio output |
+/// | `in` | stereo | Stereo signal to send to the hardware audio output |
 pub struct AudioOut {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    in_left: MonoInput,
-    in_right: MonoInput,
+    in_stereo: StereoInput,
     /// Fixed output pointing at the left audio output backplane slot.
     out_left: MonoOutput,
     /// Fixed output pointing at the right audio output backplane slot.
@@ -33,16 +32,14 @@ pub struct AudioOut {
 impl Module for AudioOut {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("AudioOut", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
         Self {
             instance_id,
             descriptor,
-            in_left: MonoInput::default(),
-            in_right: MonoInput::default(),
+            in_stereo: StereoInput::default(),
             out_left: MonoOutput { cable_idx: AUDIO_OUT_L, connected: true },
             out_right: MonoOutput { cable_idx: AUDIO_OUT_R, connected: true },
         }
@@ -60,14 +57,14 @@ impl Module for AudioOut {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], _outputs: &[OutputPort]) {
-        self.in_left = MonoInput::from_ports(inputs, 0);
-        self.in_right = MonoInput::from_ports(inputs, 1);
+        self.in_stereo = StereoInput::from_ports(inputs, 0);
         // out_left / out_right are fixed backplane slots; not assigned by the planner.
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        pool.write_mono(&self.out_left,  pool.read_mono(&self.in_left));
-        pool.write_mono(&self.out_right, pool.read_mono(&self.in_right));
+        let (l, r) = pool.read_stereo(&self.in_stereo);
+        pool.write_mono(&self.out_left,  l);
+        pool.write_mono(&self.out_right, r);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -82,12 +79,11 @@ mod tests {
     use patches_core::test_support::ModuleHarness;
 
     /// After a tick, `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots hold
-    /// the values written by the connected inputs.
+    /// the values written from the stereo input.
     #[test]
     fn process_writes_to_backplane_slots() {
         let mut h = ModuleHarness::build::<AudioOut>(&[]);
-        h.set_mono("in_left",  0.5);
-        h.set_mono("in_right", -0.3);
+        h.set_stereo("in", 0.5, -0.3);
         h.tick();
 
         let left = match h.pool_slot(AUDIO_OUT_L) {

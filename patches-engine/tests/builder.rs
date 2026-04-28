@@ -45,10 +45,7 @@ mod builder {
         graph.add_module("a_sine", sine_desc, &sine_params).unwrap();
         graph.add_module("b_out", out_desc, &ParameterMap::new()).unwrap();
         graph
-            .connect(&NodeId::from("a_sine"), p("sine"), &NodeId::from("b_out"), p("in_left"), 1.0)
-            .unwrap();
-        graph
-            .connect(&NodeId::from("a_sine"), p("sine"), &NodeId::from("b_out"), p("in_right"), 1.0)
+            .connect(&NodeId::from("a_sine"), p("sine"), &NodeId::from("b_out"), p("in"), 1.0)
             .unwrap();
         graph
     }

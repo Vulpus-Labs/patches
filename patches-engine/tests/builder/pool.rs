@@ -18,8 +18,9 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
         g.add_module("s1", s1, &p1).unwrap();
         g.add_module("s2", s2, &p2).unwrap();
         g.add_module("out", out, &ParameterMap::new()).unwrap();
-        g.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        g.connect(&NodeId::from("s2"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        // s1 broadcast onto stereo `in`; s2 is unconnected (still allocates a
+        // buffer the freelist tracks across rebuilds).
+        g.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
         let (_, new_state) = builder.build_patch(&g, &registry, &env, state).unwrap();
         new_state
     };
@@ -32,8 +33,7 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
         pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         g.add_module("s1", s, &pm).unwrap();
         g.add_module("out", out, &ParameterMap::new()).unwrap();
-        g.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        g.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        g.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
         let (_, new_state) = builder.build_patch(&g, &registry, &env, state).unwrap();
         new_state
     };
@@ -63,8 +63,7 @@ fn pool_exhausted_error_when_capacity_exceeded() {
     pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
     graph.add_module("sine", sine_desc, &pm).unwrap();
     graph.add_module("out", out_desc, &ParameterMap::new()).unwrap();
-    graph.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     let registry = default_registry();
     let env = default_env();
     assert!(matches!(

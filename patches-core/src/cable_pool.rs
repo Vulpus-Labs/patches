@@ -1,4 +1,4 @@
-use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput};
+use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput, StereoInput, StereoOutput, StereoSample};
 
 /// Encapsulates the ping-pong cable buffer pool and the current write index,
 /// providing typed read/write accessors for use in [`Module::process`].
@@ -150,6 +150,50 @@ impl<'a> CablePool<'a> {
     /// Write a 16-channel poly `value` to `output`. Writes to the **write slot** (`wi`).
     pub fn write_poly(&mut self, output: &PolyOutput, value: [f32; 16]) {
         self.pool[output.cable_idx][self.wi] = CableValue::Poly(value);
+    }
+
+    #[inline(always)]
+    /// Read a stereo `(L, R)` pair from `input`, applying `input.scale`.
+    /// Reads the **read slot** (`1 - wi`).
+    ///
+    /// When `input.broadcast_from_mono` is set the underlying slot may be
+    /// `CableValue::Mono` (produced by a mono source feeding a stereo input,
+    /// ADR 0059 §2); the sample is replicated as `(s, s)`. Otherwise the slot
+    /// is `CableValue::Poly` and lanes 0/1 are returned.
+    pub fn read_stereo(&self, input: &StereoInput) -> StereoSample {
+        let ri = 1 - self.wi;
+        match self.pool[input.cable_idx][ri] {
+            CableValue::Poly(channels) => {
+                if input.broadcast_from_mono {
+                    let s = channels[0] * input.scale;
+                    (s, s)
+                } else {
+                    (channels[0] * input.scale, channels[1] * input.scale)
+                }
+            }
+            CableValue::Mono(v) => {
+                if input.broadcast_from_mono {
+                    let s = v * input.scale;
+                    (s, s)
+                } else {
+                    debug_assert!(
+                        false,
+                        "CablePool::read_stereo encountered a Mono cable without broadcast — graph validation should prevent this"
+                    );
+                    (0.0, 0.0)
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    /// Write a stereo `(left, right)` pair to `output`. Writes to the **write
+    /// slot** (`wi`); lanes 2..16 are zeroed.
+    pub fn write_stereo(&mut self, output: &StereoOutput, left: f32, right: f32) {
+        let mut frame = [0.0_f32; 16];
+        frame[0] = left;
+        frame[1] = right;
+        self.pool[output.cable_idx][self.wi] = CableValue::Poly(frame);
     }
 }
 

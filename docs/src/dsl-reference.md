@@ -95,13 +95,16 @@ Frequency, note, and dB literals are case-insensitive. There is no time-unit suf
 ### Forward connection
 
 ```patches
-osc.sine -> out.in_left
+osc.sine -> out.in
 ```
+
+`out` here is `AudioOut`, whose `in` is a stereo port. The mono `osc.sine`
+broadcasts onto both channels automatically (see *Cable kinds* below).
 
 ### Scaled forward connection
 
 ```patches
-osc.sine -[0.5]-> out.in_left
+osc.sine -[0.5]-> out.in
 ```
 
 The scale factor is a float multiplied onto the signal at the cable level.
@@ -136,7 +139,22 @@ The `[*name]` wildcard expands into one connection per index from 0 to `name - 1
 
 - Each input port accepts exactly one cable. A second connection to the same input is an error.
 - An output port can drive any number of inputs.
-- Mono outputs can only connect to mono inputs; poly to poly. Use `MonoToPoly` / `PolyToMono` to bridge.
+- Cable kinds must match: mono ↔ mono, poly ↔ poly, stereo ↔ stereo.
+  Use `MonoToPoly` / `PolyToMono` to bridge mono and poly.
+
+### Cable kinds (mono / poly / stereo)
+
+- **Mono** carries one `f32` per tick. The default for control and audio cables.
+- **Poly** carries 16 voices (`[f32; 16]`). Used by `Poly*` modules.
+- **Stereo** carries an `(L, R)` pair. Stereo modules expose a single
+  port — `stereo_delay.in`, `lim.out` — instead of paired `*_left` /
+  `*_right` ports.
+
+A mono Audio source feeding a stereo input is silently broadcast
+(`L = R = source`); no extra wiring is needed for the common
+"mono-into-effect" case. Stereo→mono is rejected — when the user
+genuinely wants the two halves apart they go through `StereoSplitter`,
+and `StereoJoiner` assembles two monos back into one stereo cable.
 
 ## Templates
 
@@ -172,8 +190,8 @@ patch {
     module v1 : voice(attack: 0.005, sustain: 0.6)
     module v2 : voice    # all defaults
 
-    v1.audio -> out.in_left
-    v2.audio -> out.in_right
+    v1.audio -> out.in
+    v2.audio -> out.in
 }
 ```
 

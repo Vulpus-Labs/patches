@@ -678,7 +678,11 @@ pub fn build_pipeline(
 
     for comp in desc.components.iter().copied() {
         match comp {
-            TapType::Meter => {
+            TapType::Meter | TapType::StereoMeter => {
+                // `StereoMeter` reaches the processor builder once per
+                // side; the manifest split into `foo/left` / `foo/right`
+                // means each entry is itself one mono scalar slot
+                // (ADR 0059 §7). UI grouping happens upstream.
                 let dps = decay_per_sample(DEFAULT_METER_DECAY_MS, sample_rate);
                 let win = window_samples(DEFAULT_METER_WINDOW_MS, sample_rate);
                 let id_peak = ProcessorIdentity::new(&desc.name, ProcessorId::MeterPeak);
@@ -721,6 +725,7 @@ mod tests {
 
     fn meter_desc(name: &str) -> TapDescriptor {
         TapDescriptor {
+            width: 1,
             slot: 0,
             name: name.to_string(),
             components: vec![TapType::Meter],
@@ -774,6 +779,7 @@ mod tests {
     #[test]
     fn build_pipeline_emits_led_processors() {
         let desc = TapDescriptor {
+            width: 1,
             slot: 0,
             name: "bar".into(),
             components: vec![TapType::GateLed, TapType::TriggerLed],
@@ -966,6 +972,7 @@ mod tests {
     #[test]
     fn build_pipeline_osc_emits_scope_processor() {
         let desc = TapDescriptor {
+            width: 1,
             slot: 0,
             name: "o".into(),
             components: vec![TapType::Osc],
@@ -980,6 +987,7 @@ mod tests {
     #[test]
     fn build_pipeline_spectrum_emits_one_processor() {
         let desc = TapDescriptor {
+            width: 1,
             slot: 0,
             name: "s".into(),
             components: vec![TapType::Spectrum],

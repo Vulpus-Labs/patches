@@ -55,13 +55,10 @@ fn make_harness() -> ModuleHarness {
         params!["size" => 0.5_f32, "brightness" => 0.5_f32, "character" => patches_modules::fdn_reverb::params::Character::Plate],
         env,
     );
-    // Disconnect CV inputs and the right audio input (mono source).
-    h.disconnect_input("in_right");
     h.disconnect_input("size_cv");
     h.disconnect_input("brightness_cv");
     h.disconnect_input("pre_delay_cv");
     h.disconnect_input("mix_cv");
-    // Keep both outputs connected so stereo_out = true and we capture L+R.
     h
 }
 
@@ -69,18 +66,19 @@ fn make_harness() -> ModuleHarness {
 fn run_impulse_response(h: &mut ModuleHarness) -> Vec<f32> {
     let mut samples = Vec::with_capacity(N_SAMPLES * 2);
 
-    // Sample 0: impulse
-    h.set_mono("in_left", 1.0);
+    // Sample 0: impulse on left only (mono-style input via stereo cable).
+    h.set_stereo("in", 1.0, 0.0);
     h.tick();
-    samples.push(h.read_mono("out_left"));
-    samples.push(h.read_mono("out_right"));
+    let (l, r) = h.read_stereo("out");
+    samples.push(l);
+    samples.push(r);
 
-    // Samples 1..N_SAMPLES: silence
-    h.set_mono("in_left", 0.0);
+    h.set_stereo("in", 0.0, 0.0);
     for _ in 1..N_SAMPLES {
         h.tick();
-        samples.push(h.read_mono("out_left"));
-        samples.push(h.read_mono("out_right"));
+        let (l, r) = h.read_stereo("out");
+        samples.push(l);
+        samples.push(r);
     }
 
     samples

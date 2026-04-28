@@ -1,6 +1,6 @@
 template drum_machine(crush_rate: float = 0.8, crush_depth: float = 6.0, crush_mix: float = 0.3) {
     in: kick, snare, hat, ohat, clap, tom, claves, cymbal
-    out: out_left, out_right
+    out: out
 
     module kick_drum: Kick {
         pitch: 50, sweep: 2000, sweep_time: 0.03, decay: 0.4, drive: 0.7, click: 0.4
@@ -50,10 +50,8 @@ template drum_machine(crush_rate: float = 0.8, crush_depth: float = 6.0, crush_m
     }
 
     module reverb : FdnReverb { character: room }
-    mix.send_a_left -> reverb.in_left
-    mix.send_a_right -> reverb.in_right
-    reverb.out_left -> mix.return_a_left
-    reverb.out_right -> mix.return_a_right
+    mix.send_a -> reverb.in
+    reverb.out -> mix.return_a
 
     kick_drum.out   -> mix.in[kick]
     snare_drum.out  -> mix.in[snare]
@@ -64,16 +62,19 @@ template drum_machine(crush_rate: float = 0.8, crush_depth: float = 6.0, crush_m
     claves_drum.out -> mix.in[claves]
     cymbal_drum.out -> mix.in[cymbal]
 
+    module split: StereoSplitter
     module crush_l: Bitcrusher {
         rate: <crush_rate>, depth: <crush_depth>, dry_wet: <crush_mix>
     }
     module crush_r: Bitcrusher {
         rate: <crush_rate>, depth: <crush_depth>, dry_wet: <crush_mix>
     }
+    module join: StereoJoiner
 
-    mix.out_left  -> crush_l.in
-    mix.out_right -> crush_r.in
-
-    crush_l.out   -> $.out_left
-    crush_r.out   -> $.out_right
+    mix.out  -> split.in
+    split.out_left  -> crush_l.in
+    split.out_right -> crush_r.in
+    crush_l.out -> join.in_left
+    crush_r.out -> join.in_right
+    join.out -> $.out
 }

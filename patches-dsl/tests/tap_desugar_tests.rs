@@ -1,15 +1,13 @@
-//! Tap desugaring + manifest emission (ticket 0697, ADR 0054 §§2, 3, 6).
+//! Tap desugaring + manifest emission (ADR 0054 §§2, 3, 6 — superseded
+//! in part by ADR 0059 §4: the audio/trigger split is collapsed into a
+//! single `~tap` module instance with a per-channel `kind` parameter).
 //!
 //! Runs `expand` on `.patches` snippets that contain tap targets and
-//! checks both the desugared FlatPatch (synthetic `~audio_tap` /
-//! `~trigger_tap` instances, rewritten cables, slot offsets) and the
-//! emitted manifest (slot order, components, params).
-//!
-//! Synthetic tap modules don't yet exist in the registry (phase 2), so
-//! these tests stop at the FlatPatch — they don't touch the
-//! interpreter.
+//! checks both the desugared FlatPatch (synthetic `~tap` instance,
+//! rewritten cables, slot offsets, kind tags) and the emitted manifest
+//! (slot order, components, params).
 
-use patches_dsl::desugar::{SYNTH_AUDIO_TAP, SYNTH_TRIGGER_TAP};
+use patches_dsl::desugar::SYNTH_TAP;
 use patches_dsl::manifest::TapType;
 use patches_dsl::{expand, parse, ExpandResult};
 
@@ -19,7 +17,7 @@ fn run(src: &str) -> ExpandResult {
 }
 
 #[test]
-fn simple_meter_emits_audio_tap_and_manifest() {
+fn simple_meter_emits_tap_and_manifest() {
     let src = "\
 patch {
     module osc : Osc
@@ -28,23 +26,20 @@ patch {
 ";
     let r = run(src);
     let module_names: Vec<&str> = r.patch.modules.iter().map(|m| m.id.name.as_str()).collect();
-    assert!(module_names.contains(&SYNTH_AUDIO_TAP), "expected synthetic audio_tap");
-    assert!(!module_names.contains(&SYNTH_TRIGGER_TAP));
+    assert!(module_names.contains(&SYNTH_TAP), "expected synthetic ~tap");
 
-    // Manifest: one descriptor, slot 0, components [Meter].
     assert_eq!(r.manifest.len(), 1);
     let d = &r.manifest[0];
     assert_eq!(d.slot, 0);
     assert_eq!(d.name, "level");
     assert_eq!(d.components, vec![TapType::Meter]);
 
-    // The cable now lands on ~audio_tap.in[level] and there's no tap
-    // endpoint surviving in the FlatPatch.
+    // The cable now lands on ~tap.mono_in[level].
     let conn = r.patch.connections.iter()
-        .find(|c| c.to_module.name == SYNTH_AUDIO_TAP)
-        .expect("expected a cable into ~audio_tap");
+        .find(|c| c.to_module.name == SYNTH_TAP)
+        .expect("expected a cable into ~tap");
     assert_eq!(conn.from_module.name, "osc");
-    assert_eq!(conn.to_port, "in");
+    assert_eq!(conn.to_port, "mono_in");
 }
 
 #[test]
@@ -62,7 +57,7 @@ patch {
 }
 
 #[test]
-fn mixed_audio_and_trigger_emits_two_synth_modules() {
+fn mixed_audio_and_trigger_share_one_tap_module() {
     let src = "\
 patch {
     module osc : Osc
@@ -73,23 +68,31 @@ patch {
 ";
     let r = run(src);
     let module_names: Vec<&str> = r.patch.modules.iter().map(|m| m.id.name.as_str()).collect();
-    assert!(module_names.contains(&SYNTH_AUDIO_TAP));
-    assert!(module_names.contains(&SYNTH_TRIGGER_TAP));
+    // ADR 0059 §4 collapses audio/trigger into one Tap instance.
+    assert_eq!(module_names.iter().filter(|n| **n == SYNTH_TAP).count(), 1);
 
-    // Global alphabetical sort: "audible" < "beat", so audible=0, beat=1.
+    // Global alphabetical sort: "audible" < "beat".
     assert_eq!(r.manifest.len(), 2);
     assert_eq!(r.manifest[0].name, "audible");
     assert_eq!(r.manifest[0].slot, 0);
     assert_eq!(r.manifest[1].name, "beat");
     assert_eq!(r.manifest[1].slot, 1);
     assert_eq!(r.manifest[1].components, vec![TapType::TriggerLed]);
+
+    // Mono and trigger taps land on different input ports of the same module.
+    let mono_conn = r.patch.connections.iter()
+        .find(|c| c.to_module.name == SYNTH_TAP && c.to_port == "mono_in")
+        .expect("expected mono_in connection");
+    assert_eq!(mono_conn.from_module.name, "osc");
+    let trig_conn = r.patch.connections.iter()
+        .find(|c| c.to_module.name == SYNTH_TAP && c.to_port == "trigger_in")
+        .expect("expected trigger_in connection");
+    assert_eq!(trig_conn.from_module.name, "clk");
 }
 
 #[test]
-fn alphabetical_sort_across_modules() {
-    // Names chosen so trigger comes before audio alphabetically; the
-    // global slot ordering should reflect that, irrespective of
-    // declaration order or which underlying module each tap lands on.
+fn slot_order_follows_source_location() {
+    // ADR 0059 §6: slots assigned in source order, not alphabetical.
     let src = "\
 patch {
     module osc : Osc
@@ -101,9 +104,125 @@ patch {
 ";
     let r = run(src);
     let names: Vec<&str> = r.manifest.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, ["alpha", "mango", "zebra"]);
+    assert_eq!(names, ["zebra", "alpha", "mango"]);
     let slots: Vec<usize> = r.manifest.iter().map(|d| d.slot).collect();
     assert_eq!(slots, [0, 1, 2]);
+}
+
+#[test]
+fn same_name_different_kind_coexist_as_distinct_channels() {
+    // ADR 0059 §6: identity is `(tap_type, name)`. A `~trigger_led(kick)`
+    // and a `~meter(kick)` are two separate taps that share a label.
+    let src = "\
+patch {
+    module clk : Clock
+    module kk  : Kick
+    clk.tick -> ~trigger_led(kick)
+    kk.out   -> ~meter(kick)
+}
+";
+    let r = run(src);
+    assert_eq!(r.manifest.len(), 2, "expected two channels for the (kind, kick) pairs");
+    // Source order: trigger_led first, meter second.
+    assert_eq!(r.manifest[0].slot, 0);
+    assert_eq!(r.manifest[1].slot, 1);
+    let kinds: Vec<&[TapType]> = r.manifest.iter().map(|d| d.components.as_slice()).collect();
+    assert_eq!(kinds, vec![&[TapType::TriggerLed][..], &[TapType::Meter][..]]);
+}
+
+#[test]
+fn stereo_meter_emits_left_right_manifest_pair() {
+    // ADR 0059 §7: `~stereo_meter(master)` publishes two scalar tracks
+    // (`master/left`, `master/right`) at consecutive slots, all keyed
+    // by the same `StereoMeter` component tag.
+    let src = "\
+patch {
+    module mix : Mix
+    mix.out -> ~stereo_meter(master)
+}
+";
+    let r = run(src);
+    assert_eq!(r.manifest.len(), 2, "stereo channel produces L+R manifest entries");
+    assert_eq!(r.manifest[0].name, "master/left");
+    assert_eq!(r.manifest[0].slot, 0);
+    assert_eq!(r.manifest[1].name, "master/right");
+    assert_eq!(r.manifest[1].slot, 1);
+    assert_eq!(r.manifest[0].components, vec![TapType::StereoMeter]);
+    assert_eq!(r.manifest[1].components, vec![TapType::StereoMeter]);
+    let conn = r.patch.connections.iter()
+        .find(|c| c.to_module.name == SYNTH_TAP)
+        .expect("expected stereo cable into ~tap");
+    assert_eq!(conn.to_port, "stereo_in");
+}
+
+#[test]
+fn stereo_meter_after_mono_taps_uses_width_2_slots() {
+    // First a mono tap (slot 0), then a stereo tap (slots 1 & 2).
+    let src = "\
+patch {
+    module osc : Osc
+    module mix : Mix
+    osc.sine -> ~meter(level)
+    mix.out  -> ~stereo_meter(master)
+}
+";
+    let r = run(src);
+    assert_eq!(r.manifest.len(), 3);
+    assert_eq!(r.manifest[0].name, "level");
+    assert_eq!(r.manifest[0].slot, 0);
+    assert_eq!(r.manifest[1].name, "master/left");
+    assert_eq!(r.manifest[1].slot, 1);
+    assert_eq!(r.manifest[2].name, "master/right");
+    assert_eq!(r.manifest[2].slot, 2);
+}
+
+#[test]
+fn separate_components_under_one_name_coalesce_to_one_slot() {
+    // Compatible mono components (`meter`, `osc`, `spectrum`) declared
+    // separately under the same name share a single backplane slot.
+    // Equivalent to `~meter+osc+spectrum(kick)` modulo source layout.
+    let src = "\
+patch {
+    module kk : Kick
+    kk.out -> ~meter(kick)
+    kk.out -> ~osc(kick)
+    kk.out -> ~spectrum(kick)
+}
+";
+    let r = run(src);
+    assert_eq!(r.manifest.len(), 1, "all three components share one channel");
+    let d = &r.manifest[0];
+    assert_eq!(d.slot, 0);
+    assert_eq!(d.name, "kick");
+    assert_eq!(d.components, vec![TapType::Meter, TapType::Osc, TapType::Spectrum]);
+
+    // The duplicate `kk.out -> ~tap.mono_in[mono_kick]` cables collapse
+    // into a single edge — identical-source/identical-destination
+    // dedup happens at desugar time so the connectivity validator
+    // doesn't see a phantom input-already-connected error.
+    let mono_in_count = r.patch.connections.iter()
+        .filter(|c| c.to_module.name == SYNTH_TAP && c.to_port == "mono_in")
+        .count();
+    assert_eq!(mono_in_count, 1);
+}
+
+#[test]
+fn repeated_use_of_same_tap_collapses_to_one_channel() {
+    // Same `(kind, name)` used twice → one channel, two cables to it.
+    let src = "\
+patch {
+    module a : Osc
+    module b : Osc
+    a.out -> ~meter(bus)
+    b.out -> ~meter(bus)
+}
+";
+    let r = run(src);
+    assert_eq!(r.manifest.len(), 1, "duplicate (kind, name) must dedup");
+    let mono_in_count = r.patch.connections.iter()
+        .filter(|c| c.to_module.name == SYNTH_TAP && c.to_port == "mono_in")
+        .count();
+    assert_eq!(mono_in_count, 2, "both source cables route to the shared channel");
 }
 
 #[test]
@@ -116,8 +235,8 @@ patch {
 ";
     let r = run(src);
     let conn = r.patch.connections.iter()
-        .find(|c| c.to_module.name == SYNTH_AUDIO_TAP)
-        .expect("cable into ~audio_tap");
+        .find(|c| c.to_module.name == SYNTH_TAP)
+        .expect("cable into ~tap");
     assert!((conn.scale - 0.3).abs() < 1e-9, "scale lost; got {}", conn.scale);
 }
 
@@ -132,13 +251,12 @@ patch {
 ";
     let r = run(src);
     let names: Vec<&str> = r.patch.modules.iter().map(|m| m.id.name.as_str()).collect();
-    assert!(!names.contains(&SYNTH_AUDIO_TAP));
-    assert!(!names.contains(&SYNTH_TRIGGER_TAP));
+    assert!(!names.contains(&SYNTH_TAP));
     assert!(r.manifest.is_empty());
 }
 
 #[test]
-fn slot_offset_baked_per_channel() {
+fn slot_offset_and_kind_baked_per_channel() {
     let src = "\
 patch {
     module osc : Osc
@@ -148,22 +266,15 @@ patch {
 }
 ";
     let r = run(src);
-    // The synthetic ~audio_tap holds the per-channel @-block params; in
-    // the FlatPatch each appears as a (key, value) pair on the module.
-    let audio = r.patch.modules.iter()
-        .find(|m| m.id.name == SYNTH_AUDIO_TAP)
-        .expect("audio tap module");
-    // Expected: one channel `zebra` at global slot 1.
-    let pairs: Vec<(&str, &patches_dsl::Value)> = audio.params.iter()
+    let tap = r.patch.modules.iter()
+        .find(|m| m.id.name == SYNTH_TAP)
+        .expect("tap module");
+    let pairs: Vec<(&str, &patches_dsl::Value)> = tap.params.iter()
         .map(|(k, v)| (k.as_str(), v))
         .collect();
-    let zebra_offset = pairs.iter()
-        .find(|(k, _)| *k == "slot_offset/0" || *k == "slot_offset")
-        .or_else(|| pairs.iter().find(|(k, _)| k.starts_with("slot_offset")))
-        .expect("expected slot_offset on audio tap");
-    let val = match zebra_offset.1 {
-        patches_dsl::Value::Scalar(patches_dsl::Scalar::Int(i)) => *i,
-        other => panic!("unexpected slot_offset value: {:?}", other),
-    };
-    assert_eq!(val, 1);
+    // Each channel writes a (slot_offset, kind) pair.
+    let slot_keys: Vec<_> = pairs.iter().filter(|(k, _)| k.starts_with("slot_offset")).collect();
+    let kind_keys:  Vec<_> = pairs.iter().filter(|(k, _)| k.starts_with("kind")).collect();
+    assert_eq!(slot_keys.len(), 2);
+    assert_eq!(kind_keys.len(), 2);
 }

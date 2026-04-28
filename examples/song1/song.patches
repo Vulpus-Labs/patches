@@ -46,7 +46,7 @@ patch {
     module drum_player : PatternPlayer(channels: [kick, snare, hat, ohat, clap, cymbal, tom])
     module bass_player : PatternPlayer(channels: 1)
 
-    seq.crock[bass] -> bass_player.clock
+    seq.clock[bass] -> bass_player.clock
     seq.clock[drums] -> drum_player.clock
 
     module bass_cutoff_lfo : Lfo { rate: 0.01 }
@@ -74,8 +74,10 @@ patch {
     drum_player.trigger[cymbal] -> drums.cymbal
     drum_player.trigger[tom] -> drums.tom
 
-    drums.out_left -> mix.in[drum_l]
-    drums.out_right -> mix.in[drum_r]
+    module drums_split : StereoSplitter
+    drums.out -> drums_split.in
+    drums_split.out_left  -> mix.in[drum_l]
+    drums_split.out_right -> mix.in[drum_r]
 
     module mix : StereoMixer(channels: [drum_l, drum_r, bass]) {
         @drum_l { pan: -1, send_a: 0.3 }
@@ -83,8 +85,10 @@ patch {
         @bass { pan: 0, send_a: 0.3, level: 0.4 }
     }
 
+    module send_split : StereoSplitter
+    module return_join : StereoJoiner
     module hi_l : Highpass { cutoff: 500Hz }
-    module hi_r : Highpass { cutoff : 500Hz }
+    module hi_r : Highpass { cutoff: 500Hz }
     module delay : StereoDelay(channels: 1) {
         delay_ms: 375,
         feedback: 0.3,
@@ -94,19 +98,18 @@ patch {
         tone: 0.5
     }
 
-    mix.send_a_left -> hi_l.in
-    hi_l.out -> delay.in_left
-    mix.send_a_right -> hi_r.in
-    hi_r.out -> delay.in_right
+    mix.send_a -> send_split.in
+    send_split.out_left  -> hi_l.in
+    send_split.out_right -> hi_r.in
+    hi_l.out -> return_join.in_left
+    hi_r.out -> return_join.in_right
+    return_join.out -> delay.in
 
-    delay.out_left -> mix.return_a_left
-    delay.out_right -> mix.return_a_right
+    delay.out -> mix.return_a
 
     module limit : StereoLimiter
-    mix.out_left -> limit.in_left
-    mix.out_right -> limit.in_right
+    mix.out -> limit.in
 
-    limit.out_left -> out.in_left
-    limit.out_right -> out.in_right
+    limit.out -> out.in
     module out : AudioOut
 }

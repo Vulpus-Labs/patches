@@ -34,6 +34,22 @@ fn stub_desc_poly(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDe
     }
 }
 
+fn stub_desc_stereo(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescriptor {
+    ModuleDescriptor {
+        module_name: "stub_stereo",
+        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        inputs: inputs
+            .iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
+            .collect(),
+        outputs: outputs
+            .iter()
+            .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
+            .collect(),
+        parameters: vec![],
+    }
+}
+
 fn pref(name: &'static str) -> PortRef {
     PortRef { name, index: 0 }
 }
@@ -330,6 +346,74 @@ fn connect_poly_output_to_mono_input_returns_kind_mismatch() {
     let dst = NodeId::from("dst");
     g.add_module(src.clone(), stub_desc_poly(&[], &["out"]), &no_params()).unwrap();
     g.add_module(dst.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
+#[test]
+fn connect_stereo_to_stereo_is_ok() {
+    let mut g = ModuleGraph::new();
+    let src = NodeId::from("src");
+    let dst = NodeId::from("dst");
+    g.add_module(src.clone(), stub_desc_stereo(&[], &["out"]), &no_params()).unwrap();
+    g.add_module(dst.clone(), stub_desc_stereo(&["in"], &[]), &no_params()).unwrap();
+    assert!(g.connect(&src, pref("out"), &dst, pref("in"), 1.0).is_ok());
+}
+
+#[test]
+fn connect_stereo_output_to_mono_input_returns_kind_mismatch() {
+    let mut g = ModuleGraph::new();
+    let src = NodeId::from("src");
+    let dst = NodeId::from("dst");
+    g.add_module(src.clone(), stub_desc_stereo(&[], &["out"]), &no_params()).unwrap();
+    g.add_module(dst.clone(), stub_desc(&["in"], &[]), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
+#[test]
+fn connect_mono_output_to_stereo_input_is_ok_broadcast() {
+    // ADR 0059 §2: mono Audio → stereo is the broadcast coercion.
+    let mut g = ModuleGraph::new();
+    let src = NodeId::from("src");
+    let dst = NodeId::from("dst");
+    g.add_module(src.clone(), stub_desc(&[], &["out"]), &no_params()).unwrap();
+    g.add_module(dst.clone(), stub_desc_stereo(&["in"], &[]), &no_params()).unwrap();
+    assert!(g.connect(&src, pref("out"), &dst, pref("in"), 1.0).is_ok());
+}
+
+#[test]
+fn connect_trigger_output_to_stereo_input_returns_kind_mismatch() {
+    // Mono with non-Audio layout (Trigger) is *not* broadcast-eligible.
+    let mut g = ModuleGraph::new();
+    let src = NodeId::from("src");
+    let dst = NodeId::from("dst");
+    let trig_desc = ModuleDescriptor {
+        module_name: "trig",
+        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        inputs: vec![],
+        outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Trigger, poly_layout: PolyLayout::Audio }],
+        parameters: vec![],
+    };
+    g.add_module(src.clone(), trig_desc, &no_params()).unwrap();
+    g.add_module(dst.clone(), stub_desc_stereo(&["in"], &[]), &no_params()).unwrap();
+    assert!(matches!(
+        g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
+        Err(GraphError::CableKindMismatch { .. })
+    ));
+}
+
+#[test]
+fn connect_stereo_output_to_poly_input_returns_kind_mismatch() {
+    let mut g = ModuleGraph::new();
+    let src = NodeId::from("src");
+    let dst = NodeId::from("dst");
+    g.add_module(src.clone(), stub_desc_stereo(&[], &["out"]), &no_params()).unwrap();
+    g.add_module(dst.clone(), stub_desc_poly(&["in"], &[]), &no_params()).unwrap();
     assert!(matches!(
         g.connect(&src, pref("out"), &dst, pref("in"), 1.0),
         Err(GraphError::CableKindMismatch { .. })

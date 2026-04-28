@@ -92,6 +92,7 @@ fn write_port_descriptor(out: &mut String, port: &PortDescriptor) {
     match port.kind {
         CableKind::Mono => write_string(out, "mono"),
         CableKind::Poly => write_string(out, "poly"),
+        CableKind::Stereo => write_string(out, "stereo"),
     }
     out.push_str(",\"mono_layout\":");
     match port.mono_layout {

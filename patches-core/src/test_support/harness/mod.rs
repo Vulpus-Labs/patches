@@ -139,12 +139,12 @@ impl ModuleHarness {
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
-            if kind.is_poly() {
+            if kind.uses_poly_storage() {
                 pool[RESERVED_SLOTS + i] = [CableValue::Poly([0.0; 16]); 2];
             }
         }
         for (j, kind) in output_kinds.iter().enumerate() {
-            if kind.is_poly() {
+            if kind.uses_poly_storage() {
                 pool[RESERVED_SLOTS + n_inputs + j] = [CableValue::Poly([0.0; 16]); 2];
             }
         }
@@ -300,6 +300,23 @@ impl ModuleHarness {
         self.pool[cable] = [CableValue::Poly(value); 2];
     }
 
+    // ── Stereo inputs ────────────────────────────────────────────────────────
+
+    /// Write `(left, right)` to the read slot for stereo input `(name, 0)`.
+    pub fn set_stereo(&mut self, name: &str, left: f32, right: f32) {
+        self.set_stereo_at(name, 0, left, right);
+    }
+
+    /// Write `(left, right)` to the read slot for stereo input `(name, index)`.
+    /// Stereo cables share poly storage; lanes 2..16 are zeroed.
+    pub fn set_stereo_at(&mut self, name: &str, index: usize, left: f32, right: f32) {
+        let cable = self.input_cable(name, index);
+        let mut frame = [0.0_f32; 16];
+        frame[0] = left;
+        frame[1] = right;
+        self.pool[cable] = [CableValue::Poly(frame); 2];
+    }
+
     // ── Tick ─────────────────────────────────────────────────────────────────
 
     /// Process one sample. Returns `&mut Self` for chaining.
@@ -383,6 +400,28 @@ impl ModuleHarness {
             self.tick();
             self.read_mono(output)
         }).collect()
+    }
+
+    // ── Stereo outputs ───────────────────────────────────────────────────────
+
+    /// Read the stereo output `(name, 0)` `(L, R)` from the most recently
+    /// completed tick. Reads lanes 0/1 of the underlying poly slot.
+    ///
+    /// # Panics
+    /// Panics if the cable value is not `CableValue::Poly`.
+    pub fn read_stereo(&self, name: &str) -> (f32, f32) {
+        self.read_stereo_at(name, 0)
+    }
+
+    pub fn read_stereo_at(&self, name: &str, index: usize) -> (f32, f32) {
+        let cable = self.output_cable(name, index);
+        match self.pool[cable][1 - self.wi] {
+            CableValue::Poly(v) => (v[0], v[1]),
+            CableValue::Mono(_) => panic!(
+                "ModuleHarness::read_stereo: output '{}'/{}  is Mono, not stereo",
+                name, index
+            ),
+        }
     }
 
     // ── Poly outputs ─────────────────────────────────────────────────────────
@@ -634,9 +673,16 @@ impl ModuleHarness {
                     scale: 1.0,
                     connected: self.input_connected[i],
                 };
+                let stereo = crate::cables::StereoInput {
+                    cable_idx: RESERVED_SLOTS + i,
+                    scale: 1.0,
+                    connected: self.input_connected[i],
+                    broadcast_from_mono: false,
+                };
                 match kind {
                     CableKind::Mono => InputPort::Mono(mono),
                     CableKind::Poly => InputPort::Poly(poly),
+                    CableKind::Stereo => InputPort::Stereo(stereo),
                 }
             })
             .collect();
@@ -653,9 +699,14 @@ impl ModuleHarness {
                     cable_idx: RESERVED_SLOTS + self.n_inputs + j,
                     connected: self.output_connected[j],
                 };
+                let stereo = crate::cables::StereoOutput {
+                    cable_idx: RESERVED_SLOTS + self.n_inputs + j,
+                    connected: self.output_connected[j],
+                };
                 match kind {
                     CableKind::Mono => OutputPort::Mono(mono),
                     CableKind::Poly => OutputPort::Poly(poly),
+                    CableKind::Stereo => OutputPort::Stereo(stereo),
                 }
             })
             .collect();

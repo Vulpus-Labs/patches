@@ -119,16 +119,11 @@ patch {
     }
 
     vca.out -> mix.in[0]
-    mix.send_a_left -> verb.in_left
-    mix.send_a_right -> verb.in_right
-    mix.return_a_left <- verb.out_left
-    mix.return_a_right <- verb.out_right
+    mix.send_a -> verb.in
+    mix.return_a <- verb.out
 
-    mix.send_b_left -> del.in_left
-    mix.send_b_right -> del.in_right
-    mix.return_b_left <- del.out_left
-    mix.return_b_right <- del.out_right
+    mix.send_b -> del.in
+    mix.return_b <- del.out
 
-    mix.out_left  -> out.in_left
-    mix.out_right -> out.in_right
+    mix.out  -> out.in
 }

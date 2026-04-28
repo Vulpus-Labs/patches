@@ -57,16 +57,22 @@ pub(super) fn complete_components_initial() -> Vec<CompletionItem> {
     TAP_SCHEMA.iter().map(|s| component_item(s.ty)).collect()
 }
 
-/// Items for case 2 — `~comp1+...+|`. Filter out already-listed components
-/// and (when the existing list is non-empty) any whose cable kind would
-/// mix with the existing set.
+/// Items for case 2 — `~comp1+...+|`. Filter out already-listed
+/// components and any whose cable kind would mix with the existing
+/// set. Compound taps are mono-only (ADR 0059 §8): a `Stereo`
+/// component can never share a compound, so once `stereo_meter` is
+/// listed no continuation is valid.
 pub(super) fn complete_components_continuing(listed: &[&str]) -> Vec<CompletionItem> {
     let listed_types: Vec<TapType> = listed
         .iter()
         .filter_map(|n| TapType::from_ast_name(n))
         .collect();
+    if listed_types.iter().any(|t| cable_kind(*t) == CableKind::Stereo) {
+        return Vec::new();
+    }
     // Prevailing cable kind: if any listed component is trigger, only
-    // trigger components remain valid; otherwise audio.
+    // trigger components remain valid; otherwise audio. Stereo is
+    // never accepted as a continuation.
     let allow_kind = if listed_types.iter().any(|t| cable_kind(*t) == CableKind::Trigger) {
         Some(CableKind::Trigger)
     } else if !listed_types.is_empty() {
@@ -76,6 +82,7 @@ pub(super) fn complete_components_continuing(listed: &[&str]) -> Vec<CompletionI
     };
     TAP_SCHEMA
         .iter()
+        .filter(|spec| spec.cable_kind != CableKind::Stereo)
         .filter(|spec| !listed_types.contains(&spec.ty))
         .filter(|spec| allow_kind.is_none_or(|k| spec.cable_kind == k))
         .map(|spec| component_item(spec.ty))

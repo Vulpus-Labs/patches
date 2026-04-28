@@ -127,8 +127,7 @@ fn make_filter_graph(
     graph.add_module("out", AudioOut::describe(&shape), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("out"), &NodeId::from("filter"), p("in"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
 
     graph
 }

@@ -1,6 +1,6 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, ModuleShape, OutputPort, StereoInput, StereoOutput,
 };
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -30,21 +30,16 @@ module_params! {
 /// | `pan_cv[i]` | mono | Additive CV for pan (i in 0..N-1, N = channels) |
 /// | `send_a_cv[i]` | mono | Additive CV for send A amount (i in 0..N-1, N = channels) |
 /// | `send_b_cv[i]` | mono | Additive CV for send B amount (i in 0..N-1, N = channels) |
-/// | `return_a_left` | mono | Left return from send A effects |
-/// | `return_a_right` | mono | Right return from send A effects |
-/// | `return_b_left` | mono | Left return from send B effects |
-/// | `return_b_right` | mono | Right return from send B effects |
+/// | `return_a` | stereo | Stereo return from send A effects |
+/// | `return_b` | stereo | Stereo return from send B effects |
 ///
 /// # Outputs
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `out_left` | mono | Left mixed output |
-/// | `out_right` | mono | Right mixed output |
-/// | `send_a_left` | mono | Left send A bus output |
-/// | `send_a_right` | mono | Right send A bus output |
-/// | `send_b_left` | mono | Left send B bus output |
-/// | `send_b_right` | mono | Right send B bus output |
+/// | `out` | stereo | Stereo mixed output |
+/// | `send_a` | stereo | Send A bus output |
+/// | `send_b` | stereo | Send B bus output |
 ///
 /// # Parameters
 ///
@@ -74,16 +69,11 @@ pub struct StereoMixer {
     pan_cv_ports: Vec<MonoInput>,
     send_a_cv_ports: Vec<MonoInput>,
     send_b_cv_ports: Vec<MonoInput>,
-    return_a_left:  MonoInput,
-    return_a_right: MonoInput,
-    return_b_left:  MonoInput,
-    return_b_right: MonoInput,
-    out_left:      MonoOutput,
-    out_right:     MonoOutput,
-    send_a_left:   MonoOutput,
-    send_a_right:  MonoOutput,
-    send_b_left:   MonoOutput,
-    send_b_right:  MonoOutput,
+    return_a:  StereoInput,
+    return_b:  StereoInput,
+    out_stereo:    StereoOutput,
+    send_a_stereo: StereoOutput,
+    send_b_stereo: StereoOutput,
 }
 
 impl Module for StereoMixer {
@@ -95,16 +85,11 @@ impl Module for StereoMixer {
             .mono_in_multi("pan_cv",     n)
             .mono_in_multi("send_a_cv",  n)
             .mono_in_multi("send_b_cv",  n)
-            .mono_in("return_a_left")
-            .mono_in("return_a_right")
-            .mono_in("return_b_left")
-            .mono_in("return_b_right")
-            .mono_out("out_left")
-            .mono_out("out_right")
-            .mono_out("send_a_left")
-            .mono_out("send_a_right")
-            .mono_out("send_b_left")
-            .mono_out("send_b_right")
+            .stereo_in("return_a")
+            .stereo_in("return_b")
+            .stereo_out("out")
+            .stereo_out("send_a")
+            .stereo_out("send_b")
             .float_param_multi(params::level,  shape.channels, 0.0, 1.0, 1.0)
             .float_param_multi(params::pan,    shape.channels, -1.0, 1.0, 0.0)
             .float_param_multi(params::send_a, shape.channels, 0.0, 1.0, 0.0)
@@ -131,16 +116,11 @@ impl Module for StereoMixer {
             pan_cv_ports:   vec![MonoInput::default(); channels],
             send_a_cv_ports: vec![MonoInput::default(); channels],
             send_b_cv_ports: vec![MonoInput::default(); channels],
-            return_a_left:  MonoInput::default(),
-            return_a_right: MonoInput::default(),
-            return_b_left:  MonoInput::default(),
-            return_b_right: MonoInput::default(),
-            out_left:     MonoOutput::default(),
-            out_right:    MonoOutput::default(),
-            send_a_left:  MonoOutput::default(),
-            send_a_right: MonoOutput::default(),
-            send_b_left:  MonoOutput::default(),
-            send_b_right: MonoOutput::default(),
+            return_a:  StereoInput::default(),
+            return_b:  StereoInput::default(),
+            out_stereo:    StereoOutput::default(),
+            send_a_stereo: StereoOutput::default(),
+            send_b_stereo: StereoOutput::default(),
         }
     }
 
@@ -169,17 +149,12 @@ impl Module for StereoMixer {
             self.send_a_cv_ports[i] = MonoInput::from_ports(inputs, 3 * n + i);
             self.send_b_cv_ports[i] = MonoInput::from_ports(inputs, 4 * n + i);
         }
-        self.return_a_left  = MonoInput::from_ports(inputs, 5 * n);
-        self.return_a_right = MonoInput::from_ports(inputs, 5 * n + 1);
-        self.return_b_left  = MonoInput::from_ports(inputs, 5 * n + 2);
-        self.return_b_right = MonoInput::from_ports(inputs, 5 * n + 3);
+        self.return_a  = StereoInput::from_ports(inputs, 5 * n);
+        self.return_b  = StereoInput::from_ports(inputs, 5 * n + 1);
 
-        self.out_left    = MonoOutput::from_ports(outputs, 0);
-        self.out_right   = MonoOutput::from_ports(outputs, 1);
-        self.send_a_left  = MonoOutput::from_ports(outputs, 2);
-        self.send_a_right = MonoOutput::from_ports(outputs, 3);
-        self.send_b_left  = MonoOutput::from_ports(outputs, 4);
-        self.send_b_right = MonoOutput::from_ports(outputs, 5);
+        self.out_stereo    = StereoOutput::from_ports(outputs, 0);
+        self.send_a_stereo = StereoOutput::from_ports(outputs, 1);
+        self.send_b_stereo = StereoOutput::from_ports(outputs, 2);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -222,15 +197,14 @@ impl Module for StereoMixer {
             sb_r += sb_base * right_gain;
         }
 
-        out_l += pool.read_mono(&self.return_a_left)  + pool.read_mono(&self.return_b_left);
-        out_r += pool.read_mono(&self.return_a_right) + pool.read_mono(&self.return_b_right);
+        let (ra_l, ra_r) = pool.read_stereo(&self.return_a);
+        let (rb_l, rb_r) = pool.read_stereo(&self.return_b);
+        out_l += ra_l + rb_l;
+        out_r += ra_r + rb_r;
 
-        pool.write_mono(&self.out_left,    out_l);
-        pool.write_mono(&self.out_right,   out_r);
-        pool.write_mono(&self.send_a_left,  sa_l);
-        pool.write_mono(&self.send_a_right, sa_r);
-        pool.write_mono(&self.send_b_left,  sb_l);
-        pool.write_mono(&self.send_b_right, sb_r);
+        pool.write_stereo(&self.out_stereo,    out_l, out_r);
+        pool.write_stereo(&self.send_a_stereo, sa_l,  sa_r);
+        pool.write_stereo(&self.send_b_stereo, sb_l,  sb_r);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

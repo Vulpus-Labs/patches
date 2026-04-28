@@ -6,7 +6,7 @@ use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     validate_parameters, AudioEnvironment, InputPort, InstanceId,
-    ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleDescriptor, ModuleShape, MonoInput, OutputPort, StereoInput, StereoOutput,
 };
 use patches_registry::FileProcessor;
 
@@ -27,11 +27,9 @@ pub struct StereoConvReverb {
     pub(super) descriptor: ModuleDescriptor,
 
     // Ports
-    pub(super) in_left: MonoInput,
-    pub(super) in_right: MonoInput,
+    pub(super) in_stereo: StereoInput,
     pub(super) in_mix: MonoInput,
-    pub(super) out_left: MonoOutput,
-    pub(super) out_right: MonoOutput,
+    pub(super) out_stereo: StereoOutput,
 
     pub(super) core: ConvReverbCore,
 }
@@ -66,11 +64,9 @@ impl FileProcessor for StereoConvReverb {
 impl patches_core::Module for StereoConvReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("StereoConvReverb", ModuleShape { channels: 0, length: 0, ..Default::default() })
-            .mono_in("in_left")
-            .mono_in("in_right")
+            .stereo_in("in")
             .mono_in("mix")
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_out("out")
             .float_param(core_params::mix, 0.0, 1.0, 1.0)
             .enum_param(core_params::ir, IrVariant::Room)
             .file_param("ir_data", IR_FILE_EXTENSIONS)
@@ -84,11 +80,9 @@ impl patches_core::Module for StereoConvReverb {
         Self {
             instance_id,
             descriptor,
-            in_left: MonoInput::default(),
-            in_right: MonoInput::default(),
+            in_stereo: StereoInput::default(),
             in_mix: MonoInput::default(),
-            out_left: MonoOutput::default(),
-            out_right: MonoOutput::default(),
+            out_stereo: StereoOutput::default(),
             core: ConvReverbCore::new(true, audio_environment.sample_rate),
         }
     }
@@ -111,34 +105,29 @@ impl patches_core::Module for StereoConvReverb {
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_left = MonoInput::from_ports(inputs, 0);
-        self.in_right = MonoInput::from_ports(inputs, 1);
-        self.in_mix = MonoInput::from_ports(inputs, 2);
-        self.out_left = MonoOutput::from_ports(outputs, 0);
-        self.out_right = MonoOutput::from_ports(outputs, 1);
+        self.in_stereo = StereoInput::from_ports(inputs, 0);
+        self.in_mix = MonoInput::from_ports(inputs, 1);
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let input_l = pool.read_mono(&self.in_left);
-        let input_r = if self.in_right.is_connected() {
-            pool.read_mono(&self.in_right)
+        let (input_l, input_r) = pool.read_stereo(&self.in_stereo);
+
+        let out_l = if let Some(ref mut ol) = self.core.overlap_buffers[0] {
+            ol.write(input_l);
+            ol.read()
         } else {
             input_l
         };
 
-        if let Some(ref mut ol) = self.core.overlap_buffers[0] {
-            ol.write(input_l);
-            pool.write_mono(&self.out_left, ol.read());
-        } else {
-            pool.write_mono(&self.out_left, input_l);
-        }
-
-        if let Some(ref mut or) = self.core.overlap_buffers[1] {
+        let out_r = if let Some(ref mut or) = self.core.overlap_buffers[1] {
             or.write(input_r);
-            pool.write_mono(&self.out_right, or.read());
+            or.read()
         } else {
-            pool.write_mono(&self.out_right, input_r);
-        }
+            input_r
+        };
+
+        pool.write_stereo(&self.out_stereo, out_l, out_r);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

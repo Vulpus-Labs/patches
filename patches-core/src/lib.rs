@@ -10,12 +10,17 @@ pub const BASE_PERIODIC_UPDATE_INTERVAL: u32 = 32;
 /// Alias for [`BASE_PERIODIC_UPDATE_INTERVAL`] retained for backwards compatibility.
 pub const COEFF_UPDATE_INTERVAL: u32 = BASE_PERIODIC_UPDATE_INTERVAL;
 
-/// Maximum number of observation backplane slots (ADR 0053 §4).
+/// Maximum number of observation backplane slots (ADR 0053 §4, raised
+/// from 32 to 64 by ADR 0059 §5).
 ///
-/// Tap modules write into a fixed-width `[f32; MAX_TAPS]` frame each tick;
-/// the same value bounds the audio→observer ring frame layout and the
-/// observer-side per-slot pipeline state.
-pub const MAX_TAPS: usize = 32;
+/// Slots, not channels: a stereo channel claims two consecutive slots
+/// (`L` at `slot_offset`, `R` at `slot_offset + 1`); mono and trigger
+/// channels claim one each. 64 slots = 32 stereo meters or 64 mono /
+/// trigger taps. Tap modules write into a fixed-width
+/// `[f32; MAX_TAPS]` frame each tick; the same value bounds the
+/// audio→observer ring frame layout and the observer-side per-slot
+/// pipeline state.
+pub const MAX_TAPS: usize = 64;
 
 /// Per-tick observation frame: one `f32` per backplane slot (ADR 0053 §4).
 ///
@@ -117,7 +122,7 @@ pub mod source_span;
 pub use audio_environment::AudioEnvironment;
 pub use build_error::BuildError;
 pub use cable_pool::CablePool;
-pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoLayout, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput};
+pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoLayout, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput, StereoInput, StereoOutput, StereoSample};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, Node, NodeId};

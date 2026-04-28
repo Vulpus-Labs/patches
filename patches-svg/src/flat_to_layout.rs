@@ -136,5 +136,6 @@ fn cable_class(
         (CableKind::Poly, _, PolyLayout::Transport) => "cable-poly-transport",
         (CableKind::Poly, _, PolyLayout::Midi) => "cable-poly-midi",
         (CableKind::Poly, _, PolyLayout::Audio) => "cable-poly-audio",
+        (CableKind::Stereo, _, _) => "cable-stereo",
     }
 }

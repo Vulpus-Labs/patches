@@ -24,8 +24,7 @@ const TINY_PATCH: &str = r#"
 patch {
     module osc : Osc
     module out : AudioOut
-    out.in_left  <- osc.sine
-    out.in_right <- osc.sine
+    out.in <- osc.sine
 }
 "#;
 
@@ -146,8 +145,7 @@ const TAPS_NONE: &str = r#"
 patch {
     module osc : Osc
     module out : AudioOut
-    out.in_left  <- osc.sine
-    out.in_right <- osc.sine
+    out.in <- osc.sine
 }
 "#;
 

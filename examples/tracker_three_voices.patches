@@ -175,24 +175,18 @@ patch {
         dry_wet: 1.0
     }
 
-    mix.send_a_left  -> delay.in_left
-    mix.send_a_right -> delay.in_right
-    delay.out_left   -> mix.return_a_left
-    delay.out_right  -> mix.return_a_right
+    mix.send_a  -> delay.in
+    delay.out   -> mix.return_a
 
     # ── Master: reverb + limiter ──────────────────────────────────────────
     module reverb: FdnReverb {
         size: 0.45, brightness: 0.6, mix: 0.2, character: plate
     }
-    module lim_l: Limiter { threshold: 0.85 }
-    module lim_r: Limiter { threshold: 0.85 }
+    module lim: StereoLimiter { threshold: 0.85 }
 
-    mix.out_left  -> reverb.in_left
-    mix.out_right -> reverb.in_right
-    reverb.out_left  -> lim_l.in
-    reverb.out_right -> lim_r.in
+    mix.out    -> reverb.in
+    reverb.out -> lim.in
 
     module out: AudioOut
-    lim_l.out -> out.in_left
-    lim_r.out -> out.in_right
+    lim.out -> out.in
 }

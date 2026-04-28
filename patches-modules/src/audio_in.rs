@@ -1,15 +1,16 @@
 use patches_core::{
     AUDIO_IN_L, AUDIO_IN_R,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, ModuleShape, OutputPort, StereoOutput,
 };
 use patches_core::param_frame::ParamView;
 
 /// Stereo audio input from the hardware backplane.
 ///
-/// Reads the `AUDIO_IN_L` and `AUDIO_IN_R` backplane slots (written by the
-/// audio callback from the hardware input device) and exposes them as
-/// connectable mono outputs. This is the mirror of [`AudioOut`](super::AudioOut).
+/// Reads the `AUDIO_IN_L` and `AUDIO_IN_R` mono backplane slots (written
+/// by the audio callback from the hardware input device) and exposes them
+/// as a single connectable stereo output. This is the mirror of
+/// [`AudioOut`](super::AudioOut).
 ///
 /// `AudioIn` does not call any audio API; it knows nothing about the backend.
 ///
@@ -17,8 +18,7 @@ use patches_core::param_frame::ParamView;
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `out_left` | mono | Left channel from the hardware audio input |
-/// | `out_right` | mono | Right channel from the hardware audio input |
+/// | `out` | stereo | Stereo signal from the hardware audio input |
 pub struct AudioIn {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -26,17 +26,14 @@ pub struct AudioIn {
     in_left: MonoInput,
     /// Fixed input pointing at the right audio input backplane slot.
     in_right: MonoInput,
-    /// User-connectable output for the left input channel.
-    out_left: MonoOutput,
-    /// User-connectable output for the right input channel.
-    out_right: MonoOutput,
+    /// User-connectable stereo output.
+    out_stereo: StereoOutput,
 }
 
 impl Module for AudioIn {
     fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor::new("AudioIn", shape.clone())
-            .mono_out("out_left")
-            .mono_out("out_right")
+            .stereo_out("out")
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
@@ -45,8 +42,7 @@ impl Module for AudioIn {
             descriptor,
             in_left: MonoInput { cable_idx: AUDIO_IN_L, scale: 1.0, connected: true },
             in_right: MonoInput { cable_idx: AUDIO_IN_R, scale: 1.0, connected: true },
-            out_left: MonoOutput::default(),
-            out_right: MonoOutput::default(),
+            out_stereo: StereoOutput::default(),
         }
     }
 
@@ -62,14 +58,14 @@ impl Module for AudioIn {
     }
 
     fn set_ports(&mut self, _inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.out_left = MonoOutput::from_ports(outputs, 0);
-        self.out_right = MonoOutput::from_ports(outputs, 1);
+        self.out_stereo = StereoOutput::from_ports(outputs, 0);
         // in_left / in_right are fixed backplane slots; not assigned by the planner.
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        pool.write_mono(&self.out_left, pool.read_mono(&self.in_left));
-        pool.write_mono(&self.out_right, pool.read_mono(&self.in_right));
+        let l = pool.read_mono(&self.in_left);
+        let r = pool.read_mono(&self.in_right);
+        pool.write_stereo(&self.out_stereo, l, r);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -83,19 +79,17 @@ mod tests {
     use patches_core::{CableValue, AUDIO_IN_L, AUDIO_IN_R};
     use patches_core::test_support::ModuleHarness;
 
-    /// After a tick, the outputs carry the values from the `AUDIO_IN_L` and
-    /// `AUDIO_IN_R` backplane slots.
+    /// After a tick, the stereo output carries `(L, R)` from the
+    /// `AUDIO_IN_L` / `AUDIO_IN_R` backplane slots.
     #[test]
     fn process_reads_from_backplane_slots() {
         let mut h = ModuleHarness::build::<AudioIn>(&[]);
-        // Pre-fill the backplane input slots.
         h.set_pool_slot(AUDIO_IN_L, CableValue::Mono(0.42));
         h.set_pool_slot(AUDIO_IN_R, CableValue::Mono(-0.7));
         h.tick();
 
-        let left = h.read_mono("out_left");
-        let right = h.read_mono("out_right");
-        assert!((left - 0.42).abs() < 1e-6, "left: {left}");
-        assert!((right - -0.7).abs() < 1e-6, "right: {right}");
+        let (l, r) = h.read_stereo("out");
+        assert!((l - 0.42).abs() < 1e-6, "left: {l}");
+        assert!((r - -0.7).abs() < 1e-6, "right: {r}");
     }
 }

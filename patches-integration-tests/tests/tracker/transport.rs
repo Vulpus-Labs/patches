@@ -14,7 +14,7 @@ fn tracker_basic_round_trip() {
     // At 120 BPM, 4 rows/beat, tick = 60/(120*4) = 0.125s = 5512.5 samples.
     // Song has 3 rows of 8 steps each = 24 ticks total (non-looping).
     //
-    // We wire player.trigger[kick] -> out.in_left
+    // We wire player.trigger[kick] -> out.in
     // So left output should be 1.0 on the tick-fire sample and 0.0 otherwise.
     //
     // There's a 2-sample pipeline delay (1-sample cable delay × 2 hops:
@@ -80,7 +80,7 @@ patch {
 
     seq.clock[c] -> player.clock
     player.trigger[ch] -> t2a.in
-    t2a.out -> out.in_left
+    t2a.out -> out.in
 }
 "#;
     let mut engine = build_engine(src);

@@ -30,8 +30,7 @@ fn simple_graph(freq: f32) -> ModuleGraph {
     pm.insert("frequency".to_string(), ParameterValue::Float(freq));
     graph.add_module("osc", osc_desc, &pm).unwrap();
     graph.add_module("out", out_desc, &ParameterMap::new()).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 
@@ -81,8 +80,7 @@ fn counter_graph() -> ModuleGraph {
     let mut g = ModuleGraph::new();
     g.add_module("counter", counter_desc, &ParameterMap::new()).unwrap();
     g.add_module("out", out_desc, &ParameterMap::new()).unwrap();
-    g.connect(&NodeId::from("counter"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    g.connect(&NodeId::from("counter"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    g.connect(&NodeId::from("counter"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     g
 }
 

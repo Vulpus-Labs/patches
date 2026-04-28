@@ -204,6 +204,51 @@ fn poly_sub_trigger_per_voice() {
 fn cable_kind_helpers() {
     assert!(!CableKind::Mono.is_poly());
     assert!(CableKind::Poly.is_poly());
+    assert!(!CableKind::Stereo.is_poly());
+
+    assert!(!CableKind::Mono.uses_poly_storage());
+    assert!(CableKind::Poly.uses_poly_storage());
+    assert!(CableKind::Stereo.uses_poly_storage());
+}
+
+// ── StereoInput / StereoOutput ───────────────────────────────────────
+
+#[test]
+fn stereo_output_writes_lr_to_poly_slot() {
+    let mut pool = vec![CableValue::Poly([0.0; 16])];
+    let port = StereoOutput { cable_idx: 0, connected: true };
+    port.write(&mut pool, 0.25, -0.5);
+    match pool[0] {
+        CableValue::Poly(channels) => {
+            assert_eq!(channels[0], 0.25);
+            assert_eq!(channels[1], -0.5);
+            assert_eq!(channels[2], 0.0);
+        }
+        _ => panic!("expected poly slot"),
+    }
+}
+
+#[test]
+fn stereo_input_reads_lr_with_scale() {
+    let mut frame = [0.0f32; 16];
+    frame[0] = 1.0;
+    frame[1] = 2.0;
+    let pool = vec![CableValue::Poly(frame)];
+    let port = StereoInput {
+        cable_idx: 0, scale: 0.5, connected: true, broadcast_from_mono: false,
+    };
+    assert_eq!(port.read(&pool), (0.5, 1.0));
+}
+
+#[test]
+fn stereo_input_round_trip_through_output() {
+    let mut pool = vec![CableValue::Poly([0.0; 16])];
+    let out = StereoOutput { cable_idx: 0, connected: true };
+    out.write(&mut pool, 0.7, -0.3);
+    let inp = StereoInput {
+        cable_idx: 0, scale: 1.0, connected: true, broadcast_from_mono: false,
+    };
+    assert_eq!(inp.read(&pool), (0.7, -0.3));
 }
 
 // ── PolyGateInput ────────────────────────────────────────────────────

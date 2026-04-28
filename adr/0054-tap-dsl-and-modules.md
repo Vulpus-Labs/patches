@@ -1,10 +1,21 @@
 # ADR 0054 — Tap DSL syntax and module decomposition
 
 **Date:** 2026-04-25
-**Status:** Accepted
+**Status:** Accepted (partially superseded by ADR 0059)
 **Related:**
 [ADR 0053 — Observation three-thread split](0053-observation-three-thread-split.md),
-[ADR 0047 — Sub-sample trigger cables](0047-sub-sample-trigger-cables.md)
+[ADR 0047 — Sub-sample trigger cables](0047-sub-sample-trigger-cables.md),
+[ADR 0059 — Stereo cable kind and unified Tap module](0059-stereo-cable-kind-and-tap-unification.md)
+
+> **Superseded in part by ADR 0059** for §3 (alphabetical slot
+> ordering and `name`-only identity), §4 (two-module `AudioTap` /
+> `TriggerTap` decomposition), and the cable-kind portion of §5
+> (`Stereo` is now a third kind alongside audio and trigger). The
+> current rules: a single unified `Tap` module with three input ports
+> per channel (`mono_in` / `stereo_in` / `trigger_in`); tap identity
+> is `(tap_type, name)`; slot offsets follow source location with
+> stereo channels claiming two consecutive slots. Compound-tap and
+> observer-side derivation rules from this ADR are unchanged.
 
 ## Context
 

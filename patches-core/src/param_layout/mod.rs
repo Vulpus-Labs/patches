@@ -180,6 +180,7 @@ pub(crate) fn port_kind_tag(kind: &CableKind) -> u8 {
     match kind {
         CableKind::Mono => 0,
         CableKind::Poly => 1,
+        CableKind::Stereo => 2,
     }
 }
 

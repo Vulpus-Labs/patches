@@ -25,10 +25,8 @@ template stutter(rhythm: pattern) {
     player.gate -> adsr.gate
     adsr.out -> left_vca.cv, right_vca.cv
 
-    left_vca.in <- $.in_left
-    right_vca.in <- $.in_right
-    left_vca.out -> $.out_left
-    right_vca.out -> $.out_right
+    left_vca.in <- $.in
+    left_vca.out -> $.out
 }
 
 template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0) {
@@ -120,20 +118,14 @@ patch {
     vca.out -> collapse.in
     module short_delay : Delay(channels: 1) { delay_ms: 20, dry_wet: 1.0 }
     module delay : StereoDelay(channels: 1) { delay_ms: 750, feedback: 0.2, dry_wet: 0.5, pingpong: true, tone: 0.6 }
-    collapse.out -[0.3]-> stutter.in_left
-    collapse.out -[0.3]-> stutter.in_right
-    stutter.out_left -> delay.in_left
-    stutter.out_right -> short_delay.in
-    short_delay.out -> delay.in_right
+    collapse.out -[0.3]-> stutter.in
+    stutter.out -> delay.in
 
-    delay.out_left -> verb.in_left
-    delay.out_right -> verb.in_right
+    delay.out -> verb.in
     
     module lim : StereoLimiter
 
-    verb.out_left -> lim.in_left
-    verb.out_right -> lim.in_right
+    verb.out -> lim.in
     
-    lim.out_left -> audio.in_left
-    lim.out_right -> audio.in_right
+    lim.out -> audio.in
 }

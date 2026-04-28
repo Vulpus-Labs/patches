@@ -50,8 +50,7 @@ patch {
         hiss: 0.35
     }
 
-    collapse.out -[0.22]-> chorus.in_left
-    collapse.out -[0.22]-> chorus.in_right
+    collapse.out -[0.22]-> chorus.in
 
     # Short BBD delay for air, low feedback (one per side)
     module delay_l : VBbd(channels: 1) {
@@ -66,8 +65,7 @@ patch {
         gain[0]: 1.0,
         feedback[0]: 0.3
     }
-    chorus.out_left  -> delay_l.in
-    chorus.out_right -> delay_r.in
+    chorus.out  -> delay_l.in
 
     # Plate-ish reverb tail
     module reverb : VReverb {
@@ -75,14 +73,11 @@ patch {
         size: 0.75
         decay: 0.85
     }
-    delay_l.out -> reverb.in_left
-    delay_r.out -> reverb.in_right
+    delay_l.out -> reverb.in
 
     module lim : StereoLimiter
     module out : AudioOut
 
-    reverb.out_left  -> lim.in_left
-    reverb.out_right -> lim.in_right
-    lim.out_left  -> out.in_left
-    lim.out_right -> out.in_right
+    reverb.out  -> lim.in
+    lim.out  -> out.in
 }

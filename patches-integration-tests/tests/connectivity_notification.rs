@@ -85,10 +85,7 @@ fn probe_to_out_graph() -> ModuleGraph {
         .add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new())
         .unwrap();
     graph
-        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in_left"), 1.0)
-        .unwrap();
-    graph
-        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in_right"), 1.0)
+        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in"), 1.0)
         .unwrap();
     graph
 }
@@ -113,10 +110,7 @@ fn probe_with_input_graph() -> ModuleGraph {
         .connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("in"), 1.0)
         .unwrap();
     graph
-        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in_left"), 1.0)
-        .unwrap();
-    graph
-        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in_right"), 1.0)
+        .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in"), 1.0)
         .unwrap();
     graph
 }

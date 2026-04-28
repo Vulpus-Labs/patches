@@ -87,6 +87,7 @@ structural_codes! {
     TapDuplicateName        => ("ST0025", "duplicate tap name"),
     TapMixedCableKinds      => ("ST0029", "mixed cable kinds in compound tap"),
     TapUnknownComponent     => ("ST0030", "unknown tap component"),
+    TapInvalidName          => ("ST0031", "invalid tap name"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

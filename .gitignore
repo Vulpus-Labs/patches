@@ -7,3 +7,4 @@ target/
 .claude
 mutants.out/
 mutants.out.old/
+**/.DS_STORE

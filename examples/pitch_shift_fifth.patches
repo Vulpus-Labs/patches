@@ -75,10 +75,8 @@ patch {
     collapse.out           -[0.15]-> shifter.in
 
     # Reverb
-    shifter.out            -> reverb.in_left
-    shifter.out            -> reverb.in_right
+    shifter.out            -> reverb.in
 
     # Stereo output
-    reverb.out_left      -[0.5]-> out.in_left
-    reverb.out_right     -[0.5]-> out.in_right
+    reverb.out      -[0.5]-> out.in
 }

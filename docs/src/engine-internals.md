@@ -50,19 +50,19 @@ pub enum CableValue {
 
 The first 16 slots are reserved for infrastructure and never allocated to user cables:
 
-| Index | Name | Purpose |
-|-------|------|---------|
-| 0 | `MONO_READ_SINK` | Disconnected mono inputs read zero from here |
-| 1 | `POLY_READ_SINK` | Disconnected poly inputs read zero from here |
-| 2 | `MONO_WRITE_SINK` | Unconnected mono outputs write harmlessly here |
-| 3 | `POLY_WRITE_SINK` | Unconnected poly outputs write harmlessly here |
-| 4 | `AUDIO_OUT_L` | Left audio output — AudioOut writes, callback reads |
-| 5 | `AUDIO_OUT_R` | Right audio output |
-| 6 | `AUDIO_IN_L` | Left audio input (reserved) |
-| 7 | `AUDIO_IN_R` | Right audio input (reserved) |
-| 8 | `GLOBAL_CLOCK` | Absolute sample counter, written by callback each tick |
-| 9 | `GLOBAL_DRIFT` | Slowly varying value in [-1, 1] for globally correlated pitch drift |
-| 10–15 | — | Reserved for future use |
+| Index   | Name              | Purpose                                                             |
+| ------- | ----------------- | ------------------------------------------------------------------- |
+| 0       | `MONO_READ_SINK`  | Disconnected mono inputs read zero from here                        |
+| 1       | `POLY_READ_SINK`  | Disconnected poly inputs read zero from here                        |
+| 2       | `MONO_WRITE_SINK` | Unconnected mono outputs write harmlessly here                      |
+| 3       | `POLY_WRITE_SINK` | Unconnected poly outputs write harmlessly here                      |
+| 4       | `AUDIO_OUT_L`     | Left audio output — AudioOut writes, callback reads                 |
+| 5       | `AUDIO_OUT_R`     | Right audio output                                                  |
+| 6       | `AUDIO_IN_L`      | Left audio input (reserved)                                         |
+| 7       | `AUDIO_IN_R`      | Right audio input (reserved)                                        |
+| 8       | `GLOBAL_CLOCK`    | Absolute sample counter, written by callback each tick              |
+| 9       | `GLOBAL_DRIFT`    | Slowly varying value in [-1, 1] for globally correlated pitch drift |
+| 10–15   | —                 | Reserved for future use                                             |
 
 Disconnected ports point at the sink slots. This means `process` never needs to branch on connectivity — it can always call `pool.read_mono(&self.port)` safely, getting zero for unconnected inputs. Modules that want to *skip work* for disconnected outputs can check the `connected` field on their output port.
 
@@ -132,15 +132,47 @@ enum CleanupAction {
 
 The audio thread pushes to this buffer; the cleanup thread drops the values on its own time. If the buffer is full (which should not happen in normal operation), the audio thread falls back to dropping inline with a warning.
 
-## Polyphony
+## Cable kinds
 
-The system supports two cable kinds: mono (a single `f32` per tick) and poly (an `[f32; 16]` array — one value per voice per tick). The voice count is fixed at engine initialisation (default 16) and shared by all poly cables in a patch.
+The system has three cable kinds (ADR 0015, ADR 0059):
 
-Poly modules (`PolyOsc`, `PolyAdsr`, `PolyVca`, etc.) process each voice independently within a single `process` call. Their ports read and write `[f32; 16]` arrays via `pool.read_poly` and `pool.write_poly`.
+- **Mono** — one `f32` per tick. The default.
+- **Poly** — `[f32; 16]` per tick (one value per voice). Voice count is
+  fixed at engine initialisation and shared by all poly cables.
+- **Stereo** — `[f32; 2]` per tick, carried as `(L, R)`. Storage
+  reuses the poly slot (lanes 0–1); pool layout is unchanged.
 
-Connecting a mono output to a poly input (or vice versa) is a validation error caught by the interpreter. `MonoToPoly` broadcasts a mono value to all 16 voices. `PolyToMono` sums all voices down to a single mono signal.
+Layouts (`MonoLayout::Audio`/`Trigger`, `PolyLayout::Audio`/`Trigger`/
+`Transport`/`Midi`) refine within `Mono` and `Poly`. Stereo carries no
+layout — it is exclusively audio/CV.
 
-Poly cable slots are zeroed with `Poly([0.0; 16])` rather than `Mono(0.0)` to prevent type mismatches during the first tick after a hot-reload.
+### Connection rules
+
+| From          | To       | Result                                          |
+| ------------- | -------- | ----------------------------------------------- |
+| Mono          | Mono     | direct (layouts must match)                     |
+| Poly          | Poly     | direct (layouts must match)                     |
+| Stereo        | Stereo   | direct                                          |
+| Mono Audio    | Stereo   | **broadcast**: `(s, s)` (ADR 0059 §2)           |
+| Stereo        | Mono     | rejected (`CableKindMismatch`)                  |
+| Poly ↔ Stereo | —        | rejected                                        |
+| Mono ↔ Poly   | —        | rejected (use `MonoToPoly` / `PolyToMono`)      |
+
+Mono→stereo broadcast is consumer-side: the planner sets
+`StereoInput::broadcast_from_mono`, the cable still points at the mono
+producer's slot, and `pool.read_stereo()` returns `(s, s)` from the
+underlying `CableValue::Mono`. No synthetic node, no extra audio-thread
+work. Stereo→mono needs an explicit `StereoSplitter`.
+
+### Polyphony
+
+Poly modules (`PolyOsc`, `PolyAdsr`, `PolyVca`, etc.) process each voice
+independently within a single `process` call. Their ports read and
+write `[f32; 16]` arrays via `pool.read_poly` and `pool.write_poly`.
+
+Poly cable slots are zeroed with `Poly([0.0; 16])` rather than
+`Mono(0.0)` to prevent type mismatches during the first tick after a
+hot-reload.
 
 ## Periodic updates
 

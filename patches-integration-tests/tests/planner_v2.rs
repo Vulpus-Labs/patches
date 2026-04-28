@@ -12,8 +12,7 @@ fn sine_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
     params.insert("frequency".to_string(), ParameterValue::Float(freq));
     graph.add_module(osc_id, Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &params).unwrap();
     graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
-    graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 
@@ -30,8 +29,7 @@ fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
     graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from("osc_a"), p("sine"), &NodeId::from("mix"), pi("in", 0), 1.0).unwrap();
     graph.connect(&NodeId::from("osc_b"), p("sine"), &NodeId::from("mix"), pi("in", 1), 1.0).unwrap();
-    graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 
@@ -40,8 +38,7 @@ fn sum_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph.add_module("osc", Sum::describe(&ModuleShape { channels: 1, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
     graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
-    graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
 
@@ -446,7 +443,7 @@ fn shape_change_forces_re_instantiation() {
         &patches_core::NodeId::from("mix"),
         p("out"),
         &patches_core::NodeId::from("out"),
-        p("in_left"),
+        p("in"),
         1.0,
     ).unwrap();
 
@@ -473,7 +470,7 @@ fn shape_change_forces_re_instantiation() {
         &patches_core::NodeId::from("mix"),
         p("out"),
         &patches_core::NodeId::from("out"),
-        p("in_left"),
+        p("in"),
         1.0,
     ).unwrap();
 

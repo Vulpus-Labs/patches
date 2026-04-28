@@ -128,6 +128,7 @@ impl From<FfiModuleShape> for patches_core::ModuleShape {
 /// Tag values for port kind discrimination across the C ABI.
 pub const PORT_TAG_MONO: u8 = 0;
 pub const PORT_TAG_POLY: u8 = 1;
+pub const PORT_TAG_STEREO: u8 = 2;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -153,6 +154,12 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: p.scale,
                 connected: p.connected as u8,
             },
+            patches_core::InputPort::Stereo(s) => Self {
+                tag: PORT_TAG_STEREO,
+                cable_idx: s.cable_idx,
+                scale: s.scale,
+                connected: s.connected as u8,
+            },
         }
     }
 }
@@ -169,8 +176,15 @@ impl From<FfiInputPort> for patches_core::InputPort {
             scale: ffi.scale,
             connected: ffi.connected != 0,
         };
+        let stereo = patches_core::StereoInput {
+            cable_idx: ffi.cable_idx,
+            scale: ffi.scale,
+            connected: ffi.connected != 0,
+            broadcast_from_mono: false,
+        };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::InputPort::Poly(poly),
+            PORT_TAG_STEREO => patches_core::InputPort::Stereo(stereo),
             _ => patches_core::InputPort::Mono(mono),
         }
     }
@@ -197,6 +211,11 @@ impl From<&patches_core::OutputPort> for FfiOutputPort {
                 cable_idx: p.cable_idx,
                 connected: p.connected as u8,
             },
+            patches_core::OutputPort::Stereo(s) => Self {
+                tag: PORT_TAG_STEREO,
+                cable_idx: s.cable_idx,
+                connected: s.connected as u8,
+            },
         }
     }
 }
@@ -211,8 +230,13 @@ impl From<FfiOutputPort> for patches_core::OutputPort {
             cable_idx: ffi.cable_idx,
             connected: ffi.connected != 0,
         };
+        let stereo = patches_core::StereoOutput {
+            cable_idx: ffi.cable_idx,
+            connected: ffi.connected != 0,
+        };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::OutputPort::Poly(poly),
+            PORT_TAG_STEREO => patches_core::OutputPort::Stereo(stereo),
             _ => patches_core::OutputPort::Mono(mono),
         }
     }

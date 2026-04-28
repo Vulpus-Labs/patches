@@ -291,6 +291,7 @@ mod tests {
     fn meter_manifest(name: &str, slot: usize) -> Manifest {
         vec![TapDescriptor {
             slot,
+            width: 1,
             name: name.to_string(),
             components: vec![TapType::Meter],
             source: Provenance::root(Span::synthetic()),
@@ -360,6 +361,7 @@ mod tests {
         let (mut tx, rx) = tap_ring(8);
         let (mut handle, _diag) = spawn_observer(rx, Duration::from_millis(1));
         let m = vec![TapDescriptor {
+            width: 1,
             slot: 0,
             name: "x".into(),
             components: vec![TapType::GateLed],
@@ -408,6 +410,7 @@ mod tests {
         let (_tx, rx) = tap_ring(4);
         let (mut handle, mut diag) = spawn_observer(rx, Duration::from_millis(1));
         let m = vec![TapDescriptor {
+            width: 1,
             slot: MAX_TAPS, // out of range
             name: "rogue".into(),
             components: vec![TapType::Meter],

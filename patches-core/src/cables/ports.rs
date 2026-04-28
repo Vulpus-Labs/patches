@@ -1,5 +1,6 @@
 use super::mono::{MonoInput, MonoOutput};
 use super::poly::{PolyInput, PolyOutput};
+use super::stereo::{StereoInput, StereoOutput};
 
 /// Heterogeneous input-port wrapper used by the planner to deliver ports to
 /// `Module::set_ports` without boxing.
@@ -11,13 +12,14 @@ use super::poly::{PolyInput, PolyOutput};
 pub enum InputPort {
     Mono(MonoInput),
     Poly(PolyInput),
+    Stereo(StereoInput),
 }
 
 impl InputPort {
     pub fn as_mono(&self) -> Option<MonoInput> {
         match self {
             InputPort::Mono(p) => Some(*p),
-            InputPort::Poly(_) => None,
+            _ => None,
         }
     }
 
@@ -28,12 +30,23 @@ impl InputPort {
     pub fn as_poly(&self) -> Option<PolyInput> {
         match self {
             InputPort::Poly(p) => Some(*p),
-            InputPort::Mono(_) => None,
+            _ => None,
         }
     }
 
     pub fn expect_poly(&self) -> PolyInput {
         self.as_poly().expect("expected poly input port")
+    }
+
+    pub fn as_stereo(&self) -> Option<StereoInput> {
+        match self {
+            InputPort::Stereo(p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    pub fn expect_stereo(&self) -> StereoInput {
+        self.as_stereo().expect("expected stereo input port")
     }
 
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono
@@ -56,13 +69,14 @@ impl InputPort {
 pub enum OutputPort {
     Mono(MonoOutput),
     Poly(PolyOutput),
+    Stereo(StereoOutput),
 }
 
 impl OutputPort {
     pub fn as_mono(&self) -> Option<MonoOutput> {
         match self {
             OutputPort::Mono(p) => Some(*p),
-            OutputPort::Poly(_) => None,
+            _ => None,
         }
     }
 
@@ -73,12 +87,23 @@ impl OutputPort {
     pub fn as_poly(&self) -> Option<PolyOutput> {
         match self {
             OutputPort::Poly(p) => Some(*p),
-            OutputPort::Mono(_) => None,
+            _ => None,
         }
     }
 
     pub fn expect_poly(&self) -> PolyOutput {
         self.as_poly().expect("expected poly output port")
+    }
+
+    pub fn as_stereo(&self) -> Option<StereoOutput> {
+        match self {
+            OutputPort::Stereo(p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    pub fn expect_stereo(&self) -> StereoOutput {
+        self.as_stereo().expect("expected stereo output port")
     }
 
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono

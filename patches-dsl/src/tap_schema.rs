@@ -10,10 +10,13 @@ use crate::manifest::TapType;
 
 /// Cable kind a tap component consumes. Audio-rate components (meter,
 /// spectrum, osc, gate_led) cannot be combined in the same compound tap
-/// with the trigger-rate `trigger_led`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// with the trigger-rate `trigger_led`. Stereo components
+/// (`stereo_meter`) are mono-incompatible too — compound taps remain
+/// mono-only per ADR 0059 §8.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CableKind {
     Audio,
+    Stereo,
     Trigger,
 }
 
@@ -26,6 +29,7 @@ pub struct TapComponentSpec {
 /// Authoritative schema. Order is the canonical completion order.
 pub const TAP_SCHEMA: &[TapComponentSpec] = &[
     TapComponentSpec { ty: TapType::Meter, cable_kind: CableKind::Audio },
+    TapComponentSpec { ty: TapType::StereoMeter, cable_kind: CableKind::Stereo },
     TapComponentSpec { ty: TapType::Spectrum, cable_kind: CableKind::Audio },
     TapComponentSpec { ty: TapType::Osc, cable_kind: CableKind::Audio },
     TapComponentSpec { ty: TapType::GateLed, cable_kind: CableKind::Audio },

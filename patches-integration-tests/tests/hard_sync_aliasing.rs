@@ -76,8 +76,7 @@ fn build_direct(f_master: f32, f_slave: f32) -> ModuleGraph {
     g.add_module("slave",  Oscillator::describe(&shape()), &params_freq(voct(f_slave))).unwrap();
     g.add_module("out",    AudioOut::describe(&shape()), &ParameterMap::new()).unwrap();
     g.connect(&NodeId::from("master"), p("reset_out"), &NodeId::from("slave"), p("sync"), 1.0).unwrap();
-    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     g
 }
 
@@ -91,8 +90,7 @@ fn build_via_pulse(f_master: f32, f_slave: f32) -> ModuleGraph {
     g.connect(&NodeId::from("master"), p("reset_out"), &NodeId::from("s2t"), p("in"), 1.0).unwrap();
     g.connect(&NodeId::from("s2t"), p("out"), &NodeId::from("t2s"), p("in"), 1.0).unwrap();
     g.connect(&NodeId::from("t2s"), p("out"), &NodeId::from("slave"), p("sync"), 1.0).unwrap();
-    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+    g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     g
 }
 

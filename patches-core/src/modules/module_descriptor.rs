@@ -256,6 +256,10 @@ impl ModuleDescriptor {
         crate::cables::CableKind::Poly, MonoLayout::Audio, PolyLayout::Midi);
     port_builder!(midi_out,        midi_out_multi,        outputs,
         crate::cables::CableKind::Poly, MonoLayout::Audio, PolyLayout::Midi);
+    port_builder!(stereo_in,       stereo_in_multi,       inputs,
+        crate::cables::CableKind::Stereo, MonoLayout::Audio, PolyLayout::Audio);
+    port_builder!(stereo_out,      stereo_out_multi,      outputs,
+        crate::cables::CableKind::Stereo, MonoLayout::Audio, PolyLayout::Audio);
 
     /// Declare a poly input port with a specific [`PolyLayout`].
     pub fn poly_in_layout(mut self, name: &'static str, layout: PolyLayout) -> Self {

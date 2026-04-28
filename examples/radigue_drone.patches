@@ -88,12 +88,12 @@ patch {
         feedback[2]: 0.4
     }
 
-    mix.send_a_left -> del.in_left
-    mix.send_a_right -> del.in_right
-    mix.return_a_left <- del.out_left
-    mix.return_a_right, ~meter(bar) <- del.out_right
+    mix.send_a -> del.in
+    mix.return_a <- del.out
 
     # ── Stereo output (attenuated: oscillators + ring mod sum loud) ───────────
-    mix.out_left  -[0.5]-> out.in_left, ~meter+spectrum+osc(out)
-    mix.out_right -[0.5]-> out.in_right
+    module out_split : StereoSplitter
+    mix.out  -[0.5]-> out.in
+    mix.out  -[0.5]-> out_split.in
+    out_split.out_left -> ~meter+spectrum+osc(out)
 }

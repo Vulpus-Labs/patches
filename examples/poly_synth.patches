@@ -30,7 +30,6 @@
 #   kbd ──gate (poly)────→ filt_env
 #   filt_env ──out (poly)──→ filt.cutoff_cv   (sweeps cutoff from base up to ~4 kHz)
 #
-#   vca ──out (poly)──→ filt.in ──out (poly)──→ collapse ──out (mono)──→ out.in_left / out.in_right
 #
 # Hot-reload tips:
 #   - Adjust amp_env attack (try 0.002–0.05) for a harder or softer onset.
@@ -105,10 +104,8 @@ patch {
     }
 
     
-    limit.out -> chorus.in_left
-    chorus.out_left  -> reverb.in_left
-    chorus.out_right -> reverb.in_right
+    limit.out -> chorus.in
+    chorus.out  -> reverb.in
 
-    reverb.out_left  -> out.in_left
-    reverb.out_right -> out.in_right
+    reverb.out  -> out.in
 }

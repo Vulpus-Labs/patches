@@ -27,6 +27,5 @@ patch {
     vca.out                -> collapse.in
 
     # Stereo output — scale down to avoid clipping with many voices
-    collapse.out  -[0.12]-> out.in_left
-    collapse.out  -[0.12]-> out.in_right
+    collapse.out  -[0.12]-> out.in
 }

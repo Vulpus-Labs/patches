@@ -9,7 +9,6 @@
 //! [`StructuralCode`], so the existing diagnostic pipeline surfaces
 //! them with no plumbing change.
 
-use std::collections::HashMap;
 
 use crate::ast::{CableEndpoint, File, Statement, TapTarget};
 use crate::expand::ExpandError;
@@ -45,29 +44,20 @@ fn reject_taps_in_templates(file: &File) -> Result<(), ExpandError> {
     Ok(())
 }
 
-/// Walk every top-level cable endpoint, enforce name uniqueness across
-/// all taps, and validate each tap's parameter list. The name
-/// identifies the tap; observation types multiplex on it via the
-/// compound declaration form (`~meter+spectrum(foo)`).
+/// Walk every top-level cable endpoint and validate each tap's
+/// component list. ADR 0059 §6 makes tap identity `(tap_type, name)`,
+/// so the previous "tap names must be unique" rule is dropped; same
+/// name across different observation types now coexists, and same
+/// `(type, name)` referenced multiple times is collapsed by the
+/// desugarer into a single synthetic channel (with the connectivity
+/// validator rejecting the resulting duplicate input edge if it really
+/// is two distinct producers). Compound-form components remain
+/// validated individually.
 fn validate_top_level_taps(file: &File) -> Result<(), ExpandError> {
-    let mut seen_names: HashMap<String, ()> = HashMap::new();
     for stmt in &file.patch.body {
         let Statement::Connection(c) = stmt else { continue };
         for endpoint in [&c.lhs, &c.rhs] {
             if let CableEndpoint::Tap(t) = endpoint {
-                if seen_names.contains_key(&t.name.name) {
-                    return Err(ExpandError::new(
-                        Code::TapDuplicateName,
-                        t.name.span,
-                        format!(
-                            "duplicate tap name {:?}; use the compound form \
-                             (e.g. `~meter+spectrum({})`) to attach multiple \
-                             observation types",
-                            t.name.name, t.name.name
-                        ),
-                    ));
-                }
-                seen_names.insert(t.name.name.clone(), ());
                 validate_tap_components(t)?;
             }
         }
@@ -97,19 +87,40 @@ fn validate_tap_components(tap: &TapTarget) -> Result<(), ExpandError> {
         }
     }
 
-    // ADR 0054 §5: every component of a compound tap must agree on its
-    // input cable kind. Mixing audio- and trigger-cable components is a
-    // parse-time error.
+    // ADR 0054 §5 / ADR 0059 §8: every component of a compound tap
+    // must agree on its input cable kind. Compound taps stay mono-only
+    // (no stereo, no trigger mixing).
     if typed.len() > 1 {
-        let any_trigger = typed.iter().any(|t| cable_kind(*t) == CableKind::Trigger);
-        let any_audio = typed.iter().any(|t| cable_kind(*t) == CableKind::Audio);
-        if any_trigger && any_audio {
+        let kinds: std::collections::HashSet<CableKind> =
+            typed.iter().map(|t| cable_kind(*t)).collect();
+        if kinds.len() > 1 {
             return Err(ExpandError::new(
                 Code::TapMixedCableKinds,
                 tap.span,
-                "compound tap mixes audio-cable and trigger-cable components",
+                "compound tap mixes incompatible cable kinds (audio / stereo / trigger)",
             ));
         }
+        if kinds.contains(&CableKind::Stereo) {
+            return Err(ExpandError::new(
+                Code::TapMixedCableKinds,
+                tap.span,
+                "compound taps must be mono-only; `stereo_meter` cannot appear alongside other components",
+            ));
+        }
+    }
+
+    // ADR 0059 §7: `/` is reserved in tap names so the manifest's
+    // `foo/left` / `foo/right` stereo pairing convention cannot collide
+    // with user-supplied labels.
+    if tap.name.name.contains('/') {
+        return Err(ExpandError::new(
+            Code::TapInvalidName,
+            tap.name.span,
+            format!(
+                "tap name {:?} contains reserved character '/'; that suffix is used for stereo pair entries (`foo/left`, `foo/right`)",
+                tap.name.name,
+            ),
+        ));
     }
     Ok(())
 }

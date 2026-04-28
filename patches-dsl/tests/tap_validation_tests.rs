@@ -41,7 +41,12 @@ patch {
 }
 
 #[test]
-fn duplicate_tap_name_rejected() {
+fn repeated_same_kind_same_name_passes_validate() {
+    // ADR 0059 §6 dropped the "tap names must be unique" rule. Two
+    // cables to `~meter(level)` collapse onto one synthetic channel at
+    // desugar time; if they are genuinely two distinct producers the
+    // interpreter's connectivity validator surfaces the
+    // input-already-connected error there.
     let src = "\
 patch {
     module a : Osc
@@ -50,14 +55,16 @@ patch {
     b.out -> ~meter(level)
 }
 ";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapDuplicateName);
-    assert!(err.message.contains("duplicate tap name"));
-    assert_span_covers(src, err.span, "level");
+    let file = parse(src).expect("parse should succeed");
+    validate(&file).expect("repeated (kind, name) is no longer a validate-time error");
 }
 
 #[test]
-fn duplicate_name_with_different_components_still_rejected() {
+fn repeated_name_across_observation_types_passes_validate() {
+    // Two mono-Audio component types under the same name still share a
+    // `(kind, name)` identity (both classify as Mono), so the structural
+    // validator no longer rejects; users wanting both metrics on one
+    // stream still get the cleaner compound form (`~meter+spectrum`).
     let src = "\
 patch {
     module a : Osc
@@ -65,9 +72,8 @@ patch {
     a.out -> ~spectrum(level)
 }
 ";
-    let err = validate_err(src);
-    assert_eq!(err.code, StructuralCode::TapDuplicateName);
-    assert!(err.message.contains("compound"));
+    let file = parse(src).expect("parse should succeed");
+    validate(&file).expect("same (kind, name) across components must validate");
 }
 
 #[test]
@@ -125,6 +131,35 @@ fn mixed_cable_kinds_rejected() {
 patch {
     module o : Osc
     o.out -> ~meter+trigger_led(mixed)
+}
+";
+    let err = validate_err(src);
+    assert_eq!(err.code, StructuralCode::TapMixedCableKinds);
+}
+
+#[test]
+fn slash_in_tap_name_rejected_at_parse_time() {
+    // ADR 0059 §7 reserves `/` for stereo pair entries (`foo/left`,
+    // `foo/right`). The grammar's ident token already disallows `/`, so
+    // the rejection surfaces as a parse error before validate runs.
+    // The validator's check is defence-in-depth for any future path
+    // that bypasses the parser.
+    let src = "\
+patch {
+    module osc : Osc
+    osc.out -> ~meter(out/left)
+}
+";
+    assert!(parse(src).is_err(), "tap names containing '/' must not parse");
+}
+
+#[test]
+fn stereo_meter_in_compound_tap_rejected() {
+    // Compound taps stay mono-only (ADR 0059 §8).
+    let src = "\
+patch {
+    module mix : Mix
+    mix.out -> ~stereo_meter+osc(master)
 }
 ";
     let err = validate_err(src);

@@ -567,6 +567,59 @@ fn truncate_name(s: &str, max_chars: usize) -> String {
     out
 }
 
+/// One rendered row in the meter pane. Stereo halves emitted by
+/// `~stereo_meter(foo)` (manifest names `foo/left` / `foo/right`) are
+/// recognised here and labelled by stem so the pair reads as a single
+/// widget. Each row still maps to one underlying `TapEntry` slot, so
+/// per-side peak/RMS readouts stay accurate.
+enum MeterRow<'a> {
+    Mono(&'a TapEntry),
+    StereoLeft { stem: &'a str, tap: &'a TapEntry },
+    StereoRight(&'a TapEntry),
+}
+
+impl<'a> MeterRow<'a> {
+    fn tap(&self) -> &'a TapEntry {
+        match self {
+            MeterRow::Mono(t) | MeterRow::StereoLeft { tap: t, .. } | MeterRow::StereoRight(t) => t,
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            MeterRow::Mono(t) => t.name.clone(),
+            MeterRow::StereoLeft { stem, .. } => format!("{stem} ▎L"),
+            MeterRow::StereoRight(_) => "  ▎R".to_string(),
+        }
+    }
+}
+
+fn group_meter_rows<'a>(taps: &[&'a TapEntry]) -> Vec<MeterRow<'a>> {
+    let mut out = Vec::with_capacity(taps.len());
+    let mut i = 0;
+    while i < taps.len() {
+        let cur = taps[i];
+        let stem_l = cur
+            .name
+            .strip_suffix("/left")
+            .filter(|_| cur.has(TapType::StereoMeter));
+        if let (Some(stem), Some(next)) = (stem_l, taps.get(i + 1)) {
+            let pairs = next.has(TapType::StereoMeter)
+                && next.name.strip_suffix("/right") == Some(stem)
+                && next.slot == cur.slot + 1;
+            if pairs {
+                out.push(MeterRow::StereoLeft { stem, tap: cur });
+                out.push(MeterRow::StereoRight(next));
+                i += 2;
+                continue;
+            }
+        }
+        out.push(MeterRow::Mono(cur));
+        i += 1;
+    }
+    out
+}
+
 fn draw_meters(
     f: &mut Frame,
     area: Rect,
@@ -580,10 +633,16 @@ fn draw_meters(
     let meter_taps: Vec<&TapEntry> = view
         .taps
         .iter()
-        .filter(|t| t.has(TapType::Meter))
+        .filter(|t| t.has(TapType::Meter) || t.has(TapType::StereoMeter))
         .collect();
 
-    if meter_taps.is_empty() {
+    // Group adjacent stereo halves into paired rows. `~stereo_meter(foo)`
+    // surfaces in the manifest as `foo/left` and `foo/right` at
+    // consecutive slots (ADR 0059 §7); the UI labels the pair by stem
+    // and renders L on top, R indented underneath.
+    let meter_rows: Vec<MeterRow<'_>> = group_meter_rows(&meter_taps);
+
+    if meter_rows.is_empty() {
         let p = Paragraph::new("(no meter taps declared)");
         f.render_widget(p, inner);
         return;
@@ -603,20 +662,23 @@ fn draw_meters(
     let metrics_x = bar_x + bar_w + GAP_W;
 
     let visible = visible_rows(inner.height);
-    let max_scroll = meter_taps.len().saturating_sub(visible);
+    let max_scroll = meter_rows.len().saturating_sub(visible);
     let scroll = view.meter_scroll.min(max_scroll);
 
     let buf = f.buffer_mut();
 
-    for (row_idx, tap_idx) in (scroll..scroll + visible).enumerate() {
-        if tap_idx >= meter_taps.len() {
+    for (row_idx, meter_row_idx) in (scroll..scroll + visible).enumerate() {
+        if meter_row_idx >= meter_rows.len() {
             break;
         }
-        let tap = meter_taps[tap_idx];
+        let row = &meter_rows[meter_row_idx];
+        let tap = row.tap();
         let y = inner.y + row_idx as u16;
 
-        // Name (truncated).
-        let name = truncate_name(&tap.name, NAME_W as usize);
+        // Name (truncated). Stereo halves render the stem on the L row
+        // and an indented `▎R` on the R row.
+        let label = row.label();
+        let name = truncate_name(&label, NAME_W as usize);
         buf.set_string(inner.x, y, &name, Style::default());
 
         // Bar with sub-cell RMS fill and peak tick overlay.
@@ -677,7 +739,7 @@ fn draw_meters(
 
     // Scroll indicator at the bottom-right of the pane.
     if max_scroll > 0 {
-        let s = format!("[{}-{}/{}]", scroll + 1, (scroll + visible).min(meter_taps.len()), meter_taps.len());
+        let s = format!("[{}-{}/{}]", scroll + 1, (scroll + visible).min(meter_rows.len()), meter_rows.len());
         let x = inner.x + inner.width.saturating_sub(s.len() as u16);
         let y = inner.y + inner.height - 1;
         buf.set_string(x, y, &s, Style::default().fg(Color::DarkGray));
@@ -1459,6 +1521,7 @@ mod tests {
     fn desc(slot: usize, name: &str, comp: TapType) -> TapDescriptor {
         TapDescriptor {
             slot,
+            width: 1,
             name: name.into(),
             components: vec![comp],
             source: Provenance::root(Span::synthetic()),
@@ -1671,6 +1734,41 @@ mod tests {
         view.seed_drop_baselines(&handle);
         view.poll_drops(&handle, Instant::now());
         assert!(view.log.is_empty(), "fresh name should not inherit predecessor drops");
+    }
+
+    #[test]
+    fn group_meter_rows_pairs_stereo_meter_halves_by_stem() {
+        let taps = vec![
+            TapEntry { name: "kick".into(), slot: 0, components: vec![TapType::Meter] },
+            TapEntry { name: "master/left".into(),  slot: 1, components: vec![TapType::StereoMeter] },
+            TapEntry { name: "master/right".into(), slot: 2, components: vec![TapType::StereoMeter] },
+            TapEntry { name: "snare".into(), slot: 3, components: vec![TapType::Meter] },
+        ];
+        let refs: Vec<&TapEntry> = taps.iter().collect();
+        let rows = group_meter_rows(&refs);
+        assert_eq!(rows.len(), 4, "no rows lost");
+        assert!(matches!(rows[0], MeterRow::Mono(_)));
+        assert!(matches!(rows[1], MeterRow::StereoLeft { stem: "master", .. }));
+        assert!(matches!(rows[2], MeterRow::StereoRight(_)));
+        assert!(matches!(rows[3], MeterRow::Mono(_)));
+        assert_eq!(rows[1].label(), "master ▎L");
+        assert_eq!(rows[2].label(), "  ▎R");
+    }
+
+    #[test]
+    fn group_meter_rows_does_not_pair_unrelated_left_right() {
+        // A `~meter(foo/left)` is impossible (parser rejects `/`), but
+        // defensively: only StereoMeter components pair up.
+        let taps = vec![
+            TapEntry { name: "a/left".into(),  slot: 0, components: vec![TapType::Meter] },
+            TapEntry { name: "a/right".into(), slot: 1, components: vec![TapType::Meter] },
+        ];
+        let refs: Vec<&TapEntry> = taps.iter().collect();
+        let rows = group_meter_rows(&refs);
+        assert_eq!(rows.len(), 2);
+        for r in &rows {
+            assert!(matches!(r, MeterRow::Mono(_)));
+        }
     }
 
     #[test]

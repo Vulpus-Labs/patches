@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use patches_core::cables::{MONO_READ_SINK, POLY_READ_SINK};
+use patches_core::cables::{CableKind, MONO_READ_SINK, POLY_READ_SINK};
 use patches_core::modules::{ModuleDescriptor, PortConnectivity};
 use patches_core::graphs::graph::{ModuleGraph, Node, NodeId};
 use super::PlanError;
@@ -8,7 +8,10 @@ use super::PlanError;
 // ── Type aliases ──────────────────────────────────────────────────────────────
 
 type EdgeList = Vec<(NodeId, &'static str, usize, NodeId, &'static str, usize, f32)>;
-type InputBufferMap = HashMap<(NodeId, &'static str, usize), (usize, f32)>;
+/// Per-input mapping `(buf_idx, scale, broadcast)` where `broadcast` is
+/// `true` for a mono producer feeding a stereo input (ADR 0059 §2 — the
+/// `StereoInput` reads the mono slot and replicates `(s, s)`).
+type InputBufferMap = HashMap<(NodeId, &'static str, usize), (usize, f32, bool)>;
 
 // ── GraphIndex ────────────────────────────────────────────────────────────────
 
@@ -96,7 +99,7 @@ impl<'a> ResolvedGraph<'a> {
         &self,
         desc: &ModuleDescriptor,
         node_id: &NodeId,
-    ) -> Vec<(usize, f32)> {
+    ) -> Vec<(usize, f32, bool)> {
         desc.inputs
             .iter()
             .map(|port| {
@@ -104,12 +107,12 @@ impl<'a> ResolvedGraph<'a> {
                     .get(&(node_id.clone(), port.name, port.index))
                     .copied()
                     .unwrap_or_else(|| {
-                        let null_slot = if port.kind.is_poly() {
+                        let null_slot = if port.kind.uses_poly_storage() {
                             POLY_READ_SINK
                         } else {
                             MONO_READ_SINK
                         };
-                        (null_slot, 1.0)
+                        (null_slot, 1.0, false)
                     })
             })
             .collect()
@@ -136,16 +139,18 @@ fn build_input_buffer_map(
         let from_node = graph
             .get_node(from)
             .ok_or_else(|| PlanError::Internal(format!("node {from:?} missing from graph")))?;
-        let out_port_idx = from_node
+        let out_port = from_node
             .module_descriptor
             .outputs
             .iter()
-            .position(|p| p.name == *out_name && p.index == *out_idx)
+            .enumerate()
+            .find(|(_, p)| p.name == *out_name && p.index == *out_idx)
             .ok_or_else(|| {
                 PlanError::Internal(format!(
                     "output port {out_name:?}/{out_idx} not found on node {from:?}"
                 ))
             })?;
+        let (out_port_idx, out_kind) = (out_port.0, out_port.1.kind.clone());
         let buf = output_buf
             .get(&(from.clone(), out_port_idx))
             .copied()
@@ -154,7 +159,26 @@ fn build_input_buffer_map(
                     "buffer for ({from:?}, {out_port_idx}) not found"
                 ))
             })?;
-        map.insert((to.clone(), *in_name, *in_idx), (buf, *scale));
+
+        // Detect mono→stereo broadcast (ADR 0059 §2). The destination port
+        // kind is looked up on the destination node's descriptor.
+        let to_node = graph
+            .get_node(to)
+            .ok_or_else(|| PlanError::Internal(format!("node {to:?} missing from graph")))?;
+        let in_kind = to_node
+            .module_descriptor
+            .inputs
+            .iter()
+            .find(|p| p.name == *in_name && p.index == *in_idx)
+            .map(|p| p.kind.clone())
+            .ok_or_else(|| {
+                PlanError::Internal(format!(
+                    "input port {in_name:?}/{in_idx} not found on node {to:?}"
+                ))
+            })?;
+        let broadcast = matches!((&out_kind, &in_kind), (CableKind::Mono, CableKind::Stereo));
+
+        map.insert((to.clone(), *in_name, *in_idx), (buf, *scale, broadcast));
     }
     Ok(map)
 }
@@ -257,7 +281,7 @@ mod tests {
         let resolved = resolved_graph_for_test(&index, HashMap::new());
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(0, 1.0)], "unconnected port must map to (0, 1.0)");
+        assert_eq!(result, vec![(0, 1.0, false)], "unconnected port must map to (0, 1.0, false)");
     }
 
     #[test]
@@ -265,14 +289,14 @@ mod tests {
         let (graph, _src_id, dst_id) = two_node_graph();
         let dst_desc = &graph.get_node(&dst_id).unwrap().module_descriptor;
 
-        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32)> = HashMap::new();
-        map.insert((dst_id.clone(), "in", 0), (7, 0.5));
+        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32, bool)> = HashMap::new();
+        map.insert((dst_id.clone(), "in", 0), (7, 0.5, false));
         let empty_graph = ModuleGraph::new();
         let index = graph_index_for_test(&empty_graph, &[]);
         let resolved = resolved_graph_for_test(&index, map);
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(7, 0.5)], "connected port must resolve to buffer 7 scale 0.5");
+        assert_eq!(result, vec![(7, 0.5, false)], "connected port must resolve to buffer 7 scale 0.5");
     }
 
     #[test]
@@ -292,15 +316,15 @@ mod tests {
         let dst_id = NodeId::from("dst2");
         let dst_desc = &graph.get_node(&dst_id).unwrap().module_descriptor;
 
-        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32)> = HashMap::new();
-        map.insert((dst_id.clone(), "x", 0), (3, 1.0));
-        map.insert((dst_id.clone(), "y", 0), (4, 2.0));
+        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32, bool)> = HashMap::new();
+        map.insert((dst_id.clone(), "x", 0), (3, 1.0, false));
+        map.insert((dst_id.clone(), "y", 0), (4, 2.0, false));
         let empty_graph = ModuleGraph::new();
         let index = graph_index_for_test(&empty_graph, &[]);
         let resolved = resolved_graph_for_test(&index, map);
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(3, 1.0), (4, 2.0)]);
+        assert_eq!(result, vec![(3, 1.0, false), (4, 2.0, false)]);
     }
 
     // ── build_input_buffer_map tests ──────────────────────────────────────────
@@ -322,6 +346,68 @@ mod tests {
             matches!(result, Err(PlanError::Internal(_))),
             "missing source node must return InternalError"
         );
+    }
+
+    #[test]
+    fn build_input_buffer_map_flags_mono_to_stereo_broadcast() {
+        let src_desc = ModuleDescriptor {
+            module_name: "Src",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: vec![],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
+            parameters: vec![],
+        };
+        let dst_desc = ModuleDescriptor {
+            module_name: "Dst",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
+            outputs: vec![],
+            parameters: vec![],
+        };
+        let mut graph = ModuleGraph::new();
+        graph.add_module("src", src_desc, &ParameterMap::new()).unwrap();
+        graph.add_module("dst", dst_desc, &ParameterMap::new()).unwrap();
+        let src_id = NodeId::from("src");
+        let dst_id = NodeId::from("dst");
+
+        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, 1.0f32)];
+        let mut output_buf = HashMap::new();
+        output_buf.insert((src_id.clone(), 0usize), 42usize);
+
+        let map = build_input_buffer_map(&edges, &output_buf, &graph).unwrap();
+        let entry = map.get(&(dst_id.clone(), "in", 0)).copied();
+        assert_eq!(entry, Some((42, 1.0, true)));
+    }
+
+    #[test]
+    fn build_input_buffer_map_does_not_flag_stereo_to_stereo() {
+        let src_desc = ModuleDescriptor {
+            module_name: "Src",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: vec![],
+            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
+            parameters: vec![],
+        };
+        let dst_desc = ModuleDescriptor {
+            module_name: "Dst",
+            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
+            outputs: vec![],
+            parameters: vec![],
+        };
+        let mut graph = ModuleGraph::new();
+        graph.add_module("src", src_desc, &ParameterMap::new()).unwrap();
+        graph.add_module("dst", dst_desc, &ParameterMap::new()).unwrap();
+        let src_id = NodeId::from("src");
+        let dst_id = NodeId::from("dst");
+
+        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, 1.0f32)];
+        let mut output_buf = HashMap::new();
+        output_buf.insert((src_id.clone(), 0usize), 9usize);
+
+        let map = build_input_buffer_map(&edges, &output_buf, &graph).unwrap();
+        let entry = map.get(&(dst_id.clone(), "in", 0)).copied();
+        assert_eq!(entry, Some((9, 1.0, false)));
     }
 
     #[test]

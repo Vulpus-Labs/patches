@@ -2,19 +2,20 @@ use super::*;
 
 #[test]
 fn fanout_buffer_shared_between_both_inputs() {
+    // ADR 0059 §2: a mono `sine` source feeding the stereo `in` port of
+    // AudioOut connects via a single broadcast cable; the consumer reads
+    // the producer's mono slot directly with no synthetic node. The plan
+    // has one input alias per port (just `in`) pointing at sine's output.
     let graph = sine_to_audio_out_graph();
     let (plan, _, _) = default_build(&graph);
 
-    // AudioOut has no output ports; sine has one.
     let sine_slot = plan.slots.iter().find(|s| !s.output_buffers.is_empty()).unwrap();
     let ao_slot   = plan.slots.iter().find(|s|  s.output_buffers.is_empty()).unwrap();
 
     let sine_out_buf = sine_slot.output_buffers[0];
-    let left_buf  = ao_slot.unscaled_inputs.iter().find(|&&(j, _)| j == 0).unwrap().1;
-    let right_buf = ao_slot.unscaled_inputs.iter().find(|&&(j, _)| j == 1).unwrap().1;
+    let in_buf = ao_slot.unscaled_inputs.iter().find(|&&(j, _)| j == 0).unwrap().1;
 
-    assert_eq!(sine_out_buf, left_buf,  "left input must use sine output buffer");
-    assert_eq!(sine_out_buf, right_buf, "right input must use sine output buffer");
+    assert_eq!(sine_out_buf, in_buf, "stereo `in` must read sine's output buffer");
 }
 
 #[test]
@@ -59,8 +60,7 @@ fn input_scale_is_applied_at_tick_time() {
         p_map.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         g.add_module("sine", sine_desc, &p_map).unwrap();
         g.add_module("out", out_desc, &ParameterMap::new()).unwrap();
-        g.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in_left"), scale).unwrap();
-        g.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in_right"), scale).unwrap();
+        g.connect(&NodeId::from("sine"), p("sine"), &NodeId::from("out"), p("in"), scale).unwrap();
         g
     };
 
@@ -155,8 +155,7 @@ fn removed_node_tombstone() {
         graph_a.add_module("s1", s1, &p1).unwrap();
         graph_a.add_module("s2", s2, &p2).unwrap();
         graph_a.add_module("out", out, &ParameterMap::new()).unwrap();
-        graph_a.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        graph_a.connect(&NodeId::from("s2"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        graph_a.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     }
     let (_plan_a, state_a) =
         builder.build_patch(&graph_a, &registry, &env, &PlannerState::empty()).unwrap();
@@ -171,8 +170,7 @@ fn removed_node_tombstone() {
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_b.add_module("s1", s1, &p1).unwrap();
         graph_b.add_module("out", out, &ParameterMap::new()).unwrap();
-        graph_b.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        graph_b.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        graph_b.connect(&NodeId::from("s1"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     }
     let (plan_b, _state_b) =
         builder.build_patch(&graph_b, &registry, &env, &state_a).unwrap();
@@ -199,8 +197,7 @@ fn type_changed_node_tombstone_and_new_module() {
         graph_a.add_module("osc", sine, &pm).unwrap();
         graph_a.add_module("out", out, &ParameterMap::new()).unwrap();
         // Oscillator has a sine output; wire it to both channels.
-        graph_a.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        graph_a.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        graph_a.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     }
     let (_plan_a, state_a) =
         builder.build_patch(&graph_a, &registry, &env, &PlannerState::empty()).unwrap();
@@ -214,8 +211,7 @@ fn type_changed_node_tombstone_and_new_module() {
         let out = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
         graph_b.add_module("osc", sum, &ParameterMap::new()).unwrap();
         graph_b.add_module("out", out, &ParameterMap::new()).unwrap();
-        graph_b.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_left"), 1.0).unwrap();
-        graph_b.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in_right"), 1.0).unwrap();
+        graph_b.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     }
     let (plan_b, state_b) =
         builder.build_patch(&graph_b, &registry, &env, &state_a).unwrap();

@@ -33,10 +33,10 @@ const SRC_TEMPLATE: &str = "patch {
     module osc : Osc { frequency: 220Hz }
     module ch  : VChorus { variant: bright, mode: one, hiss: {HISS}, jitter: {JITTER} }
     module out : AudioOut
-    osc.sine -> ch.in_left
-    osc.sine -> ch.in_right
-    ch.out_left  -> out.in_left
-    ch.out_right -> out.in_right
+    osc.sine -> ch.in
+    
+    ch.out -> out.in
+    
 }
 ";
 

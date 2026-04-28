@@ -152,10 +152,10 @@ patch {
     module ch  : VChorus { variant: bright, mode: one, hiss: 0.0 }
     module out : AudioOut
 
-    osc.sine -> ch.in_left
-    osc.sine -> ch.in_right
-    ch.out_left  -> out.in_left
-    ch.out_right -> out.in_right
+    osc.sine -> ch.in
+    
+    ch.out -> out.in
+    
 }
 "#;
     let file = patches_dsl::parse(src).expect("parse");
