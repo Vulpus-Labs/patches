@@ -340,3 +340,50 @@ path and retires the old instance. No new mechanism.
 - Migrate `convolution_reverb` (and any future file-backed module) to
   declare `ir_data` as a structural string param, decode in `prepare`,
   delete the bespoke `update_parameters` override.
+
+## Future work: warm-state migration
+
+Structural edits replace one instance with another: the new instance
+starts cold. For most cases this is correct — a different IR file is
+a different convolver, a different FFT window is a different latency
+profile. For some cases it is a regression — bumping `high_quality`
+on a long delay erases the delay-line tail, even though the user's
+intent was a quality-only tweak.
+
+Three escape hatches, in increasing cost:
+
+1. **Lift to realtime.** If the value can be honoured on the audio
+   thread (interpolation, ramping, lock-free swap), declare it
+   `realtime` and accept the audio-thread cost. Right answer for any
+   "knob the user expects to twiddle live."
+2. **Split the module.** Structural shell + realtime inner. Edits to
+   the inner preserve state by definition.
+3. **Warm-state hand-off.** New instance constructed off-thread in
+   `prepare`, then a control-thread call decants survivable state
+   from the old instance into the new before the audio-thread swap.
+   Bulk memcpy lives on the control thread, not the audio thread.
+
+The third option is the open design question. Naive "audio-thread
+`migrate_from`" only works for tiny state — copying a 2 s stereo
+convolution tail (~768 KB at 48 kHz) during the swap blocks the next
+sample. The realistic shape is a three-phase protocol:
+
+- Audio thread, last tick before swap: writes a snapshot into a
+  pre-allocated scratch buffer (sized by the new module up-front).
+- Control thread: `new.adopt_warm_state(&snapshot)` interprets the
+  scratch into the new instance's representation. Bulk memcpy lives
+  here, off the audio thread.
+- Audio thread, swap tick: pointer swap, old to cleanup ring.
+
+The per-module protocol — a serde for warm state — is non-trivial,
+and most plausible consumers (delay lines, convolution tails, FDN
+matrices) have substantial state. Even the small cases (biquad
+histories, ramp positions) only pay off when the user expectation
+demands continuity.
+
+Deferred until a concrete user-facing surprise motivates it. A
+follow-up ADR would specify: which structural edits are eligible
+(descriptor-hash equality between old and new), the snapshot
+allocation contract, the failure mode (migrate-not-supported falls
+back to today's drop-and-replace), and whether the new module's
+`prepare` runs before or after `adopt_warm_state`.

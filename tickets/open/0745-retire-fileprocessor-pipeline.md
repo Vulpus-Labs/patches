@@ -30,8 +30,14 @@ file-resolution pipeline. Retire the dead infrastructure.
 - [ ] Delete `FloatBufferId`, `fetch_buffer_static`, `pack` handling
       for buffer slots, the `buffer_tail` portion of `ParamFrame`
       layout, and corresponding ABI / wire-format support.
-- [ ] Simplify the FFI `ArcTable` runtime (file-buffer fan-out goes
-      away).
+- [ ] Delete the FFI `ArcTable` infrastructure entirely
+      (`patches-ffi-common::arc_table`, `RuntimeArcTables*`,
+      `ArcTableAudio` / `ArcTableControl` handles, counters,
+      soak/fuzz tests). With `FloatBufferId` and the realtime
+      File→FloatBuffer route gone, ArcTable has no producer and no
+      consumer. Existing observability hooks (param-frame dispatch
+      counter on `RuntimeAudioHandles`) move to a slimmer
+      replacement or fold into ADR 0043's tap surface.
 - [ ] `cargo +nightly udeps` clean — no orphaned deps from the
       removal.
 - [ ] DSL `file("path.wav")` continues to parse but desugars to a
