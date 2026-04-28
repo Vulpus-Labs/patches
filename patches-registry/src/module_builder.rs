@@ -2,6 +2,8 @@ use std::marker::PhantomData;
 use patches_core::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
 };
+#[cfg(test)]
+use patches_core::StructuralParams;
 
 pub trait ModuleBuilder: Send + Sync {
     fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor;
@@ -53,20 +55,21 @@ mod tests {
                 shape: shape.clone(),
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             }
         }
 
         fn prepare(
             _audio_environment: &AudioEnvironment,
             descriptor: ModuleDescriptor,
-            instance_id: InstanceId,
-        ) -> Self {
+            instance_id: InstanceId, _structural: &StructuralParams,
+        ) -> Result<Self, BuildError> { Ok({
             Self {
                 instance_id,
                 descriptor,
             }
-        }
+        })}
 
         fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {
         }
@@ -89,7 +92,7 @@ mod tests {
     #[test]
     fn build_a_module() {
         let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
-        let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
+        let shape = ModuleShape { channels: 2 };
         let params = ParameterMap::new();
         let builder = Builder::<TestModule>(PhantomData);
         let module = builder.build(&audio_environment, &shape, &params, InstanceId::next()).unwrap();

@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Sums a configurable number of input signals into a single output.
@@ -36,7 +37,7 @@ impl Module for Sum {
             .mono_out("out")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let size = descriptor.shape.channels;
         Self {
             instance_id,
@@ -45,7 +46,7 @@ impl Module for Sum {
             in_ports: vec![MonoInput::default(); size],
             out_port: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {
     }
@@ -86,7 +87,7 @@ mod tests {
 
     #[test]
     fn descriptor_shape_size_3() {
-        let h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3, length: 0, ..Default::default() });
+        let h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3 });
         let desc = h.descriptor();
         assert_eq!(desc.inputs.len(), 3);
         assert_eq!(desc.outputs.len(), 1);
@@ -100,7 +101,7 @@ mod tests {
 
     #[test]
     fn size_1_passes_input_unchanged() {
-        let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 1, length: 0, ..Default::default() });
+        let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 1 });
         h.set_mono_at("in", 0, 0.75);
         h.tick();
         assert_eq!(0.75_f32, h.read_mono("out"));
@@ -108,7 +109,7 @@ mod tests {
 
     #[test]
     fn size_3_sums_inputs() {
-        let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3, length: 0, ..Default::default() });
+        let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3 });
         h.set_mono_at("in", 0, 0.2);
         h.set_mono_at("in", 1, 0.3);
         h.set_mono_at("in", 2, 0.5);

@@ -19,7 +19,7 @@ fn descriptor_ports_and_params_mono() {
     assert_eq!(desc.inputs[0].name, "in");
     assert_eq!(desc.inputs[1].name, "mix");
     assert_eq!(desc.outputs[0].name, "out");
-    let names: Vec<&str> = desc.parameters.iter().map(|p| p.name).collect();
+    let names: Vec<&str> = desc.realtime_params.iter().map(|p| p.name).collect();
     assert!(names.contains(&"mix"));
     assert!(names.contains(&"ir"));
 }

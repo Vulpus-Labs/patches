@@ -13,7 +13,7 @@ use crate::param_frame::{ParamFrame, ParamView, ParamViewIndex};
 use crate::param_layout::compute_layout;
 
 fn empty_shape() -> ModuleShape {
-    ModuleShape { channels: 1, length: 0, high_quality: false }
+    ModuleShape { channels: 1 }
 }
 
 fn mixed_descriptor() -> ModuleDescriptor {
@@ -27,7 +27,7 @@ fn mixed_descriptor() -> ModuleDescriptor {
 
 fn defaults_from(desc: &ModuleDescriptor) -> ParameterMap {
     let mut m = ParameterMap::new();
-    for p in &desc.parameters {
+    for p in &desc.realtime_params {
         use crate::modules::module_descriptor::ParameterKind;
         let v = match &p.parameter_type {
             ParameterKind::Float { default, .. } => ParameterValue::Float(*default),

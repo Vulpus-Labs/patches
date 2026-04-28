@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Mono-to-poly broadcasting adapter.
@@ -34,14 +35,14 @@ impl Module for MonoToPoly {
             .poly_out("out")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
             in_mono: MonoInput::default(),
             out_poly: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

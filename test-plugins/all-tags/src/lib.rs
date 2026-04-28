@@ -10,6 +10,7 @@ use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
 use patches_core::param_frame::ParamView;
 use patches_core::params_enum;
 use patches_core::{AudioEnvironment, Module};
+use patches_core::{StructuralParams, BuildError};
 
 params_enum! {
     pub enum Mode {
@@ -73,10 +74,10 @@ impl Module for AllTags {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self { descriptor, instance_id }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let f = p.fetch_float_static("g", 0);

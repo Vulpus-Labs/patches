@@ -99,27 +99,17 @@ impl From<FfiAudioEnvironment> for patches_core::AudioEnvironment {
 #[derive(Debug, Clone, Copy)]
 pub struct FfiModuleShape {
     pub channels: usize,
-    pub length: usize,
-    pub high_quality: u8,
 }
 
 impl From<&patches_core::ModuleShape> for FfiModuleShape {
     fn from(shape: &patches_core::ModuleShape) -> Self {
-        Self {
-            channels: shape.channels,
-            length: shape.length,
-            high_quality: shape.high_quality as u8,
-        }
+        Self { channels: shape.channels }
     }
 }
 
 impl From<FfiModuleShape> for patches_core::ModuleShape {
     fn from(ffi: FfiModuleShape) -> Self {
-        Self {
-            channels: ffi.channels,
-            length: ffi.length,
-            high_quality: ffi.high_quality != 0,
-        }
+        Self { channels: ffi.channels }
     }
 }
 
@@ -260,11 +250,17 @@ pub struct FfiPluginVTable {
 
     pub describe: unsafe extern "C" fn(shape: FfiModuleShape) -> FfiBytes,
 
+    /// Construct a plugin instance.
+    ///
+    /// `structural_blob` carries the structural-parameter slot values
+    /// (ADR 0060). Empty in this slice; positional encoding lands in 0739.
     pub prepare: unsafe extern "C" fn(
         descriptor_json: *const u8,
         descriptor_json_len: usize,
         env: FfiAudioEnvironment,
         instance_id: u64,
+        structural_blob: *const u8,
+        structural_blob_len: usize,
     ) -> *mut c_void,
 
     /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
@@ -328,12 +324,10 @@ mod tests {
 
     #[test]
     fn module_shape_round_trip() {
-        let orig = patches_core::ModuleShape { channels: 4, length: 16, high_quality: true };
+        let orig = patches_core::ModuleShape { channels: 4 };
         let ffi: FfiModuleShape = (&orig).into();
         let back: patches_core::ModuleShape = ffi.into();
         assert_eq!(back.channels, 4);
-        assert_eq!(back.length, 16);
-        assert!(back.high_quality);
     }
 
     #[test]
@@ -413,6 +407,7 @@ mod tests {
     unsafe extern "C" fn stub_describe(_s: FfiModuleShape) -> FfiBytes { FfiBytes::empty() }
     unsafe extern "C" fn stub_prepare(
         _p: *const u8, _l: usize, _e: FfiAudioEnvironment, _i: u64,
+        _sb: *const u8, _sl: usize,
     ) -> *mut c_void { std::ptr::null_mut() }
     unsafe extern "C" fn stub_uvp(
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,

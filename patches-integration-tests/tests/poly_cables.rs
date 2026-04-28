@@ -6,6 +6,7 @@ use patches_core::{
     AudioEnvironment, CableKind, CablePool, GraphError, InstanceId, Module, ModuleDescriptor,
     ModuleGraph, ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::ParameterMap;
@@ -39,14 +40,15 @@ impl Module for PolyProbe {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolyProbe",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![PortDescriptor { name: "poly_in", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -59,7 +61,7 @@ impl Module for PolyProbe {
                 last_received: Mutex::new(None),
             }),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
@@ -118,21 +120,22 @@ impl Module for PolySource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolySource",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
             poly_out: PolyOutput::default(),
             pattern: POLY_PATTERN,
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
@@ -178,10 +181,10 @@ fn connected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("src", PolySource::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.add_module("src", PolySource::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("poly_out"), &NodeId::from("probe"), p("poly_in"), 1.0).unwrap();
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -195,9 +198,9 @@ fn disconnected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
@@ -288,8 +291,8 @@ fn kind_mismatch_at_connect() {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &osc_params).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
 
     let result = graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("poly_in"), 1.0);
     assert!(

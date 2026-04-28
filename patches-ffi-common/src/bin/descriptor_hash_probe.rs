@@ -17,7 +17,7 @@ patches_core::params_enum! {
 fn main() {
     let d = ModuleDescriptor::new(
         "Probe",
-        ModuleShape { channels: 1, length: 0, high_quality: false },
+        ModuleShape { channels: 1 },
     )
     .float_param("gain", 0.0, 1.0, 0.5)
     .int_param("count", 0, 8, 1)

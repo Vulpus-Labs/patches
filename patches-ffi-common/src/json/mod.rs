@@ -22,7 +22,7 @@ mod tests {
     fn module_descriptor_round_trip() {
         let desc = ModuleDescriptor {
             module_name: "TestGain",
-            shape: ModuleShape { channels: 2, length: 8, high_quality: true },
+            shape: ModuleShape { channels: 2 },
             inputs: vec![
                 PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "sidechain", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
@@ -30,12 +30,13 @@ mod tests {
             outputs: vec![
                 PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
-            parameters: vec![
+            realtime_params: vec![
                 ParameterDescriptor { name: "gain", index: 0, parameter_type: ParameterKind::Float { min: 0.0, max: 2.0, default: 1.0 } },
                 ParameterDescriptor { name: "mode", index: 0, parameter_type: ParameterKind::Enum { variants: &["linear", "log"], default: "linear" } },
                 ParameterDescriptor { name: "active", index: 0, parameter_type: ParameterKind::Bool { default: true } },
                 ParameterDescriptor { name: "voices", index: 0, parameter_type: ParameterKind::Int { min: 1, max: 8, default: 4 } },
             ],
+            structural_params: vec![],
         };
 
         let json = serialize_module_descriptor(&desc);
@@ -43,8 +44,6 @@ mod tests {
 
         assert_eq!(back.module_name, "TestGain");
         assert_eq!(back.shape.channels, 2);
-        assert_eq!(back.shape.length, 8);
-        assert!(back.shape.high_quality);
         assert_eq!(back.inputs.len(), 2);
         assert_eq!(back.inputs[0].name, "in");
         assert_eq!(back.inputs[0].kind, CableKind::Mono);
@@ -52,10 +51,10 @@ mod tests {
         assert_eq!(back.inputs[1].kind, CableKind::Poly);
         assert_eq!(back.outputs.len(), 1);
         assert_eq!(back.outputs[0].name, "out");
-        assert_eq!(back.parameters.len(), 4);
+        assert_eq!(back.realtime_params.len(), 4);
 
         // Float param
-        match &back.parameters[0].parameter_type {
+        match &back.realtime_params[0].parameter_type {
             ParameterKind::Float { min, max, default } => {
                 assert_eq!(*min, 0.0);
                 assert_eq!(*max, 2.0);
@@ -65,7 +64,7 @@ mod tests {
         }
 
         // Enum param
-        match &back.parameters[1].parameter_type {
+        match &back.realtime_params[1].parameter_type {
             ParameterKind::Enum { variants, default } => {
                 assert_eq!(variants.len(), 2);
                 assert_eq!(variants[0], "linear");
@@ -76,13 +75,13 @@ mod tests {
         }
 
         // Bool param
-        match &back.parameters[2].parameter_type {
+        match &back.realtime_params[2].parameter_type {
             ParameterKind::Bool { default } => assert!(*default),
             other => panic!("expected Bool, got {other:?}"),
         }
 
         // Int param
-        match &back.parameters[3].parameter_type {
+        match &back.realtime_params[3].parameter_type {
             ParameterKind::Int { min, max, default } => {
                 assert_eq!(*min, 1);
                 assert_eq!(*max, 8);

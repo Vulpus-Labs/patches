@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Polyphonic sum: sums N poly inputs into one poly output, per-voice.
@@ -36,7 +37,7 @@ impl Module for PolySum {
             .poly_out("out")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let size = descriptor.shape.channels;
         Self {
             instance_id,
@@ -45,7 +46,7 @@ impl Module for PolySum {
             in_ports: vec![PolyInput::default(); size],
             out_port: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
@@ -84,7 +85,7 @@ mod tests {
         let mut h = ModuleHarness::build_full::<PolySum>(
             &[],
             AudioEnvironment { sample_rate: 44100.0, poly_voices: 4, periodic_update_interval: 32, hosted: false },
-            ModuleShape { channels: 2, length: 0, ..Default::default() },
+            ModuleShape { channels: 2 },
         );
 
         let mut a = [0.0f32; 16];

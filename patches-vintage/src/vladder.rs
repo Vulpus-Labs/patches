@@ -31,6 +31,7 @@ use patches_core::param_frame::ParamView;
 use patches_core::{
     params_enum, AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::{LadderCoeffs, LadderKernel, LadderVariant};
 
 params_enum! {
@@ -101,7 +102,7 @@ impl Module for VLadder {
             .float_param(params::drive, 0.0, DRIVE_MAX, 1.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let variant = VLadderVariant::Smooth;
         let cutoff = 1_000.0;
         let resonance = 0.0;
@@ -121,7 +122,7 @@ impl Module for VLadder {
             in_cutoff_cv: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.variant = p.get(params::variant);

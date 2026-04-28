@@ -63,8 +63,15 @@ pub fn serialize_module_descriptor(desc: &ModuleDescriptor) -> Vec<u8> {
     }
     out.push(']');
 
-    out.push_str(",\"parameters\":[");
-    for (i, param) in desc.parameters.iter().enumerate() {
+    out.push_str(",\"realtime_params\":[");
+    for (i, param) in desc.realtime_params.iter().enumerate() {
+        if i > 0 { out.push(','); }
+        write_parameter_descriptor(&mut out, param);
+    }
+    out.push(']');
+
+    out.push_str(",\"structural_params\":[");
+    for (i, param) in desc.structural_params.iter().enumerate() {
         if i > 0 { out.push(','); }
         write_parameter_descriptor(&mut out, param);
     }
@@ -75,12 +82,7 @@ pub fn serialize_module_descriptor(desc: &ModuleDescriptor) -> Vec<u8> {
 }
 
 fn write_shape(out: &mut String, shape: &ModuleShape) {
-    out.push_str(&format!(
-        "{{\"channels\":{},\"length\":{},\"high_quality\":{}}}",
-        shape.channels,
-        shape.length,
-        shape.high_quality,
-    ));
+    out.push_str(&format!("{{\"channels\":{}}}", shape.channels));
 }
 
 fn write_port_descriptor(out: &mut String, port: &PortDescriptor) {

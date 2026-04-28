@@ -4,6 +4,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -98,8 +99,8 @@ impl Module for PolySvf {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let default_cutoff = 6.0_f32;
         let default_q = 0.0_f32;
         let fc = (C0_FREQ * default_cutoff.exp2())
@@ -123,7 +124,7 @@ impl Module for PolySvf {
             out_highpass: PolyOutput::default(),
             out_bandpass: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.cutoff = p.get(params::cutoff);

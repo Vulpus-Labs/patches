@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -103,7 +104,7 @@ impl Module for RingMod {
             .float_param(params::drive, 0.2, 20.0, 1.0)
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -112,7 +113,7 @@ impl Module for RingMod {
             in_carrier: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let db = p.get(params::drive);

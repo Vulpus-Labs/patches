@@ -123,6 +123,8 @@ macro_rules! export_plugin {
             descriptor_json_len: usize,
             env: $crate::types::FfiAudioEnvironment,
             instance_id: u64,
+            _structural_blob: *const u8,
+            _structural_blob_len: usize,
         ) -> *mut ::std::ffi::c_void {
             // SAFETY: host passes a valid descriptor-JSON byte slice for
             // the duration of the call (ADR 0045 §4).
@@ -146,11 +148,18 @@ macro_rules! export_plugin {
                 ::std::vec::Vec::with_capacity(descriptor.outputs.len());
             let audio_env: ::patches_core::AudioEnvironment = env.into();
             let id = ::patches_core::modules::InstanceId::from_raw(instance_id);
-            let module = <$module as ::patches_core::Module>::prepare(
+            // ADR 0060: structural blob ABI lands in 0739; pass an empty
+            // carrier for now so existing plugins continue to work unchanged.
+            let structural = ::patches_core::modules::StructuralParams::new();
+            let module = match <$module as ::patches_core::Module>::prepare(
                 &audio_env,
                 descriptor,
                 id,
-            );
+                &structural,
+            ) {
+                Ok(m) => m,
+                Err(_) => return ::std::ptr::null_mut(),
+            };
             let instance = ::std::boxed::Box::new($crate::sdk::PluginInstance::<
                 $module,
             > {
@@ -354,6 +363,8 @@ macro_rules! export_plugin_with_hash_override {
             _descriptor_json_len: usize,
             _env: $crate::types::FfiAudioEnvironment,
             _instance_id: u64,
+            _structural_blob: *const u8,
+            _structural_blob_len: usize,
         ) -> *mut ::std::ffi::c_void {
             ::std::ptr::null_mut()
         }
@@ -488,6 +499,8 @@ macro_rules! export_modules {
                     descriptor_json_len: usize,
                     env: $crate::types::FfiAudioEnvironment,
                     instance_id: u64,
+                    _structural_blob: *const u8,
+                    _structural_blob_len: usize,
                 ) -> *mut ::std::ffi::c_void {
                     // SAFETY: host guarantees a valid descriptor-JSON slice
                     // for the duration of the call (ADR 0045 §4).
@@ -511,11 +524,16 @@ macro_rules! export_modules {
                         ::std::vec::Vec::with_capacity(descriptor.outputs.len());
                     let audio_env: ::patches_core::AudioEnvironment = env.into();
                     let id = ::patches_core::modules::InstanceId::from_raw(instance_id);
-                    let module = <$module as ::patches_core::Module>::prepare(
+                    let structural = ::patches_core::modules::StructuralParams::new();
+                    let module = match <$module as ::patches_core::Module>::prepare(
                         &audio_env,
                         descriptor,
                         id,
-                    );
+                        &structural,
+                    ) {
+                        Ok(m) => m,
+                        Err(_) => return ::std::ptr::null_mut(),
+                    };
                     let instance = ::std::boxed::Box::new(
                         $crate::sdk::PluginInstance::<$module> {
                             module,
@@ -694,7 +712,8 @@ macro_rules! export_modules {
 mod tests {
     use super::*;
     use patches_core::cables::CableValue;
-    use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
+    use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap, StructuralParams};
+    use patches_core::build_error::BuildError;
     use patches_core::param_frame::{pack_into, ParamFrame};
     use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
     use patches_core::{
@@ -815,10 +834,10 @@ mod tests {
         fn prepare(
             _env: &AudioEnvironment,
             descriptor: ModuleDescriptor,
-            instance_id: InstanceId,
-        ) -> Self {
+            instance_id: InstanceId, _structural: &StructuralParams,
+        ) -> Result<Self, BuildError> { Ok({
             Self { descriptor, instance_id }
-        }
+        })}
         fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
             let g = p.fetch_float_static("gain", 0);
             let m = p.fetch_int_static("mode", 0);
@@ -888,6 +907,8 @@ mod tests {
             json_bytes.len(),
             ffi_env,
             99,
+            std::ptr::null(),
+            0,
         );
         assert!(!handle.is_null());
 

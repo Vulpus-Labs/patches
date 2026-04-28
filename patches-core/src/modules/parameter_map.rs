@@ -166,7 +166,7 @@ impl ParameterMap {
     /// map before the planner resolves file contents.
     pub fn declared_defaults(descriptor: &ModuleDescriptor) -> Self {
         descriptor
-            .parameters
+            .realtime_params
             .iter()
             .map(|p| (p.name.to_string(), p.index, p.parameter_type.default_value()))
             .collect()
@@ -179,7 +179,7 @@ impl ParameterMap {
     /// 0599); `SongName` is `Int(0)`.
     pub fn defaults(descriptor: &ModuleDescriptor) -> Self {
         let mut inner: HashMap<String, Vec<(usize, ParameterValue)>> = HashMap::new();
-        for p in &descriptor.parameters {
+        for p in &descriptor.realtime_params {
             let v = match &p.parameter_type {
                 ParameterKind::Float { default, .. } => ParameterValue::Float(*default),
                 ParameterKind::Int { default, .. } => ParameterValue::Int(*default),
@@ -254,7 +254,7 @@ mod tests {
             module_name: "test",
             inputs: Vec::new(),
             outputs: Vec::new(),
-            parameters: vec![
+            realtime_params: vec![
                 ParameterDescriptor {
                     name: "cutoff",
                     index: 0,
@@ -267,6 +267,7 @@ mod tests {
                 },
             ],
             shape: crate::modules::module_descriptor::ModuleShape::default(),
+            structural_params: vec![],
         }
     }
 
@@ -275,7 +276,7 @@ mod tests {
             module_name: "test",
             inputs: Vec::new(),
             outputs: Vec::new(),
-            parameters: vec![
+            realtime_params: vec![
                 ParameterDescriptor {
                     name: "gain",
                     index: 0,
@@ -288,6 +289,7 @@ mod tests {
                 },
             ],
             shape: crate::modules::module_descriptor::ModuleShape::default(),
+            structural_params: vec![],
         }
     }
 
@@ -296,7 +298,7 @@ mod tests {
             module_name: "test",
             inputs: Vec::new(),
             outputs: Vec::new(),
-            parameters: vec![ParameterDescriptor {
+            realtime_params: vec![ParameterDescriptor {
                 name: "mode",
                 index: 0,
                 parameter_type: ParameterKind::Enum {
@@ -305,6 +307,7 @@ mod tests {
                 },
             }],
             shape: crate::modules::module_descriptor::ModuleShape::default(),
+            structural_params: vec![],
         }
     }
 
@@ -339,12 +342,13 @@ mod tests {
             module_name: "t",
             inputs: Vec::new(),
             outputs: Vec::new(),
-            parameters: vec![ParameterDescriptor {
+            realtime_params: vec![ParameterDescriptor {
                 name: "mode",
                 index: 0,
                 parameter_type: ParameterKind::Enum { variants: &["x", "y"], default: "missing" },
             }],
             shape: crate::modules::module_descriptor::ModuleShape::default(),
+            structural_params: vec![],
         };
         let m = ParameterMap::defaults(&d);
         assert_eq!(m.get("mode", 0), Some(&ParameterValue::Enum(0)));

@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    OutputPort, ParameterMap,
+    OutputPort, ParameterMap, StructuralParams,
 };
 use patches_core::param_frame::ParamView;
 use patches_core::build_error::BuildError;
@@ -38,7 +38,8 @@ impl Module for TimingShim {
         _audio_environment: &AudioEnvironment,
         _descriptor: ModuleDescriptor,
         _instance_id: InstanceId,
-    ) -> Self
+        _structural: &StructuralParams,
+    ) -> Result<Self, BuildError>
     where
         Self: Sized,
     {
@@ -49,8 +50,8 @@ impl Module for TimingShim {
         self.inner.update_validated_parameters(params);
     }
 
-    fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        self.inner.update_parameters(params)
+    fn apply_unpacked_params(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
+        self.inner.apply_unpacked_params(params)
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {

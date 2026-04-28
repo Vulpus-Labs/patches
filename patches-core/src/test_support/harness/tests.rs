@@ -1,6 +1,7 @@
 use super::*;
 use crate::AudioEnvironment;
 use crate::modules::{ModuleDescriptor, ModuleShape};
+use crate::{StructuralParams, BuildError};
 
 // A minimal test-only module: one mono input, one mono output; output = input * 2.
 struct Doubler {
@@ -20,15 +21,15 @@ impl Module for Doubler {
     fn prepare(
         _env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        id: InstanceId,
-    ) -> Self {
+        id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             id,
             descriptor,
             input: MonoInput::default(),
             output: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &crate::param_frame::ParamView<'_>) {}
 
@@ -67,15 +68,15 @@ impl Module for PolyPass {
     fn prepare(
         _env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        id: InstanceId,
-    ) -> Self {
+        id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             id,
             descriptor,
             input: PolyInput::default(),
             output: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &crate::param_frame::ParamView<'_>) {}
 
@@ -160,9 +161,9 @@ fn disconnect_input_delivers_false_connected() {
         fn describe(shape: &ModuleShape) -> ModuleDescriptor {
             ModuleDescriptor::new("ConnectProbe", shape.clone()).mono_in("sig")
         }
-        fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+        fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id, descriptor: d, saw_connected: false }
-        }
+        })}
         fn update_validated_parameters(&mut self, _: &crate::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.id }
@@ -234,9 +235,9 @@ fn assert_steady_state_bounded_fails_for_alternating() {
         fn describe(s: &ModuleShape) -> ModuleDescriptor {
             ModuleDescriptor::new("Toggle", s.clone()).mono_out("out")
         }
-        fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+        fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id, descriptor: d, output: MonoOutput::default(), sign: 1.0 }
-        }
+        })}
         fn update_validated_parameters(&mut self, _: &crate::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.id }

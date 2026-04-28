@@ -26,6 +26,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
@@ -69,7 +70,7 @@ impl Module for Clock {
             .int_param(params::quavers_per_beat, 1, 4, 2)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -85,7 +86,7 @@ impl Module for Clock {
             out_quaver: MonoOutput::default(),
             out_semiquaver: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::bpm);

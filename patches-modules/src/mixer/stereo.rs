@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, ModuleShape, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -98,7 +99,7 @@ impl Module for StereoMixer {
             .bool_param_multi(params::solo,    shape.channels, false)
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
         Self {
             instance_id,
@@ -122,7 +123,7 @@ impl Module for StereoMixer {
             send_a_stereo: StereoOutput::default(),
             send_b_stereo: StereoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         for i in 0..self.channels {

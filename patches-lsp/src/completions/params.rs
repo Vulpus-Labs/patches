@@ -21,8 +21,9 @@ pub(super) fn complete_parameters(
     match desc {
         ResolvedDescriptor::Module { desc: md, .. } => {
             let mut seen = std::collections::HashSet::new();
-            md.parameters
+            md.realtime_params
                 .iter()
+                .chain(md.structural_params.iter())
                 .filter(|p| seen.insert(p.name))
                 .map(|p| CompletionItem {
                     label: p.name.to_string(),
@@ -107,7 +108,7 @@ pub(super) fn complete_enum_values(
         ResolvedDescriptor::Module { desc: md, .. } => md,
         ResolvedDescriptor::Template { .. } => return vec![],
     };
-    let param = match md.parameters.iter().find(|p| p.name == param_name) {
+    let param = match md.realtime_params.iter().chain(md.structural_params.iter()).find(|p| p.name == param_name) {
         Some(p) => p,
         None => return vec![],
     };

@@ -11,6 +11,7 @@ use patches_core::{
     ModuleShape, NodeId, ParameterDescriptor, ParameterKind, MonoLayout, PolyLayout, PortDescriptor, PortRef,
     PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
@@ -51,18 +52,19 @@ impl Module for PolySineSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolySineSource",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![ParameterDescriptor {
+            realtime_params: vec![ParameterDescriptor {
                 name: "frequency",
                 index: 0,
                 parameter_type: ParameterKind::Float { min: 1.0, max: 22050.0, default: 440.0 },
             }],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -71,7 +73,7 @@ impl Module for PolySineSource {
             sample_idx: 0,
             poly_out: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         const FREQUENCY: FloatParamName = FloatParamName::new("frequency");
@@ -110,7 +112,7 @@ fn make_filter_graph(
     filter_params: &ParameterMap,
     source_freq: f32,
 ) -> ModuleGraph {
-    let shape = ModuleShape { channels: 0, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 0 };
     let mut graph = ModuleGraph::new();
 
     let mut src_params = ParameterMap::new();

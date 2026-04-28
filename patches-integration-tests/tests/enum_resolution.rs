@@ -176,7 +176,7 @@ fn every_enum_variant_round_trips() {
     let shape = patches_core::ModuleShape::default();
     for name in reg.module_names() {
         let descriptor = reg.describe(name, &shape).expect("describe failed");
-        for desc @ ParameterDescriptor { parameter_type, .. } in &descriptor.parameters {
+        for desc @ ParameterDescriptor { parameter_type, .. } in &descriptor.realtime_params {
             let ParameterKind::Enum { variants, .. } = parameter_type else {
                 continue;
             };

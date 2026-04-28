@@ -14,6 +14,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Split a stereo cable into two mono cables.
@@ -46,7 +47,7 @@ impl Module for StereoSplitter {
             .mono_out("out_right")
     }
 
-    fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -54,7 +55,7 @@ impl Module for StereoSplitter {
             out_left:  MonoOutput::default(),
             out_right: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -105,7 +106,7 @@ impl Module for StereoJoiner {
             .stereo_out("out")
     }
 
-    fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -113,7 +114,7 @@ impl Module for StereoJoiner {
             in_right:   MonoInput::default(),
             out_stereo: StereoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }

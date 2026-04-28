@@ -14,7 +14,7 @@ fn make_fdn(character: Character, size: f32, brightness: f32) -> ModuleHarness {
 
 #[test]
 fn descriptor_ports_and_params() {
-    let desc = FdnReverb::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+    let desc = FdnReverb::describe(&ModuleShape { channels: 0 });
     assert_eq!(desc.module_name, "FdnReverb");
     assert_eq!(desc.inputs.len(),  5);
     assert_eq!(desc.outputs.len(), 1);
@@ -24,7 +24,7 @@ fn descriptor_ports_and_params() {
     assert_eq!(desc.inputs[3].name,  "pre_delay_cv");
     assert_eq!(desc.inputs[4].name,  "mix_cv");
     assert_eq!(desc.outputs[0].name, "out");
-    let names: Vec<&str> = desc.parameters.iter().map(|p| p.name).collect();
+    let names: Vec<&str> = desc.realtime_params.iter().map(|p| p.name).collect();
     assert!(names.contains(&"size"));
     assert!(names.contains(&"brightness"));
     assert!(names.contains(&"pre_delay"));

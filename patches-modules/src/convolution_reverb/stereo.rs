@@ -5,9 +5,10 @@ use patches_core::cable_pool::CablePool;
 use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    validate_parameters, AudioEnvironment, InputPort, InstanceId,
+    AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, ModuleShape, MonoInput, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams};
 use patches_registry::FileProcessor;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
@@ -32,6 +33,8 @@ pub struct StereoConvReverb {
     pub(super) out_stereo: StereoOutput,
 
     pub(super) core: ConvReverbCore,
+    /// Pre-decoded IR loaded from the `ir_path` structural param (if any).
+    pub(super) pre_fft_ir: Option<Vec<f32>>,
 }
 
 unsafe impl Send for StereoConvReverb {}
@@ -63,33 +66,57 @@ impl FileProcessor for StereoConvReverb {
 
 impl patches_core::Module for StereoConvReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("StereoConvReverb", ModuleShape { channels: 0, length: 0, ..Default::default() })
+        ModuleDescriptor::new("StereoConvReverb", ModuleShape { channels: 0 })
             .stereo_in("in")
             .mono_in("mix")
             .stereo_out("out")
             .float_param(core_params::mix, 0.0, 1.0, 1.0)
             .enum_param(core_params::ir, IrVariant::Room)
-            .file_param("ir_data", IR_FILE_EXTENSIONS)
+            .structural_string_param("ir_path", IR_FILE_EXTENSIONS)
     }
 
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
         instance_id: InstanceId,
-    ) -> Self {
-        Self {
+        structural: &StructuralParams,
+    ) -> Result<Self, BuildError> {
+        let pre_fft_ir = match structural.get_string("ir_path", 0) {
+            Some(p) if !p.is_empty() => {
+                let (left, right) = patches_io::read_stereo(
+                    std::path::Path::new(p),
+                    audio_environment.sample_rate as f64,
+                )
+                .map_err(|e| BuildError::Custom {
+                    module: "StereoConvReverb",
+                    message: format!("failed to load '{p}': {e}"),
+                    origin: None,
+                })?;
+                let left_pre =
+                    NonUniformConvolver::serialize_pre_fft(&left, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+                let right_pre =
+                    NonUniformConvolver::serialize_pre_fft(&right, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
+                let mut packed = Vec::with_capacity(1 + left_pre.len() + right_pre.len());
+                packed.push(left_pre.len() as f32);
+                packed.extend_from_slice(&left_pre);
+                packed.extend_from_slice(&right_pre);
+                Some(packed)
+            }
+            _ => None,
+        };
+        Ok(Self {
             instance_id,
             descriptor,
             in_stereo: StereoInput::default(),
             in_mix: MonoInput::default(),
             out_stereo: StereoOutput::default(),
             core: ConvReverbCore::new(true, audio_environment.sample_rate),
-        }
+            pre_fft_ir,
+        })
     }
 
-    fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        validate_parameters(params, self.descriptor())?;
-        self.core.update_parameters(params, "StereoConvReverb")
+    fn apply_unpacked_params(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
+        self.core.update_parameters(params, "StereoConvReverb", self.pre_fft_ir.take())
     }
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {

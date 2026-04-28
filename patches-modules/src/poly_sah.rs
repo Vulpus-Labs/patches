@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 
@@ -39,7 +40,7 @@ impl Module for PolySah {
             .poly_out("out")
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -48,7 +49,7 @@ impl Module for PolySah {
             in_trig: TriggerInput::default(),
             out: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

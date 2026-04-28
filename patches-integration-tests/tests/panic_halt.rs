@@ -5,6 +5,7 @@ use std::any::Any;
 use patches_core::{
     AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_engine::{ExecutionPlan, OversamplingFactor};
@@ -27,19 +28,20 @@ impl PanicOnProcess {
             id: InstanceId::next(),
             desc: ModuleDescriptor {
                 module_name: Self::NAME,
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                shape: ModuleShape { channels: 0 },
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             },
         }
     }
 }
 impl Module for PanicOnProcess {
     fn describe(_s: &ModuleShape) -> ModuleDescriptor { unreachable!() }
-    fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+    fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, desc: d }
-    }
+    })}
     fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
     fn instance_id(&self) -> InstanceId { self.id }
@@ -60,19 +62,20 @@ impl PanicOnPeriodic {
             id: InstanceId::next(),
             desc: ModuleDescriptor {
                 module_name: Self::NAME,
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                shape: ModuleShape { channels: 0 },
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             },
         }
     }
 }
 impl Module for PanicOnPeriodic {
     fn describe(_s: &ModuleShape) -> ModuleDescriptor { unreachable!() }
-    fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+    fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, desc: d }
-    }
+    })}
     fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
     fn instance_id(&self) -> InstanceId { self.id }
@@ -90,10 +93,11 @@ fn empty_param_state(name: &'static str) -> ParamState {
     ParamState::new_for_descriptor(
         &ModuleDescriptor {
             module_name: name,
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         },
         &ParameterMap::new(),
     )

@@ -55,6 +55,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_dsp::{DelayBuffer, HalfbandInterpolator, LimiterCore, ms_to_samples};
@@ -91,7 +92,7 @@ impl Module for Limiter {
             .float_param(params::release_ms, 1.0, 5000.0, 100.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let core = LimiterCore::new(env.sample_rate, 0.9, 2.0, 100.0, MAX_ATTACK_MS);
         let max_lookahead = ms_to_samples(MAX_ATTACK_MS, env.sample_rate);
         let dry_delay = DelayBuffer::new(max_lookahead + HalfbandInterpolator::GROUP_DELAY_BASE_RATE + 1);
@@ -105,7 +106,7 @@ impl Module for Limiter {
             in_port: MonoInput::default(),
             out_port: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::threshold);
@@ -173,7 +174,7 @@ mod tests {
         let mut h = ModuleHarness::build_full::<Limiter>(
             &[],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
         let warmup = warmup_samples(2.0, SR);
         for _ in 0..warmup {
@@ -194,7 +195,7 @@ mod tests {
         let mut h = ModuleHarness::build_full::<Limiter>(
             &[],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         // 500 ms at 48 kHz = 24 000 samples — enough to fully release and
@@ -229,7 +230,7 @@ mod tests {
                 ("release_ms", ParameterValue::Float(5.0)),
             ],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         let freq = 1_000.0_f32;
@@ -275,7 +276,7 @@ mod tests {
                 ("release_ms", ParameterValue::Float(release_ms)),
             ],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         // Phase 1: drive hard at amplitude 2.0, verify clamping

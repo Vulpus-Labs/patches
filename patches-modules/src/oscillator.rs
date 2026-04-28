@@ -4,6 +4,7 @@ use patches_core::{
     MonoInput, MonoOutput, ModuleShape, OutputPort, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
     OSCILLATOR_DRIFT_STEP,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -114,7 +115,7 @@ impl Module for Oscillator {
             .float_param(params::drift, 0.0, 1.0, 0.0)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         // Derive a non-zero seed from instance_id so each oscillator drifts independently.
         let seed = (instance_id.as_u64().wrapping_add(1)) as u32;
         Self {
@@ -139,7 +140,7 @@ impl Module for Oscillator {
             drift_counter: 0,
             drift_voct_offset: 0.0,
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::frequency);

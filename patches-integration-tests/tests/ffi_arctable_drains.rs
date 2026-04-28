@@ -77,7 +77,7 @@ fn arctable_drains_after_plugin_release() {
     let ffi_env = FfiAudioEnvironment::from(&env);
     let ser = json::serialize_module_descriptor(&descriptor_json_bytes);
     let handle = unsafe {
-        (vtable.prepare)(ser.as_ptr(), ser.len(), ffi_env, InstanceId::next().as_u64())
+        (vtable.prepare)(ser.as_ptr(), ser.len(), ffi_env, InstanceId::next().as_u64(), std::ptr::null(), 0)
     };
     assert!(!handle.is_null());
 

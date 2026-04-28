@@ -54,8 +54,8 @@ fn tick_runs_without_panic() {
 fn input_scale_is_applied_at_tick_time() {
     let make_graph = |scale: f32| {
         let mut g = ModuleGraph::new();
-        let sine_desc = Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
-        let out_desc = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+        let sine_desc = Oscillator::describe(&ModuleShape { channels: 0 });
+        let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
         let mut p_map = ParameterMap::new();
         p_map.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         g.add_module("sine", sine_desc, &p_map).unwrap();
@@ -145,9 +145,9 @@ fn removed_node_tombstone() {
     // Graph with two sines.
     let mut graph_a = ModuleGraph::new();
     {
-        let s1 = Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
-        let s2 = Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
-        let out = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+        let s1 = Oscillator::describe(&ModuleShape { channels: 0 });
+        let s2 = Oscillator::describe(&ModuleShape { channels: 0 });
+        let out = AudioOut::describe(&ModuleShape { channels: 0 });
         let mut p1 = ParameterMap::new();
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         let mut p2 = ParameterMap::new();
@@ -164,8 +164,8 @@ fn removed_node_tombstone() {
     // Graph with only s1.
     let mut graph_b = ModuleGraph::new();
     {
-        let s1 = Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
-        let out = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+        let s1 = Oscillator::describe(&ModuleShape { channels: 0 });
+        let out = AudioOut::describe(&ModuleShape { channels: 0 });
         let mut p1 = ParameterMap::new();
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_b.add_module("s1", s1, &p1).unwrap();
@@ -190,8 +190,8 @@ fn type_changed_node_tombstone_and_new_module() {
     // Graph A: Oscillator at "osc" (sine output).
     let mut graph_a = ModuleGraph::new();
     {
-        let sine = Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
-        let out = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+        let sine = Oscillator::describe(&ModuleShape { channels: 0 });
+        let out = AudioOut::describe(&ModuleShape { channels: 0 });
         let mut pm = ParameterMap::new();
         pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_a.add_module("osc", sine, &pm).unwrap();
@@ -207,8 +207,8 @@ fn type_changed_node_tombstone_and_new_module() {
     // Graph B: Sum (1-channel) at "osc" (type changed from Oscillator).
     let mut graph_b = ModuleGraph::new();
     {
-        let sum = Sum::describe(&ModuleShape { channels: 1, length: 0, ..Default::default() });
-        let out = AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() });
+        let sum = Sum::describe(&ModuleShape { channels: 1 });
+        let out = AudioOut::describe(&ModuleShape { channels: 0 });
         graph_b.add_module("osc", sum, &ParameterMap::new()).unwrap();
         graph_b.add_module("out", out, &ParameterMap::new()).unwrap();
         graph_b.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();

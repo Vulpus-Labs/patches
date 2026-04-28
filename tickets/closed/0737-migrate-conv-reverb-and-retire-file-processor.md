@@ -58,3 +58,16 @@ This is the largest single deletion in the epic. Confirm before each
 removal that no FFI plugin or external crate depends on the symbol.
 Run `cargo +nightly udeps` after deletion to catch newly-orphaned
 deps.
+
+## Status
+
+Conv-reverb migration to structural `ir_path` (mono + stereo) landed.
+The bespoke `update_parameters` override is gone; `apply_unpacked_params`
+now consumes a pre-decoded IR stashed in `prepare`. The FloatBuffer
+branch in `ConvReverbCore::update_parameters` is removed. Tests pass.
+
+Wholesale pipeline deletion — `resolve_file_params`, `FileProcessor`,
+`ParameterValue::File`/`FloatBuffer`, `FloatBufferId`, `fetch_buffer_*`,
+`buffer_tail` layout, ArcTable simplification — deferred to **0745**.
+With no live consumer left, those symbols are dead but still compile;
+0745 deletes them.

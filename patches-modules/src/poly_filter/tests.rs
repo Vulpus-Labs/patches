@@ -25,7 +25,7 @@ fn make_lowpass_sr(cutoff_voct: f32, resonance: f32, sr: f32) -> Box<dyn Module>
     r.create(
         "PolyLowpass",
         &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
-        &ModuleShape { channels: 0, length: 0, ..Default::default() },
+        &ModuleShape { channels: 0 },
         &params,
         InstanceId::next(),
     )
@@ -41,7 +41,7 @@ fn make_highpass_sr(cutoff_voct: f32, resonance: f32, sr: f32) -> Box<dyn Module
     r.create(
         "PolyHighpass",
         &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
-        &ModuleShape { channels: 0, length: 0, ..Default::default() },
+        &ModuleShape { channels: 0 },
         &params,
         InstanceId::next(),
     )
@@ -57,7 +57,7 @@ fn make_bandpass_sr(center_voct: f32, bandwidth_q: f32, sr: f32) -> Box<dyn Modu
     r.create(
         "PolyBandpass",
         &AudioEnvironment { sample_rate: sr, poly_voices: 16, periodic_update_interval: 32, hosted: false },
-        &ModuleShape { channels: 0, length: 0, ..Default::default() },
+        &ModuleShape { channels: 0 },
         &params,
         InstanceId::next(),
     )

@@ -3,6 +3,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyGateInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -90,7 +91,7 @@ impl Module for PolyAdsr {
             .enum_param(params::shape, PolyAdsrShapeParam::Linear)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let sr = audio_environment.sample_rate;
         Self {
             instance_id,
@@ -104,7 +105,7 @@ impl Module for PolyAdsr {
             in_gate: PolyGateInput::default(),
             out_env: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.attack_secs = p.get(params::attack);

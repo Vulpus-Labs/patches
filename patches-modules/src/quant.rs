@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -75,7 +76,7 @@ impl Module for Quant {
             .float_param(params::scale, -4.0, 4.0, 1.0)
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let mut notes_buf = [0.0f32; 12];
         notes_buf[0] = 0.0;
         Self {
@@ -91,7 +92,7 @@ impl Module for Quant {
             out: MonoOutput::default(),
             trig_out: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let channels = self.descriptor.shape.channels.max(1).min(12);
@@ -142,7 +143,7 @@ mod tests {
     use patches_core::ModuleShape;
 
     fn shape(n: usize) -> ModuleShape {
-        ModuleShape { channels: n, length: 0, ..Default::default() }
+        ModuleShape { channels: n }
     }
 
     fn pitch_map(pitches: &[f32]) -> ParameterMap {

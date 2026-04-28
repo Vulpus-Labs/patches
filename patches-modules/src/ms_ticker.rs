@@ -23,6 +23,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 
@@ -51,8 +52,8 @@ impl Module for MsTicker {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -63,7 +64,7 @@ impl Module for MsTicker {
             out_trigger: MonoOutput::default(),
             out_gate: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

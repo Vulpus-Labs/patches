@@ -5,7 +5,7 @@ use crate::modules::{ModuleDescriptor, ModuleShape, ParameterMap, PortDescriptor
 fn stub_desc(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
@@ -14,14 +14,15 @@ fn stub_desc(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescrip
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
 fn stub_desc_poly(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_poly",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
@@ -30,14 +31,15 @@ fn stub_desc_poly(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDe
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
 fn stub_desc_stereo(inputs: &[&'static str], outputs: &[&'static str]) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_stereo",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
@@ -46,7 +48,8 @@ fn stub_desc_stereo(inputs: &[&'static str], outputs: &[&'static str]) -> Module
             .iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
@@ -280,13 +283,14 @@ fn port_ref_index_distinguishes_same_named_ports() {
     // A descriptor with two ports both named "in" but different indices.
     let desc = ModuleDescriptor {
         module_name: "stub",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: vec![
             PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
         ],
         outputs: vec![],
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     };
     let src = NodeId::from("src");
     let dst = NodeId::from("dst");
@@ -394,10 +398,11 @@ fn connect_trigger_output_to_stereo_input_returns_kind_mismatch() {
     let dst = NodeId::from("dst");
     let trig_desc = ModuleDescriptor {
         module_name: "trig",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: vec![],
         outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Trigger, poly_layout: PolyLayout::Audio }],
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     };
     g.add_module(src.clone(), trig_desc, &no_params()).unwrap();
     g.add_module(dst.clone(), stub_desc_stereo(&["in"], &[]), &no_params()).unwrap();
@@ -429,14 +434,15 @@ fn stub_desc_mono_layout(
 ) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_trigger",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs.iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout, poly_layout: PolyLayout::Audio })
             .collect(),
         outputs: outputs.iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Mono, mono_layout, poly_layout: PolyLayout::Audio })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
@@ -447,14 +453,15 @@ fn stub_desc_poly_layout(
 ) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_poly_trigger",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs.iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout })
             .collect(),
         outputs: outputs.iter()
             .map(|&n| PortDescriptor { name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
@@ -507,7 +514,7 @@ fn poly_desc_layout(
 ) -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "stub_layout",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: inputs
             .iter()
             .map(|&(n, layout)| PortDescriptor {
@@ -520,7 +527,8 @@ fn poly_desc_layout(
                 name: n, index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: layout,
             })
             .collect(),
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 

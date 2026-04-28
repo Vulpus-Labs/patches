@@ -229,7 +229,7 @@ mod tests {
     fn default_registry_contains_all_modules() {
         let r = super::default_registry();
         let env = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
-        let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
+        let shape = ModuleShape { channels: 2 };
         let params = ParameterMap::new();
 
         for name in &[

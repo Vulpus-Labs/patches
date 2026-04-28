@@ -4,6 +4,7 @@ use patches_core::module_params;
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
 use patches_core::param_frame::ParamView;
 use patches_core::{AudioEnvironment, Module};
+use patches_core::{StructuralParams, BuildError};
 
 module_params! {
     Gain {
@@ -34,8 +35,8 @@ impl Module for Gain {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             descriptor,
             instance_id,
@@ -43,7 +44,7 @@ impl Module for Gain {
             input: MonoInput::default(),
             output: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.gain = p.get(params::gain);

@@ -38,6 +38,7 @@ use patches_core::{
     AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput,
     OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 
 module_params! {
     PitchShift {
@@ -172,8 +173,8 @@ impl Drop for PitchShift {
 }
 
 impl patches_core::Module for PitchShift {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PitchShift", ModuleShape { channels: 0, length: shape.length, high_quality: shape.high_quality })
+    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
+        ModuleDescriptor::new("PitchShift", ModuleShape { channels: 0 })
             .mono_in("in")
             .mono_in("pitch")
             .mono_in("mix")
@@ -182,24 +183,27 @@ impl patches_core::Module for PitchShift {
             .float_param(params::mix, 0.0, 1.0, 1.0)
             .bool_param(params::formants, false)
             .bool_param(params::mono, false)
+            .structural_bool_param("high_quality", false)
+            .structural_int_param("length", 0, 4096, 0)
     }
 
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
         instance_id: InstanceId,
-    ) -> Self {
-        let (window_size, overlap_factor, default_budget) =
-            if descriptor.shape.high_quality {
-                (HQ_WINDOW_SIZE, HQ_OVERLAP_FACTOR, HQ_PROCESSING_BUDGET)
-            } else {
-                (STD_WINDOW_SIZE, STD_OVERLAP_FACTOR, STD_PROCESSING_BUDGET)
-            };
-
-        let processing_budget = if descriptor.shape.length == 0 {
+        structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
+        let high_quality = structural.get_bool("high_quality", 0).unwrap_or(false);
+        let length = structural.get_int("length", 0).unwrap_or(0) as usize;
+        let (window_size, overlap_factor, default_budget) = if high_quality {
+            (HQ_WINDOW_SIZE, HQ_OVERLAP_FACTOR, HQ_PROCESSING_BUDGET)
+        } else {
+            (STD_WINDOW_SIZE, STD_OVERLAP_FACTOR, STD_PROCESSING_BUDGET)
+        };
+        let processing_budget = if length == 0 {
             default_budget
         } else {
-            descriptor.shape.length.next_power_of_two().clamp(128, 4096)
+            length.next_power_of_two().clamp(128, 4096)
         };
         let config =
             SlotDeckConfig::new(window_size, overlap_factor, processing_budget)
@@ -232,7 +236,7 @@ impl patches_core::Module for PitchShift {
             base_mix: 1.0,
             processor_thread: Some(join_handle),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.base_semitones = p.get(params::semitones);

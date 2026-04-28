@@ -12,7 +12,7 @@ const ENV: AudioEnvironment = AudioEnvironment {
 };
 
 fn shape() -> ModuleShape {
-    ModuleShape { channels: 1, length: 0, ..Default::default() }
+    ModuleShape { channels: 1 }
 }
 
 fn run_sine(h: &mut ModuleHarness, n: usize) -> (Vec<f32>, Vec<f32>) {

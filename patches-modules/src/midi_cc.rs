@@ -19,6 +19,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 
@@ -49,8 +50,8 @@ impl Module for MidiCc {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -59,7 +60,7 @@ impl Module for MidiCc {
             value: -1.0,
             out: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::cc);
@@ -107,7 +108,7 @@ mod tests {
     #[test]
     fn default_cc_is_1() {
         let h = ModuleHarness::build::<MidiCc>(&[]);
-        assert_eq!(h.descriptor().parameters[0].name, "cc");
+        assert_eq!(h.descriptor().realtime_params[0].name, "cc");
     }
 
     #[test]

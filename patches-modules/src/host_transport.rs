@@ -3,6 +3,7 @@ use patches_core::{
     MonoOutput, ModuleShape, OutputPort, PolyInput, TransportFrame,
     GLOBAL_TRANSPORT,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Unpacks host transport state from the `GLOBAL_TRANSPORT` backplane into
@@ -59,8 +60,8 @@ impl Module for HostTransport {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -78,7 +79,7 @@ impl Module for HostTransport {
             out_tsig_num: MonoOutput::default(),
             out_tsig_denom: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

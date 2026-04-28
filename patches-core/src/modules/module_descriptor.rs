@@ -135,21 +135,13 @@ impl ParameterDescriptor {
     }
 }
 
+/// Descriptor-shape (ADR 0060): the only field that changes the descriptor's
+/// port counts and identity hash. Construction-time knobs that don't shape
+/// the descriptor (former `length`, `high_quality`) live in
+/// `structural_params` on the modules that consume them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModuleShape {
     pub channels: usize,
-    /// Pre-allocated step/slot count for sequencer-style modules.
-    ///
-    /// Set to `0` for modules that do not use array parameters. When non-zero,
-    /// the module factory uses this value to pre-allocate the backing array so
-    /// that subsequent `update_parameters` calls can write into the existing
-    /// allocation. If the shape changes between builds the planner will
-    /// tombstone the old instance and create a fresh one.
-    pub length: usize,
-    /// When true, modules may use larger internal buffers, higher overlap
-    /// factors, or other settings that improve quality at the cost of
-    /// latency and CPU.  Defaults to `false`.
-    pub high_quality: bool,
 }
 
 /// Describes the full layout of a module.
@@ -165,7 +157,13 @@ pub struct ModuleDescriptor {
     pub shape: ModuleShape,
     pub inputs: Vec<PortDescriptor>,
     pub outputs: Vec<PortDescriptor>,
-    pub parameters: Vec<ParameterDescriptor>,
+    /// Numeric parameters packed into [`crate::param_frame::ParamFrame`] and
+    /// consumed on the audio thread (ADR 0060).
+    pub realtime_params: Vec<ParameterDescriptor>,
+    /// Construction-time, control-thread-only parameters (ADR 0060). Read by
+    /// [`super::Module::prepare`]; never reach the audio thread. May carry
+    /// non-packable types such as strings.
+    pub structural_params: Vec<ParameterDescriptor>,
 }
 
 // Generates a pair of builder methods for a single port kind/direction:
@@ -200,7 +198,7 @@ macro_rules! param_builder {
     ($single:ident, $multi:ident, $NameTy:ty, $ArrayTy:ty, ($($arg:ident : $ty:ty),*), $kind:expr) => {
         pub fn $single(mut self, name: impl Into<$NameTy>, $($arg: $ty),*) -> Self {
             let name: $NameTy = name.into();
-            self.parameters.push(ParameterDescriptor {
+            self.realtime_params.push(ParameterDescriptor {
                 name: name.as_str(),
                 index: 0,
                 parameter_type: $kind,
@@ -211,7 +209,7 @@ macro_rules! param_builder {
         pub fn $multi(mut self, name: impl Into<$ArrayTy>, count: usize, $($arg: $ty),*) -> Self {
             let name: $ArrayTy = name.into();
             for i in 0..count {
-                self.parameters.push(ParameterDescriptor {
+                self.realtime_params.push(ParameterDescriptor {
                     name: name.as_str(),
                     index: i,
                     parameter_type: $kind,
@@ -230,7 +228,8 @@ impl ModuleDescriptor {
             shape,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            parameters: Vec::new(),
+            realtime_params: Vec::new(),
+            structural_params: Vec::new(),
         }
     }
 
@@ -306,7 +305,7 @@ impl ModuleDescriptor {
         let name: crate::params::EnumParamName<E> = name.into();
         let variants = E::VARIANTS;
         let default_s = variants[default.to_variant() as usize];
-        self.parameters.push(ParameterDescriptor {
+        self.realtime_params.push(ParameterDescriptor {
             name: name.as_str(),
             index: 0,
             parameter_type: ParameterKind::Enum { variants, default: default_s },
@@ -324,7 +323,7 @@ impl ModuleDescriptor {
         let variants = E::VARIANTS;
         let default_s = variants[default.to_variant() as usize];
         for i in 0..count {
-            self.parameters.push(ParameterDescriptor {
+            self.realtime_params.push(ParameterDescriptor {
                 name: name.as_str(),
                 index: i,
                 parameter_type: ParameterKind::Enum { variants, default: default_s },
@@ -340,7 +339,7 @@ impl ModuleDescriptor {
         name: &'static str,
         extensions: &'static [&'static str],
     ) -> Self {
-        self.parameters.push(ParameterDescriptor {
+        self.realtime_params.push(ParameterDescriptor {
             name,
             index: 0,
             parameter_type: ParameterKind::File { extensions },
@@ -355,7 +354,7 @@ impl ModuleDescriptor {
         extensions: &'static [&'static str],
     ) -> Self {
         for i in 0..count {
-            self.parameters.push(ParameterDescriptor {
+            self.realtime_params.push(ParameterDescriptor {
                 name,
                 index: i,
                 parameter_type: ParameterKind::File { extensions },
@@ -367,10 +366,68 @@ impl ModuleDescriptor {
     /// Declare a song-name parameter. The DSL supplies a string; the
     /// interpreter resolves it to a `ParameterValue::Int` song-bank index.
     pub fn song_name_param(mut self, name: impl Into<crate::params::SongNameParamName>) -> Self {
-        self.parameters.push(ParameterDescriptor {
+        self.realtime_params.push(ParameterDescriptor {
             name: name.into().as_str(),
             index: 0,
             parameter_type: ParameterKind::SongName,
+        });
+        self
+    }
+
+    // ── Structural parameter builders (ADR 0060) ────────────────────────────
+    //
+    // Structural params are construction-time inputs read by
+    // `Module::prepare`. They are not packed into `ParamFrame`, never reach
+    // the audio thread, and may carry non-packable types (strings).
+
+    pub fn structural_bool_param(mut self, name: &'static str, default: bool) -> Self {
+        self.structural_params.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::Bool { default },
+        });
+        self
+    }
+
+    pub fn structural_int_param(
+        mut self,
+        name: &'static str,
+        min: i64,
+        max: i64,
+        default: i64,
+    ) -> Self {
+        self.structural_params.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::Int { min, max, default },
+        });
+        self
+    }
+
+    pub fn structural_float_param(
+        mut self,
+        name: &'static str,
+        min: f32,
+        max: f32,
+        default: f32,
+    ) -> Self {
+        self.structural_params.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::Float { min, max, default },
+        });
+        self
+    }
+
+    pub fn structural_string_param(
+        mut self,
+        name: &'static str,
+        extensions: &'static [&'static str],
+    ) -> Self {
+        self.structural_params.push(ParameterDescriptor {
+            name,
+            index: 0,
+            parameter_type: ParameterKind::File { extensions },
         });
         self
     }
@@ -406,7 +463,7 @@ mod tests {
 
         let m = ModuleDescriptor {
             module_name: "Mixer",
-            shape: ModuleShape { channels: 2, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 2 },
             inputs: vec![
                 PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
@@ -419,7 +476,7 @@ mod tests {
                 PortDescriptor { name: "out_l", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "out_r", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
-            parameters: vec![
+            realtime_params: vec![
                 ParameterDescriptor { name: "gain", index: 0, parameter_type: gain_amount.clone() },
                 ParameterDescriptor { name: "gain", index: 1, parameter_type: gain_amount },
                 ParameterDescriptor { name: "pan", index: 0, parameter_type: pan_amount.clone() },
@@ -429,18 +486,18 @@ mod tests {
                 ParameterDescriptor { name: "solo", index: 0, parameter_type: toggle_off_on.clone() },
                 ParameterDescriptor { name: "solo", index: 1, parameter_type: toggle_off_on },
             ],
+            structural_params: vec![],
         };
         assert_eq!(m.module_name, "Mixer");
         assert_eq!(m.shape.channels, 2);
-        assert_eq!(m.shape.length, 0);
         assert_eq!(m.inputs.len(), 6);
         assert_eq!(m.outputs.len(), 2);
-        assert_eq!(m.parameters.len(), 8);
+        assert_eq!(m.realtime_params.len(), 8);
     }
 
     #[test]
     fn builder_single_port_methods() {
-        let m = ModuleDescriptor::new("Vca", ModuleShape { channels: 1, length: 0, ..Default::default() })
+        let m = ModuleDescriptor::new("Vca", ModuleShape { channels: 1 })
             .mono_in("in")
             .mono_in("cv")
             .mono_out("out")
@@ -470,7 +527,7 @@ mod tests {
 
     #[test]
     fn builder_multi_port_methods_count_3() {
-        let m = ModuleDescriptor::new("Mixer", ModuleShape { channels: 3, length: 0, ..Default::default() })
+        let m = ModuleDescriptor::new("Mixer", ModuleShape { channels: 3 })
             .mono_in_multi("in", 3)
             .poly_out_multi("out", 3);
 
@@ -491,30 +548,30 @@ mod tests {
 
     #[test]
     fn builder_parameter_methods() {
-        let m = ModuleDescriptor::new("Synth", ModuleShape { channels: 1, length: 0, ..Default::default() })
+        let m = ModuleDescriptor::new("Synth", ModuleShape { channels: 1 })
             .float_param("gain", 0.0, 1.0, 0.5)
             .int_param("voices", 1, 8, 4)
             .bool_param("active", true)
             .enum_param(EnumParamName::<Wave>::new("wave"), Wave::Sine);
 
-        assert_eq!(m.parameters.len(), 4);
+        assert_eq!(m.realtime_params.len(), 4);
 
-        let p = &m.parameters[0];
+        let p = &m.realtime_params[0];
         assert_eq!(p.name, "gain");
         assert_eq!(p.index, 0);
         assert!(matches!(p.parameter_type, ParameterKind::Float { min, max, default } if min == 0.0 && max == 1.0 && default == 0.5));
 
-        let p = &m.parameters[1];
+        let p = &m.realtime_params[1];
         assert_eq!(p.name, "voices");
         assert_eq!(p.index, 0);
         assert!(matches!(p.parameter_type, ParameterKind::Int { min, max, default } if min == 1 && max == 8 && default == 4));
 
-        let p = &m.parameters[2];
+        let p = &m.realtime_params[2];
         assert_eq!(p.name, "active");
         assert_eq!(p.index, 0);
         assert!(matches!(p.parameter_type, ParameterKind::Bool { default } if default));
 
-        let p = &m.parameters[3];
+        let p = &m.realtime_params[3];
         assert_eq!(p.name, "wave");
         assert_eq!(p.index, 0);
         assert!(matches!(p.parameter_type, ParameterKind::Enum { default, .. } if default == "sine"));
@@ -522,30 +579,30 @@ mod tests {
 
     #[test]
     fn builder_multi_parameter_methods() {
-        let m = ModuleDescriptor::new("Mixer", ModuleShape { channels: 3, length: 0, ..Default::default() })
+        let m = ModuleDescriptor::new("Mixer", ModuleShape { channels: 3 })
             .float_param_multi("gain", 3, 0.0, 1.2, 1.0)
             .int_param_multi("steps", 3, 1, 32, 16)
             .bool_param_multi("mute", 3, false)
             .enum_param_multi(EnumParamArray::<Wave2>::new("wave"), 3, Wave2::Sine);
 
-        assert_eq!(m.parameters.len(), 12);
+        assert_eq!(m.realtime_params.len(), 12);
 
         // Check indices for first group
         for i in 0..3 {
-            assert_eq!(m.parameters[i].name, "gain");
-            assert_eq!(m.parameters[i].index, i);
+            assert_eq!(m.realtime_params[i].name, "gain");
+            assert_eq!(m.realtime_params[i].index, i);
         }
         for i in 0..3 {
-            assert_eq!(m.parameters[3 + i].name, "steps");
-            assert_eq!(m.parameters[3 + i].index, i);
+            assert_eq!(m.realtime_params[3 + i].name, "steps");
+            assert_eq!(m.realtime_params[3 + i].index, i);
         }
         for i in 0..3 {
-            assert_eq!(m.parameters[6 + i].name, "mute");
-            assert_eq!(m.parameters[6 + i].index, i);
+            assert_eq!(m.realtime_params[6 + i].name, "mute");
+            assert_eq!(m.realtime_params[6 + i].index, i);
         }
         for i in 0..3 {
-            assert_eq!(m.parameters[9 + i].name, "wave");
-            assert_eq!(m.parameters[9 + i].index, i);
+            assert_eq!(m.realtime_params[9 + i].name, "wave");
+            assert_eq!(m.realtime_params[9 + i].index, i);
         }
     }
 

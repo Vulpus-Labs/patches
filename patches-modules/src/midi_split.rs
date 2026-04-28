@@ -34,6 +34,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, MidiOutput, Module,
     ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 
 module_params! {
     MidiSplit {
@@ -70,8 +71,8 @@ impl Module for MidiSplit {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -81,7 +82,7 @@ impl Module for MidiSplit {
             split: 60,
             held: [SIDE_NONE; 128],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.split = p.get(params::split).clamp(0, 127) as u8;
@@ -171,7 +172,7 @@ mod tests {
         assert_eq!(d.outputs.len(), 2);
         assert_eq!(d.outputs[0].name, "low");
         assert_eq!(d.outputs[1].name, "high");
-        assert_eq!(d.parameters[0].name, "split");
+        assert_eq!(d.realtime_params[0].name, "split");
     }
 
     #[test]

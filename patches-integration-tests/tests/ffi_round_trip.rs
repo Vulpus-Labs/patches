@@ -55,6 +55,8 @@ fn all_scalar_tags_round_trip() {
             desc_bytes.len(),
             ffi_env,
             InstanceId::next().as_u64(),
+            std::ptr::null(),
+            0,
         )
     };
     assert!(!handle.is_null());

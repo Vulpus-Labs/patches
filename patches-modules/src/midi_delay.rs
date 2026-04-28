@@ -40,6 +40,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, MidiInput, MidiMessage,
     MidiOutput, Module, ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 
 module_params! {
     MidiDelay {
@@ -230,8 +231,8 @@ impl Module for MidiDelay {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -245,7 +246,7 @@ impl Module for MidiDelay {
             pending_on: [[0; 128]; 16],
             emitted_on: [[false; 128]; 16],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.delay_samples = p.get(params::delay_samples).clamp(0, MAX_DELAY as i64) as u32;
@@ -314,7 +315,7 @@ mod tests {
         assert_eq!(d.inputs[0].name, "midi");
         assert_eq!(d.outputs.len(), 1);
         assert_eq!(d.outputs[0].name, "midi");
-        assert_eq!(d.parameters[0].name, "delay_samples");
+        assert_eq!(d.realtime_params[0].name, "delay_samples");
     }
 
     #[test]

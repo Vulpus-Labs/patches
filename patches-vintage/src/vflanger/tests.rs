@@ -11,7 +11,7 @@ const ENV: AudioEnvironment = AudioEnvironment {
 };
 
 fn shape() -> ModuleShape {
-    ModuleShape { channels: 1, length: 0, ..Default::default() }
+    ModuleShape { channels: 1 }
 }
 
 #[test]

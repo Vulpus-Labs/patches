@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort};
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue};
-use patches_core::AudioEnvironment;
+use patches_core::param_frame::{ParamView, ParamViewIndex};
+use patches_core::param_layout::compute_layout;
+use patches_core::{validate_and_pack, AudioEnvironment};
 use patches_registry::ModuleBuilder;
 use patches_ffi::loader::load_plugin;
 
@@ -40,7 +42,7 @@ fn describe_returns_correct_metadata() {
     let mut builders = load_plugin(&gain_dylib_path()).expect("failed to load gain plugin");
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let desc = builder.describe(&shape);
 
     assert_eq!(desc.module_name, "Gain");
@@ -48,8 +50,8 @@ fn describe_returns_correct_metadata() {
     assert_eq!(desc.inputs[0].name, "in");
     assert_eq!(desc.outputs.len(), 1);
     assert_eq!(desc.outputs[0].name, "out");
-    assert_eq!(desc.parameters.len(), 1);
-    assert_eq!(desc.parameters[0].name, "gain");
+    assert_eq!(desc.realtime_params.len(), 1);
+    assert_eq!(desc.realtime_params[0].name, "gain");
 }
 
 #[test]
@@ -58,7 +60,7 @@ fn build_and_process_with_default_gain() {
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
     let env = default_env();
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
     let mut module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -93,7 +95,7 @@ fn update_parameters_changes_gain() {
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
     let env = default_env();
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
     let mut module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -106,7 +108,12 @@ fn update_parameters_changes_gain() {
     // Update gain to 0.5
     let mut new_params = ParameterMap::new();
     new_params.insert("gain".to_string(), ParameterValue::Float(0.5));
-    module.update_parameters(&new_params).expect("update failed");
+    let descriptor = module.descriptor().clone();
+    let frame = validate_and_pack(&descriptor, &new_params).expect("pack failed");
+    let layout = compute_layout(&descriptor);
+    let index = ParamViewIndex::from_layout(&layout);
+    let view = ParamView::new(&index, &frame);
+    module.update_validated_parameters(&view);
 
     // Process
     let mut pool = vec![
@@ -130,7 +137,7 @@ fn drop_does_not_crash() {
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
     let env = default_env();
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
     let module = builder.build(&env, &shape, &params, InstanceId::next())
         .expect("build failed");
@@ -152,7 +159,7 @@ fn multiple_instances_from_same_plugin() {
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
     let env = default_env();
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
 
     let module1 = builder.build(&env, &shape, &params, InstanceId::next())

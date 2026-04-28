@@ -5,6 +5,7 @@ use patches_core::{
     MonoOutput, PolyInput, ModuleShape, OutputPort,
     TrackerData, ReceivesTrackerData,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_tracker_core::{ClockBusFrame, PatternPlayerCore};
 
@@ -65,7 +66,7 @@ impl Module for PatternPlayer {
             .mono_out_multi("gate", n)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
         Self {
             instance_id,
@@ -78,7 +79,7 @@ impl Module for PatternPlayer {
             trigger_out: vec![MonoOutput::default(); channels],
             gate_out: vec![MonoOutput::default(); channels],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {
         // PatternPlayer has no parameters — all data comes from tracker data

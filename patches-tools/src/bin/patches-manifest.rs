@@ -65,10 +65,7 @@ fn render_param(name: &str, index: usize, indexed: bool, kind: &ParameterKind) -
 /// Group ports/params by name so indexed groups (`in[0]..in[N]`) print as
 /// `in[i]` once, not N times.
 fn print_descriptor(desc: &ModuleDescriptor) {
-    println!(
-        "  shape: channels={}, length={}, high_quality={}",
-        desc.shape.channels, desc.shape.length, desc.shape.high_quality
-    );
+    println!("  shape: channels={}", desc.shape.channels);
 
     if !desc.inputs.is_empty() {
         println!("  inputs:");
@@ -78,9 +75,13 @@ fn print_descriptor(desc: &ModuleDescriptor) {
         println!("  outputs:");
         print_port_group(&desc.outputs, /*is_input=*/ false);
     }
-    if !desc.parameters.is_empty() {
+    if !desc.realtime_params.is_empty() {
         println!("  parameters:");
-        print_param_group(&desc.parameters);
+        print_param_group(&desc.realtime_params);
+    }
+    if !desc.structural_params.is_empty() {
+        println!("  structural_params:");
+        print_param_group(&desc.structural_params);
     }
 }
 
@@ -147,7 +148,8 @@ fn print_param_group(params: &[patches_core::ParameterDescriptor]) {
 fn descriptors_equivalent(a: &ModuleDescriptor, b: &ModuleDescriptor) -> bool {
     if a.inputs.len() != b.inputs.len()
         || a.outputs.len() != b.outputs.len()
-        || a.parameters.len() != b.parameters.len()
+        || a.realtime_params.len() != b.realtime_params.len()
+        || a.structural_params.len() != b.structural_params.len()
     {
         return false;
     }
@@ -161,7 +163,12 @@ fn descriptors_equivalent(a: &ModuleDescriptor, b: &ModuleDescriptor) -> bool {
             return false;
         }
     }
-    for (x, y) in a.parameters.iter().zip(&b.parameters) {
+    for (x, y) in a.realtime_params.iter().zip(&b.realtime_params) {
+        if x.name != y.name || x.index != y.index {
+            return false;
+        }
+    }
+    for (x, y) in a.structural_params.iter().zip(&b.structural_params) {
         if x.name != y.name || x.index != y.index {
             return false;
         }
@@ -212,11 +219,11 @@ fn main() {
     for name in &names {
         let one = registry.describe(
             name,
-            &ModuleShape { channels: 1, length: 0, high_quality: false },
+            &ModuleShape { channels: 1 },
         );
         let two = registry.describe(
             name,
-            &ModuleShape { channels: 2, length: 0, high_quality: false },
+            &ModuleShape { channels: 2 },
         );
 
         println!("## {name}");

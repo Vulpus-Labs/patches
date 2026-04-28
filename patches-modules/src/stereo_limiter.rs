@@ -37,6 +37,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -77,7 +78,7 @@ impl Module for StereoLimiter {
             .float_param(params::release_ms, 1.0, 5000.0, 100.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let core = LimiterCore::new(env.sample_rate, 0.9, 2.0, 100.0, MAX_ATTACK_MS);
         let max_lookahead = ms_to_samples(MAX_ATTACK_MS, env.sample_rate);
         let delay_len = max_lookahead + HalfbandInterpolator::GROUP_DELAY_BASE_RATE + 1;
@@ -93,7 +94,7 @@ impl Module for StereoLimiter {
             in_stereo: StereoInput::default(),
             out_stereo: StereoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.core.set_threshold(p.get(params::threshold));
@@ -166,7 +167,7 @@ mod tests {
         let mut h = ModuleHarness::build_full::<StereoLimiter>(
             &[],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
         let warmup = warmup_samples(2.0, SR);
         for _ in 0..warmup {
@@ -191,7 +192,7 @@ mod tests {
         let mut h = ModuleHarness::build_full::<StereoLimiter>(
             &[],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         // Drive only the left channel hard; right is quiet.
@@ -223,7 +224,7 @@ mod tests {
                 ("threshold", ParameterValue::Float(0.5)),
             ],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         // Feed identical signal to both channels; outputs should track each other.
@@ -252,7 +253,7 @@ mod tests {
                 ("release_ms", ParameterValue::Float(release_ms)),
             ],
             ENV,
-            patches_core::ModuleShape { channels: 0, length: 0, ..Default::default() },
+            patches_core::ModuleShape { channels: 0 },
         );
 
         // Phase 1: overdrive both channels

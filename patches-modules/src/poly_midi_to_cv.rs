@@ -3,6 +3,7 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
     GLOBAL_MIDI,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::{CableKind, MonoLayout, PolyLayout};
 use patches_core::param_frame::ParamView;
 
@@ -127,11 +128,12 @@ impl Module for PolyMidiToCv {
                 PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -148,7 +150,7 @@ impl Module for PolyMidiToCv {
             out_mod: MonoOutput::default(),
             out_pitch: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

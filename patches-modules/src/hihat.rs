@@ -28,6 +28,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
@@ -73,7 +74,7 @@ impl Module for ClosedHiHat {
             .float_param(params::filter, 2000.0, 16000.0, 8000.0)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let sr = audio_environment.sample_rate;
         let mut amp_env = DecayEnvelope::new(sr);
         amp_env.set_decay(0.04);
@@ -98,7 +99,7 @@ impl Module for ClosedHiHat {
             in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::pitch);
@@ -211,7 +212,7 @@ impl Module for OpenHiHat {
             .float_param(params::filter, 2000.0, 16000.0, 8000.0)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let sr = audio_environment.sample_rate;
         let mut amp_env = DecayEnvelope::new(sr);
         amp_env.set_decay(0.5);
@@ -237,7 +238,7 @@ impl Module for OpenHiHat {
             in_velocity: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::pitch);

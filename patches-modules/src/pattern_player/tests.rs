@@ -1,5 +1,5 @@
 use super::*;
-use patches_core::{AudioEnvironment, ModuleShape};
+use patches_core::{AudioEnvironment, ModuleShape, StructuralParams};
 use patches_core::{PatternBank, Pattern, SongBank, TrackerStep};
 
 const SR: f32 = 44100.0;
@@ -11,7 +11,7 @@ const ENV: AudioEnvironment = AudioEnvironment {
 };
 
 fn shape(channels: usize) -> ModuleShape {
-    ModuleShape { channels, length: 0, ..Default::default() }
+    ModuleShape { channels }
 }
 
 fn repeat_step(cv1: f32, repeat: u8) -> TrackerStep {
@@ -56,7 +56,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
 
     let s = shape(1);
     let desc = PatternPlayer::describe(&s);
-    let mut player = PatternPlayer::prepare(&ENV, desc, InstanceId::next());
+    let mut player = PatternPlayer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     {
         use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
         use patches_core::param_layout::{compute_layout, defaults_from_descriptor};

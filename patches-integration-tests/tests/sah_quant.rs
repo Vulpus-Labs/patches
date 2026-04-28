@@ -8,7 +8,7 @@ use patches_modules::{PolySah, PolyQuant, Quant, Sah};
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn shape(n: usize) -> ModuleShape {
-    ModuleShape { channels: n, length: 0, ..Default::default() }
+    ModuleShape { channels: n }
 }
 
 /// Build a ParameterMap with per-channel `pitch[i]` v/oct values (C0 = 0.0,

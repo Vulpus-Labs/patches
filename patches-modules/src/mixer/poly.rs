@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -62,7 +63,7 @@ impl Module for PolyMixer {
             .bool_param_multi(params::solo,   shape.channels, false)
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
         Self {
             instance_id,
@@ -76,7 +77,7 @@ impl Module for PolyMixer {
             level_cv_ports: vec![MonoInput::default(); channels],
             out: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         for i in 0..self.channels {

@@ -5,6 +5,7 @@ use patches_core::{
     Module, ModuleDescriptor, ModuleGraph, ModuleShape, MonoOutput,
     MonoLayout, PolyLayout, PortDescriptor, PortRef,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::param_frame::ParamView;
@@ -99,16 +100,17 @@ impl Module for ImpulseSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "ImpulseSource",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, descriptor: d, out: MonoOutput::default(), fired: false }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _: &ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -139,14 +141,14 @@ const CONST_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
 
 impl Module for ConstSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ConstSource", ModuleShape { channels: 0, length: 0, ..Default::default() })
+        ModuleDescriptor::new("ConstSource", ModuleShape { channels: 0 })
             .mono_out("out")
             .float_param(CONST_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
     }
 
-    fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, descriptor: d, out: MonoOutput::default(), value: 1.0 }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.value = p.get(CONST_SOURCE_AMPLITUDE);
@@ -182,13 +184,13 @@ const SINE_SOURCE_FREQ_HZ:   FloatParamName = FloatParamName::new("freq_hz");
 
 impl Module for SineSource {
     fn describe(_: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("SineSource", ModuleShape { channels: 0, length: 0, ..Default::default() })
+        ModuleDescriptor::new("SineSource", ModuleShape { channels: 0 })
             .mono_out("out")
             .float_param(SINE_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
             .float_param(SINE_SOURCE_FREQ_HZ, 0.0, 24_000.0, 1_000.0)
     }
 
-    fn prepare(env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             id,
             descriptor: d,
@@ -198,7 +200,7 @@ impl Module for SineSource {
             amplitude: 1.0,
             sample_rate: env.sample_rate,
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.amplitude = p.get(SINE_SOURCE_AMPLITUDE);

@@ -17,6 +17,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, OutputPort, StereoInput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::params::{EnumParamArray, IntParamArray};
 
@@ -75,8 +76,8 @@ impl Module for Tap {
     fn prepare(
         _env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
         Self {
             instance_id,
@@ -88,7 +89,7 @@ impl Module for Tap {
             slot_offsets: vec![0; channels],
             kinds: vec![TapKind::Mono; channels],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         let kind_array = EnumParamArray::<TapKind>::new("kind");
@@ -145,7 +146,7 @@ mod tests {
     use patches_core::{params, ModuleShape, ParameterMap, ParameterValue};
 
     fn shape(channels: usize) -> ModuleShape {
-        ModuleShape { channels, length: 0, ..Default::default() }
+        ModuleShape { channels }
     }
 
     fn slots_and_kinds(slots: &[i64], kinds: &[&str]) -> ParameterMap {
@@ -172,7 +173,7 @@ mod tests {
         // 3 port groups × 2 channels
         assert_eq!(d.inputs.len(), 6);
         // slot_offset[i] + kind[i] = 2 × 2 = 4
-        assert_eq!(d.parameters.len(), 4);
+        assert_eq!(d.realtime_params.len(), 4);
     }
 
     #[test]

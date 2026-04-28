@@ -126,8 +126,8 @@ mod tests {
     use std::any::Any;
 
     use patches_core::{
-        AudioEnvironment, CablePool, CableValue, InstanceId, Module, ModuleDescriptor, ModuleShape,
-        POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+        AudioEnvironment, BuildError, CablePool, CableValue, InstanceId, Module, ModuleDescriptor,
+        ModuleShape, StructuralParams, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     };
     use patches_core::parameter_map::ParameterMap;
 
@@ -142,10 +142,11 @@ mod tests {
         ParamState::new_for_descriptor(
             &ModuleDescriptor {
                 module_name: "Stub",
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                shape: ModuleShape { channels: 0 },
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             },
             &ParameterMap::new(),
         )
@@ -164,10 +165,11 @@ mod tests {
                 id: InstanceId::next(),
                 desc: ModuleDescriptor {
                     module_name: "Stub",
-                    shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                    shape: ModuleShape { channels: 0 },
                     inputs: vec![],
                     outputs: vec![],
-                    parameters: vec![],
+                    realtime_params: vec![],
+                    structural_params: vec![],
                 },
             }
         }
@@ -177,15 +179,16 @@ mod tests {
         fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
             ModuleDescriptor {
                 module_name: "Stub",
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                shape: ModuleShape { channels: 0 },
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             }
         }
-        fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+        fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id: instance_id, desc: descriptor }
-        }
+        })}
         fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
         fn instance_id(&self) -> InstanceId { self.id }

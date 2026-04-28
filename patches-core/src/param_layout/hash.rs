@@ -66,7 +66,7 @@ pub fn descriptor_hash(d: &ModuleDescriptor) -> u64 {
     h.write_str(d.module_name);
 
     // Parameters in canonical order.
-    let mut params: Vec<&ParameterDescriptor> = d.parameters.iter().collect();
+    let mut params: Vec<&ParameterDescriptor> = d.realtime_params.iter().collect();
     params.sort_by(|a, b| a.name.cmp(b.name).then_with(|| a.index.cmp(&b.index)));
     h.write_u32(params.len() as u32);
     for p in params {

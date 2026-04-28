@@ -41,6 +41,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, MidiInput, MidiMessage,
     MidiOutput, Module, ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::xorshift64;
 
 params_enum! {
@@ -199,8 +200,8 @@ impl Module for MidiArp {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -220,7 +221,7 @@ impl Module for MidiArp {
             step_idx: 0,
             prng_state: instance_id.as_u64() + 1,
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.pattern = p.get(params::pattern);
@@ -375,7 +376,7 @@ mod tests {
         assert_eq!(d.inputs[1].name, "clock");
         assert_eq!(d.outputs.len(), 1);
         assert_eq!(d.outputs[0].name, "midi");
-        let names: Vec<_> = d.parameters.iter().map(|p| p.name).collect();
+        let names: Vec<_> = d.realtime_params.iter().map(|p| p.name).collect();
         assert_eq!(names, vec!["pattern", "octaves", "gate_length"]);
     }
 

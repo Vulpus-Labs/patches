@@ -17,7 +17,7 @@ crate::params_enum! {
 }
 
 fn empty_shape() -> ModuleShape {
-    ModuleShape { channels: 1, length: 0, high_quality: false }
+    ModuleShape { channels: 1 }
 }
 
 fn scalar_mixed() -> ModuleDescriptor {
@@ -130,7 +130,7 @@ fn every_parameter_appears_exactly_once() {
         keys.push((b.key.name.clone(), b.key.index));
     }
     let total = l.scalars.len() + l.buffer_slots.len();
-    assert_eq!(total, d.parameters.len());
+    assert_eq!(total, d.realtime_params.len());
     let mut sorted = keys.clone();
     sorted.sort();
     sorted.dedup();

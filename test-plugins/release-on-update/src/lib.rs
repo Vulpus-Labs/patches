@@ -20,6 +20,7 @@ use patches_ffi_common::types::{
     FfiAudioEnvironment, FfiBytes, FfiModuleShape, FfiPluginManifest, FfiPluginVTable,
     ABI_VERSION,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_ffi_common::{descriptor_hash, json};
 
 pub struct Stub;
@@ -37,10 +38,10 @@ impl patches_core::Module for Stub {
     fn prepare(
         _env: &patches_core::AudioEnvironment,
         _d: ModuleDescriptor,
-        _id: patches_core::modules::InstanceId,
-    ) -> Self {
+        _id: patches_core::modules::InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Stub
-    }
+    })}
     fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor {
         unreachable!()
@@ -67,6 +68,8 @@ pub extern "C" fn __rop_prepare(
     descriptor_json_len: usize,
     _env: FfiAudioEnvironment,
     _instance_id: u64,
+    _structural_blob: *const u8,
+    _structural_blob_len: usize,
 ) -> *mut c_void {
     let slice =
         unsafe { std::slice::from_raw_parts(descriptor_json, descriptor_json_len) };

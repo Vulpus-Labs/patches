@@ -33,6 +33,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, MidiOutput, Module,
     ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 
 module_params! {
     MidiTranspose {
@@ -69,8 +70,8 @@ impl Module for MidiTranspose {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -79,7 +80,7 @@ impl Module for MidiTranspose {
             semitones: 0,
             held: [HeldState::None; 128],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.semitones = p.get(params::semitones).clamp(-127, 127) as i8;
@@ -176,7 +177,7 @@ mod tests {
         assert_eq!(d.inputs[0].name, "midi");
         assert_eq!(d.outputs.len(), 1);
         assert_eq!(d.outputs[0].name, "midi");
-        assert_eq!(d.parameters[0].name, "semitones");
+        assert_eq!(d.realtime_params[0].name, "semitones");
     }
 
     #[test]

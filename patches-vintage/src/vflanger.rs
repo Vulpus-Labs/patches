@@ -50,6 +50,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 
 mod core;
 
@@ -104,8 +105,8 @@ impl Module for VFlanger {
     fn prepare(
         env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -121,7 +122,7 @@ impl Module for VFlanger {
             fb_cv: MonoInput::default(),
             out_port: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.core.set_rate(p.get(params::rate_hz));

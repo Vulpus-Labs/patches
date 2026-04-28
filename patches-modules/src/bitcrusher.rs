@@ -28,6 +28,7 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::BitcrusherKernel;
@@ -66,7 +67,7 @@ impl Module for Bitcrusher {
             .float_param(params::dry_wet, 0.0, 1.0, 1.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let mut kernel = BitcrusherKernel::new();
         kernel.set_rate(1.0, env.sample_rate);
         kernel.set_depth(32.0);
@@ -83,7 +84,7 @@ impl Module for Bitcrusher {
             in_depth_cv: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::rate);

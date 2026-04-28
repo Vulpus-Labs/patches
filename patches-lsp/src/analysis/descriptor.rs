@@ -110,7 +110,8 @@ impl ResolvedDescriptor {
     pub fn has_parameter(&self, name: &str) -> bool {
         match self {
             ResolvedDescriptor::Module { desc, .. } => {
-                desc.parameters.iter().any(|p| p.name == name)
+                desc.realtime_params.iter().chain(desc.structural_params.iter())
+                    .any(|p| p.name == name)
             }
             ResolvedDescriptor::Template { .. } => false,
         }
@@ -141,7 +142,8 @@ impl ResolvedDescriptor {
     pub fn parameter_names(&self) -> Vec<&str> {
         match self {
             ResolvedDescriptor::Module { desc, .. } => {
-                desc.parameters.iter().map(|p| p.name).collect()
+                desc.realtime_params.iter().chain(desc.structural_params.iter())
+                    .map(|p| p.name).collect()
             }
             ResolvedDescriptor::Template { .. } => Vec::new(),
         }
@@ -302,23 +304,12 @@ fn extract_channel_aliases(shape_args: &[(String, ShapeValue)]) -> Vec<String> {
 fn build_module_shape(shape_args: &[(String, ShapeValue)]) -> ModuleShape {
     let mut shape = ModuleShape::default();
     for (name, value) in shape_args {
-        match name.as_str() {
-            "channels" => match value {
+        if name.as_str() == "channels" {
+            match value {
                 ShapeValue::Int(n) => shape.channels = *n as usize,
                 ShapeValue::AliasList(list) => shape.channels = list.len(),
                 ShapeValue::Other => {}
-            },
-            "length" => {
-                if let ShapeValue::Int(n) = value {
-                    shape.length = *n as usize;
-                }
             }
-            "high_quality" | "hq" => {
-                if let ShapeValue::Int(n) = value {
-                    shape.high_quality = *n != 0;
-                }
-            }
-            _ => {}
         }
     }
     shape

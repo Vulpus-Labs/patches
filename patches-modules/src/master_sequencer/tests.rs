@@ -12,7 +12,7 @@
 //! 3. Stop-sentinel poly encoding when `core.emit_stop_sentinel` is set.
 
 use super::*;
-use patches_core::{AudioEnvironment, ModuleShape};
+use patches_core::{AudioEnvironment, ModuleShape, StructuralParams};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
@@ -40,7 +40,7 @@ const ENV: AudioEnvironment = AudioEnvironment {
 };
 
 fn shape(channels: usize) -> ModuleShape {
-    ModuleShape { channels, length: 0, ..Default::default() }
+    ModuleShape { channels }
 }
 
 fn simple_step(cv1: f32, trigger: bool, gate: bool) -> TrackerStep {
@@ -59,7 +59,7 @@ fn sync_auto_selects_host_when_hosted() {
     };
     let s = shape(1);
     let desc = MasterSequencer::describe(&s);
-    let seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
+    let seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     assert!(seq.use_host_transport, "auto mode should use host transport when hosted");
 }
 
@@ -67,7 +67,7 @@ fn sync_auto_selects_host_when_hosted() {
 fn sync_auto_selects_free_when_standalone() {
     let s = shape(1);
     let desc = MasterSequencer::describe(&s);
-    let seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
+    let seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     assert!(!seq.use_host_transport, "auto mode should not use host transport when standalone");
 }
 
@@ -81,7 +81,7 @@ fn sync_free_overrides_hosted() {
     };
     let s = shape(1);
     let desc = MasterSequencer::describe(&s);
-    let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next());
+    let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Free as u32));
     apply_params_to(&mut seq, &params);
@@ -92,7 +92,7 @@ fn sync_free_overrides_hosted() {
 fn sync_host_overrides_standalone() {
     let s = shape(1);
     let desc = MasterSequencer::describe(&s);
-    let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next());
+    let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Host as u32));
     apply_params_to(&mut seq, &params);

@@ -234,8 +234,6 @@ pub fn deserialize_module_descriptor(data: &[u8]) -> Result<ModuleDescriptor, St
     let shape_val = root.get("shape").ok_or("missing shape")?;
     let shape = ModuleShape {
         channels: shape_val.get("channels").and_then(|v| v.as_usize()).unwrap_or(0),
-        length: shape_val.get("length").and_then(|v| v.as_usize()).unwrap_or(0),
-        high_quality: shape_val.get("high_quality").and_then(|v| v.as_bool()).unwrap_or(false),
     };
 
     let inputs = root.get("inputs")
@@ -250,7 +248,13 @@ pub fn deserialize_module_descriptor(data: &[u8]) -> Result<ModuleDescriptor, St
         .transpose()?
         .unwrap_or_default();
 
-    let parameters = root.get("parameters")
+    let realtime_params = root.get("realtime_params")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().map(deserialize_parameter_descriptor).collect::<Result<Vec<_>, _>>())
+        .transpose()?
+        .unwrap_or_default();
+
+    let structural_params = root.get("structural_params")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().map(deserialize_parameter_descriptor).collect::<Result<Vec<_>, _>>())
         .transpose()?
@@ -261,7 +265,8 @@ pub fn deserialize_module_descriptor(data: &[u8]) -> Result<ModuleDescriptor, St
         shape,
         inputs,
         outputs,
-        parameters,
+        realtime_params,
+        structural_params,
     })
 }
 

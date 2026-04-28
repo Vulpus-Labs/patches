@@ -93,7 +93,7 @@ fn enum_param_is_accepted() {
         patches_core::ParameterValue::Enum(idx) => {
             let desc = node
                 .module_descriptor
-                .parameters
+                .realtime_params
                 .iter()
                 .find(|p| p.name == "fm_type")
                 .expect("fm_type descriptor missing");

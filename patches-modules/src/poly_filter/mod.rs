@@ -6,6 +6,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
@@ -105,8 +106,8 @@ impl Module for PolyResonantLowpass {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let default_cutoff = 6.0_f32; // V/oct above C0 (≈ C6, ≈ 1047 Hz)
         let default_resonance = 0.0;
         let (b0, b1, b2, a1, a2) =
@@ -126,7 +127,7 @@ impl Module for PolyResonantLowpass {
             in_resonance_cv: PolyInput::default(),
             out_audio: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.cutoff = p.get(params::cutoff);
@@ -269,8 +270,8 @@ impl Module for PolyResonantHighpass {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let default_cutoff = 6.0_f32; // V/oct above C0 (≈ C6, ≈ 1047 Hz)
         let default_resonance = 0.0;
         let (b0, b1, b2, a1, a2) =
@@ -290,7 +291,7 @@ impl Module for PolyResonantHighpass {
             in_resonance_cv: PolyInput::default(),
             out_audio: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.cutoff = p.get(params::cutoff);
@@ -433,8 +434,8 @@ impl Module for PolyResonantBandpass {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let default_center = 6.0_f32; // V/oct above C0 (≈ C6, ≈ 1047 Hz)
         let default_q = 1.0;
         let (b0, b1, b2, a1, a2) =
@@ -454,7 +455,7 @@ impl Module for PolyResonantBandpass {
             in_resonance_cv: PolyInput::default(),
             out_audio: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.center = p.get(bp_params::center);

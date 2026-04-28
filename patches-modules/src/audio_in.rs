@@ -3,6 +3,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, ModuleShape, OutputPort, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 
 /// Stereo audio input from the hardware backplane.
@@ -36,7 +37,7 @@ impl Module for AudioIn {
             .stereo_out("out")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -44,7 +45,7 @@ impl Module for AudioIn {
             in_right: MonoInput { cable_idx: AUDIO_IN_R, scale: 1.0, connected: true },
             out_stereo: StereoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {
     }

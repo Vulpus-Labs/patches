@@ -2,6 +2,7 @@ use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
 use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap, ParameterValue};
 use patches_core::{AudioEnvironment, Module};
+use patches_core::{StructuralParams, BuildError};
 
 /// A wavefolder distortion effect.
 ///
@@ -43,8 +44,8 @@ impl Module for Wavefolder {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             descriptor,
             instance_id,
@@ -53,7 +54,7 @@ impl Module for Wavefolder {
             drive_cv: MonoInput::default(),
             output: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, params: &ParameterMap) {
         if let Some(ParameterValue::Float(d)) = params.get("drive", 0) {

@@ -234,17 +234,19 @@ mod tests {
     fn two_node_graph() -> (ModuleGraph, NodeId, NodeId) {
         let src_desc = ModuleDescriptor {
             module_name: "Src",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let dst_desc = ModuleDescriptor {
             module_name: "Dst",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let mut graph = ModuleGraph::new();
         graph.add_module("src", src_desc, &ParameterMap::new()).unwrap();
@@ -257,7 +259,7 @@ mod tests {
     fn two_port_desc() -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "Test",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![
                 PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "in", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
@@ -266,7 +268,8 @@ mod tests {
                 PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "out", index: 1, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
@@ -303,13 +306,14 @@ mod tests {
     fn resolve_multiple_ports_independently() {
         let dst_desc_data = ModuleDescriptor {
             module_name: "Dst2",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![
                 PortDescriptor { name: "x", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
                 PortDescriptor { name: "y", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             ],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let mut graph = ModuleGraph::new();
         graph.add_module("dst2", dst_desc_data, &ParameterMap::new()).unwrap();
@@ -352,17 +356,19 @@ mod tests {
     fn build_input_buffer_map_flags_mono_to_stereo_broadcast() {
         let src_desc = ModuleDescriptor {
             module_name: "Src",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let dst_desc = ModuleDescriptor {
             module_name: "Dst",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let mut graph = ModuleGraph::new();
         graph.add_module("src", src_desc, &ParameterMap::new()).unwrap();
@@ -383,17 +389,19 @@ mod tests {
     fn build_input_buffer_map_does_not_flag_stereo_to_stereo() {
         let src_desc = ModuleDescriptor {
             module_name: "Src",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let dst_desc = ModuleDescriptor {
             module_name: "Dst",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Stereo, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         };
         let mut graph = ModuleGraph::new();
         graph.add_module("src", src_desc, &ParameterMap::new()).unwrap();

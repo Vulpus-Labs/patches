@@ -6,6 +6,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::MonoBiquad;
 
 use crate::common::approximate::fast_sine;
@@ -57,7 +58,7 @@ impl FdnReverb {
 
 impl Module for FdnReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("FdnReverb", ModuleShape { channels: 0, length: 0, ..Default::default() })
+        ModuleDescriptor::new("FdnReverb", ModuleShape { channels: 0 })
             .stereo_in("in")
             .mono_in("size_cv")
             .mono_in("brightness_cv")
@@ -71,7 +72,7 @@ impl Module for FdnReverb {
             .enum_param(params::character, Character::Hall)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let sr       = env.sample_rate;
         let sr_recip = sr.recip();
         let char_idx = 3; // "hall" default
@@ -134,7 +135,7 @@ impl Module for FdnReverb {
             last_eff_bright: 0.5,
             last_character:  char_idx,
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::size);

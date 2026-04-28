@@ -5,13 +5,14 @@ use crate::cables::{InputPort, OutputPort};
 use super::instance_id::InstanceId;
 use super::module_descriptor::{ModuleDescriptor, ModuleShape, ParameterKind};
 use super::parameter_map::{ParameterMap, ParameterValue};
+use super::structural_params::StructuralParams;
 use crate::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use crate::param_layout::{compute_layout, defaults_from_descriptor};
 
 /// Validate `params` against `descriptor`.
 ///
 /// Returns an error if:
-/// - Any key in `params` is not declared in `descriptor.parameters`.
+/// - Any key in `params` is not declared in `descriptor.realtime_params`.
 /// - Any supplied value has the wrong type for its parameter.
 /// - Any supplied numeric value is outside the bounds declared in its [`ParameterKind`].
 /// - Any supplied enum value is not among the declared variants.
@@ -24,13 +25,13 @@ pub fn validate_parameters(
 ) -> Result<(), BuildError> {
     // Reject any key not declared in the descriptor.
     for (name, idx, _) in params.iter() {
-        if !descriptor.parameters.iter().any(|p| p.matches(name, idx)) {
+        if !descriptor.realtime_params.iter().any(|p| p.matches(name, idx)) {
             return Err(unknown_parameter_error(descriptor, name, idx));
         }
     }
 
     // Validate type and bounds for each supplied parameter.
-    for param_desc in &descriptor.parameters {
+    for param_desc in &descriptor.realtime_params {
         let Some(value) = params.get(param_desc.name, param_desc.index) else {
             continue;
         };
@@ -94,7 +95,7 @@ fn unknown_parameter_error(descriptor: &ModuleDescriptor, name: &str, idx: usize
         format!("{name}/{idx}")
     };
     let mut known: Vec<String> = descriptor
-        .parameters
+        .realtime_params
         .iter()
         .map(|p| {
             if p.index == 0 {
@@ -113,6 +114,29 @@ fn unknown_parameter_error(descriptor: &ModuleDescriptor, name: &str, idx: usize
             known.join(", ")
         ), origin: None,
     }
+}
+
+/// Validate `params` against `descriptor` and pack into a fresh
+/// [`ParamFrame`] sized by the descriptor's realtime parameters.
+///
+/// Returns an error if validation fails or `pack_into` rejects the input.
+/// Intended for control-thread use during initial build / param-edit
+/// resolution (ADR 0060): the audio thread receives the resulting frame
+/// and reads it via [`ParamView`].
+pub fn validate_and_pack(
+    descriptor: &ModuleDescriptor,
+    params: &ParameterMap,
+) -> Result<ParamFrame, BuildError> {
+    validate_parameters(params, descriptor)?;
+    let layout = compute_layout(descriptor);
+    let mut frame = ParamFrame::with_layout(&layout);
+    let defaults = defaults_from_descriptor(descriptor);
+    pack_into(&layout, &defaults, params, &mut frame).map_err(|e| BuildError::Custom {
+        module: descriptor.module_name,
+        message: format!("pack_into failed: {e:?}"),
+        origin: None,
+    })?;
+    Ok(frame)
 }
 
 /// Describes which input and output ports of a module are connected in the current patch.
@@ -180,16 +204,19 @@ pub trait Module: Send {
         Self: Sized;
 
     /// Allocate and initialise a new instance, storing `audio_environment`, `descriptor`,
-    /// and the externally-minted `instance_id`. All other fields should be set to their
-    /// default/zero values.
+    /// the externally-minted `instance_id`, and absorbing any structural parameter
+    /// values declared by the descriptor (ADR 0060).
     ///
-    /// This is infallible; parameter validation is deferred to
+    /// Fallible: structural-driven init (file decode, IR partitioning, sizing
+    /// from a structural int param) may fail. Realtime parameter validation
+    /// is still deferred to
     /// [`update_validated_parameters`](Module::update_validated_parameters).
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
         instance_id: InstanceId,
-    ) -> Self
+        structural: &StructuralParams,
+    ) -> Result<Self, BuildError>
     where
         Self: Sized;
 
@@ -205,25 +232,16 @@ pub trait Module: Send {
     /// adoption (ADR 0045 §4, Spike 5).
     fn update_validated_parameters(&mut self, params: &ParamView<'_>);
 
-    /// Validate `params` against the module's descriptor, then apply them.
+    /// Apply non-packable initial-build parameter payloads (e.g. file
+    /// buffers) that travel in [`ParameterMap`] but not in [`ParamFrame`].
     ///
-    /// Default implementation packs `params` into a fresh `ParamFrame` on
-    /// the control thread, builds a `ParamView`, and dispatches. Used by
-    /// [`Module::build`]'s first-time parameter application; the audio
-    /// thread uses pool-owned frames directly.
-    fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        validate_parameters(params, self.descriptor())?;
-        let layout = compute_layout(self.descriptor());
-        let index = ParamViewIndex::from_layout(&layout);
-        let mut frame = ParamFrame::with_layout(&layout);
-        let defaults = defaults_from_descriptor(self.descriptor());
-        pack_into(&layout, &defaults, params, &mut frame).map_err(|e| BuildError::Custom {
-            module: self.descriptor().module_name,
-            message: format!("pack_into failed: {e:?}"),
-            origin: None,
-        })?;
-        let view = ParamView::new(&index, &frame);
-        self.update_validated_parameters(&view);
+    /// Called once during [`Module::build`] after [`validate_and_pack`] has
+    /// produced the realtime frame and before
+    /// [`update_validated_parameters`] is dispatched. Default implementation
+    /// is a no-op; override in modules that need the unpacked payload (the
+    /// `File` / `FloatBuffer` route is the canonical case, retiring with
+    /// 0737 / ADR 0060).
+    fn apply_unpacked_params(&mut self, _params: &ParameterMap) -> Result<(), BuildError> {
         Ok(())
     }
 
@@ -234,7 +252,9 @@ pub trait Module: Send {
     /// 1. Calls [`describe`](Module::describe) to obtain the descriptor.
     /// 2. Calls [`prepare`](Module::prepare) with the given `instance_id`.
     /// 3. Fills any missing parameters using the defaults declared in the descriptor.
-    /// 4. Calls [`update_parameters`](Module::update_parameters) (validates then applies).
+    /// 4. Validates and packs the realtime frame via [`validate_and_pack`].
+    /// 5. Calls [`apply_unpacked_params`](Module::apply_unpacked_params).
+    /// 6. Calls [`update_validated_parameters`](Module::update_validated_parameters).
     ///
     /// Module implementations should not need to override this.
     fn build(
@@ -247,15 +267,33 @@ pub trait Module: Send {
         Self: Sized,
     {
         let descriptor = Self::describe(shape);
-        let mut instance = Self::prepare(audio_environment, descriptor, instance_id);
+        // Module::build is the legacy entry point used where structural params
+        // are not (yet) threaded; pass an empty carrier (ADR 0060 transitional).
+        let structural = StructuralParams::new();
+        let mut instance = Self::prepare(audio_environment, descriptor, instance_id, &structural)?;
 
         // Fill in any missing parameters using the descriptor's declared defaults.
-        let filled = ParameterMap::with_overrides(
+        // The unpacked side sees `declared_defaults` (carries `File("")` for
+        // file params); the packed side uses `defaults` (post-resolution shape
+        // with empty FloatBuffer stand-ins, which the packer accepts).
+        let unpacked = ParameterMap::with_overrides(
             &ParameterMap::declared_defaults(instance.descriptor()),
             params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
+        let packable = ParameterMap::with_overrides(
+            &ParameterMap::defaults(instance.descriptor()),
+            params.iter().filter_map(|(n, i, v)| match v {
+                ParameterValue::File(_) => None,
+                _ => Some((n.to_string(), i, v.clone())),
+            }),
+        );
 
-        instance.update_parameters(&filled)?;  // control thread — allocation fine
+        let frame = validate_and_pack(instance.descriptor(), &packable)?;
+        instance.apply_unpacked_params(&unpacked)?;
+        let layout = compute_layout(instance.descriptor());
+        let index = ParamViewIndex::from_layout(&layout);
+        let view = ParamView::new(&index, &frame);
+        instance.update_validated_parameters(&view);
         Ok(instance)
     }
 
@@ -334,14 +372,15 @@ mod tests {
     fn float_descriptor() -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "TestFloatModule",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![],
-            parameters: vec![ParameterDescriptor {
+            realtime_params: vec![ParameterDescriptor {
                 name: "gain",
                 index: 0,
                 parameter_type: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
             }],
+            structural_params: vec![],
         }
     }
 

@@ -10,23 +10,25 @@ fn p(name: &'static str) -> PortRef {
 fn osc_desc() -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "Oscillator",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: vec![],
         outputs: vec![PortDescriptor { name: "sine", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
 fn sink_desc() -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "AudioOut",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: vec![
             PortDescriptor { name: "left", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
             PortDescriptor { name: "right", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
         ],
         outputs: vec![],
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
@@ -36,7 +38,8 @@ fn multi_in_desc(module_name: &'static str, in_count: usize, shape: ModuleShape)
         shape,
         inputs: (0..in_count).map(|i| PortDescriptor { name: "in", index: i, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }).collect(),
         outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-        parameters: vec![],
+        realtime_params: vec![],
+        structural_params: vec![],
     }
 }
 
@@ -122,8 +125,8 @@ fn classify_type_changed_node_is_install() {
 
 #[test]
 fn classify_shape_changed_node_is_install() {
-    let new_shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
-    let old_shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let new_shape = ModuleShape { channels: 2 };
+    let old_shape = ModuleShape { channels: 1 };
     let new_desc = multi_in_desc("Sum", 2, new_shape);
     let old_desc = multi_in_desc("Sum", 1, old_shape.clone());
 
@@ -308,14 +311,15 @@ fn classify_multiple_nodes_each_classified_independently() {
 fn gain_desc() -> ModuleDescriptor {
     ModuleDescriptor {
         module_name: "Gain",
-        shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+        shape: ModuleShape { channels: 0 },
         inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
         outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-        parameters: vec![ParameterDescriptor {
+        realtime_params: vec![ParameterDescriptor {
             name: "gain",
             index: 0,
             parameter_type: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
         }],
+        structural_params: vec![],
     }
 }
 

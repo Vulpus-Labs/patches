@@ -80,7 +80,7 @@ fn bench_poly_lowpass(saturate: bool) {
 
     let mut module = PolyResonantLowpass::build(
         &env,
-        &ModuleShape { channels: 0, length: 0, ..Default::default() },
+        &ModuleShape { channels: 0 },
         &params,
         InstanceId::next(),
     ).expect("build failed");
@@ -119,7 +119,7 @@ fn bench_poly_svf() {
 
     let mut module = PolySvf::build(
         &env,
-        &ModuleShape { channels: 0, length: 0, ..Default::default() },
+        &ModuleShape { channels: 0 },
         &params,
         InstanceId::next(),
     ).expect("build failed");

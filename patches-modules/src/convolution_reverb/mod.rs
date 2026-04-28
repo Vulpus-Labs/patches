@@ -52,9 +52,10 @@ use patches_core::cable_pool::CablePool;
 use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    validate_parameters, AudioEnvironment, InputPort, InstanceId,
+    AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams};
 use patches_registry::FileProcessor;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
@@ -87,6 +88,10 @@ pub struct ConvolutionReverb {
     out_audio: MonoOutput,
 
     core: ConvReverbCore,
+    /// Pre-decoded IR loaded from the `ir_path` structural param (if any).
+    /// `apply_unpacked_params` consumes this on first call to install the
+    /// convolver synchronously.
+    pre_fft_ir: Option<Vec<f32>>,
 }
 
 // SAFETY: see ConvReverbCore.
@@ -114,33 +119,51 @@ impl FileProcessor for ConvolutionReverb {
 
 impl patches_core::Module for ConvolutionReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ConvReverb", ModuleShape { channels: 0, length: 0, ..Default::default() })
+        ModuleDescriptor::new("ConvReverb", ModuleShape { channels: 0 })
             .mono_in("in")
             .mono_in("mix")
             .mono_out("out")
             .float_param(core_params::mix, 0.0, 1.0, 1.0)
             .enum_param(core_params::ir, IrVariant::Room)
-            .file_param("ir_data", IR_FILE_EXTENSIONS)
+            .structural_string_param("ir_path", IR_FILE_EXTENSIONS)
     }
 
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
         instance_id: InstanceId,
-    ) -> Self {
-        Self {
+        structural: &StructuralParams,
+    ) -> Result<Self, BuildError> {
+        let pre_fft_ir = match structural.get_string("ir_path", 0) {
+            Some(p) if !p.is_empty() => {
+                let samples = patches_io::read_mono(
+                    std::path::Path::new(p),
+                    audio_environment.sample_rate as f64,
+                )
+                .map_err(|e| BuildError::Custom {
+                    module: "ConvReverb",
+                    message: format!("failed to load '{p}': {e}"),
+                    origin: None,
+                })?;
+                Some(NonUniformConvolver::serialize_pre_fft(
+                    &samples, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE,
+                ))
+            }
+            _ => None,
+        };
+        Ok(Self {
             instance_id,
             descriptor,
             in_audio: MonoInput::default(),
             in_mix: MonoInput::default(),
             out_audio: MonoOutput::default(),
             core: ConvReverbCore::new(false, audio_environment.sample_rate),
-        }
+            pre_fft_ir,
+        })
     }
 
-    fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        validate_parameters(params, self.descriptor())?;
-        self.core.update_parameters(params, "ConvReverb")
+    fn apply_unpacked_params(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
+        self.core.update_parameters(params, "ConvReverb", self.pre_fft_ir.take())
     }
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {

@@ -32,6 +32,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::EnvelopeFollower;
@@ -82,7 +83,7 @@ impl Module for TransientShaper {
             .float_param(params::mix, 0.0, 1.0, 1.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let mut s = Self {
             instance_id,
             descriptor,
@@ -98,7 +99,7 @@ impl Module for TransientShaper {
         };
         s.configure_envelopes();
         s
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.attack_amount = p.get(params::attack).clamp(-1.0, 1.0);

@@ -3,6 +3,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiOutput, Module,
     ModuleDescriptor, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 
 /// Pure MIDI source. Reads packed MIDI events from a backplane slot and
 /// republishes them on a `midi` output port.
@@ -33,15 +34,15 @@ impl Module for MidiIn {
     fn prepare(
         _audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
             midi_in: MidiInput::backplane(patches_core::GLOBAL_MIDI),
             midi_out: MidiOutput::new(patches_core::PolyOutput::default()),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

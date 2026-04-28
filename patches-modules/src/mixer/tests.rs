@@ -4,7 +4,7 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::test_support::{assert_nearly, ModuleHarness};
 
 fn shape(channels: usize) -> ModuleShape {
-    ModuleShape { channels, length: 0, ..Default::default() }
+    ModuleShape { channels }
 }
 
 fn env() -> AudioEnvironment {

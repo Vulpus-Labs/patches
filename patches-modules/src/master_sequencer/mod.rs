@@ -6,6 +6,7 @@ use patches_core::{
     TrackerData, ReceivesTrackerData, TransportFrame,
     GLOBAL_TRANSPORT,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
 
@@ -108,7 +109,7 @@ impl Module for MasterSequencer {
             .enum_param(mp::sync, SyncMode::Auto)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
         Self {
             instance_id,
@@ -129,7 +130,7 @@ impl Module for MasterSequencer {
             in_resume: MonoInput::default(),
             clock_out: vec![PolyOutput::default(); channels],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         self.apply_params(params);

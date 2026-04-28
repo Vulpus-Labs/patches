@@ -51,6 +51,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, OutputPort, StereoInput, StereoOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::approximate::fast_tanh;
 
 use crate::bbd::{Bbd, BbdDevice};
@@ -138,8 +139,8 @@ impl Module for VReverb {
     fn prepare(
         env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let sr = env.sample_rate;
         let interval = env.periodic_update_interval;
         Self {
@@ -165,7 +166,7 @@ impl Module for VReverb {
             decay_cv: MonoInput::default(),
             out_stereo: StereoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
@@ -268,7 +269,7 @@ mod tests {
     };
 
     fn shape() -> ModuleShape {
-        ModuleShape { channels: 0, length: 0, ..Default::default() }
+        ModuleShape { channels: 0 }
     }
 
     fn disconnect_cvs(h: &mut ModuleHarness) {

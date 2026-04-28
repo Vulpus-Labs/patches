@@ -20,7 +20,7 @@ use crate::sdk::DecodeError;
 use crate::sdk::decode_param_frame;
 
 fn shape() -> ModuleShape {
-    ModuleShape { channels: 1, length: 0, high_quality: false }
+    ModuleShape { channels: 1 }
 }
 
 // Static name pool matched to patches-core fuzz.

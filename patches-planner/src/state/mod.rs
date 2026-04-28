@@ -198,7 +198,7 @@ pub fn classify_nodes<'a>(
                 for (name, idx, _) in prev_ns.parameter_map.iter() {
                     if node.parameter_map.get(name, idx).is_none() {
                         if let Some(param_desc) = desc
-                            .parameters
+                            .realtime_params
                             .iter()
                             .find(|p| p.matches(name, idx))
                         {

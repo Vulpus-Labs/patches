@@ -31,7 +31,7 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
     let mut builders =
         load_plugin(&dylib_path("test-gain-plugin")).expect("load gain");
     let builder = builders.remove(0);
-    let shape = ModuleShape { channels: 1, length: 0, ..Default::default() };
+    let shape = ModuleShape { channels: 1 };
     let mut module = builder
         .build(&env(), &shape, &ParameterMap::new(), InstanceId::next())
         .expect("build");

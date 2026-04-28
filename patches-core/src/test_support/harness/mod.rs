@@ -20,7 +20,7 @@ use crate::modules::parameter_map::ParameterMap;
 /// ```ignore
 /// let mut h = ModuleHarness::build::<Vca>(&[]);
 /// let mut h = ModuleHarness::build::<Oscillator>(&params!["frequency" => 440.0_f32]);
-/// let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3, length: 0, ..Default::default() });
+/// let mut h = ModuleHarness::build_with_shape::<Sum>(&[], ModuleShape { channels: 3 });
 /// let mut h = ModuleHarness::build_with_env::<Glide>(&params!["glide_ms" => 100.0_f32],
 ///     AudioEnvironment { sample_rate: 22050.0, poly_voices: 16, periodic_update_interval: 32, hosted: false });
 /// ```
@@ -52,12 +52,12 @@ impl ModuleHarness {
     /// Build a harness for module type `M` with the given parameters.
     ///
     /// Uses `AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }` and
-    /// `ModuleShape { channels: 0, length: 0, ..Default::default() }` as defaults. All ports connected.
+    /// `ModuleShape { channels: 0 }` as defaults. All ports connected.
     pub fn build<M: Module + 'static>(params: &[(&str, ParameterValue)]) -> Self {
         Self::build_full::<M>(
             params,
             AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
-            ModuleShape { channels: 0, length: 0, ..Default::default() },
+            ModuleShape { channels: 0 },
         )
     }
 
@@ -80,7 +80,7 @@ impl ModuleHarness {
         params: &[(&str, ParameterValue)],
         env: AudioEnvironment,
     ) -> Self {
-        Self::build_full::<M>(params, env, ModuleShape { channels: 0, length: 0, ..Default::default() })
+        Self::build_full::<M>(params, env, ModuleShape { channels: 0 })
     }
 
     /// Build a harness with both a custom environment and shape.

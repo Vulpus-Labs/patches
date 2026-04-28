@@ -21,12 +21,12 @@ fn sine_out_graph(sample_rate: f32) -> (patches_core::ModuleGraph, AudioEnvironm
     // 440 Hz (A4): log2(440 / 16.3516) ≈ 4.75 V/oct
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
-        .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &params)
+        .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &params)
         .unwrap();
     graph
         .add_module(
             "out",
-            AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }),
+            AudioOut::describe(&ModuleShape { channels: 0 }),
             &ParameterMap::new(),
         )
         .unwrap();

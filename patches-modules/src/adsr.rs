@@ -3,6 +3,7 @@ use patches_core::{
     AudioEnvironment, CablePool, GateInput, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoOutput, ModuleShape, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -91,7 +92,7 @@ impl Module for Adsr {
             .enum_param(params::shape, AdsrShapeParam::Linear)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -104,7 +105,7 @@ impl Module for Adsr {
             in_gate: GateInput::default(),
             out_env: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.attack_secs = p.get(params::attack);

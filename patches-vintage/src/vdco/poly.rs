@@ -38,6 +38,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     OutputPort, PolyInput, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 
 use super::core::{
     advance, compute_increment, render_and_advance, render_and_advance_soft,
@@ -97,8 +98,8 @@ impl Module for VPolyDco {
     fn prepare(
         env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         // Derive per-voice seeds from instance_id so voices' noise streams are
         // independent both across voices and across instances.
         let base = instance_id.as_u64();
@@ -124,7 +125,7 @@ impl Module for VPolyDco {
             out: PolyOutput::default(),
             reset_out: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.frequency = p.get(params::frequency);

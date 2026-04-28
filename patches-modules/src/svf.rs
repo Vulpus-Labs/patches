@@ -3,6 +3,7 @@ use crate::common::frequency::C0_FREQ;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, ModuleShape, OutputPort, };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::{SvfKernel, svf_f, q_to_damp};
@@ -96,8 +97,8 @@ impl Module for Svf {
     fn prepare(
         audio_environment: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let default_cutoff = 6.0_f32;
         let default_q = 0.0_f32;
         let fc = (C0_FREQ * default_cutoff.exp2())
@@ -120,7 +121,7 @@ impl Module for Svf {
             out_highpass: MonoOutput::default(),
             out_bandpass: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.cutoff = p.get(params::cutoff);

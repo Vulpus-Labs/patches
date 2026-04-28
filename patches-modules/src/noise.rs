@@ -2,6 +2,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoOutput, OutputPort, PolyOutput,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_dsp::{xorshift64, PinkFilter, BrownFilter};
 
@@ -43,7 +44,7 @@ impl Module for Noise {
             .mono_out("red")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
@@ -56,7 +57,7 @@ impl Module for Noise {
             out_brown: MonoOutput::default(),
             out_red: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
@@ -146,7 +147,7 @@ impl Module for PolyNoise {
             .poly_out("red")
     }
 
-    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         // Seed each voice with a distinct non-zero value derived from instance_id.
         let base = instance_id.as_u64().wrapping_add(1);
         let prng_states = std::array::from_fn(|i| base.wrapping_add((i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)));
@@ -162,7 +163,7 @@ impl Module for PolyNoise {
             out_brown: PolyOutput::default(),
             out_red: PolyOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 

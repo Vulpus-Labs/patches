@@ -5,6 +5,7 @@ use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort, };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::MonoBiquad;
 
 use super::compute_biquad_highpass;
@@ -85,7 +86,7 @@ impl Module for ResonantHighpass {
             .bool_param(params::saturate, false)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let default_cutoff = 6.0_f32;
         let default_resonance = 0.0;
         let (b0, b1, b2, a1, a2) =
@@ -105,7 +106,7 @@ impl Module for ResonantHighpass {
             in_resonance_cv: MonoInput::default(),
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.cutoff = p.get(params::cutoff);

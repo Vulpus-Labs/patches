@@ -44,6 +44,7 @@ use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
     MonoInput, MonoOutput, OutputPort,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::approximate::fast_tanh;
 use std::f32::consts::TAU;
 
@@ -157,8 +158,8 @@ impl Module for VBbd {
     fn prepare(
         env: &AudioEnvironment,
         descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
+        instance_id: InstanceId, _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> { Ok({
         let sr = env.sample_rate;
         let interval = env.periodic_update_interval;
         let taps = descriptor.shape.channels;
@@ -187,7 +188,7 @@ impl Module for VBbd {
             gain_cv: vec![MonoInput::default(); taps],
             fb_cv: vec![MonoInput::default(); taps],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
@@ -286,7 +287,7 @@ mod tests {
     };
 
     fn shape(taps: usize) -> ModuleShape {
-        ModuleShape { channels: taps, length: 0, ..Default::default() }
+        ModuleShape { channels: taps }
     }
 
     #[test]

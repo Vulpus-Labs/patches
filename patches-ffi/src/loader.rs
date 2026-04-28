@@ -15,9 +15,9 @@ use std::sync::{Arc, OnceLock};
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap};
-use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
-use patches_core::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
+use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap, StructuralParams};
+use patches_core::param_frame::{ParamView, ParamViewIndex};
+use patches_core::param_layout::{compute_layout, ParamLayout};
 use patches_core::{AudioEnvironment, Module};
 use patches_ffi_common::abi::{Handle, HostEnv};
 use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
@@ -83,7 +83,8 @@ impl Module for DylibModule {
         _audio_environment: &AudioEnvironment,
         _descriptor: ModuleDescriptor,
         _instance_id: InstanceId,
-    ) -> Self
+        _structural: &StructuralParams,
+    ) -> Result<Self, BuildError>
     where
         Self: Sized,
     {
@@ -100,23 +101,6 @@ impl Module for DylibModule {
                 host_env() as *const HostEnv,
             );
         }
-    }
-
-    fn update_parameters(&mut self, params: &ParameterMap) -> Result<(), BuildError> {
-        // New ABI: control-thread validation happens host-side via the layout.
-        // Pack defaults + overrides, then dispatch as a validated frame.
-        let layout = compute_layout(&self.descriptor);
-        let defaults = defaults_from_descriptor(&self.descriptor);
-        let mut frame = ParamFrame::with_layout(&layout);
-        pack_into(&layout, &defaults, params, &mut frame).map_err(|e| BuildError::Custom {
-            module: self.descriptor.module_name,
-            message: format!("{e:?}"),
-            origin: None,
-        })?;
-        let index = ParamViewIndex::from_layout(&layout);
-        let view = ParamView::new(&index, &frame);
-        self.update_validated_parameters(&view);
-        Ok(())
     }
 
     fn descriptor(&self) -> &ModuleDescriptor {
@@ -222,6 +206,8 @@ impl ModuleBuilder for DylibModuleBuilder {
                 desc_json.len(),
                 ffi_env,
                 instance_id.as_u64(),
+                std::ptr::null(),
+                0,
             )
         };
 
@@ -252,7 +238,11 @@ impl ModuleBuilder for DylibModuleBuilder {
             &patches_core::parameter_map::ParameterMap::declared_defaults(&module.descriptor),
             params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
-        module.update_parameters(&filled)?;
+        let frame = patches_core::validate_and_pack(&module.descriptor, &filled)?;
+        let layout = compute_layout(&module.descriptor);
+        let index = ParamViewIndex::from_layout(&layout);
+        let view = ParamView::new(&index, &frame);
+        module.update_validated_parameters(&view);
 
         Ok(Box::new(module))
     }

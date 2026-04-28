@@ -76,7 +76,7 @@ pub(super) fn try_hover_module_name(
             type_name,
             md.inputs.len(),
             md.outputs.len(),
-            md.parameters.len()
+            md.realtime_params.len()
         ),
         ResolvedDescriptor::Template { in_ports, out_ports } => format!(
             "**{}** : `{}` (template)\n\n{} in ports, {} out ports",
@@ -106,16 +106,9 @@ pub(super) fn hover_for_module(m: &FlatModule, bound: &BoundPatch, line_starts: 
 
     let mut lines = Vec::new();
     lines.push(format!("**{}** : `{}`", m.id, m.type_name));
-    if shape.channels > 0 || shape.length > 0 {
-        let mut parts = Vec::new();
-        if shape.channels > 0 {
-            parts.push(format!("channels = {}", shape.channels));
-        }
-        if shape.length > 0 {
-            parts.push(format!("length = {}", shape.length));
-        }
+    if shape.channels > 0 {
         lines.push(String::new());
-        lines.push(format!("_shape:_ {}", parts.join(", ")));
+        lines.push(format!("_shape:_ channels = {}", shape.channels));
     }
 
     if !m.params.is_empty() {
@@ -173,11 +166,26 @@ fn format_module_descriptor_hover(desc: &ModuleDescriptor) -> String {
         }
     }
 
-    if !desc.parameters.is_empty() {
+    if !desc.realtime_params.is_empty() {
         lines.push(String::new());
         lines.push("**Parameters:**".to_string());
         let mut seen = std::collections::HashSet::new();
-        for param in &desc.parameters {
+        for param in &desc.realtime_params {
+            if seen.insert(param.name) {
+                lines.push(format!(
+                    "- `{}`: {}",
+                    param.name,
+                    format_parameter_kind(&param.parameter_type)
+                ));
+            }
+        }
+    }
+
+    if !desc.structural_params.is_empty() {
+        lines.push(String::new());
+        lines.push("**Structural parameters:** _(rebuild on edit, ADR 0060)_".to_string());
+        let mut seen = std::collections::HashSet::new();
+        for param in &desc.structural_params {
             if seen.insert(param.name) {
                 lines.push(format!(
                     "- `{}`: {}",

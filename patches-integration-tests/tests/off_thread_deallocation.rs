@@ -7,6 +7,7 @@ use patches_core::param_frame::ParamView;
 use patches_engine::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator};
 use patches_integration_tests::HeadlessEngine;
+use patches_core::{StructuralParams, BuildError};
 
 // ── ThreadIdDropSpy ───────────────────────────────────────────────────────────
 
@@ -22,10 +23,11 @@ impl ThreadIdDropSpy {
             instance_id: InstanceId::next(),
             descriptor: ModuleDescriptor {
                 module_name: "ThreadIdDropSpy",
-                shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+                shape: ModuleShape { channels: 0 },
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             },
             drop_thread,
         }
@@ -43,20 +45,21 @@ impl Module for ThreadIdDropSpy {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "ThreadIdDropSpy",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![],
             outputs: vec![],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self {
             instance_id,
             descriptor,
             drop_thread: Arc::new(Mutex::new(None)),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
 
@@ -92,14 +95,14 @@ fn sine_out_graph() -> patches_core::ModuleGraph {
     graph
         .add_module(
             "osc",
-            Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }),
+            Oscillator::describe(&ModuleShape { channels: 0 }),
             &params,
         )
         .unwrap();
     graph
         .add_module(
             "out",
-            AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }),
+            AudioOut::describe(&ModuleShape { channels: 0 }),
             &ParameterMap::new(),
         )
         .unwrap();

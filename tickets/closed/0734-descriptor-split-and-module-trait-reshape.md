@@ -41,6 +41,25 @@ just calls another trait method) can be deleted.
       `apply_structural` paths).
 - [ ] `cargo test` and `cargo clippy` pass on the inner-loop subset.
 
+## Sub-tickets
+
+Scope across the workspace is too large to land in one PR (descriptor
+field rename touches ~30 files; `Module::prepare` signature change
+ripples through ~50 module impls + FFI plugins + test harness). Split
+into four sub-tickets, each ending in a compiling tree:
+
+- **0741** — Add `StructuralParams` carrier and structural builders
+  (additive); rename `parameters` → `realtime_params`; add empty
+  `structural_params` field. No trait changes.
+- **0742** — Reshape `Module::prepare` to fallible + take
+  `&StructuralParams`. Sweep every module impl, FFI plugin, test
+  harness. Behaviour unchanged.
+- **0743** — Extract `validate_and_pack` free function; drop
+  `Module::update_parameters` default. `Module::build` calls the
+  free function directly.
+- **0744** — Restrict `compute_layout` to `realtime_params` and
+  harden the packer against non-packable types.
+
 ## Notes
 
 This ticket is intentionally a no-op semantically: every existing

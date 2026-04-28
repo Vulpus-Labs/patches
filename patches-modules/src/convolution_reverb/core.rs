@@ -181,6 +181,7 @@ impl ConvReverbCore {
         &mut self,
         params: &ParameterMap,
         module_name: &'static str,
+        pre_fft_ir: Option<Vec<f32>>,
     ) -> Result<(), BuildError> {
         if let Some(ParameterValue::Float(v)) = params.get("mix", 0) {
             self.base_mix = *v;
@@ -192,15 +193,15 @@ impl ConvReverbCore {
             }
         }
 
-        // Handle pre-processed file data (FloatBuffer from planner's FileProcessor).
-        if let Some(ParameterValue::FloatBuffer(data)) = params.get("ir_data", 0) {
+        // Pre-decoded IR from the `ir_path` structural param (ADR 0060).
+        if let Some(data) = pre_fft_ir {
             let ready = if self.stereo {
                 let left_len = data[0] as usize;
                 let conv_l = NonUniformConvolver::from_pre_fft(&data[1..1 + left_len]);
                 let conv_r = NonUniformConvolver::from_pre_fft(&data[1 + left_len..]);
                 build_stereo_ready(conv_l, conv_r, self.base_mix)
             } else {
-                let convolver = NonUniformConvolver::from_pre_fft(data);
+                let convolver = NonUniformConvolver::from_pre_fft(&data);
                 build_mono_ready(convolver, self.base_mix)
             };
             self.start_from_ready(ready);
@@ -211,7 +212,7 @@ impl ConvReverbCore {
         // Synthetic IR variants.
         let variant = IR_VARIANTS[self.ir_variant_idx as usize];
         if variant == "file" {
-            // No FloatBuffer means the file hasn't been provided yet.
+            // `ir: file` selected but no `ir_path` provided — passthrough.
             self.update_shared_mix(0.0);
             return Ok(());
         }
@@ -239,12 +240,9 @@ impl ConvReverbCore {
     pub(super) fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.base_mix = p.get(params::mix);
 
-        // TODO(E101-0599): resolve FloatBufferId via ArcTable for hot reload of
-        // file-backed IRs. ParamView now exposes only a FloatBufferId; the Arc
-        // resolution path is not yet wired. Until then, file IR hot-reload is
-        // a no-op; initial build via update_parameters still works.
-        let _ = p.fetch_buffer_static("ir_data", 0);
-
+        // ADR 0060: `ir_path` is structural; hot-reloading the file IR
+        // triggers an instance rebuild (planner-side, ticket 0740) rather
+        // than an audio-thread param update.
         let mut ir_changed = false;
 
         let ir: IrVariant = p.get(params::ir);

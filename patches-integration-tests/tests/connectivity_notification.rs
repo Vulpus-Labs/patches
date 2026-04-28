@@ -4,6 +4,7 @@ use patches_core::{
     AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
     ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PortRef,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
@@ -28,16 +29,17 @@ impl Module for Probe {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "Probe",
-            shape: ModuleShape { channels: 0, length: 0, ..Default::default() },
+            shape: ModuleShape { channels: 0 },
             inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            parameters: vec![],
+            realtime_params: vec![],
+            structural_params: vec![],
         }
     }
 
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { instance_id, descriptor }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
 
@@ -79,10 +81,10 @@ fn make_registry() -> Registry {
 fn probe_to_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph
-        .add_module("probe", Probe::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new())
+        .add_module("probe", Probe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new())
+        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in"), 1.0)
@@ -98,13 +100,13 @@ fn probe_with_input_graph() -> ModuleGraph {
     // 440 Hz (A4) expressed in V/oct from C0: log2(440 / 16.3516) ≈ 4.75
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
-        .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &params)
+        .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &params)
         .unwrap();
     graph
-        .add_module("probe", Probe::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new())
+        .add_module("probe", Probe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }), &ParameterMap::new())
+        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("in"), 1.0)

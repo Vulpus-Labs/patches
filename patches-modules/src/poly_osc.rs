@@ -3,6 +3,7 @@ use patches_core::{
     ModuleShape, MonoInput, OutputPort, PolyInput, PolyOutput,
     GLOBAL_DRIFT, HALF_SEMITONE_VOCT, OSCILLATOR_DRIFT_STEP,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -104,7 +105,7 @@ impl Module for PolyOsc {
             .float_param(params::drift, 0.0, 1.0, 0.0)
     }
 
-    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         // Derive non-zero, per-voice seeds from instance_id so each voice drifts independently.
         let base_seed = instance_id.as_u64().wrapping_add(1) as u32;
         let drift_walks = std::array::from_fn(|i| {
@@ -132,7 +133,7 @@ impl Module for PolyOsc {
             drift_counter: 0,
             drift_voct_offsets: [0.0; 16],
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         let v = p.get(params::frequency);

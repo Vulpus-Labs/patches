@@ -47,11 +47,8 @@ pub(crate) fn format_flat_port(name: &str, index: u32) -> String {
 pub(crate) fn module_shape_from_args(args: &[(String, Scalar)]) -> ModuleShape {
     let mut shape = ModuleShape::default();
     for (name, scalar) in args {
-        match (name.as_str(), scalar) {
-            ("channels", Scalar::Int(n)) => shape.channels = *n as usize,
-            ("length", Scalar::Int(n)) => shape.length = *n as usize,
-            ("high_quality", Scalar::Bool(b)) => shape.high_quality = *b,
-            _ => {}
+        if let ("channels", Scalar::Int(n)) = (name.as_str(), scalar) {
+            shape.channels = *n as usize;
         }
     }
     shape
@@ -63,12 +60,6 @@ pub(crate) fn render_shape_inline(shape: &ModuleShape) -> String {
     let mut parts = Vec::new();
     if shape.channels > 0 {
         parts.push(format!("channels={}", shape.channels));
-    }
-    if shape.length > 0 {
-        parts.push(format!("length={}", shape.length));
-    }
-    if shape.high_quality {
-        parts.push("hq".to_string());
     }
     parts.join(", ")
 }
@@ -102,20 +93,14 @@ mod tests {
 
     #[test]
     fn shape_from_args_round_trips() {
-        let args = vec![
-            ("channels".to_string(), Scalar::Int(4)),
-            ("length".to_string(), Scalar::Int(2048)),
-            ("high_quality".to_string(), Scalar::Bool(true)),
-        ];
+        let args = vec![("channels".to_string(), Scalar::Int(4))];
         let s = module_shape_from_args(&args);
         assert_eq!(s.channels, 4);
-        assert_eq!(s.length, 2048);
-        assert!(s.high_quality);
     }
 
     #[test]
     fn inline_render_skips_unset_fields() {
-        let s = ModuleShape { channels: 2, length: 0, high_quality: false };
+        let s = ModuleShape { channels: 2 };
         assert_eq!(render_shape_inline(&s), "channels=2");
     }
 

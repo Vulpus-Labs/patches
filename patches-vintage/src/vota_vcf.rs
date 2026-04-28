@@ -43,6 +43,7 @@ use patches_core::{
     params_enum, AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleShape, MonoInput, MonoOutput, OutputPort, GLOBAL_DRIFT,
 };
+use patches_core::{StructuralParams, BuildError};
 use patches_dsp::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles};
 
 params_enum! {
@@ -123,7 +124,7 @@ impl Module for VOtaVcf {
             .float_param(params::drift_amount, 0.0, 1.0, 0.0)
     }
 
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self {
+    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let poles = VOtaPoles::Four;
         let cutoff = 1_000.0;
         let resonance = 0.0;
@@ -146,7 +147,7 @@ impl Module for VOtaVcf {
             in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
             out_audio: MonoOutput::default(),
         }
-    }
+    })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.poles = p.get(params::poles);

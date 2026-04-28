@@ -92,7 +92,7 @@ pub fn compute_layout(descriptor: &ModuleDescriptor) -> ParamLayout {
     let mut scalars_in: Vec<(ParameterKey, ScalarTag)> = Vec::new();
     let mut buffers_in: Vec<ParameterKey> = Vec::new();
 
-    for p in &descriptor.parameters {
+    for p in &descriptor.realtime_params {
         let key = ParameterKey::new(p.name, p.index);
         match classify(&p.parameter_type) {
             Classified::Scalar(tag) => scalars_in.push((key, tag)),

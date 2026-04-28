@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use patches_core::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
 };
+#[cfg(test)]
+use patches_core::StructuralParams;
 use crate::file_processor::FileProcessor;
 use crate::module_builder::{Builder, ModuleBuilder};
 
@@ -51,7 +53,7 @@ impl Registry {
     where
         T: Module + 'static,
     {
-        let name = T::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }).module_name;
+        let name = T::describe(&ModuleShape { channels: 0 }).module_name;
         self.versions.insert(name.to_string(), 0);
         self.builders
             .insert(name.to_string(), Box::new(Builder::<T>(PhantomData)));
@@ -67,7 +69,7 @@ impl Registry {
     where
         T: Module + FileProcessor + 'static,
     {
-        let name = T::describe(&ModuleShape { channels: 0, length: 0, ..Default::default() }).module_name;
+        let name = T::describe(&ModuleShape { channels: 0 }).module_name;
         self.file_processors.insert(
             name.to_string(),
             Box::new(|env, shape, param_name, path| T::process_file(env, shape, param_name, path)),
@@ -182,20 +184,21 @@ mod tests {
                 shape: shape.clone(),
                 inputs: vec![],
                 outputs: vec![],
-                parameters: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
             }
         }
 
         fn prepare(
             _audio_environment: &AudioEnvironment,
             descriptor: ModuleDescriptor,
-            instance_id: InstanceId,
-        ) -> Self {
+            instance_id: InstanceId, _structural: &StructuralParams,
+        ) -> Result<Self, BuildError> { Ok({
             Self {
                 instance_id,
                 descriptor,
             }
-        }
+        })}
 
         fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {
         }
@@ -218,9 +221,9 @@ mod tests {
     struct AltModule { instance_id: InstanceId, descriptor: ModuleDescriptor }
     impl Module for AltModule {
         fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor { module_name: "TestModule", shape: shape.clone(), inputs: vec![], outputs: vec![], parameters: vec![] }
+            ModuleDescriptor { module_name: "TestModule", shape: shape.clone(), inputs: vec![], outputs: vec![], realtime_params: vec![], structural_params: vec![] }
         }
-        fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId) -> Self { Self { instance_id, descriptor } }
+        fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({ Self { instance_id, descriptor } })}
         fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.instance_id }
@@ -261,7 +264,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register::<TestModule>();
 
-        let shape = ModuleShape { channels: 2, length: 0, ..Default::default() };
+        let shape = ModuleShape { channels: 2 };
         let params = ParameterMap::new();
         let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
         let module = registry.create("TestModule", &audio_environment, &shape, &params, InstanceId::next()).unwrap();
