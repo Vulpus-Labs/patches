@@ -247,7 +247,7 @@ impl<'a> PortView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{MonoInput, MonoOutput, PolyInput, PolyOutput};
+    use patches_core::{MonoInput, MonoOutput, PolyInput, PolyOutput, StereoInput};
 
     fn mono_in(idx: usize, scale: f32, connected: bool) -> InputPort {
         InputPort::Mono(MonoInput { cable_idx: idx, scale, connected })
@@ -326,6 +326,42 @@ mod tests {
                 assert_eq!(got.cable_idx, expected.cable_idx);
                 assert_eq!(got.connected, expected.connected);
             }
+        }
+    }
+
+    #[test]
+    fn round_trip_stereo_with_broadcast() {
+        let layout = PortLayout::new(2, 0);
+        let mut frame = PortFrame::with_layout(layout);
+        let inputs = vec![
+            InputPort::Stereo(StereoInput {
+                cable_idx: 5,
+                scale: 1.0,
+                connected: true,
+                broadcast_from_mono: true,
+            }),
+            InputPort::Stereo(StereoInput {
+                cable_idx: 9,
+                scale: 0.5,
+                connected: true,
+                broadcast_from_mono: false,
+            }),
+        ];
+        pack_ports_into(7, &inputs, &[], &mut frame).unwrap();
+        let view = frame.view();
+        let a = view.input(0);
+        assert_eq!(a.tag, crate::types::PORT_TAG_STEREO);
+        assert_eq!(a.cable_idx, 5);
+        assert_eq!(a.broadcast, 1);
+        let b = view.input(1);
+        assert_eq!(b.tag, crate::types::PORT_TAG_STEREO);
+        assert_eq!(b.cable_idx, 9);
+        assert_eq!(b.broadcast, 0);
+
+        let back_a: InputPort = a.into();
+        match back_a {
+            InputPort::Stereo(s) => assert!(s.broadcast_from_mono),
+            _ => panic!("expected stereo"),
         }
     }
 

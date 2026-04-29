@@ -5,7 +5,7 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -139,6 +139,10 @@ pub struct FfiInputPort {
     pub cable_idx: usize,
     pub scale: f32,
     pub connected: u8,
+    /// Stereo-only: when `tag == PORT_TAG_STEREO` and the cable is mono,
+    /// the reader splays the mono sample across both lanes. Always `0`
+    /// for non-stereo variants.
+    pub broadcast: u8,
 }
 
 impl From<&patches_core::InputPort> for FfiInputPort {
@@ -149,18 +153,21 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 cable_idx: m.cable_idx,
                 scale: m.scale,
                 connected: m.connected as u8,
+                broadcast: 0,
             },
             patches_core::InputPort::Poly(p) => Self {
                 tag: PORT_TAG_POLY,
                 cable_idx: p.cable_idx,
                 scale: p.scale,
                 connected: p.connected as u8,
+                broadcast: 0,
             },
             patches_core::InputPort::Stereo(s) => Self {
                 tag: PORT_TAG_STEREO,
                 cable_idx: s.cable_idx,
                 scale: s.scale,
                 connected: s.connected as u8,
+                broadcast: s.broadcast_from_mono as u8,
             },
         }
     }
@@ -182,7 +189,7 @@ impl From<FfiInputPort> for patches_core::InputPort {
             cable_idx: ffi.cable_idx,
             scale: ffi.scale,
             connected: ffi.connected != 0,
-            broadcast_from_mono: false,
+            broadcast_from_mono: ffi.broadcast != 0,
         };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::InputPort::Poly(poly),
@@ -382,6 +389,53 @@ mod tests {
         assert_eq!(p.cable_idx, 7);
         assert_eq!(p.scale, 0.5);
         assert!(!p.connected);
+    }
+
+    #[test]
+    fn input_port_stereo_broadcast_round_trip() {
+        let orig = patches_core::InputPort::Stereo(patches_core::StereoInput {
+            cable_idx: 11,
+            scale: 1.0,
+            connected: true,
+            broadcast_from_mono: true,
+        });
+        let ffi: FfiInputPort = (&orig).into();
+        assert_eq!(ffi.tag, PORT_TAG_STEREO);
+        assert_eq!(ffi.broadcast, 1);
+        let back: patches_core::InputPort = ffi.into();
+        let s = match back {
+            patches_core::InputPort::Stereo(s) => s,
+            _ => panic!("expected stereo"),
+        };
+        assert_eq!(s.cable_idx, 11);
+        assert!(s.connected);
+        assert!(s.broadcast_from_mono);
+
+        let orig_no_b = patches_core::InputPort::Stereo(patches_core::StereoInput {
+            cable_idx: 12,
+            scale: 1.0,
+            connected: true,
+            broadcast_from_mono: false,
+        });
+        let ffi_no_b: FfiInputPort = (&orig_no_b).into();
+        assert_eq!(ffi_no_b.broadcast, 0);
+        let back_no_b: patches_core::InputPort = ffi_no_b.into();
+        let s2 = match back_no_b {
+            patches_core::InputPort::Stereo(s) => s,
+            _ => panic!("expected stereo"),
+        };
+        assert!(!s2.broadcast_from_mono);
+    }
+
+    #[test]
+    fn input_port_mono_serializes_broadcast_zero() {
+        let orig = patches_core::InputPort::Mono(patches_core::MonoInput {
+            cable_idx: 1,
+            scale: 1.0,
+            connected: true,
+        });
+        let ffi: FfiInputPort = (&orig).into();
+        assert_eq!(ffi.broadcast, 0);
     }
 
     #[test]
