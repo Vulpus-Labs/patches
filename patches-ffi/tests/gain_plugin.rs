@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort};
-use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue};
+use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, StructuralParams};
 use patches_core::param_frame::{ParamView, ParamViewIndex};
 use patches_core::param_layout::compute_layout;
 use patches_core::{validate_and_pack, AudioEnvironment};
@@ -62,7 +62,7 @@ fn build_and_process_with_default_gain() {
     let env = default_env();
     let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
-    let mut module = builder.build(&env, &shape, &params, InstanceId::next())
+    let mut module = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build failed");
 
     // Set up ports: input at cable 0, output at cable 1
@@ -97,7 +97,7 @@ fn update_parameters_changes_gain() {
     let env = default_env();
     let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
-    let mut module = builder.build(&env, &shape, &params, InstanceId::next())
+    let mut module = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build failed");
 
     // Set ports
@@ -139,7 +139,7 @@ fn drop_does_not_crash() {
     let env = default_env();
     let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
-    let module = builder.build(&env, &shape, &params, InstanceId::next())
+    let module = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build failed");
     drop(module);
     // If we get here without crashing, the test passes.
@@ -162,9 +162,9 @@ fn multiple_instances_from_same_plugin() {
     let shape = ModuleShape { channels: 1 };
     let params = ParameterMap::new();
 
-    let module1 = builder.build(&env, &shape, &params, InstanceId::next())
+    let module1 = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build module 1 failed");
-    let module2 = builder.build(&env, &shape, &params, InstanceId::next())
+    let module2 = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build module 2 failed");
 
     assert_ne!(module1.instance_id(), module2.instance_id());

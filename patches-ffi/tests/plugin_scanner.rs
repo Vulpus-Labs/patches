@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use patches_core::modules::{InstanceId, ModuleShape, ParameterMap};
+use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, StructuralParams};
 use patches_core::AudioEnvironment;
 use patches_registry::Registry;
 use patches_ffi::scanner::{register_plugins, scan_plugins, PluginScanner, SkipReason};
@@ -57,7 +57,7 @@ fn scan_and_register_gain_plugin() {
     let env = AudioEnvironment { sample_rate: 48000.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
     let shape = ModuleShape::default();
     let params = ParameterMap::new();
-    let module = registry.create("Gain", &env, &shape, &params, InstanceId::next());
+    let module = registry.create("Gain", &env, &shape, &params, &StructuralParams::new(), InstanceId::next());
     assert!(module.is_ok(), "failed to create Gain from registry: {:?}", module.err());
 
     // Clean up

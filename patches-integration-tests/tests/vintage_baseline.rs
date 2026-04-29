@@ -33,8 +33,6 @@ use std::path::PathBuf;
 // Fixed rendering parameters. Any change invalidates the golden file.
 const SR: f32 = 44_100.0;
 const SAMPLES: usize = 8192;
-const WARMUP: usize = 0;
-
 const FIXTURE_REL: &str = "fixtures/vintage_baseline.patches";
 const GOLDEN_REL:  &str = "fixtures/vintage_baseline.f32";
 const HASH_REL:    &str = "fixtures/vintage_baseline.sha256";
@@ -84,7 +82,6 @@ fn build_from_fixture(registry: &Registry) -> HeadlessEngine {
 
 fn render_stereo_bytes(registry: &Registry) -> Vec<u8> {
     let mut engine = build_from_fixture(registry);
-    for _ in 0..WARMUP { engine.tick(); }
     let mut bytes = Vec::with_capacity(SAMPLES * 8);
     for _ in 0..SAMPLES {
         engine.tick();
