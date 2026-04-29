@@ -8,6 +8,7 @@
   api.applyState = function (snapshot) {
     api.lastSnapshot = snapshot;
     if (api._syncTapLayout) api._syncTapLayout(snapshot && snapshot.taps);
+    if (api._applyTapOpts) api._applyTapOpts(snapshot && snapshot.tap_opts);
     if (api._renderHalt) api._renderHalt(snapshot && snapshot.halt_message);
     if (api._renderDiagnostics) api._renderDiagnostics(snapshot && snapshot.diagnostics);
     if (api._renderStatusLog) api._renderStatusLog(snapshot && snapshot.status_log);
@@ -797,6 +798,50 @@
     rebuildTaps(taps);
   };
 
+  // Restore selector values to match persisted tap_opts so a window
+  // close/reopen or state load doesn't snap controls back to defaults.
+  api._applyTapOpts = function (optsBySlot) {
+    if (!optsBySlot) return;
+    var sels = document.querySelectorAll("select.tap-opt");
+    for (var i = 0; i < sels.length; i++) {
+      var el = sels[i];
+      var slot = parseInt(el.dataset.scopeSlot || el.dataset.spectrumSlot, 10);
+      if (isNaN(slot)) continue;
+      var o = optsBySlot[slot];
+      if (!o) continue;
+      var val = null;
+      if (el.dataset.scopeOpt === "decimation") val = o.scope_decimation;
+      else if (el.dataset.scopeOpt === "window") val = o.scope_window_samples;
+      else if (el.dataset.spectrumOpt === "fft_size") val = o.spectrum_fft_size;
+      if (val != null) el.value = String(val);
+    }
+    // Restore scope snap and spectrum mode toggles from persisted state.
+    for (var slotKey in optsBySlot) {
+      if (!Object.prototype.hasOwnProperty.call(optsBySlot, slotKey)) continue;
+      var s = parseInt(slotKey, 10);
+      var op = optsBySlot[slotKey];
+      var b = slotWidgets[s];
+      if (!b) continue;
+      if (b.scope) {
+        b.scope.setSnap(!!op.scope_snap);
+        var snapBtn = document.querySelector(
+          'button.btn-snap[data-scope-slot="' + s + '"]'
+        );
+        if (snapBtn) snapBtn.classList.toggle("is-active", !!op.scope_snap);
+      }
+      if (b.spectrum) {
+        var mode = op.spectrum_heatmap ? "heatmap" : "curve";
+        b.spectrum.setMode(mode);
+        var modeBtn = document.querySelector(
+          'button.btn-mode[data-spectrum-slot="' + s + '"]'
+        );
+        if (modeBtn) {
+          modeBtn.textContent = mode === "heatmap" ? "curve" : "heatmap";
+        }
+      }
+    }
+  };
+
   api._renderTaps = function (frame) {
     if (!frame || !frame.slots) return;
     for (var i = 0; i < frame.slots.length; i++) {
@@ -1061,8 +1106,10 @@
       var sslot = parseInt(t.dataset.scopeSlot, 10);
       var sbundle = slotWidgets[sslot];
       if (sbundle && sbundle.scope) {
-        sbundle.scope.setSnap(!sbundle.scope.snap);
-        t.classList.toggle("is-active", sbundle.scope.snap);
+        var snapNext = !sbundle.scope.snap;
+        sbundle.scope.setSnap(snapNext);
+        t.classList.toggle("is-active", snapNext);
+        postIntent("set_tap_opts", { slot: sslot, scope_snap: snapNext });
       }
       return;
     }
@@ -1074,6 +1121,10 @@
         bundle.spectrum.setMode(next);
         // Button label shows the *other* mode (what clicking switches to).
         t.textContent = next === "heatmap" ? "curve" : "heatmap";
+        postIntent("set_tap_opts", {
+          slot: slot,
+          spectrum_heatmap: next === "heatmap",
+        });
       }
       return;
     }

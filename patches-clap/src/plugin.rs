@@ -745,11 +745,14 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         }
     }
 
-    // Refresh the GUI labels if anything changed.
-    if gui_dirty {
-        if let Some(handle) = &p.gui_handle {
-            handle.update(&p.gui_state);
-        }
+    // Refresh the GUI labels. Always call: `update` throttles to
+    // PUSH_INTERVAL and dedupes by JSON, so calling on every tick is
+    // cheap, and an unconditional call is required so the webview
+    // repopulates after `Intent::Ready` clears the dedupe cache (e.g.
+    // host close-and-reopen of the plugin window — ticket 0752).
+    let _ = gui_dirty;
+    if let Some(handle) = &p.gui_handle {
+        handle.update(&p.gui_state);
     }
 
     // Push a TapFrame at most once per `TAP_PUSH_INTERVAL`. Frames flow

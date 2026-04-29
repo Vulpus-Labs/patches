@@ -46,6 +46,12 @@ pub struct TapDisplayOpts {
     pub spectrum_fft_size: usize,
     pub scope_decimation: usize,
     pub scope_window_samples: usize,
+    /// Scope auto-trigger ("snap") toggle. Pure UI state, but persisted
+    /// alongside the numeric opts so it survives window close/reopen
+    /// and host save/load.
+    pub scope_snap: bool,
+    /// Spectrum display mode: `false` = curve, `true` = heatmap.
+    pub spectrum_heatmap: bool,
 }
 
 impl Default for TapDisplayOpts {
@@ -54,6 +60,8 @@ impl Default for TapDisplayOpts {
             spectrum_fft_size: 1024,
             scope_decimation: 16,
             scope_window_samples: 512,
+            scope_snap: false,
+            spectrum_heatmap: false,
         }
     }
 }
@@ -146,6 +154,10 @@ pub struct GuiSnapshot {
     pub halt_message: Option<String>,
     pub diagnostics: Vec<DiagnosticSummary>,
     pub taps: Vec<TapSummary>,
+    /// Per-slot display options projected for the webview to restore
+    /// selector values after a window close/reopen or state reload.
+    /// Keyed by slot index. Ticket 0752 follow-up.
+    pub tap_opts: std::collections::HashMap<usize, TapDisplayOpts>,
 }
 
 /// Compact, webview-facing projection of a [`RenderedDiagnostic`].
@@ -186,6 +198,7 @@ impl GuiSnapshot {
             halt_message: state.halt.as_ref().map(format_halt),
             diagnostics: summarise_diagnostics(&state.diagnostic_view),
             taps: state.taps.clone(),
+            tap_opts: state.tap_opts.clone(),
         }
     }
 }
@@ -294,6 +307,8 @@ pub enum Intent {
         spectrum_fft_size: Option<usize>,
         scope_decimation: Option<usize>,
         scope_window_samples: Option<usize>,
+        scope_snap: Option<bool>,
+        spectrum_heatmap: Option<bool>,
     },
     /// JS bundle finished loading and `window.__patches` is wired up.
     /// Host-side handler clears push-dedupe caches so the next snapshot
@@ -316,11 +331,15 @@ impl Intent {
                 spectrum_fft_size,
                 scope_decimation,
                 scope_window_samples,
+                scope_snap,
+                spectrum_heatmap,
             } => {
                 let entry = state.tap_opts.entry(slot).or_insert_with(TapDisplayOpts::default);
                 if let Some(n) = spectrum_fft_size { entry.spectrum_fft_size = n; }
                 if let Some(d) = scope_decimation { entry.scope_decimation = d; }
                 if let Some(w) = scope_window_samples { entry.scope_window_samples = w; }
+                if let Some(b) = scope_snap { entry.scope_snap = b; }
+                if let Some(b) = spectrum_heatmap { entry.spectrum_heatmap = b; }
             }
             Intent::Ready => {}
         }

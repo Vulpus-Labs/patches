@@ -132,6 +132,9 @@ static STATE: clap_plugin_state = clap_plugin_state {
 /// for each:
 ///   [u32 slot][u32 fft][u32 dec][u32 win]
 /// [u32 width][u32 height]                  // optional (ticket 0753)
+/// [u32 tap_modes_count]                    // optional
+/// for each:
+///   [u32 slot][u32 snap][u32 heatmap]
 /// ```
 ///
 /// Each trailing section is independently EOF-tolerant: a clean EOF at
@@ -200,6 +203,29 @@ unsafe extern "C" fn state_save(
     // Window size (ticket 0753).
     if !stream_write_all(stream, &p.gui_width.to_le_bytes()) { return false; }
     if !stream_write_all(stream, &p.gui_height.to_le_bytes()) { return false; }
+
+    // Tap display modes (snap, heatmap) — separate EOF-tolerant section
+    // so legacy tap_opts states (with no mode bools) still load.
+    let tap_modes: Vec<(u32, u32, u32)> = {
+        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
+        gui.tap_opts
+            .iter()
+            .map(|(slot, o)| {
+                (
+                    *slot as u32,
+                    if o.scope_snap { 1 } else { 0 },
+                    if o.spectrum_heatmap { 1 } else { 0 },
+                )
+            })
+            .collect()
+    };
+    let mode_count = tap_modes.len() as u32;
+    if !stream_write_all(stream, &mode_count.to_le_bytes()) { return false; }
+    for (slot, snap, heat) in &tap_modes {
+        if !stream_write_all(stream, &slot.to_le_bytes()) { return false; }
+        if !stream_write_all(stream, &snap.to_le_bytes()) { return false; }
+        if !stream_write_all(stream, &heat.to_le_bytes()) { return false; }
+    }
 
     true
 }
@@ -295,6 +321,7 @@ unsafe extern "C" fn state_load(
                         spectrum_fft_size: fft,
                         scope_decimation: dec,
                         scope_window_samples: win,
+                        ..patches_plugin_common::TapDisplayOpts::default()
                     },
                 ));
             }
@@ -318,6 +345,39 @@ unsafe extern "C" fn state_load(
             let (w, h) = clamp_size(width, height);
             p.gui_width = w;
             p.gui_height = h;
+        }
+        ReadU32::Eof => {}
+        ReadU32::Err => return false,
+    }
+
+    // Optional tap-modes section (snap, heatmap).
+    match try_read_u32(stream) {
+        ReadU32::Ok(count) => {
+            let mut entries = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let slot = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n as usize,
+                    _ => return false,
+                };
+                let snap = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n != 0,
+                    _ => return false,
+                };
+                let heat = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n != 0,
+                    _ => return false,
+                };
+                entries.push((slot, snap, heat));
+            }
+            let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
+            for (slot, snap, heat) in entries {
+                let entry = gui
+                    .tap_opts
+                    .entry(slot)
+                    .or_insert_with(patches_plugin_common::TapDisplayOpts::default);
+                entry.scope_snap = snap;
+                entry.spectrum_heatmap = heat;
+            }
         }
         ReadU32::Eof => {}
         ReadU32::Err => return false,
