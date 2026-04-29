@@ -20,6 +20,7 @@ patches-modules = { path = "../patches-modules" }
 patches-dsl = { path = "../patches-dsl" }
 patches-dsp = { path = "../patches-dsp" }
 patches-interpreter = { path = "../patches-interpreter" }
+patches-io = { path = "../patches-io" }
 patches-ffi = { path = "../patches-ffi" }
 patches-ffi-common = { path = "../patches-ffi-common" }
 patches-alloc-trap = { path = "../patches-alloc-trap" }

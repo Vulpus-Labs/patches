@@ -5,7 +5,7 @@ use crate::cables::{
     CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput,
     POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
 };
-use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue};
+use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue, StructuralParams};
 use crate::COEFF_UPDATE_INTERVAL;
 use crate::modules::parameter_map::ParameterMap;
 
@@ -95,7 +95,7 @@ impl ModuleHarness {
             .collect();
 
         let module: Box<dyn Module> = Box::new(
-            M::build(&env, &shape, &param_map, InstanceId::next())
+            M::build(&env, &shape, &param_map, &StructuralParams::new(), InstanceId::next())
                 .expect("ModuleHarness::build: module creation failed")
         );
 

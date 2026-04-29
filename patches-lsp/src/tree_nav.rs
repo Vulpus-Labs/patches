@@ -222,7 +222,7 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
                 module_decl,
             });
         }
-        if let Some(shape_block) = ancestor_or_self(node, "shape_block") {
+        if let Some(shape_block) = ancestor_or_self(node, "call_block") {
             return Some(CursorContext::ShapeBlock {
                 shape_block,
                 module_decl,
@@ -300,7 +300,7 @@ pub(crate) fn is_in_type_slot(byte_offset: usize, module_decl: Node<'_>) -> bool
         return true;
     }
 
-    let no_shape = first_named_child_of_kind(module_decl, "shape_block")
+    let no_shape = first_named_child_of_kind(module_decl, "call_block")
         .is_none_or(|s| byte_offset < s.start_byte());
     let no_params = first_named_child_of_kind(module_decl, "param_block")
         .is_none_or(|p| byte_offset < p.start_byte());

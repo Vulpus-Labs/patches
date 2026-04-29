@@ -42,7 +42,7 @@ pub use ast::{
     Arrow, AtBlockIndex, Connection, Direction, File, Ident, IncludeDirective, IncludeFile,
     ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
     PlayAtom, PlayBody, PlayExpr, PlayTerm, PortGroupDecl, PortIndex, PortLabel, PortRef,
-    RowGroup, Scalar, SectionDef, ShapeArg, ShapeArgValue, SongCell, SongDef, SongItem, SongRow,
+    CallArg, CallBlock, RowGroup, Scalar, SectionDef, ShapeValue, SongCell, SongDef, SongItem, SongRow,
     SourceId, Span, Statement, Step, StepOrGenerator, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};

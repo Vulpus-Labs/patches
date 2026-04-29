@@ -36,7 +36,7 @@ impl<'a> Expander<'a> {
         let type_name = &decl.type_name.name;
         let template = self.templates[type_name.as_str()];
 
-        let instance_alias_map = build_alias_map(&decl.shape);
+        let instance_alias_map = build_alias_map(&decl.call_block);
         let empty = HashMap::new();
         let classify_map = if instance_alias_map.is_empty() {
             &empty

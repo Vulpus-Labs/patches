@@ -1,7 +1,7 @@
 template IndexCheck(k: int, n: int) {
     in:  x
     out: y
-    module m : Sum(channels: 4)
+    module m : Sum(4)
     m.in[0]  <- $.x
     m.in[k]  <- $.x
     m.in[*n] <- $.x

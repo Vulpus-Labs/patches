@@ -272,7 +272,7 @@ patch {
     fn at_block_parsing() {
         let source = r#"
 patch {
-    module del : StereoDelay(channels: [tap1, tap2]) {
+    module del : StereoDelay([tap1, tap2]) {
         @tap1: { delay_ms: 700, feedback: 0.3 }
         @tap2: { delay_ms: 450, feedback: 0.3 }
     }
@@ -326,7 +326,7 @@ patch {
     fn shape_args_with_alias_list() {
         let source = r#"
 patch {
-    module mix : Mixer(channels: [drums, bass, synth])
+    module mix : Mixer([drums, bass, synth])
 }
 "#;
         let (file, diags) = parse(source);
@@ -335,7 +335,7 @@ patch {
         if let Statement::Module(m) = &patch.body[0] {
             assert_eq!(m.shape.len(), 1);
             let sa = &m.shape[0];
-            assert_eq!(sa.name.as_ref().unwrap().name, "channels");
+            assert!(sa.name.is_none(), "positional arg should have no name");
             if let Some(ShapeArgValue::AliasList(aliases)) = &sa.value {
                 assert_eq!(aliases.len(), 3);
                 assert_eq!(aliases[0].name, "drums");
@@ -349,7 +349,7 @@ patch {
     fn at_block_without_colon() {
         let source = r#"
 patch {
-    module mixer : Mixer(channels: [drum, bass]) {
+    module mixer : Mixer([drum, bass]) {
         @drum { level: 1.0 }
         @bass { level: 0.5 }
     }

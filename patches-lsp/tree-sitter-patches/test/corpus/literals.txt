@@ -75,7 +75,7 @@ At-blocks
 ================================================================================
 
 patch {
-    module del : StereoDelay(channels: [tap1, tap2]) {
+    module del : StereoDelay([tap1, tap2]) {
         @tap1: { delay_ms: 700, feedback: 0.3 }
         @tap2: { delay_ms: 450, feedback: 0.3 }
     }
@@ -161,7 +161,7 @@ template bus(boost: float = 1.0) {
     in:  ch
     out: mix
 
-    module m : Sum(channels: 1)
+    module m : Sum(1)
     m.in[0] <- $.ch
     $.mix <-[<boost>]- m.out
 }
@@ -251,7 +251,7 @@ Indexed param entries
 ================================================================================
 
 patch {
-    module bus : GainBus(n: 3) { gains[0]: 1.0, gains[1]: 0.3 }
+    module bus : GainBus(3) { gains[0]: 1.0, gains[1]: 0.3 }
 }
 
 --------------------------------------------------------------------------------

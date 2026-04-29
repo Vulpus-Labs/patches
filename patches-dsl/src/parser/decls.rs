@@ -11,7 +11,7 @@ use crate::ast::{
 
 use super::error::ParseError;
 use super::expressions::{
-    build_ident, build_param_entry, build_param_ref_name, build_scalar, build_shape_arg,
+    build_call_block, build_ident, build_param_entry, build_param_ref_name, build_scalar,
     build_statements,
 };
 use super::steps_songs::{build_pattern_block, build_song_block};
@@ -100,13 +100,13 @@ pub(super) fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, Pars
     // whole declaration (which pest widens across trailing whitespace when
     // optional shape/param blocks are absent).
     let span = Span::new(current_source(), name.span.start, type_name.span.end);
-    let mut shape = Vec::new();
+    let mut call_block = None;
     let mut params = Vec::new();
 
     for next in it {
         match next.as_rule() {
-            Rule::shape_block => {
-                shape = next.into_inner().map(build_shape_arg).collect::<Result<_, _>>()?;
+            Rule::call_block => {
+                call_block = Some(build_call_block(next)?);
             }
             Rule::param_block => {
                 // Each item is either a param_ref (shorthand) or param_entry (key: value).
@@ -128,7 +128,7 @@ pub(super) fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, Pars
         }
     }
 
-    Ok(ModuleDecl { name, type_name, shape, params, span })
+    Ok(ModuleDecl { name, type_name, call_block, params, span })
 }
 
 fn build_param_decl(pair: Pair<'_, Rule>) -> Result<ParamDecl, ParseError> {

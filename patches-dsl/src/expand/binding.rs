@@ -17,7 +17,8 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    AtBlockIndex, ModuleDecl, ParamEntry, ParamIndex, ParamType, Scalar, Span, Template, Value,
+    AtBlockIndex, CallArg, ModuleDecl, ParamEntry, ParamIndex, ParamType, Scalar, ShapeValue,
+    Span, Template, Value,
 };
 use crate::structural::StructuralCode as Code;
 
@@ -58,30 +59,62 @@ pub(in crate::expand) fn classify_call_args(
     let declared_names: HashSet<&str> =
         template.params.iter().map(|p| p.name.name.as_str()).collect();
 
-    // Shape block: only scalar (non-group) template params.
+    // Call block: scalar (non-group) template params, supplied as named
+    // entries `name: value`, shorthand `<name>` (sugar for `name: <name>`),
+    // or — when the template has exactly one scalar param — a single bare
+    // positional value.
     let mut scalar_call_params: ScalarCallParams = HashMap::new();
-    for arg in &decl.shape {
-        let name = &arg.name.name;
-        if !declared_names.contains(name.as_str()) {
-            let mut known: Vec<&str> = declared_names.iter().copied().collect();
-            known.sort();
-            return Err(ExpandError::new(Code::UnknownTemplateParam, arg.span, format!(
-                    "unknown parameter '{}' for template '{}'; known parameters: {}",
-                    name,
-                    type_name,
-                    known.join(", ")
-                )));
+    let scalar_param_names: Vec<&str> = template
+        .params
+        .iter()
+        .filter(|p| p.arity.is_none())
+        .map(|p| p.name.name.as_str())
+        .collect();
+
+    if let Some(cb) = &decl.call_block {
+        for arg in &cb.args {
+            match arg {
+                CallArg::Named { name, value, span } => {
+                    bind_named_scalar(
+                        &name.name,
+                        value,
+                        *span,
+                        type_name,
+                        &declared_names,
+                        &group_param_names,
+                        param_env,
+                        &mut scalar_call_params,
+                    )?;
+                }
+                CallArg::Shorthand { name, span } => {
+                    let value = ShapeValue::Scalar(Scalar::ParamRef(name.clone()));
+                    bind_named_scalar(
+                        name,
+                        &value,
+                        *span,
+                        type_name,
+                        &declared_names,
+                        &group_param_names,
+                        param_env,
+                        &mut scalar_call_params,
+                    )?;
+                }
+                CallArg::Bare { value, span } => {
+                    if scalar_param_names.len() != 1 {
+                        return Err(ExpandError::other(*span, format!(
+                                "template '{}' has {} scalar params; positional arg requires exactly one — use named form `name: value`",
+                                type_name,
+                                scalar_param_names.len()
+                            )));
+                    }
+                    let only = scalar_param_names[0];
+                    scalar_call_params.insert(
+                        only.to_owned(),
+                        super::substitute::eval_shape_value(value, param_env, span)?,
+                    );
+                }
+            }
         }
-        if group_param_names.contains(name.as_str()) {
-            return Err(ExpandError::other(arg.span, format!(
-                    "group param '{}' must be supplied in the param block {{...}}, not the shape block (...)",
-                    name
-                )));
-        }
-        scalar_call_params.insert(
-            name.clone(),
-            super::substitute::eval_shape_arg_value(&arg.value, param_env, &arg.span)?,
-        );
     }
 
     // Param block: group param assignments (broadcast, array, per-index, arity).
@@ -182,6 +215,40 @@ pub(in crate::expand) fn classify_call_args(
     }
 
     Ok((scalar_call_params, group_calls))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bind_named_scalar(
+    name: &str,
+    value: &ShapeValue,
+    span: Span,
+    type_name: &str,
+    declared_names: &HashSet<&str>,
+    group_param_names: &HashSet<&str>,
+    param_env: &HashMap<String, Scalar>,
+    scalar_call_params: &mut ScalarCallParams,
+) -> Result<(), ExpandError> {
+    if !declared_names.contains(name) {
+        let mut known: Vec<&str> = declared_names.iter().copied().collect();
+        known.sort();
+        return Err(ExpandError::new(Code::UnknownTemplateParam, span, format!(
+                "unknown parameter '{}' for template '{}'; known parameters: {}",
+                name,
+                type_name,
+                known.join(", ")
+            )));
+    }
+    if group_param_names.contains(name) {
+        return Err(ExpandError::other(span, format!(
+                "group param '{}' must be supplied in the param block {{...}}, not the call args block (...)",
+                name
+            )));
+    }
+    scalar_call_params.insert(
+        name.to_owned(),
+        super::substitute::eval_shape_value(value, param_env, &span)?,
+    );
+    Ok(())
 }
 
 /// Build the child param-env and param-type map from classified call args.

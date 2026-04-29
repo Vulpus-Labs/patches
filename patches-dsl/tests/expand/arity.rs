@@ -217,7 +217,7 @@ fn ast_param_decl_arity() {
 #[test]
 fn shape_arg_literal_value_preserved() {
     // Sum(channels: 3) should produce shape [("channels", Int(3))] in FlatModule.
-    let flat = parse_expand(r#"patch { module m : Sum(channels: 3) }"#);
+    let flat = parse_expand(r#"patch { module m : Sum(3) }"#);
     let m = find_module(&flat, "m");
     assert_eq!(m.shape.len(), 1, "expected 1 shape arg");
     assert_eq!(m.shape[0].0, "channels");

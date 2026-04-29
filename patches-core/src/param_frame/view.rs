@@ -11,7 +11,6 @@
 
 use crate::modules::parameter_map::ParameterKey;
 
-use crate::ids::FloatBufferId;
 use crate::param_layout::{ParamLayout, ScalarTag};
 
 use super::ParamFrame;
@@ -21,7 +20,6 @@ use super::ParamFrame;
 enum Entry {
     Empty,
     Scalar { name_hash: u64, tag: ScalarTag, offset: u32 },
-    Buffer { name_hash: u64, slot_index: u16 },
 }
 
 /// Prepare-time perfect-hash index. Built once per module instance and
@@ -32,7 +30,6 @@ pub struct ParamViewIndex {
     mask: u64, // bucket index mask (table.len() - 1)
     table: Vec<Entry>,
     scalar_size: u32,
-    buffer_slot_count: u32,
     descriptor_hash: u64,
 }
 
@@ -40,7 +37,7 @@ impl ParamViewIndex {
     /// Build an index from a layout. Deterministic: same layout ⇒ same index
     /// across runs and threads.
     pub fn from_layout(layout: &ParamLayout) -> Self {
-        let total = layout.scalars.len() + layout.buffer_slots.len();
+        let total = layout.scalars.len();
 
         if total == 0 {
             return Self {
@@ -48,7 +45,6 @@ impl ParamViewIndex {
                 mask: 0,
                 table: Vec::new(),
                 scalar_size: layout.scalar_size,
-                buffer_slot_count: 0,
                 descriptor_hash: layout.descriptor_hash,
             };
         }
@@ -58,38 +54,25 @@ impl ParamViewIndex {
         let bucket_count = (total * 4).next_power_of_two().max(2);
         let mask = (bucket_count - 1) as u64;
 
-        let raw: Vec<(&ParameterKey, EntryKind)> = layout
+        let raw: Vec<(&ParameterKey, ScalarTag, u32)> = layout
             .scalars
             .iter()
-            .map(|s| (&s.key, EntryKind::Scalar(s.tag, s.offset)))
-            .chain(
-                layout
-                    .buffer_slots
-                    .iter()
-                    .map(|b| (&b.key, EntryKind::Buffer(b.slot_index))),
-            )
+            .map(|s| (&s.key, s.tag, s.offset))
             .collect();
 
         let mut seed: u64 = 0;
         let mut table: Vec<Entry> = vec![Entry::Empty; bucket_count];
         'outer: loop {
-            // Reset table.
             table.fill(Entry::Empty);
-            for (k, kind) in &raw {
+            for (k, tag, offset) in &raw {
                 let h = key_hash_seed(k, seed);
                 let bucket = (h & mask) as usize;
                 match table[bucket] {
                     Entry::Empty => {
-                        table[bucket] = match *kind {
-                            EntryKind::Scalar(tag, offset) => Entry::Scalar {
-                                name_hash: h,
-                                tag,
-                                offset,
-                            },
-                            EntryKind::Buffer(slot_index) => Entry::Buffer {
-                                name_hash: h,
-                                slot_index,
-                            },
+                        table[bucket] = Entry::Scalar {
+                            name_hash: h,
+                            tag: *tag,
+                            offset: *offset,
                         };
                     }
                     _ => {
@@ -107,7 +90,6 @@ impl ParamViewIndex {
             mask,
             table,
             scalar_size: layout.scalar_size,
-            buffer_slot_count: layout.buffer_slots.len() as u32,
             descriptor_hash: layout.descriptor_hash,
         }
     }
@@ -132,9 +114,8 @@ impl ParamViewIndex {
         let h = hash_raw(name_bytes, index, self.seed);
         let bucket = (h & self.mask) as usize;
         let entry = self.table[bucket];
-        // In debug, verify the full hash matches — catches unknown keys.
         match entry {
-            Entry::Scalar { name_hash, .. } | Entry::Buffer { name_hash, .. } => {
+            Entry::Scalar { name_hash, .. } => {
                 debug_assert_eq!(
                     name_hash, h,
                     "ParamView: unknown key (name={:?} index={}) bucket collision with a declared key",
@@ -158,26 +139,19 @@ impl ParamViewIndex {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum EntryKind {
-    Scalar(ScalarTag, u32),
-    Buffer(u16),
-}
-
 /// Borrowed typed view over a `ParamFrame`, driven by a `ParamViewIndex`.
 #[derive(Debug, Clone, Copy)]
 pub struct ParamView<'a> {
     index: &'a ParamViewIndex,
     scalar_area: &'a [u8],
-    buffer_slots: &'a [u64],
     wire_bytes: &'a [u8],
 }
 
 impl<'a> ParamView<'a> {
     /// Borrow a view over raw wire bytes with the same on-the-wire layout as
     /// `ParamFrame::storage_bytes()`: padded scalar area (`scalar_size`
-    /// rounded up to multiple of 8) followed by `buffer_slot_count` `u64`
-    /// slots. Plugin-side counterpart of `ParamView::new` (ADR 0045 §6).
+    /// rounded up to multiple of 8). Plugin-side counterpart of
+    /// `ParamView::new` (ADR 0045 §6).
     ///
     /// `bytes.as_ptr()` must be 8-byte aligned — satisfied when bytes come
     /// from a `Vec<u64>`-backed `ParamFrame` across FFI, which is the only
@@ -186,10 +160,9 @@ impl<'a> ParamView<'a> {
         use super::U64_SIZE;
         let scalar_words = (index.scalar_size as usize).div_ceil(U64_SIZE);
         let scalar_padded = scalar_words * U64_SIZE;
-        let total = scalar_padded + (index.buffer_slot_count as usize) * U64_SIZE;
         debug_assert_eq!(
             bytes.len(),
-            total,
+            scalar_padded,
             "ParamView::from_wire_bytes: byte length mismatch",
         );
         debug_assert_eq!(
@@ -198,24 +171,15 @@ impl<'a> ParamView<'a> {
             "ParamView::from_wire_bytes: bytes must be 8-byte aligned",
         );
         let scalar_area = &bytes[..index.scalar_size as usize];
-        let tail = &bytes[scalar_padded..];
-        // SAFETY: aligned (debug-asserted), u64 is POD, slice covers
-        // buffer_slot_count * 8 bytes of the input buffer.
-        let buffer_slots = unsafe {
-            std::slice::from_raw_parts(
-                tail.as_ptr() as *const u64,
-                index.buffer_slot_count as usize,
-            )
-        };
-        Self { index, scalar_area, buffer_slots, wire_bytes: bytes }
+        Self { index, scalar_area, wire_bytes: bytes }
     }
 
-    /// Expected wire-byte length for the given index: padded scalar area +
-    /// tail slot bytes. Used by decode helpers for length checks.
+    /// Expected wire-byte length for the given index: padded scalar area.
+    /// Used by decode helpers for length checks.
     pub fn wire_size_for(index: &ParamViewIndex) -> usize {
         use super::U64_SIZE;
         let scalar_words = (index.scalar_size as usize).div_ceil(U64_SIZE);
-        scalar_words * U64_SIZE + (index.buffer_slot_count as usize) * U64_SIZE
+        scalar_words * U64_SIZE
     }
 
     /// Borrow the frame. Asserts shape consistency with the index.
@@ -230,15 +194,9 @@ impl<'a> ParamView<'a> {
             index.scalar_size as usize,
             "ParamView::new: scalar_size mismatch",
         );
-        debug_assert_eq!(
-            frame.buffer_slot_count(),
-            index.buffer_slot_count as usize,
-            "ParamView::new: buffer_slot_count mismatch",
-        );
         Self {
             index,
             scalar_area: frame.scalar_area(),
-            buffer_slots: frame.buffer_slots(),
             wire_bytes: frame.storage_bytes(),
         }
     }
@@ -313,25 +271,6 @@ impl<'a> ParamView<'a> {
             _ => {
                 debug_assert!(false, "ParamView::get::<Enum>: {name} idx={index} not an Enum slot");
                 0
-            }
-        }
-    }
-
-    #[doc(hidden)]
-    #[inline]
-    pub fn fetch_buffer_static(&self, name: &'static str, index: u16) -> Option<FloatBufferId> {
-        match self.index.lookup_static(name, index) {
-            Entry::Buffer { slot_index, .. } => {
-                let raw = self.buffer_slots[slot_index as usize];
-                if raw == 0 {
-                    None
-                } else {
-                    Some(FloatBufferId::from_u64_unchecked(raw))
-                }
-            }
-            _ => {
-                debug_assert!(false, "ParamView::get::<Buffer>: {name} idx={index} not a Buffer slot");
-                None
             }
         }
     }

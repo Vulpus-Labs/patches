@@ -7,7 +7,7 @@ template Levelled(size: int, level[size]: float = 1.0) {
 }
 patch {
     module osc : Osc
-    module lv  : Levelled(size: 3) { level: 0.8 }
+    module lv  : Levelled(3) { level: 0.8 }
     module out : AudioOut
     osc.sine[0] -[1.0]-> lv.x
     out.in_left[0] <-[1.0]- lv.y

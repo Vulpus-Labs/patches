@@ -27,14 +27,12 @@ fn shape() -> ModuleShape {
 const F_NAMES: &[&str] = &["f0", "f1", "f2", "f3"];
 const I_NAMES: &[&str] = &["i0", "i1", "i2", "i3"];
 const B_NAMES: &[&str] = &["b0", "b1", "b2", "b3"];
-const BUF_NAMES: &[&str] = &["buf0", "buf1", "buf2", "buf3"];
 
 #[derive(Debug, Clone)]
 enum Slot {
     Float(&'static str),
     Int(&'static str),
     Bool(&'static str),
-    Buffer(&'static str),
 }
 
 fn slot_strategy() -> impl Strategy<Value = Slot> {
@@ -42,7 +40,6 @@ fn slot_strategy() -> impl Strategy<Value = Slot> {
         (0usize..F_NAMES.len()).prop_map(|i| Slot::Float(F_NAMES[i])),
         (0usize..I_NAMES.len()).prop_map(|i| Slot::Int(I_NAMES[i])),
         (0usize..B_NAMES.len()).prop_map(|i| Slot::Bool(B_NAMES[i])),
-        (0usize..BUF_NAMES.len()).prop_map(|i| Slot::Buffer(BUF_NAMES[i])),
     ]
 }
 
@@ -52,7 +49,7 @@ fn dedup(slots: Vec<Slot>) -> Vec<Slot> {
         .into_iter()
         .filter(|s| {
             let n = match s {
-                Slot::Float(n) | Slot::Int(n) | Slot::Bool(n) | Slot::Buffer(n) => *n,
+                Slot::Float(n) | Slot::Int(n) | Slot::Bool(n) => *n,
             };
             seen.insert(n)
         })
@@ -68,7 +65,6 @@ fn descriptor_strategy() -> impl Strategy<Value = (ModuleDescriptor, Vec<Slot>)>
                 Slot::Float(k) => d.float_param(*k, f32::MIN, f32::MAX, 0.0),
                 Slot::Int(k) => d.int_param(*k, i64::MIN, i64::MAX, 0),
                 Slot::Bool(k) => d.bool_param(*k, false),
-                Slot::Buffer(k) => d.file_param(k, &[]),
             };
         }
         (d, slots)
@@ -116,7 +112,6 @@ proptest! {
                 Slot::Float(k) => { let _ = view.fetch_float_static(k, 0); }
                 Slot::Int(k) => { let _ = view.fetch_int_static(k, 0); }
                 Slot::Bool(k) => { let _ = view.fetch_bool_static(k, 0); }
-                Slot::Buffer(k) => { let _ = view.fetch_buffer_static(k, 0); }
             }
         }
     }

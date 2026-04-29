@@ -82,6 +82,7 @@ fn bench_poly_lowpass(saturate: bool) {
         &env,
         &ModuleShape { channels: 0 },
         &params,
+        &patches_core::StructuralParams::new(),
         InstanceId::next(),
     ).expect("build failed");
 
@@ -121,6 +122,7 @@ fn bench_poly_svf() {
         &env,
         &ModuleShape { channels: 0 },
         &params,
+        &patches_core::StructuralParams::new(),
         InstanceId::next(),
     ).expect("build failed");
 

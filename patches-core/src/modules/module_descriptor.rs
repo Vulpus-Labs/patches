@@ -62,15 +62,14 @@ pub enum ParameterKind {
     Int   { min: i64, max: i64, default: i64 },
     Bool  { default: bool },
     Enum  { variants: &'static [&'static str], default: &'static str },
-    /// A file path parameter. The DSL writes `file("path")` which the interpreter
-    /// resolves to an absolute path against the patch file's directory.
-    ///
-    /// `extensions` declares the set of accepted file extensions (e.g. `&["wav", "aiff"]`).
-    /// The interpreter validates the extension before the value reaches the planner.
-    ///
-    /// At plan-build time, modules that implement [`FileProcessor`] have their
-    /// `process_file` method called, and the `ParameterValue::File` is replaced with
-    /// `ParameterValue::FloatBuffer(Arc<[f32]>)` before the plan reaches the audio thread.
+    /// A structural file path parameter (ADR 0060). Declared via
+    /// [`ModuleDescriptor::structural_string_param`]; only valid in
+    /// `structural_params`, never in `realtime_params`. The DSL writes
+    /// `file("path")` which the interpreter resolves to an absolute path
+    /// against the patch file's directory and threads through the structural
+    /// blob to `Module::prepare`. `extensions` declares the set of accepted
+    /// file extensions (e.g. `&["wav", "aiff"]`); the interpreter validates
+    /// the extension before the value reaches the planner.
     File { extensions: &'static [&'static str] },
     /// A song name parameter. The DSL writes a string (`song: "my_song"`)
     /// which the interpreter resolves to an integer index into the
@@ -93,7 +92,9 @@ impl ParameterKind {
                     .unwrap_or(0) as u32;
                 ParameterValue::Enum(idx)
             }
-            ParameterKind::File { .. } => ParameterValue::File(String::new()),
+            ParameterKind::File { .. } => unreachable!(
+                "ParameterKind::File only valid in structural_params, not realtime_params"
+            ),
             ParameterKind::SongName => ParameterValue::Int(-1),
         }
     }
@@ -327,37 +328,6 @@ impl ModuleDescriptor {
                 name: name.as_str(),
                 index: i,
                 parameter_type: ParameterKind::Enum { variants, default: default_s },
-            });
-        }
-        self
-    }
-
-    /// Legacy string-typed file parameter (ADR 0046: no `ParamView::get` site,
-    /// resolved off-thread into a buffer slot).
-    pub fn file_param(
-        mut self,
-        name: &'static str,
-        extensions: &'static [&'static str],
-    ) -> Self {
-        self.realtime_params.push(ParameterDescriptor {
-            name,
-            index: 0,
-            parameter_type: ParameterKind::File { extensions },
-        });
-        self
-    }
-
-    pub fn file_param_multi(
-        mut self,
-        name: &'static str,
-        count: usize,
-        extensions: &'static [&'static str],
-    ) -> Self {
-        for i in 0..count {
-            self.realtime_params.push(ParameterDescriptor {
-                name,
-                index: i,
-                parameter_type: ParameterKind::File { extensions },
             });
         }
         self

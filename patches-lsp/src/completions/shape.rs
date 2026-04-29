@@ -5,16 +5,11 @@ use tower_lsp::lsp_types::*;
 use crate::analysis::{self, SemanticModel};
 use crate::lsp_util::{first_named_child_of_kind, node_text};
 
-/// Complete with shape argument names.
+/// Complete inside a module-call shape block. After ticket 0738 the shape
+/// block takes a single positional value (int, alias list, or `<param>`),
+/// so there are no longer any named keys to suggest.
 pub(super) fn complete_shape_args() -> Vec<CompletionItem> {
-    ["channels", "length", "high_quality"]
-        .iter()
-        .map(|name| CompletionItem {
-            label: name.to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            ..Default::default()
-        })
-        .collect()
+    Vec::new()
 }
 
 /// Check if the cursor is immediately after an `@` sign.
@@ -55,17 +50,17 @@ pub(super) fn complete_at_block_aliases(
     module_decl: tree_sitter::Node,
     source: &str,
 ) -> Vec<CompletionItem> {
-    let shape_block = match first_named_child_of_kind(module_decl, "shape_block") {
+    let shape_block = match first_named_child_of_kind(module_decl, "call_block") {
         Some(sb) => sb,
         None => return vec![],
     };
     let mut items = Vec::new();
     let mut cursor = shape_block.walk();
-    for shape_arg in shape_block.named_children(&mut cursor) {
-        if shape_arg.kind() != "shape_arg" {
+    for call_arg in shape_block.named_children(&mut cursor) {
+        if call_arg.kind() != "call_arg" {
             continue;
         }
-        if let Some(alias_list) = first_named_child_of_kind(shape_arg, "alias_list") {
+        if let Some(alias_list) = first_named_child_of_kind(call_arg, "alias_list") {
             let mut alias_cursor = alias_list.walk();
             for ident in alias_list.named_children(&mut alias_cursor) {
                 if ident.kind() == "ident" {

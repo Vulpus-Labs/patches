@@ -117,10 +117,11 @@ pub fn build_from_bound(
     for bm in &bound.modules {
         let resolved = require_resolved(bm, "module")?;
         graph
-            .add_module(
+            .add_module_with_structural(
                 resolved.id.clone(),
                 resolved.descriptor.clone(),
                 &resolved.params,
+                &resolved.structural,
             )
             .map_err(|e| {
                 InterpretError::new(
@@ -249,60 +250,160 @@ pub(crate) fn parse_param_name(name: &str) -> (&str, usize) {
 }
 
 /// Convert a slice of `(name, Value)` DSL param pairs into a
-/// [`patches_core::ParameterMap`], validating each value's type against
-/// the module's descriptor. Returns `Err(message)` on the first type
-/// incompatibility or unrecognised parameter name encountered.
+/// realtime [`patches_core::ParameterMap`] paired with a
+/// [`patches_core::StructuralParams`] carrier (ADR 0060). Each pair is
+/// routed by descriptor: names declared in `realtime_params` land in the
+/// `ParameterMap`; names declared in `structural_params` land in the
+/// `StructuralParams`. Returns `Err` on the first type incompatibility or
+/// unrecognised parameter name encountered.
+///
+/// `base_dir` resolves relative file paths declared via `file("…")` against
+/// the source `.patches` file's directory, so the absolute path threaded to
+/// `Module::prepare` does not depend on the engine's cwd.
 pub(crate) fn convert_params(
     params: &[(String, Value)],
     descriptor: &patches_core::ModuleDescriptor,
     base_dir: Option<&Path>,
     song_name_to_index: &HashMap<String, usize>,
-) -> Result<patches_core::ParameterMap, ParamConversionError> {
-    use patches_core::{ParameterMap, ParameterValue};
-    let mut map = ParameterMap::new();
+) -> Result<(patches_core::ParameterMap, patches_core::StructuralParams), ParamConversionError> {
+    use patches_core::{ParameterMap, StructuralParams};
+    let mut realtime = ParameterMap::new();
+    let mut structural = StructuralParams::new();
     for (raw_name, value) in params {
         let (base_name, idx) = parse_param_name(raw_name);
 
-        let param_desc = descriptor
+        if let Some(rt) = descriptor
             .realtime_params
             .iter()
             .find(|p| p.name == base_name && p.index == idx)
-            .ok_or_else(|| {
-                let mut known: Vec<String> = descriptor
-                    .realtime_params
-                    .iter()
-                    .map(|p| {
-                        if p.index == 0 {
-                            p.name.to_string()
-                        } else {
-                            format!("{}/{}", p.name, p.index)
-                        }
-                    })
-                    .collect();
-                known.sort();
-                known.dedup();
-                ParamConversionError::Unknown(format!(
-                    "unknown parameter '{raw_name}'; known parameters: {}",
-                    known.join(", ")
-                ))
-            })?;
-
-        let mut pv = convert_value(value, &param_desc.parameter_type, song_name_to_index)
-            .map_err(|e| e.prefix_with_param(raw_name))?;
-
-        // Resolve relative file paths against the patch file's directory.
-        if let Some(dir) = base_dir {
-            match &mut pv {
-                ParameterValue::File(s) if !s.is_empty() && !Path::new(s.as_str()).is_absolute() => {
-                    *s = dir.join(s.as_str()).to_string_lossy().into_owned();
-                }
-                _ => {}
-            }
+        {
+            let pv = convert_value(value, &rt.parameter_type, song_name_to_index)
+                .map_err(|e| e.prefix_with_param(raw_name))?;
+            realtime.insert_param(base_name.to_string(), idx, pv);
+            continue;
         }
 
-        map.insert_param(base_name.to_string(), idx, pv);
+        if let Some(sp) = descriptor
+            .structural_params
+            .iter()
+            .find(|p| p.name == base_name && p.index == idx)
+        {
+            let sv = convert_structural_value(
+                value,
+                &sp.parameter_type,
+                base_dir,
+                raw_name,
+            )?;
+            structural.insert(base_name.to_string(), idx, sv);
+            continue;
+        }
+
+        let mut known: Vec<String> = descriptor
+            .realtime_params
+            .iter()
+            .chain(descriptor.structural_params.iter())
+            .map(|p| {
+                if p.index == 0 {
+                    p.name.to_string()
+                } else {
+                    format!("{}/{}", p.name, p.index)
+                }
+            })
+            .collect();
+        known.sort();
+        known.dedup();
+        return Err(ParamConversionError::Unknown(format!(
+            "unknown parameter '{raw_name}'; known parameters: {}",
+            known.join(", ")
+        )));
     }
-    Ok(map)
+    Ok((realtime, structural))
+}
+
+/// Convert a DSL [`Value`] for a structural parameter declared on the
+/// descriptor (ADR 0060). `Float`/`Int`/`Bool` mirror the realtime
+/// converters; `File`/`String` route into [`StructuralValue::String`].
+/// Relative paths declared via `file("…")` are resolved against `base_dir`
+/// when present.
+fn convert_structural_value(
+    value: &Value,
+    kind: &patches_core::ParameterKind,
+    base_dir: Option<&Path>,
+    raw_name: &str,
+) -> Result<patches_core::StructuralValue, ParamConversionError> {
+    use patches_core::{ParameterKind, StructuralValue};
+    match (value, kind) {
+        (Value::Scalar(Scalar::Float(f)), ParameterKind::Float { .. }) => {
+            Ok(StructuralValue::Float(*f as f32))
+        }
+        (Value::Scalar(Scalar::Int(i)), ParameterKind::Float { .. }) => {
+            Ok(StructuralValue::Float(*i as f32))
+        }
+        (Value::Scalar(Scalar::Int(i)), ParameterKind::Int { .. }) => {
+            Ok(StructuralValue::Int(*i))
+        }
+        (Value::Scalar(Scalar::Bool(b)), ParameterKind::Bool { .. }) => {
+            Ok(StructuralValue::Bool(*b))
+        }
+        (Value::File(p), ParameterKind::File { extensions }) => {
+            let resolved = resolve_file_path(p, base_dir);
+            validate_file_extension(&resolved, extensions, raw_name)?;
+            Ok(StructuralValue::String(resolved))
+        }
+        (Value::Scalar(Scalar::Str(s)), ParameterKind::File { extensions }) => {
+            let resolved = resolve_file_path(s, base_dir);
+            validate_file_extension(&resolved, extensions, raw_name)?;
+            Ok(StructuralValue::String(resolved))
+        }
+        _ => Err(ParamConversionError::TypeMismatch(format!(
+            "parameter '{raw_name}': expected structural {}, found {}",
+            kind.kind_name(),
+            value_kind_name(value),
+        ))),
+    }
+}
+
+fn resolve_file_path(path: &str, base_dir: Option<&Path>) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    match base_dir {
+        Some(base) => base.join(p).to_string_lossy().into_owned(),
+        None => path.to_string(),
+    }
+}
+
+fn validate_file_extension(
+    path: &str,
+    extensions: &[&str],
+    raw_name: &str,
+) -> Result<(), ParamConversionError> {
+    if extensions.is_empty() {
+        return Ok(());
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext {
+        Some(ref e) if extensions.iter().any(|x| x.eq_ignore_ascii_case(e)) => Ok(()),
+        _ => Err(ParamConversionError::OutOfRange(format!(
+            "parameter '{raw_name}': file '{path}' does not have an accepted extension ({})",
+            extensions.join(", "),
+        ))),
+    }
+}
+
+fn value_kind_name(value: &Value) -> &'static str {
+    match value {
+        Value::Scalar(Scalar::Float(_)) => "float",
+        Value::Scalar(Scalar::Int(_)) => "int",
+        Value::Scalar(Scalar::Bool(_)) => "bool",
+        Value::Scalar(Scalar::Str(_)) => "string",
+        Value::Scalar(Scalar::ParamRef(_)) => "param-ref",
+        Value::File(_) => "file",
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

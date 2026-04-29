@@ -1,9 +1,9 @@
-//! `ParamFrame` — owned byte buffer carrying packed scalars + tail u64 buffer
-//! slots, sized from a `ParamLayout`.
+//! `ParamFrame` — owned byte buffer carrying packed scalars, sized from a
+//! `ParamLayout`.
 //!
-//! Backing storage is a `Vec<u64>` so the tail slot area is naturally 8-byte
-//! aligned. The scalar area is viewed as `&[u8]` via a safe transmute of the
-//! leading `Vec<u64>` region (u64 is POD, any byte pattern is valid).
+//! Backing storage is a `Vec<u64>` so the underlying memory is naturally
+//! 8-byte aligned. The scalar area is viewed as `&[u8]` via a safe transmute
+//! of the `Vec<u64>` region (u64 is POD, any byte pattern is valid).
 
 use crate::param_layout::ParamLayout;
 
@@ -14,15 +14,13 @@ pub const U64_SIZE: usize = std::mem::size_of::<u64>();
 /// Length and capacity are set at construction and never change.
 #[derive(Debug)]
 pub struct ParamFrame {
-    /// Backing storage. Length = `scalar_words + buffer_slot_count`.
+    /// Backing storage. Length = `scalar_words`.
     storage: Vec<u64>,
     /// Effective (unpadded) scalar byte count as declared by the layout.
     scalar_size: u32,
     /// Number of u64 words that cover the scalar area (scalar_size padded up to
     /// multiple of 8, divided by 8). Padding is internal to the frame only.
     scalar_words: u32,
-    /// Number of tail buffer slots.
-    buffer_slot_count: u32,
     /// Layout descriptor hash, captured at construction for sanity checks.
     layout_hash: u64,
 }
@@ -32,8 +30,7 @@ impl ParamFrame {
     pub fn with_layout(layout: &ParamLayout) -> Self {
         let scalar_size = layout.scalar_size;
         let scalar_words = scalar_size.div_ceil(U64_SIZE as u32);
-        let buffer_slot_count = layout.buffer_slots.len() as u32;
-        let total_words = scalar_words as usize + buffer_slot_count as usize;
+        let total_words = scalar_words as usize;
 
         let storage = vec![0u64; total_words];
         debug_assert_eq!(storage.len(), storage.capacity());
@@ -42,7 +39,6 @@ impl ParamFrame {
             storage,
             scalar_size,
             scalar_words,
-            buffer_slot_count,
             layout_hash: layout.descriptor_hash,
         }
     }
@@ -51,12 +47,6 @@ impl ParamFrame {
     #[inline]
     pub fn scalar_size(&self) -> usize {
         self.scalar_size as usize
-    }
-
-    /// Number of tail buffer slots.
-    #[inline]
-    pub fn buffer_slot_count(&self) -> usize {
-        self.buffer_slot_count as usize
     }
 
     /// Layout descriptor hash captured at construction.
@@ -89,22 +79,9 @@ impl ParamFrame {
         &mut bytes[..self.scalar_size as usize]
     }
 
-    /// Tail slot table as a `u64` slice.
-    #[inline]
-    pub fn buffer_slots(&self) -> &[u64] {
-        &self.storage[self.scalar_words as usize..]
-    }
-
-    /// Mutable tail slot table.
-    #[inline]
-    pub fn buffer_slots_mut(&mut self) -> &mut [u64] {
-        &mut self.storage[self.scalar_words as usize..]
-    }
-
-    /// Entire backing storage as bytes (padded scalar area immediately
-    /// followed by tail `u64` slot table). This is the wire layout pushed
-    /// across the FFI boundary in `update_validated_parameters` (ADR 0045
-    /// §6 / E104 ticket 0612).
+    /// Entire backing storage as bytes (padded scalar area). This is the
+    /// wire layout pushed across the FFI boundary in
+    /// `update_validated_parameters` (ADR 0045 §6 / E104 ticket 0612).
     #[inline]
     pub fn storage_bytes(&self) -> &[u8] {
         let len = self.storage.len() * U64_SIZE;

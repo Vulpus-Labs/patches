@@ -121,9 +121,66 @@
     }
   },
   {
+    "type": "bare_arg",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "alias_list",
+          "named": true
+        },
+        {
+          "type": "scalar",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "bool_lit",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "call_arg",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "bare_arg",
+          "named": true
+        },
+        {
+          "type": "named_arg",
+          "named": true
+        },
+        {
+          "type": "shorthand_arg",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "call_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "call_arg",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "channel_row",
@@ -320,11 +377,11 @@
       "required": false,
       "types": [
         {
-          "type": "param_block",
+          "type": "call_block",
           "named": true
         },
         {
-          "type": "shape_block",
+          "type": "param_block",
           "named": true
         }
       ]
@@ -340,6 +397,36 @@
       "types": [
         {
           "type": "ident",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "named_arg",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "ident",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "alias_list",
+          "named": true
+        },
+        {
+          "type": "scalar",
           "named": true
         }
       ]
@@ -904,45 +991,15 @@
     }
   },
   {
-    "type": "shape_arg",
+    "type": "shorthand_arg",
     "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "ident",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
       "multiple": false,
       "required": true,
       "types": [
         {
-          "type": "alias_list",
-          "named": true
-        },
-        {
-          "type": "scalar",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "shape_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "shape_arg",
+          "type": "param_ref",
           "named": true
         }
       ]

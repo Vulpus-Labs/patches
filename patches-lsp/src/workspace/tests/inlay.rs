@@ -69,11 +69,11 @@ fn inlay_hints_template_call_with_shape_arg_renders() {
 template bus(channels: int = 4) {
 in: x
 out: y
-module mx : Mixer(channels: <channels>)
+module mx : Mixer(<channels>)
 $.x -> mx.in[*channels]
 mx.out -> $.y
 }
-patch { module b : bus(channels: 4) }
+patch { module b : bus(4) }
 ";
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();

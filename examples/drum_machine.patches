@@ -92,7 +92,7 @@ song drums(kick, snare, hat, ohat, clap, tom, claves, cymbal) {
 
 patch {
     # ── Sequencer ─────────────────────────────────────────────────────────
-    module seq: MasterSequencer(channels: [kick, snare, hat, ohat, clap, tom, claves, cymbal]) {
+    module seq: MasterSequencer([kick, snare, hat, ohat, clap, tom, claves, cymbal]) {
         song: drums,
         bpm: 120,
         rows_per_beat: 4,
@@ -102,14 +102,14 @@ patch {
     }
 
     # ── Pattern players (one per drum voice) ──────────────────────────────
-    module kick_pp:   PatternPlayer(channels: [hit])
-    module snare_pp:  PatternPlayer(channels: [hit])
-    module hat_pp:    PatternPlayer(channels: [hit])
-    module ohat_pp:   PatternPlayer(channels: [hit])
-    module clap_pp:   PatternPlayer(channels: [hit])
-    module tom_pp:    PatternPlayer(channels: [hit])
-    module claves_pp: PatternPlayer(channels: [hit])
-    module cymbal_pp: PatternPlayer(channels: [hit])
+    module kick_pp:   PatternPlayer([hit])
+    module snare_pp:  PatternPlayer([hit])
+    module hat_pp:    PatternPlayer([hit])
+    module ohat_pp:   PatternPlayer([hit])
+    module clap_pp:   PatternPlayer([hit])
+    module tom_pp:    PatternPlayer([hit])
+    module claves_pp: PatternPlayer([hit])
+    module cymbal_pp: PatternPlayer([hit])
 
     seq.clock[kick]   -> kick_pp.clock
     seq.clock[snare]  -> snare_pp.clock
@@ -214,7 +214,7 @@ patch {
     tom_drum.out -> tom_drive.in
 
     # ── Mixer: 8 channels panned across the stereo field ─────────────────
-    module mix: StereoMixer(channels: 8) {
+    module mix: StereoMixer(8) {
         @0: { level: 0.85, pan: 0.0 },
         @1: { level: 0.75, pan: -0.1 },
         @2: { level: 0.55, pan: 0.3 },
@@ -239,7 +239,7 @@ patch {
     cymbal_drum.out -> ~spectrum(cymbal)
 
     # ── FX: stereo delay on send A (clap + claves + cymbal) ──────────────
-    module delay: StereoDelay(channels: 2) {
+    module delay: StereoDelay(2) {
         delay_ms: 375,
         feedback: 0.3,
         dry_wet: 1.0

@@ -1,11 +1,7 @@
 //! Control-thread encoder: `ParameterMap` → `ParamFrame`.
 //!
 //! Zero allocation after the frame is constructed. Each `ScalarSlot` is
-//! written at its layout offset via `write_unaligned`; buffer slots are
-//! written as `u64` into the tail slot table. `String`/`File` variants are
-//! rejected here (Spike 5 tightens this to a compile-time split).
-
-use std::sync::Arc;
+//! written at its layout offset via `write_unaligned`.
 
 use crate::modules::parameter_map::{ParameterMap, ParameterValue};
 
@@ -70,16 +66,6 @@ pub fn pack_into(
         write_scalar(scalar_area, slot.offset as usize, slot.tag, value)?;
     }
 
-    let buf_slots = frame.buffer_slots_mut();
-    for slot in &layout.buffer_slots {
-        let value = lookup(overrides, defaults, &slot.key.name, slot.key.index);
-        let id = match value {
-            None => 0u64,
-            Some(v) => buffer_id_from_value(v)?,
-        };
-        buf_slots[slot.slot_index as usize] = id;
-    }
-
     Ok(())
 }
 
@@ -126,10 +112,6 @@ fn write_scalar(
         }
         // `SongName` classified as Int in the layout but flows as
         // `ParameterValue::Int` from the planner — handled above.
-        (_, ParameterValue::File(_)) => {
-            debug_assert!(false, "pack_into: File variant in scalar slot");
-            return Err(PackError::UnsupportedVariant);
-        }
         _ => {
             debug_assert!(
                 false,
@@ -141,31 +123,5 @@ fn write_scalar(
         }
     }
     Ok(())
-}
-
-fn buffer_id_from_value(value: &ParameterValue) -> Result<u64, PackError> {
-    match value {
-        ParameterValue::FloatBuffer(arc) => Ok(arc_stub_id(arc)),
-        ParameterValue::File(_) => {
-            debug_assert!(
-                false,
-                "pack_into: File in buffer slot — planner must resolve first",
-            );
-            Err(PackError::UnsupportedVariant)
-        }
-        _ => {
-            debug_assert!(false, "pack_into: non-buffer value in buffer slot");
-            Err(PackError::TypeMismatch)
-        }
-    }
-}
-
-/// Spike-3 stand-in: derive a u64 buffer id from the `Arc<[f32]>` identity.
-/// Real ids come from the `ArcTable` in Spike 6/7; this keeps the shadow
-/// path self-consistent until then.
-#[inline]
-pub(crate) fn arc_stub_id(arc: &Arc<[f32]>) -> u64 {
-    // Arc<[f32]>::as_ptr returns a thin pointer to the slice head.
-    Arc::as_ptr(arc) as *const () as usize as u64
 }
 

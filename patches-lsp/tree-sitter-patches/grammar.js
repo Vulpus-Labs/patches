@@ -71,13 +71,19 @@ module.exports = grammar({
 
     value: ($) => choice($.file_ref, $.scalar),
 
-    // ─── Shape and param blocks ─────────────────────────────────────────
+    // ─── Module call-arg block ──────────────────────────────────────────
     alias_list: ($) => seq("[", comma_list($.ident), "]"),
 
-    shape_arg: ($) =>
+    named_arg: ($) =>
       seq(field("name", $.ident), ":", choice($.alias_list, $.scalar)),
 
-    shape_block: ($) => seq("(", comma_list($.shape_arg), ")"),
+    shorthand_arg: ($) => prec(2, $.param_ref),
+
+    bare_arg: ($) => prec(1, choice($.alias_list, $.scalar)),
+
+    call_arg: ($) => choice($.named_arg, $.shorthand_arg, $.bare_arg),
+
+    call_block: ($) => seq("(", comma_list($.call_arg), ")"),
 
     // param_index: literal index [N], arity wildcard [*ident], or alias [ident]
     param_index_arity: ($) => seq("*", $.ident),
@@ -111,7 +117,7 @@ module.exports = grammar({
         field("name", $.ident),
         ":",
         field("type", $.ident),
-        optional($.shape_block),
+        optional($.call_block),
         optional($.param_block)
       ),
 

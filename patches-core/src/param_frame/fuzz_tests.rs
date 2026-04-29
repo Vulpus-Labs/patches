@@ -34,14 +34,12 @@ fn shape() -> ModuleShape {
 const F_NAMES: &[&str] = &["f0", "f1", "f2", "f3"];
 const I_NAMES: &[&str] = &["i0", "i1", "i2", "i3"];
 const B_NAMES: &[&str] = &["b0", "b1", "b2", "b3"];
-const BUF_NAMES: &[&str] = &["buf0", "buf1", "buf2", "buf3"];
 
 #[derive(Debug, Clone)]
 enum Slot {
     Float(&'static str, f32),
     Int(&'static str, i64),
     Bool(&'static str, bool),
-    Buffer(&'static str),
 }
 
 fn slot_strategy() -> impl Strategy<Value = Slot> {
@@ -52,7 +50,6 @@ fn slot_strategy() -> impl Strategy<Value = Slot> {
             .prop_map(|(i, v)| Slot::Int(I_NAMES[i], v)),
         (0usize..B_NAMES.len(), any::<bool>())
             .prop_map(|(i, v)| Slot::Bool(B_NAMES[i], v)),
-        (0usize..BUF_NAMES.len()).prop_map(|i| Slot::Buffer(BUF_NAMES[i])),
     ]
 }
 
@@ -63,7 +60,7 @@ fn dedup(slots: Vec<Slot>) -> Vec<Slot> {
         .into_iter()
         .filter(|s| {
             let n = match s {
-                Slot::Float(n, _) | Slot::Int(n, _) | Slot::Bool(n, _) | Slot::Buffer(n) => *n,
+                Slot::Float(n, _) | Slot::Int(n, _) | Slot::Bool(n, _) => *n,
             };
             seen.insert(n)
         })
@@ -79,7 +76,6 @@ fn descriptor_strategy() -> impl Strategy<Value = (ModuleDescriptor, Vec<Slot>)>
                 Slot::Float(k, _) => d.float_param(*k, f32::MIN, f32::MAX, 0.0),
                 Slot::Int(k, _) => d.int_param(*k, i64::MIN, i64::MAX, 0),
                 Slot::Bool(k, _) => d.bool_param(*k, false),
-                Slot::Buffer(k) => d.file_param(k, &[]),
             };
         }
         (d, slots)
@@ -87,19 +83,12 @@ fn descriptor_strategy() -> impl Strategy<Value = (ModuleDescriptor, Vec<Slot>)>
 }
 
 fn defaults_map(slots: &[Slot]) -> ParameterMap {
-    use std::sync::Arc;
     let mut m = ParameterMap::new();
     for s in slots {
         let (k, v) = match s {
             Slot::Float(k, _) => ((*k).to_string(), ParameterValue::Float(0.0)),
             Slot::Int(k, _) => ((*k).to_string(), ParameterValue::Int(0)),
             Slot::Bool(k, _) => ((*k).to_string(), ParameterValue::Bool(false)),
-            Slot::Buffer(k) => (
-                (*k).to_string(),
-                ParameterValue::FloatBuffer(Arc::<[f32]>::from(
-                    vec![0.0f32].into_boxed_slice(),
-                )),
-            ),
         };
         m.insert(k, v);
     }
@@ -113,7 +102,6 @@ fn overrides_map(slots: &[Slot]) -> ParameterMap {
             Slot::Float(k, v) => ((*k).to_string(), ParameterValue::Float(*v)),
             Slot::Int(k, v) => ((*k).to_string(), ParameterValue::Int(*v)),
             Slot::Bool(k, v) => ((*k).to_string(), ParameterValue::Bool(*v)),
-            Slot::Buffer(_) => continue,
         };
         m.insert(k, v);
     }
@@ -144,7 +132,6 @@ proptest! {
                 Slot::Bool(k, v) => {
                     prop_assert_eq!(view.fetch_bool_static(k, 0), *v);
                 }
-                Slot::Buffer(_) => {}
             }
         }
     }
@@ -161,9 +148,7 @@ proptest! {
         for b in frame.scalar_area_mut() {
             *b = poison_scalar;
         }
-        for s in frame.buffer_slots_mut() {
-            *s = poison_tail;
-        }
+        let _ = poison_tail;
         let idx = ParamViewIndex::from_layout(&layout);
         let view = ParamView::new(&idx, &frame);
         for s in &slots {
@@ -171,7 +156,6 @@ proptest! {
                 Slot::Float(k, _) => { let _ = view.fetch_float_static(k, 0); }
                 Slot::Int(k, _) => { let _ = view.fetch_int_static(k, 0); }
                 Slot::Bool(k, _) => { let _ = view.fetch_bool_static(k, 0); }
-                Slot::Buffer(k) => { let _ = view.fetch_buffer_static(k, 0); }
             }
         }
     }

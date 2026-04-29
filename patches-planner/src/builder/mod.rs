@@ -8,7 +8,7 @@ use patches_core::{
     OutputPort, PolyInput, PolyOutput, StereoInput, StereoOutput, TrackerData,
 };
 use patches_registry::Registry;
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
+use patches_core::parameter_map::ParameterMap;
 use patches_ffi_common::param_frame::{pack_into, ParamFrame, ParamViewIndex};
 use patches_ffi_common::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
 
@@ -311,14 +311,16 @@ impl PatchBuilder {
         prev_state: &PlannerState,
     ) -> Result<(ExecutionPlan, PlannerState), BuildError> {
         // ── Decision phase ───────────────────────────────────────────────────
+        // Structural parameters are read directly from each `graph::Node`
+        // (ADR 0060). The interpreter populates them via
+        // `ModuleGraph::add_module_with_structural` before plan-build; the
+        // planner threads them into `Module::prepare` on `Install`.
         let PlanDecisions { index, order, buf_alloc, mut decisions } =
             make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 
         // ── Action phase ─────────────────────────────────────────────────────
 
         // Step A – mint InstanceIds for Install nodes and instantiate fresh modules.
-        // Before creating modules, resolve any ParameterValue::File entries
-        // by calling the registered FileProcessor for the module type.
         let mut instance_ids: HashMap<NodeId, InstanceId> =
             HashMap::with_capacity(decisions.len());
         let mut fresh_modules: HashMap<NodeId, Box<dyn Module>> =
@@ -328,11 +330,10 @@ impl PatchBuilder {
 
         for (id, decision) in &mut decisions {
             match decision {
-                NodeDecision::Install { module_name, shape, params } => {
-                    let resolved_params = resolve_file_params(params, module_name, env, shape, registry)?;
+                NodeDecision::Install { module_name, shape, params, structural } => {
                     let new_id = InstanceId::next();
                     let m = registry
-                        .create(module_name, env, shape, &resolved_params, new_id)
+                        .create(module_name, env, shape, params, structural, new_id)
                         .map_err(|e| BuildErrorKind::ModuleCreationError(e.to_string()))?;
                     // Compute the packed-parameter layout + view index for
                     // this instance from the module's descriptor, and pack
@@ -346,7 +347,7 @@ impl PatchBuilder {
                     let view_index = ParamViewIndex::from_layout(&layout);
                     let mut frame = ParamFrame::with_layout(&layout);
                     let defaults = defaults_from_descriptor(descriptor);
-                    pack_into(&layout, &defaults, &resolved_params, &mut frame)
+                    pack_into(&layout, &defaults, params, &mut frame)
                         .map_err(|e| BuildError::new(BuildErrorKind::InternalError(
                             format!("pack_into failed for install {id:?}: {e:?}"),
                         )))?;
@@ -357,17 +358,8 @@ impl PatchBuilder {
                     instance_ids.insert(id.clone(), new_id);
                     fresh_modules.insert(id.clone(), m);
                 }
-                NodeDecision::Update { instance_id, param_diff, .. } => {
+                NodeDecision::Update { instance_id, .. } => {
                     instance_ids.insert(id.clone(), *instance_id);
-                    // Resolve file params in the diff for surviving modules.
-                    if param_diff.iter().any(|(_, _, v)| matches!(v, ParameterValue::File(_))) {
-                        let node = index.get_node(id).ok_or_else(|| {
-                            BuildErrorKind::InternalError(format!("node {id:?} missing from graph"))
-                        })?;
-                        let module_name = node.module_descriptor.module_name;
-                        let shape = &node.module_descriptor.shape;
-                        *param_diff = resolve_file_params(param_diff, module_name, env, shape, registry)?;
-                    }
                 }
             }
         }
@@ -478,8 +470,8 @@ impl PatchBuilder {
             // `Update` move directly into the corresponding diff collections
             // — matches the destructive-read convention used downstream by
             // `Module::update_validated_parameters(&mut ParameterMap)`.
-            let (is_periodic, node_layout, node_view_index) = match decision {
-                NodeDecision::Install { .. } => {
+            let (is_periodic, node_layout, node_view_index, node_structural) = match decision {
+                NodeDecision::Install { structural, .. } => {
                     let mut fresh = fresh_modules.remove(&id).ok_or_else(|| {
                         BuildErrorKind::InternalError(format!(
                             "fresh module for install node {id:?} is missing"
@@ -497,7 +489,7 @@ impl PatchBuilder {
                     let layout = param_state.layout.clone();
                     let view_index = param_state.view_index.clone();
                     new_module_param_state.push(param_state);
-                    (periodic, layout, view_index)
+                    (periodic, layout, view_index, structural)
                 }
                 NodeDecision::Update { param_diff, .. } => {
                     let prev_ns = &prev_state.nodes[&id];
@@ -531,7 +523,7 @@ impl PatchBuilder {
                         port_updates.push((pool_index, input_ports.clone(), output_ports.clone()));
                     }
                     if is_periodic { periodic_indices.push(pool_index); }
-                    (is_periodic, layout, view_index)
+                    (is_periodic, layout, view_index, prev_ns.structural.clone())
                 }
             };
 
@@ -550,6 +542,7 @@ impl PatchBuilder {
                     is_periodic,
                     layout: node_layout,
                     view_index: node_view_index,
+                    structural: node_structural,
                 },
             );
 
@@ -615,51 +608,6 @@ pub fn build_patch(
     PatchBuilder::new(pool_capacity, module_pool_capacity)
         .build_patch(graph, registry, env, prev_state)
 }
-
-// ── File parameter resolution ────────────────────────────────────────────────
-
-/// Resolve `ParameterValue::File` entries in a parameter map by calling the
-/// registry's [`FileProcessor`] for the given module type.
-///
-/// Returns a new `ParameterMap` where every `File(path)` has been replaced
-/// with `FloatBuffer(Arc<[f32]>)`. Non-file parameters are cloned as-is.
-///
-/// Returns an error if the module has a `File` parameter but no registered
-/// `FileProcessor`, or if `process_file` fails.
-fn resolve_file_params(
-    params: &ParameterMap,
-    module_name: &str,
-    env: &AudioEnvironment,
-    shape: &patches_core::ModuleShape,
-    registry: &Registry,
-) -> Result<ParameterMap, BuildError> {
-    let has_file = params.iter().any(|(_, _, v)| matches!(v, ParameterValue::File(_)));
-    if !has_file {
-        return Ok(params.clone());
-    }
-
-    let mut resolved = ParameterMap::new();
-    for (name, idx, value) in params.iter() {
-        match value {
-            ParameterValue::File(path) => {
-                let data = registry
-                    .process_file(module_name, env, shape, name, path)
-                    .ok_or_else(|| BuildErrorKind::ModuleCreationError(format!(
-                        "module '{module_name}' has file parameter '{name}' but no FileProcessor is registered"
-                    )))?
-                    .map_err(|e| BuildErrorKind::ModuleCreationError(format!(
-                        "module '{module_name}' file parameter '{name}': {e}"
-                    )))?;
-                resolved.insert_param(name.to_string(), idx, ParameterValue::FloatBuffer(Arc::from(data)));
-            }
-            _ => {
-                resolved.insert_param(name.to_string(), idx, value.clone());
-            }
-        }
-    }
-    Ok(resolved)
-}
-
 
 #[cfg(test)]
 mod tests;

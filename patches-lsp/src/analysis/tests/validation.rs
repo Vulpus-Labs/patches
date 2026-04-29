@@ -142,7 +142,7 @@ template voice(filt_cutoff: float = 600.0, filt_res: float = 0.7) {
 in: voct
 out: audio
 module filt : PolyLowpass { cutoff: <filt_cutoff>, resonance: <filt_res>, saturate: true }
-module mx : Mixer(channels: [drum, bass]) {
+module mx : Mixer([drum, bass]) {
     @drum { level: 0.5 }
     @bass { level: 0.3 }
 }
@@ -225,7 +225,7 @@ fn unknown_output_port_lists_channel_aliases() {
     let model = analyse_source(
         r#"
 patch {
-module seq : MasterSequencer(channels: [bass, drums]) {
+module seq : MasterSequencer([bass, drums]) {
     bass: x...x...x...x...
     drums: x.x.x.x.x.x.x.x.
 }

@@ -33,7 +33,7 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
     let builder = builders.remove(0);
     let shape = ModuleShape { channels: 1 };
     let mut module = builder
-        .build(&env(), &shape, &ParameterMap::new(), InstanceId::next())
+        .build(&env(), &shape, &ParameterMap::new(), &patches_core::StructuralParams::new(), InstanceId::next())
         .expect("build");
     let inputs = vec![InputPort::Mono(MonoInput {
         cable_idx: 0,

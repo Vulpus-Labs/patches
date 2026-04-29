@@ -13,10 +13,10 @@ template voice(n: int) {
 in: gate
 out: audio
 module osc : Osc
-module mix : Sum(channels: <n>)
+module mix : Sum(<n>)
 }
 patch {
-module v : voice(n: 2)
+module v : voice(2)
 }
 "#;
     let tmp = TempDir::new("hover_exp_use");
@@ -38,7 +38,7 @@ in: gate
 out: audio
 module env1 : Env
 module env2 : Env
-module mix : Sum(channels: 2)
+module mix : Sum(2)
 $.gate -> env1.gate, env2.gate
 mix.out -> $.audio
 }
@@ -90,10 +90,10 @@ fn hover_inside_template_body_resolves_channels() {
 template voice(n: int) {
 in: gate
 out: audio
-module mix : Sum(channels: <n>)
+module mix : Sum(<n>)
 }
 patch {
-module v : voice(n: 3)
+module v : voice(3)
 }
 "#;
     let tmp = TempDir::new("hover_exp_body");
@@ -132,7 +132,7 @@ osc.sine -> out.in_left, out.in_right
 fn hover_port_shows_expanded_index() {
     let src = r#"
 patch {
-module mix : Sum(channels: 2)
+module mix : Sum(2)
 module out : AudioOut
 mix.out -> out.in_left
 }

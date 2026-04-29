@@ -5,9 +5,9 @@
 use pest::iterators::Pair;
 
 use crate::ast::{
-    Arrow, AtBlockIndex, CableEndpoint, Connection, Direction, Ident, ParamEntry, ParamIndex,
-    PortIndex, PortLabel, PortRef, Scalar, ShapeArg, ShapeArgValue, Statement, TapTarget,
-    Value,
+    Arrow, AtBlockIndex, CableEndpoint, CallArg, CallBlock, Connection, Direction, Ident,
+    ParamEntry, ParamIndex, PortIndex, PortLabel, PortRef, Scalar, ShapeValue, Statement,
+    TapTarget, Value,
 };
 
 use super::decls::build_module_decl;
@@ -95,23 +95,52 @@ pub(super) fn build_value(pair: Pair<'_, Rule>) -> Result<Value, ParseError> {
     }
 }
 
-pub(super) fn build_shape_arg(pair: Pair<'_, Rule>) -> Result<ShapeArg, ParseError> {
-    // pair.as_rule() == Rule::shape_arg
-    // Grammar: shape_arg = { ident ~ ":" ~ (alias_list | scalar) }
-    let span = span_of(&pair);
-    let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
-    let value_pair = it.next().unwrap();
-    let value = match value_pair.as_rule() {
+fn build_shape_value(pair: Pair<'_, Rule>) -> Result<ShapeValue, ParseError> {
+    match pair.as_rule() {
         Rule::alias_list => {
             // alias_list = { "[" ~ (ident ~ ","?)* ~ "]" }
-            let members = value_pair.into_inner().map(build_ident).collect();
-            ShapeArgValue::AliasList(members)
+            let members = pair.into_inner().map(build_ident).collect();
+            Ok(ShapeValue::AliasList(members))
         }
-        Rule::scalar => ShapeArgValue::Scalar(build_scalar(value_pair)?),
-        _ => unreachable!("unexpected rule in shape_arg value: {:?}", value_pair.as_rule()),
-    };
-    Ok(ShapeArg { name, value, span })
+        Rule::scalar => Ok(ShapeValue::Scalar(build_scalar(pair)?)),
+        other => unreachable!("unexpected rule in shape value: {:?}", other),
+    }
+}
+
+pub(super) fn build_call_arg(pair: Pair<'_, Rule>) -> Result<CallArg, ParseError> {
+    // pair.as_rule() == Rule::call_arg
+    // Grammar: call_arg = { named_arg | shorthand_arg | bare_arg }
+    let span = span_of(&pair);
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::named_arg => {
+            // named_arg = { ident ~ ":" ~ (alias_list | scalar) }
+            let mut it = inner.into_inner();
+            let name = build_ident(it.next().unwrap());
+            let value = build_shape_value(it.next().unwrap())?;
+            Ok(CallArg::Named { name, value, span })
+        }
+        Rule::shorthand_arg => {
+            // shorthand_arg = { param_ref }
+            let pr = inner.into_inner().next().unwrap();
+            let name = build_param_ref_name(pr);
+            Ok(CallArg::Shorthand { name, span })
+        }
+        Rule::bare_arg => {
+            // bare_arg = { alias_list | scalar }
+            let v = inner.into_inner().next().unwrap();
+            let value = build_shape_value(v)?;
+            Ok(CallArg::Bare { value, span })
+        }
+        other => unreachable!("unexpected rule in call_arg: {:?}", other),
+    }
+}
+
+pub(super) fn build_call_block(pair: Pair<'_, Rule>) -> Result<CallBlock, ParseError> {
+    // pair.as_rule() == Rule::call_block
+    let span = span_of(&pair);
+    let args = pair.into_inner().map(build_call_arg).collect::<Result<_, _>>()?;
+    Ok(CallBlock { args, span })
 }
 
 pub(super) fn build_at_block(pair: Pair<'_, Rule>) -> Result<ParamEntry, ParseError> {

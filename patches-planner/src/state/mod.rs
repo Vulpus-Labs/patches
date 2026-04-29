@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, PortConnectivity};
+use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, PortConnectivity, StructuralParams};
 use patches_core::graphs::graph::{ModuleGraph, NodeId};
 
 pub mod alloc;
@@ -83,6 +83,12 @@ pub struct NodeState {
     pub layout: patches_ffi_common::param_layout::ParamLayout,
     /// Perfect-hash view index for this instance, computed from `layout`.
     pub view_index: patches_ffi_common::param_frame::ParamViewIndex,
+    /// Structural parameter snapshot used at install for this instance
+    /// (ADR 0060). Compared against the next build's structural input to
+    /// detect structural-edit rebuilds; on a diff the surviving node is
+    /// reclassified as [`NodeDecision::Install`] (forced rebuild via
+    /// `Module::prepare`).
+    pub structural: StructuralParams,
 }
 
 // ── PlannerState ──────────────────────────────────────────────────────────────
@@ -125,12 +131,13 @@ impl PlannerState {
 /// not mint [`InstanceId`]s or call `registry.create`. Both side effects happen
 /// in the action phase that follows.
 pub enum NodeDecision<'a> {
-    /// Node is new, or its module type or shape changed.
+    /// Node is new, or its module type / shape / structural params changed.
     /// A fresh module must be instantiated in the action phase.
     Install {
         module_name: &'static str,
         shape: &'a ModuleShape,
         params: &'a ParameterMap,
+        structural: StructuralParams,
     },
     /// Node is surviving. The existing module stays in the pool.
     /// Non-empty `param_diff` or `connectivity_changed == true` means diffs
@@ -176,10 +183,13 @@ pub fn classify_nodes<'a>(
             PlanError::Internal(format!("node {id:?} missing from graph"))
         })?;
         let desc = &node.module_descriptor;
+        let new_structural = node.structural.clone();
 
         let decision = match prev_state.nodes.get(id) {
             Some(prev_ns)
-                if prev_ns.module_name == desc.module_name && prev_ns.shape == desc.shape =>
+                if prev_ns.module_name == desc.module_name
+                    && prev_ns.shape == desc.shape
+                    && prev_ns.structural == new_structural =>
             {
                 // Surviving node: compute parameter diff and connectivity diff.
                 //
@@ -216,11 +226,14 @@ pub fn classify_nodes<'a>(
                 NodeDecision::Update { instance_id: prev_ns.instance_id, param_diff, connectivity_changed }
             }
             _ => {
-                // New, type-changed, or shape-changed node → fresh installation.
+                // New, type-changed, shape-changed, or structural-changed node
+                // → fresh installation. The action phase mints a new
+                // `InstanceId` and tombstones the previous slot.
                 NodeDecision::Install {
                     module_name: desc.module_name,
                     shape: &desc.shape,
                     params: &node.parameter_map,
+                    structural: new_structural,
                 }
             }
         };

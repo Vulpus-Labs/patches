@@ -66,17 +66,16 @@ fn prev_with_node(
             layout: patches_ffi_common::param_layout::ParamLayout {
                 scalar_size: 0,
                 scalars: Vec::new(),
-                buffer_slots: Vec::new(),
                 descriptor_hash: 0,
             },
             view_index: patches_ffi_common::param_frame::ParamViewIndex::from_layout(
                 &patches_ffi_common::param_layout::ParamLayout {
                     scalar_size: 0,
                     scalars: Vec::new(),
-                    buffer_slots: Vec::new(),
                     descriptor_hash: 0,
                 },
             ),
+            structural: patches_core::StructuralParams::new(),
         },
     );
     state

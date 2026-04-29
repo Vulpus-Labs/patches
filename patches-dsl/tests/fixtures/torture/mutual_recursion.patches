@@ -6,7 +6,7 @@ template recur_a(x: float = 0.0) {
     in:  input
     out: output
 
-    module b : recur_b(x: <x>)
+    module b : recur_b(<x>)
     b.input  <- $.input
     $.output <- b.output
 }
@@ -15,7 +15,7 @@ template recur_b(x: float = 0.0) {
     in:  input
     out: output
 
-    module a : recur_a(x: <x>)
+    module a : recur_a(<x>)
     a.input  <- $.input
     $.output <- a.output
 }

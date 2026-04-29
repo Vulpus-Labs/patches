@@ -10,7 +10,7 @@ template drumkit() {
         }
     }
 
-    module seq : MasterSequencer(channels: [ch]) { song: drums }
+    module seq : MasterSequencer([ch]) { song: drums }
     module out : AudioOut
     seq.clock[ch] -> out.in_left
 }

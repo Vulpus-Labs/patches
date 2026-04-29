@@ -94,7 +94,6 @@ impl Default for TapBlockFrame {
 pub mod test_support;
 
 pub mod audio_environment;
-pub mod ids;
 pub mod param_frame;
 pub mod param_layout;
 pub mod build_error;

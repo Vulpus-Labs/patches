@@ -2,25 +2,15 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use patches_core::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
+    StructuralParams,
 };
-#[cfg(test)]
-use patches_core::StructuralParams;
-use crate::file_processor::FileProcessor;
 use crate::module_builder::{Builder, ModuleBuilder};
-
-/// Type-erased file processor function pointer.
-type FileProcessorFn = Box<
-    dyn Fn(&AudioEnvironment, &ModuleShape, &str, &str) -> Result<Vec<f32>, String>
-        + Send
-        + Sync,
->;
 
 pub struct Registry {
     builders: HashMap<String, Box<dyn ModuleBuilder>>,
     /// Per-builder module version (semver-packed). Built-in (non-FFI)
     /// registrations use `0` so any FFI plugin v >= 1 can shadow them.
     versions: HashMap<String, u32>,
-    file_processors: HashMap<String, FileProcessorFn>,
 }
 
 /// Outcome of a version-aware registry insert.
@@ -45,7 +35,6 @@ impl Registry {
         Self {
             builders: HashMap::new(),
             versions: HashMap::new(),
-            file_processors: HashMap::new(),
         }
     }
 
@@ -57,23 +46,6 @@ impl Registry {
         self.versions.insert(name.to_string(), 0);
         self.builders
             .insert(name.to_string(), Box::new(Builder::<T>(PhantomData)));
-    }
-
-    /// Register a [`FileProcessor`] implementation for a module type.
-    ///
-    /// The module must already be registered via [`register`](Self::register).
-    /// At plan-build time, the planner calls [`process_file`](Self::process_file)
-    /// for any `ParameterValue::File` parameters on modules with a registered
-    /// file processor.
-    pub fn register_file_processor<T>(&mut self)
-    where
-        T: Module + FileProcessor + 'static,
-    {
-        let name = T::describe(&ModuleShape { channels: 0 }).module_name;
-        self.file_processors.insert(
-            name.to_string(),
-            Box::new(|env, shape, param_name, path| T::process_file(env, shape, param_name, path)),
-        );
     }
 
     /// Register a pre-built `ModuleBuilder` under the given name.
@@ -128,34 +100,13 @@ impl Registry {
             .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })
     }
 
-    /// Call the registered [`FileProcessor`] for the given module type.
-    ///
-    /// Returns `None` if no file processor is registered for `module_name`.
-    /// Returns `Some(Err(...))` if the processor fails.
-    pub fn process_file(
-        &self,
-        module_name: &str,
-        env: &AudioEnvironment,
-        shape: &ModuleShape,
-        param_name: &str,
-        path: &str,
-    ) -> Option<Result<Vec<f32>, String>> {
-        self.file_processors
-            .get(module_name)
-            .map(|f| f(env, shape, param_name, path))
-    }
-
-    /// Returns `true` if a [`FileProcessor`] is registered for the given module.
-    pub fn has_file_processor(&self, module_name: &str) -> bool {
-        self.file_processors.contains_key(module_name)
-    }
-
     pub fn create(
         &self,
         name: &str,
         audio_environment: &AudioEnvironment,
         shape: &ModuleShape,
         params: &ParameterMap,
+        structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
         let builder = self
@@ -163,7 +114,7 @@ impl Registry {
             .get(name)
             .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })?;
 
-        builder.build(audio_environment, shape, params, instance_id)
+        builder.build(audio_environment, shape, params, structural, instance_id)
     }
 }
 
@@ -223,7 +174,7 @@ mod tests {
         fn describe(shape: &ModuleShape) -> ModuleDescriptor {
             ModuleDescriptor { module_name: "TestModule", shape: shape.clone(), inputs: vec![], outputs: vec![], realtime_params: vec![], structural_params: vec![] }
         }
-        fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({ Self { instance_id, descriptor } })}
+        fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok(Self { instance_id, descriptor })}
         fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.instance_id }
@@ -267,7 +218,7 @@ mod tests {
         let shape = ModuleShape { channels: 2 };
         let params = ParameterMap::new();
         let audio_environment = AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false };
-        let module = registry.create("TestModule", &audio_environment, &shape, &params, InstanceId::next()).unwrap();
+        let module = registry.create("TestModule", &audio_environment, &shape, &params, &StructuralParams::new(), InstanceId::next()).unwrap();
 
         assert_eq!(module.descriptor().module_name, "TestModule");
         assert_eq!(module.descriptor().shape.channels, 2);

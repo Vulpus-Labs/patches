@@ -8,7 +8,7 @@ template bad_scale(waveform: float = 0.0) {
     osc.x <- $.inp
 }
 patch {
-    module t : bad_scale(waveform: 0.5)
+    module t : bad_scale(0.5)
     module out : AudioOut
     out.in_left <- t.out
 }

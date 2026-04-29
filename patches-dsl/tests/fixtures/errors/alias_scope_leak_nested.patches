@@ -1,7 +1,7 @@
 template Inner() {
     in:  x
     out: y
-    module n : Mixer(channels: [snare])
+    module n : Mixer([snare])
     n.in[snare] <- $.x
     $.y <- n.out
 }

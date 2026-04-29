@@ -17,9 +17,12 @@ Two key design affordances the DSL offers — **use them**:
    implementation from instrument-level orchestration. The top-level
    `patch { ... }` block should read as "how the voices compose", not
    "which oscillators and filters exist".
-2. **Channel aliases** — shape args like `channels: [kick, snare, hat]`
-   give you named indices instead of `in[0]`, `in[1]`, `in[2]`. Always
-   prefer aliases once you have more than two channels.
+2. **Channel aliases** — shape args like `[kick, snare, hat]` give you
+   named indices instead of `in[0]`, `in[1]`, `in[2]`. Always prefer
+   aliases once you have more than two channels. The shape block on a
+   module declaration takes a single positional value: an int
+   (`Mixer(8)`), an alias list (`Mixer([drums, bass])`), or a
+   `<param>` ref (`Mixer(<n>)`).
 
 ## File structure
 
@@ -136,19 +139,19 @@ applied seriously.
 For anything with >2 channels, name them:
 
 ```
-module mix : StereoMixer(channels: [lo, hi, noise]) {
+module mix : StereoMixer([lo, hi, noise]) {
     level[lo]: 0.7, level[hi]: 0.5, level[noise]: 0.3,
     pan[lo]: -0.4, pan[hi]: 0.4,
     send_a[hi]: 0.5
 }
-module seq : MasterSequencer(channels: [kick, snare, hat, bass, lead])
+module seq : MasterSequencer([kick, snare, hat, bass, lead])
 seq.clock[bass] -> bass_pp.clock
 ```
 
 Indexed parameter blocks:
 
 ```
-module del : StereoDelay(channels: [early, late]) {
+module del : StereoDelay([early, late]) {
     @early: { delay_ms: 250, feedback: 0.3 },
     @late:  { delay_ms: 500, feedback: 0.4 }
 }
@@ -181,8 +184,8 @@ names.
 Wiring a sequenced voice:
 
 ```
-module seq : MasterSequencer(channels: [bass]) { song: tune, bpm: 120, rows_per_beat: 4 }
-module bass_pp : PatternPlayer(channels: [note, vel])
+module seq : MasterSequencer([bass]) { song: tune, bpm: 120, rows_per_beat: 4 }
+module bass_pp : PatternPlayer([note, vel])
 module bass_v  : voice(glide_ms: 30.0, cutoff: 4.0)
 
 seq.clock[bass]      -> bass_pp.clock
@@ -316,7 +319,7 @@ Use this when:
 - a user asks about a module you are unsure of — grep the output
 - you need a parameter's exact name or enum variants
 - you are choosing between mono / poly variants
-- you want to confirm whether a module takes a `channels: N` shape arg
+- you want to confirm whether a module takes a positional shape arg
 
 Pipe through `grep -A N "^## ModuleName"` to isolate a single module.
 

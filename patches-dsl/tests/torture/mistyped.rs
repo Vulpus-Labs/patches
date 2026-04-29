@@ -15,7 +15,7 @@ template PortByType(gain: float = 1.0) {
     osc.x <- $.x
 }
 patch {
-    module t   : PortByType(gain: 0.5)
+    module t   : PortByType(0.5)
     module out : AudioOut
     out.in_left <- t.y
 }
@@ -36,7 +36,7 @@ fn error_float_value_as_arity_param() {
 template FloatArity(n: float = 2.5) {
     in:  x
     out: y
-    module m : Sum(channels: 3)
+    module m : Sum(3)
     m.in[*n] <- $.x
     $.y <- m.out
 }
@@ -62,7 +62,7 @@ fn error_negative_arity_param() {
 template NegArity(n: int = -2) {
     in:  x
     out: y
-    module m : Sum(channels: 3)
+    module m : Sum(3)
     m.in[*n] <- $.x
     $.y <- m.out
 }
@@ -95,7 +95,7 @@ template StringScale(label: float = 0.0) {
     osc.x <- $.x
 }
 patch {
-    module t   : StringScale(label: loud)
+    module t   : StringScale(loud)
     module out : AudioOut
     out.in_left <- t.y
 }
@@ -143,7 +143,7 @@ fn error_group_param_in_shape_block() {
 template GroupInShapeBlock(n: int, gains[n]: float = 1.0) {
     in:  x
     out: y
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     m.in[0] <- $.x
     $.y <- m.out
 }

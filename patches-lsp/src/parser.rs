@@ -113,7 +113,7 @@ patch {
 
         let source = r#"
 patch {
-    module del : StereoDelay(channels: [tap1, tap2]) {
+    module del : StereoDelay([tap1, tap2]) {
         @tap1: { delay_ms: 700, feedback: 0.3 }
         @tap2: { delay_ms: 450, feedback: 0.3 }
     }
@@ -146,7 +146,7 @@ template voice(attack: float = 0.01) {
 }
 
 patch {
-    module v : voice(attack: 0.005)
+    module v : voice(0.005)
     module out : AudioOut
     out.in_left <- v.audio
 }

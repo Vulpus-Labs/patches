@@ -198,10 +198,8 @@ pub(super) fn build_stereo_ready(
 /// Per-module IR loader service.
 ///
 /// Runs a background thread that generates synthetic IRs, builds convolvers,
-/// and spawns processing threads — all off the audio thread. For file-based
-/// IRs the heavy work (I/O, FFT partitioning) is done by `FileProcessor` on
-/// the control thread; the loader receives pre-FFT data and only builds the
-/// convolver. Results are delivered via a lock-free ring buffer polled in
+/// and spawns processing threads — all off the audio thread. Results are
+/// delivered via a lock-free ring buffer polled in
 /// [`patches_core::modules::module::PeriodicUpdate::periodic_update`].
 pub(super) struct IrLoader {
     pub(super) request_tx: rtrb::Producer<IrLoadRequest>,

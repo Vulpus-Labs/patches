@@ -93,12 +93,9 @@ fn encode_kind_payload(h: &mut Fnv1a64, kind: &ParameterKind) {
                 h.write_str(v);
             }
         }
-        ParameterKind::File { extensions } => {
-            h.write_u32(extensions.len() as u32);
-            for e in *extensions {
-                h.write_str(e);
-            }
-        }
+        ParameterKind::File { .. } => unreachable!(
+            "ParameterKind::File only valid in structural_params"
+        ),
         ParameterKind::Float { .. }
         | ParameterKind::Int { .. }
         | ParameterKind::Bool { .. }

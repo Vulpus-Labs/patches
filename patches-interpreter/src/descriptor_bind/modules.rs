@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use patches_core::{ModuleDescriptor, ParameterMap, Provenance, QName};
+use patches_core::{ModuleDescriptor, ParameterMap, Provenance, QName, StructuralParams};
 use patches_registry::Registry;
 use patches_dsl::flat::FlatModule;
 
@@ -16,6 +16,11 @@ pub struct ResolvedModule {
     pub type_name: String,
     pub descriptor: ModuleDescriptor,
     pub params: ParameterMap,
+    /// Structural-parameter snapshot (ADR 0060) extracted from the same
+    /// DSL `params` block via [`crate::convert_params`]. Threaded through
+    /// to the runtime graph node so the planner can call `Module::prepare`
+    /// with the user-declared structural values on `Install`.
+    pub structural: StructuralParams,
     pub port_aliases: Vec<(u32, String)>,
     pub provenance: Provenance,
 }
@@ -102,7 +107,7 @@ pub(super) fn bind_module(
         }
     };
 
-    let params = match crate::convert_params(&fm.params, &descriptor, base_dir, song_name_to_index) {
+    let (params, structural) = match crate::convert_params(&fm.params, &descriptor, base_dir, song_name_to_index) {
         Ok(p) => p,
         Err(err) => {
             let code = err.bind_code();
@@ -125,6 +130,7 @@ pub(super) fn bind_module(
         type_name: fm.type_name.clone(),
         descriptor,
         params,
+        structural,
         port_aliases: fm.port_aliases.clone(),
         provenance: fm.provenance.clone(),
     })

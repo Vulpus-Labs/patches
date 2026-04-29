@@ -47,7 +47,7 @@ patch {
     #module vibrato   : Lfo        { rate: 5.0 }
     module pm_spread : MonoToPoly
     module osc       : PolyOsc
-    module mix       : PolySum(channels: 2)
+    module mix       : PolySum(2)
     module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.12,  sustain: 0.65, release: 0.4 }
     module vca       : PolyVca
     module filt_env  : PolyAdsr   { attack: 0.2,   decay: 0.25,  sustain: 0.3,  release: 0.4 }

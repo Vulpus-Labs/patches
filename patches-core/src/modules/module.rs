@@ -72,8 +72,6 @@ pub fn validate_parameters(
                 }
             }
             (ParameterKind::SongName, ParameterValue::Int(_)) => {}
-            (ParameterKind::File { .. }, ParameterValue::File(_)) => {}
-            (ParameterKind::File { .. }, ParameterValue::FloatBuffer(_)) => {}
             _ => {
                 return Err(BuildError::InvalidParameterType {
                     module: descriptor.module_name,
@@ -261,31 +259,22 @@ pub trait Module: Send {
         audio_environment: &AudioEnvironment,
         shape: &ModuleShape,
         params: &ParameterMap,
+        structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Self, BuildError>
     where
         Self: Sized,
     {
         let descriptor = Self::describe(shape);
-        // Module::build is the legacy entry point used where structural params
-        // are not (yet) threaded; pass an empty carrier (ADR 0060 transitional).
-        let structural = StructuralParams::new();
-        let mut instance = Self::prepare(audio_environment, descriptor, instance_id, &structural)?;
+        let mut instance = Self::prepare(audio_environment, descriptor, instance_id, structural)?;
 
-        // Fill in any missing parameters using the descriptor's declared defaults.
-        // The unpacked side sees `declared_defaults` (carries `File("")` for
-        // file params); the packed side uses `defaults` (post-resolution shape
-        // with empty FloatBuffer stand-ins, which the packer accepts).
         let unpacked = ParameterMap::with_overrides(
             &ParameterMap::declared_defaults(instance.descriptor()),
             params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
         let packable = ParameterMap::with_overrides(
             &ParameterMap::defaults(instance.descriptor()),
-            params.iter().filter_map(|(n, i, v)| match v {
-                ParameterValue::File(_) => None,
-                _ => Some((n.to_string(), i, v.clone())),
-            }),
+            params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
 
         let frame = validate_and_pack(instance.descriptor(), &packable)?;

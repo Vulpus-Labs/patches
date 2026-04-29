@@ -70,14 +70,8 @@ macro_rules! __module_params_one {
     ($field:ident : BoolArray) => {
         pub const $field: BoolParamArray = BoolParamArray::new(stringify!($field));
     };
-    ($field:ident : Buffer) => {
-        pub const $field: BufferParamName = BufferParamName::new(stringify!($field));
-    };
     ($field:ident : SongName) => {
         pub const $field: SongNameParamName = SongNameParamName::new(stringify!($field));
-    };
-    ($field:ident : BufferArray) => {
-        pub const $field: BufferParamArray = BufferParamArray::new(stringify!($field));
     };
     ($field:ident : Enum<$E:ty>) => {
         pub const $field: EnumParamName<$E> = EnumParamName::<$E>::new(stringify!($field));
@@ -104,7 +98,6 @@ mod tests {
             gain:    FloatArray,
             steps:   IntArray,
             active:  Bool,
-            ir:      Buffer,
             shape:   Enum<Mode>,
         }
     }
@@ -115,7 +108,6 @@ mod tests {
         assert_eq!(params::gain.as_str(), "gain");
         assert_eq!(params::steps.as_str(), "steps");
         assert_eq!(params::active.as_str(), "active");
-        assert_eq!(params::ir.as_str(), "ir");
         assert_eq!(params::shape.as_str(), "shape");
     }
 

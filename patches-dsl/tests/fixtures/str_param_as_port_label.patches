@@ -6,7 +6,7 @@ template pick(port: str) {
     $.inp -> osc.voct
 }
 patch {
-    module t : pick(port: sine)
+    module t : pick(sine)
     module out : AudioOut
     out.in_left <- t.out
 }

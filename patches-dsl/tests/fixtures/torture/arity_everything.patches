@@ -22,7 +22,7 @@ template GainBus(n: int, solo: int = 0, boost: float = 1.0, gains[n]: float = 0.
     in:  ch[n]
     out: mix, tap
 
-    module m   : Sum(channels: <n>)
+    module m   : Sum(<n>)
     module sel : Identity
     # cfg holds the resolved gains so tests can inspect them as flat params.
     # Shorthand <gains/0> expands to gains/0: <gains/0>, giving key "gains/0".
@@ -44,7 +44,7 @@ template Redirector(ch: int) {
     in:  src
     out: out
 
-    module m : Sum(channels: 4)
+    module m : Sum(4)
     m.in[ch] <- $.src   # [ch] is a param index — selects which m.in slot
     $.out    <- m.out
 }
@@ -67,8 +67,8 @@ patch {
     module bus_p : GainBus(n: 3, solo: 2) { gains[0]: 1.0, gains[1]: 0.3 }
 
     # Redirectors exercising [k] param index on destination side
-    module red0 : Redirector(ch: 0)   # routes to m.in[0]
-    module red2 : Redirector(ch: 2)   # routes to m.in[2]
+    module red0 : Redirector(0)   # routes to m.in[0]
+    module red2 : Redirector(2)   # routes to m.in[2]
 
     # Wire sources into bus_b using literal [N] indices at the call site
     osc0.sine[0] -[1.0]-> bus_b.ch[0]

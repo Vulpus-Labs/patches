@@ -8,7 +8,7 @@ template scaled_conn(gain: float = 1.0) {
     osc.x <- $.x
 }
 patch {
-    module t : scaled_conn(gain: 0.5)
+    module t : scaled_conn(0.5)
     module out : AudioOut
     out.in_left <- t.y
 }

@@ -108,10 +108,10 @@ fn bundle_shares_one_library_handle_across_instances() {
     let any_shape = ModuleShape::default();
     let params = ParameterMap::new();
     let m1 = builders[0]
-        .build(&env(), &any_shape, &params, InstanceId::from_raw(1))
+        .build(&env(), &any_shape, &params, &patches_core::StructuralParams::new(), InstanceId::from_raw(1))
         .expect("build #1 failed");
     let m2 = builders[0]
-        .build(&env(), &any_shape, &params, InstanceId::from_raw(2))
+        .build(&env(), &any_shape, &params, &patches_core::StructuralParams::new(), InstanceId::from_raw(2))
         .expect("build #2 failed");
 
     let with_modules = Arc::strong_count(&retained);

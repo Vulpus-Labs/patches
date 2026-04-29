@@ -21,7 +21,6 @@ use patches_engine::{
     build_patch, ExecutionPlan, OversamplingFactor, PlannerState,
 };
 use patches_ffi::loader::load_plugin;
-use patches_ffi_common::arc_table::{RuntimeArcTables, RuntimeArcTablesConfig};
 use patches_integration_tests::{
     dylib_path, env, HeadlessEngine, MODULE_CAP, POOL_CAP,
 };
@@ -103,13 +102,6 @@ fn soak_ten_thousand_cycles_randomised_params() {
         registry.register_builder(name, Box::new(b));
     }
 
-    // Wire an ArcTable so we can assert drain at shutdown. The vintage
-    // bundle does not use buffer handles, so live_count should stay zero
-    // throughout — covers the acceptance criterion trivially while keeping
-    // the harness in place for future ArcTable-using modules.
-    let (control, _audio) =
-        RuntimeArcTables::new(RuntimeArcTablesConfig { float_buffers: 4 });
-
     let total_cycles: usize = std::env::var("PATCHES_SOAK_CYCLES")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -159,12 +151,6 @@ fn soak_ten_thousand_cycles_randomised_params() {
     // tombstoned module, plan, and param frame is actually released).
     drop(engine);
     drop(registry);
-
-    assert_eq!(
-        control.float_buffer_live_count(),
-        0,
-        "ArcTable must drain to zero at shutdown"
-    );
 
     assert_eq!(
         Arc::strong_count(&lib_arc),

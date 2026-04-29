@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 
 use patches_core::QName;
 
-use crate::ast::{File, ParamType, Scalar, ShapeArg, ShapeArgValue, Span, Template};
+use crate::ast::{File, ParamType, Scalar, Span, Template};
 use crate::flat::{
     FlatConnection, FlatGraph, FlatModule, FlatPatch, FlatPatternDef, FlatPortRef, SongData,
 };
@@ -263,11 +263,21 @@ fn scalar_to_usize(scalar: &Scalar, span: &Span) -> Result<usize, ExpandError> {
     scalar_to_u32(scalar, span).map(|v| v as usize)
 }
 
-/// Build an alias map from `AliasList` shape args: alias name → index.
-fn build_alias_map(shape: &[ShapeArg]) -> HashMap<String, u32> {
+/// Build an alias map from any `AliasList` value carried in a module-call
+/// arg block: alias name → index.
+fn build_alias_map(call_block: &Option<crate::ast::CallBlock>) -> HashMap<String, u32> {
     let mut map = HashMap::new();
-    for arg in shape {
-        if let ShapeArgValue::AliasList(names) = &arg.value {
+    let cb = match call_block {
+        Some(cb) => cb,
+        None => return map,
+    };
+    for arg in &cb.args {
+        let value = match arg {
+            crate::ast::CallArg::Bare { value, .. } => value,
+            crate::ast::CallArg::Named { value, .. } => value,
+            crate::ast::CallArg::Shorthand { .. } => continue,
+        };
+        if let crate::ast::ShapeValue::AliasList(names) = value {
             for (i, name_ident) in names.iter().enumerate() {
                 map.insert(name_ident.name.clone(), i as u32);
             }

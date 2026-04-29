@@ -70,11 +70,11 @@ song s(c) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [c]) {
+    module seq: MasterSequencer([c]) {
         song: s, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: false, swing: 0.5
     }
-    module player: PatternPlayer(channels: [ch])
+    module player: PatternPlayer([ch])
     module t2a: SyncToTrigger
     module out: AudioOut
 

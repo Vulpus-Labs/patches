@@ -44,7 +44,7 @@ patch {
     # ── Quantiser: major pentatonic C D E G A across two octaves around C4 ───
     # centre: 4.0 shifts the base to C4 (voct 4.0); the ±3 oct noise range
     # means the melody spans roughly C1–C7.
-    module quant : Quant(channels: [root, second, third, fifth, sixth]) {
+    module quant : Quant([root, second, third, fifth, sixth]) {
         pitch[root]:   C0,
         pitch[second]: D0,
         pitch[third]:  E0,
@@ -104,7 +104,7 @@ patch {
     osc.sine       -> vca.in
     env.out        -> vca.cv
 
-    module del : StereoDelay(channels: 1) {
+    module del : StereoDelay(1) {
         delay_ms[0]: 1200,
         feedback[0]: 0.6,
         gain[0]: 1.0,
@@ -112,7 +112,7 @@ patch {
         pingpong[0]: true
     }
 
-    module mix : StereoMixer(channels: 1) {
+    module mix : StereoMixer(1) {
         level[0]: 0.7,
         send_a[0]: 0.4,
         send_b[0]: 0.4

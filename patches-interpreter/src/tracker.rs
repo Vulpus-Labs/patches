@@ -211,21 +211,6 @@ pub(crate) fn convert_value(
             .ok_or_else(|| {
                 ParamConversionError::OutOfRange(format!("invalid enum variant '{s}'"))
             }),
-        (Value::File(path), ParameterKind::File { extensions }) => {
-            if !path.is_empty() {
-                let ext = std::path::Path::new(path)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
-                if !extensions.is_empty() && !extensions.iter().any(|&e| e.eq_ignore_ascii_case(ext)) {
-                    return Err(ParamConversionError::OutOfRange(format!(
-                        "unsupported file extension '.{ext}'; expected one of: {}",
-                        extensions.join(", ")
-                    )));
-                }
-            }
-            Ok(ParameterValue::File(path.clone()))
-        }
         (Value::Scalar(Scalar::Str(s)), ParameterKind::SongName) => {
             if s.is_empty() {
                 Ok(ParameterValue::Int(-1))

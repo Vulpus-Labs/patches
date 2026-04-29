@@ -36,27 +36,53 @@ pub enum Value {
 
 // ─── Module declarations ──────────────────────────────────────────────────────
 
-/// The value of a `shape_arg`: either a plain scalar or an alias list.
+/// A bare value carried in a module-call arg block: a scalar or alias list.
 ///
-/// An alias list `[drums, bass, guitar]` declares per-channel symbolic names for
-/// that shape dimension. The count of the list is used as the integer value of
-/// the shape parameter; the individual names become available as aliases.
+/// An alias list `[drums, bass, guitar]` declares per-channel symbolic names
+/// for the shape dimension. The count of the list is used as the integer
+/// value of the shape parameter; the individual names become available as
+/// aliases.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ShapeArgValue {
+pub enum ShapeValue {
     /// A plain scalar (int, float, param ref, etc.).
     Scalar(Scalar),
     /// A bracketed list of alias identifiers: `[drums, bass, guitar]`.
     AliasList(Vec<Ident>),
 }
 
-/// One `ident: scalar` or `ident: [alias, ...]` entry inside a shape block `(...)`.
+/// One entry inside a module-call arg block `(...)`.
 ///
-/// Shape params are always scalar ints (possibly supplied via a `<param_ref>`)
-/// or alias lists (which resolve to their count).
+/// Three syntactic forms; semantic interpretation (shape vs template call
+/// arg) is chosen by the expander based on whether the module type is a
+/// primitive or a template.
+///
+/// - `Bare(value)`     — a positional scalar/alias list (`Foo(8)`,
+///   `Foo([a,b,c])`, `Foo(<n>)` — the param-ref case lands here).
+/// - `Named { ... }`   — a named template arg `name: value`
+///   (`Foo(wave: square)`).
+/// - `Shorthand(name)` — `<ident>` shorthand for `name: <name>` on a
+///   template call.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ShapeArg {
-    pub name: Ident,
-    pub value: ShapeArgValue,
+pub enum CallArg {
+    Bare {
+        value: ShapeValue,
+        span: Span,
+    },
+    Named {
+        name: Ident,
+        value: ShapeValue,
+        span: Span,
+    },
+    Shorthand {
+        name: String,
+        span: Span,
+    },
+}
+
+/// The parenthesised arg block on a module declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallBlock {
+    pub args: Vec<CallArg>,
     pub span: Span,
 }
 
@@ -102,7 +128,7 @@ pub enum ParamEntry {
 pub struct ModuleDecl {
     pub name: Ident,
     pub type_name: Ident,
-    pub shape: Vec<ShapeArg>,
+    pub call_block: Option<CallBlock>,
     pub params: Vec<ParamEntry>,
     pub span: Span,
 }

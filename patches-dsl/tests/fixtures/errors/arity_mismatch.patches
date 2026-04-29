@@ -1,8 +1,8 @@
 template Mismatch(n: int, m: int) {
     in:  x
     out: y
-    module a : Sum(channels: <n>)
-    module b : Sum(channels: <m>)
+    module a : Sum(<n>)
+    module b : Sum(<m>)
     a.in[*n] <- b.out[*m]
     $.x <- a.in[0]
     $.y <- b.out[0]

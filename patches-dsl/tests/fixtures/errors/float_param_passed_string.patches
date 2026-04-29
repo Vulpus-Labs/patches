@@ -6,7 +6,7 @@ template gain(level: float = 1.0) {
     amp.out -> $.out
 }
 patch {
-    module t : gain(level: loud)
+    module t : gain(loud)
     module out : AudioOut
     out.in_left <- t.out
 }

@@ -51,18 +51,25 @@ file_ref    = { "file" ~ "(" ~ (string_lit | param_ref) ~ ")" }
 scalar      = { float_unit | float_lit | int_lit | bool_lit | note_lit | string_lit | param_ref | ident }
 value       = { file_ref | scalar }
 
-// ─── Shape and param blocks ───────────────────────────────────────────────────
+// ─── Module-call arg block ────────────────────────────────────────────────────
 // alias_list: a bracketed list of identifiers; used in shape args to declare
 // per-channel aliases.
 //   [drums, bass, guitar]  →  AliasList(["drums", "bass", "guitar"])
 alias_list  = { "[" ~ (ident ~ ","?)* ~ "]" }
-// shape_arg: either an alias list or a single scalar.
-//   channels: [drums, bass, guitar]  → ShapeArg { name:"channels", value:AliasList(...) }
-//   channels: 2                      → ShapeArg { name:"channels", value:Scalar(Int(2)) }
-//   channels: <n>                    → ShapeArg { name:"channels", value:Scalar(ParamRef("n")) }
-// alias_list must come before scalar so "[" is not consumed as an array.
-shape_arg   = { ident ~ ":" ~ (alias_list | scalar) }
-shape_block = { "(" ~ (shape_arg ~ ","?)* ~ ")" }
+// call_block: the parenthesised block on a module declaration.
+// Carries either a shape value (positional `channels` for primitive modules)
+// or template call args (named entries / shorthand `<ident>` / single
+// positional value for one-param templates). Disambiguated semantically by
+// the expander — see `crate::expand::binding`.
+//
+// Order matters: `named_arg` must come before `bare_arg` so `ident:` is not
+// consumed as a bare scalar identifier. `shorthand_arg` must come before
+// `bare_arg` so `<ident>` is recognised as shorthand.
+named_arg     = { ident ~ ":" ~ (alias_list | scalar) }
+shorthand_arg = { param_ref }
+bare_arg      = { alias_list | scalar }
+call_arg      = { named_arg | shorthand_arg | bare_arg }
+call_block    = { "(" ~ (call_arg ~ ","?)* ~ ")" }
 
 // param_index: literal index [N], arity wildcard [*ident], or alias [ident].
 // Compound-atomic for arity to prevent whitespace between * and ident.
@@ -85,7 +92,7 @@ param_entry = { at_block | ident ~ param_index? ~ ":" ~ value }
 param_block = { "{" ~ ((param_ref | param_entry) ~ ","?)* ~ "}" }
 
 // ─── Module declaration ───────────────────────────────────────────────────────
-module_decl = { "module" ~ ident ~ ":" ~ ident ~ shape_block? ~ param_block? }
+module_decl = { "module" ~ ident ~ ":" ~ ident ~ call_block? ~ param_block? }
 
 // ─── Port references ──────────────────────────────────────────────────────────
 // Compound-atomic: no whitespace within "mod.port[k]"

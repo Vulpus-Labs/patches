@@ -9,13 +9,13 @@ error[E0277]: the trait bound `FloatParamArray: ParamKey` is not satisfied
    = help: the following other types implement trait `ParamKey`:
              BoolParamKey
              BoolParamName
-             BufferParamKey
-             BufferParamName
              EnumParamKey<E>
              EnumParamName<E>
              FloatParamKey
              FloatParamName
-           and $N others
+             IntParamKey
+             IntParamName
+             SongNameParamName
 note: required by a bound in `ParamView::<'a>::get`
   --> src/param_frame/view.rs
    |

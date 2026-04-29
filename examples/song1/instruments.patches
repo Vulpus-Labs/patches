@@ -7,7 +7,7 @@ template bass(glide_ms: float = 40.0, q: float = 0.7, filter_env_amount: float =
     module sub : Osc
     module saw : Osc { frequency: 0.004}
     module tuner : Tuner { octave: -1 }
-    module sum : Sum(channels: [sub, saw, square])
+    module sum : Sum([sub, saw, square])
     module glide : Glide { glide_ms: <glide_ms> }
     module amp_env : env
     module filter_env : Adsr { attack: 0.005, decay: 0.12, sustain: 0.0, release: 0.1 }
@@ -26,7 +26,7 @@ template bass(glide_ms: float = 40.0, q: float = 0.7, filter_env_amount: float =
 
     sum.out -> filter.in
 
-    module cutoff_sum : Sum(channels: [cutoff, env])
+    module cutoff_sum : Sum([cutoff, env])
     $.cutoff -[0.4]-> cutoff_sum.in[cutoff]
     filter_env.out -[<filter_env_amount>]-> cutoff_sum.in[env]
     cutoff_sum.out -> filter.voct

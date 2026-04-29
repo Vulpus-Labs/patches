@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn completions_for_at_block_aliases() {
         let source =
-            "patch {\n    module mx : Mixer(channels: [drum, bass]) {\n        @\n    }\n}";
+            "patch {\n    module mx : Mixer([drum, bass]) {\n        @\n    }\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find('@').unwrap() + 1;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn completions_for_port_index_aliases() {
         let source =
-            "patch {\n    module mix : Mixer(channels: [drum, bass])\n    mix.out[\n}";
+            "patch {\n    module mix : Mixer([drum, bass])\n    mix.out[\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find("out[").unwrap() + 4;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn completions_for_song_names_in_master_sequencer() {
-        let source = "song my_song(ch) {\n    play {}\n}\n\npatch {\n    module seq : MasterSequencer(channels: [ch]) {\n        song: \n    }\n}";
+        let source = "song my_song(ch) {\n    play {}\n}\n\npatch {\n    module seq : MasterSequencer([ch]) {\n        song: \n    }\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find("song: \n").unwrap() + 6;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);

@@ -15,11 +15,11 @@ song s(c) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [c]) {
+    module seq: MasterSequencer([c]) {
         song: s, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: true, swing: 0.5
     }
-    module player: PatternPlayer(channels: [ch])
+    module player: PatternPlayer([ch])
     module out: AudioOut
 
     seq.clock[c] -> player.clock
@@ -73,11 +73,11 @@ song s(c) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [c]) {
+    module seq: MasterSequencer([c]) {
         song: s, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: true, swing: 0.5
     }
-    module player: PatternPlayer(channels: [ch])
+    module player: PatternPlayer([ch])
     module t2a: SyncToTrigger
     module out: AudioOut
 
@@ -125,11 +125,11 @@ song s(c) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [c]) {
+    module seq: MasterSequencer([c]) {
         song: s, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: true, swing: 0.5
     }
-    module player: PatternPlayer(channels: [ch])
+    module player: PatternPlayer([ch])
     module osc: Osc
     module env: Adsr { attack: 0.001, decay: 0.02, sustain: 0.0, release: 0.001 }
     module vca: Vca
@@ -186,11 +186,11 @@ song s(c) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [c]) {
+    module seq: MasterSequencer([c]) {
         song: s, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: true, swing: 0.5
     }
-    module player: PatternPlayer(channels: [ch])
+    module player: PatternPlayer([ch])
     module osc: Osc
     module env: Adsr { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.001 }
     module vca: Vca

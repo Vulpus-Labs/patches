@@ -31,7 +31,7 @@ patch {
     filt.lowpass  -> vca.in
     env.out       -> vca.cv
 
-    module delay : StereoDelay(channels: 1) { delay_ms: 250, feedback: 0.3, dry_wet: 0.3, pingpong: true }
+    module delay : StereoDelay(1) { delay_ms: 250, feedback: 0.3, dry_wet: 0.3, pingpong: true }
     module lim   : StereoLimiter
     module out   : AudioOut
 

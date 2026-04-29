@@ -56,7 +56,6 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
 };
 use patches_core::{StructuralParams};
-use patches_registry::FileProcessor;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
 
@@ -92,28 +91,22 @@ pub struct ConvolutionReverb {
     /// `apply_unpacked_params` consumes this on first call to install the
     /// convolver synchronously.
     pre_fft_ir: Option<Vec<f32>>,
+    /// Sticky witness: `true` iff `prepare` decoded a non-empty IR from the
+    /// `ir_path` structural param. Survives `apply_unpacked_params` so
+    /// integration tests can assert the structural pipeline reached
+    /// `Module::prepare` (ADR 0060, ticket 0746).
+    prepared_with_ir_path: bool,
 }
 
 // SAFETY: see ConvReverbCore.
 unsafe impl Send for ConvolutionReverb {}
 
-impl FileProcessor for ConvolutionReverb {
-    fn process_file(
-        env: &AudioEnvironment,
-        _shape: &ModuleShape,
-        _param_name: &str,
-        path: &str,
-    ) -> Result<Vec<f32>, String> {
-        let samples = patches_io::read_mono(
-            std::path::Path::new(path),
-            env.sample_rate as f64,
-        )
-        .map_err(|e| format!("failed to load '{path}': {e}"))?;
-        Ok(NonUniformConvolver::serialize_pre_fft(
-            &samples,
-            BLOCK_SIZE,
-            MAX_TIER_BLOCK_SIZE,
-        ))
+impl ConvolutionReverb {
+    /// Test/observation hook (ADR 0060): `true` when `prepare` decoded a
+    /// non-empty IR from the `ir_path` structural param. Sticky — set once
+    /// at `prepare` time, survives `apply_unpacked_params`.
+    pub fn prepared_with_ir_path(&self) -> bool {
+        self.prepared_with_ir_path
     }
 }
 
@@ -151,6 +144,7 @@ impl patches_core::Module for ConvolutionReverb {
             }
             _ => None,
         };
+        let prepared_with_ir_path = pre_fft_ir.as_ref().is_some_and(|v| !v.is_empty());
         Ok(Self {
             instance_id,
             descriptor,
@@ -159,6 +153,7 @@ impl patches_core::Module for ConvolutionReverb {
             out_audio: MonoOutput::default(),
             core: ConvReverbCore::new(false, audio_environment.sample_rate),
             pre_fft_ir,
+            prepared_with_ir_path,
         })
     }
 

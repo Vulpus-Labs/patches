@@ -11,7 +11,7 @@ template Voice(freq: float = 440.0) {
 }
 patch {
     module src : Clock { bpm: 120.0 }
-    module v   : Voice(freq: 880.0)
+    module v   : Voice(880.0)
     module out : AudioOut
     src.semiquaver -> v.gate
     out.in_left    <- v.audio

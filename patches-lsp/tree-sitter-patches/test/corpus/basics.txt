@@ -41,7 +41,7 @@ Module with shape arguments
 ================================================================================
 
 patch {
-    module mix : Sum(channels: 3)
+    module mix : Sum(3)
 }
 
 --------------------------------------------------------------------------------
@@ -62,7 +62,7 @@ Module with shape alias list
 ================================================================================
 
 patch {
-    module del : StereoDelay(channels: [tap1, tap2])
+    module del : StereoDelay([tap1, tap2])
 }
 
 --------------------------------------------------------------------------------
@@ -156,7 +156,7 @@ Negative scale (phase inversion)
 
 patch {
     module a : Osc
-    module b : Sum(channels: 1)
+    module b : Sum(1)
     b.in[0] <-[-0.5]- a.sine
 }
 
@@ -184,7 +184,7 @@ Indexed port references (literal)
 ================================================================================
 
 patch {
-    module mix : Sum(channels: 3)
+    module mix : Sum(3)
     module osc : Osc
     osc.sine -> mix.in[0]
     osc.sine -> mix.in[2]

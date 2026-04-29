@@ -19,10 +19,7 @@ pub type Handle = *mut c_void;
 ///
 /// Delivers a complete snapshot of the module's parameters in the wire
 /// format dictated by the module's `ParamLayout`. Pointers are valid only
-/// for the duration of the call; scalars must be copied if kept. Buffer ids
-/// present in the tail slot table arrive **already retained** on the plugin's
-/// behalf (ADR 0045 §2, lifecycle point 3) — the plugin is responsible for
-/// exactly one `arc_release` per id when it no longer needs it.
+/// for the duration of the call; scalars must be copied if kept.
 pub type UpdateValidatedParametersFn = unsafe extern "C" fn(
     handle: Handle,
     bytes: *const u8,
@@ -59,13 +56,9 @@ pub type ProcessFn = unsafe extern "C" fn(
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct HostEnv {
-    /// Release one `FloatBufferId` the plugin no longer needs. Audio-safe:
-    /// a single atomic `fetch_sub` on the refcount map plus a lock-free
-    /// queue push if the count reached zero.
-    pub float_buffer_release: extern "C" fn(u64),
-    /// Release one `SongDataId`. Shape mirrors `float_buffer_release`. Kept
-    /// even though the tracker path does not cross FFI today (ADR 0045 §6),
-    /// so the vtable shape is stable as future payload types land.
+    /// Release one `SongDataId`. Kept even though the tracker path does not
+    /// cross FFI today (ADR 0045 §6), so the vtable shape is stable as
+    /// future payload types land.
     pub song_data_release: extern "C" fn(u64),
 }
 
@@ -78,19 +71,16 @@ mod tests {
 
     #[test]
     fn host_env_layout_is_stable() {
-        assert_eq!(size_of::<HostEnv>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<HostEnv>(), size_of::<usize>());
         assert_eq!(align_of::<HostEnv>(), align_of::<usize>());
-        assert_eq!(offset_of!(HostEnv, float_buffer_release), 0);
-        assert_eq!(offset_of!(HostEnv, song_data_release), size_of::<usize>());
+        assert_eq!(offset_of!(HostEnv, song_data_release), 0);
     }
 
     #[test]
     fn host_env_constructible() {
         let env = HostEnv {
-            float_buffer_release: noop_release,
             song_data_release: noop_release,
         };
-        (env.float_buffer_release)(0);
         (env.song_data_release)(0);
     }
 

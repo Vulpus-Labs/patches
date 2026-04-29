@@ -1,7 +1,7 @@
 # error: malformed_index — port index using a float (mix.in[3.14] is not valid)
 patch {
     module osc : Osc { frequency: 440.0 }
-    module mix : Sum(channels: 2)
+    module mix : Sum(2)
     module out : AudioOut
 
     osc.sine -> mix.in[3.14]

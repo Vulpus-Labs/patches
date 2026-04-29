@@ -9,7 +9,7 @@ patch {
     module osc_a     : PolyOsc { frequency: -0.004 }
     module osc_b     : PolyOsc { frequency:  0.004 }
     module sub       : PolyOsc { frequency: -1.0 }
-    module mix       : PolySum(channels: 3)
+    module mix       : PolySum(3)
 
     module amp_env   : PolyAdsr { attack: 0.35, decay: 0.4, sustain: 0.85, release: 1.2 }
     module filt_env  : PolyAdsr { attack: 0.6,  decay: 0.9, sustain: 0.5,  release: 1.0 }
@@ -53,13 +53,13 @@ patch {
     collapse.out -[0.22]-> chorus.in
 
     # Short BBD delay for air, low feedback (one per side)
-    module delay_l : VBbd(channels: 1) {
+    module delay_l : VBbd(1) {
         dry_wet: 0.4,
         delay_ms[0]: 200,
         gain[0]: 1.0,
         feedback[0]: 0.3
     }
-    module delay_r : VBbd(channels: 1) {
+    module delay_r : VBbd(1) {
         dry_wet: 0.4,
         delay_ms[0]: 150,
         gain[0]: 1.0,

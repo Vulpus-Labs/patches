@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use super::module_descriptor::{ModuleDescriptor, ParameterKind};
 
@@ -65,12 +64,6 @@ pub enum ParameterValue {
     /// Enum variant index matching the order of
     /// [`ParameterKind::Enum::variants`](super::module_descriptor::ParameterKind::Enum).
     Enum(u32),
-    /// A resolved absolute file path. Produced by the interpreter from
-    /// `file("path")` DSL syntax. The planner replaces this with `FloatBuffer`
-    /// after calling the module's `FileProcessor::process_file`.
-    File(String),
-    /// Pre-processed file data as a flat float buffer.
-    FloatBuffer(Arc<[f32]>),
 }
 
 impl From<f32> for ParameterValue {
@@ -90,8 +83,6 @@ impl ParameterValue {
             ParameterValue::Int(_) => "int",
             ParameterValue::Bool(_) => "bool",
             ParameterValue::Enum(_) => "enum",
-            ParameterValue::File(_) => "file",
-            ParameterValue::FloatBuffer(_) => "float_buffer",
         }
     }
 }
@@ -188,8 +179,8 @@ impl ParameterMap {
                     let idx = variants.iter().position(|v| v == default).unwrap_or(0);
                     ParameterValue::Enum(idx as u32)
                 }
-                ParameterKind::File { .. } => ParameterValue::FloatBuffer(
-                    Arc::<[f32]>::from(Vec::<f32>::new().into_boxed_slice()),
+                ParameterKind::File { .. } => unreachable!(
+                    "ParameterKind::File only valid in structural_params, not realtime_params"
                 ),
                 ParameterKind::SongName => ParameterValue::Int(0),
             };
@@ -239,6 +230,26 @@ impl ParameterMap {
     /// (`planner::builder::diff_non_empty`) uses this to skip empty diffs.
     pub fn is_empty(&self) -> bool {
         self.0.values().all(|v| v.is_empty())
+    }
+}
+
+/// Collect a sparse map from an iterator of `(name, index, value)`.
+///
+/// Produces a possibly-sparse map. Use [`ParameterMap::defaults`] +
+/// [`ParameterMap::with_overrides`] when a descriptor-complete map is needed.
+/// This impl exists for planner diffs and test construction.
+impl FromIterator<(String, usize, ParameterValue)> for ParameterMap {
+    fn from_iter<I: IntoIterator<Item = (String, usize, ParameterValue)>>(iter: I) -> Self {
+        let mut inner: HashMap<String, Vec<(usize, ParameterValue)>> = HashMap::new();
+        for (name, index, value) in iter {
+            let entries = inner.entry(name).or_default();
+            if let Some(existing) = entries.iter_mut().find(|(i, _)| *i == index) {
+                existing.1 = value;
+            } else {
+                entries.push((index, value));
+            }
+        }
+        Self(inner)
     }
 }
 
@@ -465,25 +476,5 @@ mod tests {
         m.insert_param("k", 1, pv_f(2.0));
         assert_eq!(m.get("k", 0), Some(&pv_f(1.0)));
         assert_eq!(m.get("k", 1), Some(&pv_f(2.0)));
-    }
-}
-
-/// Collect a sparse map from an iterator of `(name, index, value)`.
-///
-/// Produces a possibly-sparse map. Use [`ParameterMap::defaults`] +
-/// [`ParameterMap::with_overrides`] when a descriptor-complete map is needed.
-/// This impl exists for planner diffs and test construction.
-impl FromIterator<(String, usize, ParameterValue)> for ParameterMap {
-    fn from_iter<I: IntoIterator<Item = (String, usize, ParameterValue)>>(iter: I) -> Self {
-        let mut inner: HashMap<String, Vec<(usize, ParameterValue)>> = HashMap::new();
-        for (name, index, value) in iter {
-            let entries = inner.entry(name).or_default();
-            if let Some(existing) = entries.iter_mut().find(|(i, _)| *i == index) {
-                existing.1 = value;
-            } else {
-                entries.push((index, value));
-            }
-        }
-        Self(inner)
     }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{AtBlockIndex, ParamEntry, ParamIndex, Scalar, ShapeArgValue, Span, Value};
+use crate::ast::{AtBlockIndex, ParamEntry, ParamIndex, Scalar, ShapeValue, Span, Value};
 use crate::structural::StructuralCode as Code;
 
 use super::connection::deref_index_alias;
@@ -46,18 +46,18 @@ pub(in crate::expand) fn subst_value(
     }
 }
 
-/// Resolve a `ShapeArgValue` to a `Scalar`.
+/// Resolve a `ShapeValue` to a `Scalar`.
 ///
 /// - `Scalar(s)` → substitute param refs / enum refs, return resulting scalar.
 /// - `AliasList(names)` → return `Scalar::Int(names.len())` (count).
-pub(in crate::expand) fn eval_shape_arg_value(
-    value: &ShapeArgValue,
+pub(in crate::expand) fn eval_shape_value(
+    value: &ShapeValue,
     param_env: &HashMap<String, Scalar>,
     span: &Span,
 ) -> Result<Scalar, ExpandError> {
     match value {
-        ShapeArgValue::Scalar(s) => subst_scalar(s, param_env, span),
-        ShapeArgValue::AliasList(names) => Ok(Scalar::Int(names.len() as i64)),
+        ShapeValue::Scalar(s) => subst_scalar(s, param_env, span),
+        ShapeValue::AliasList(names) => Ok(Scalar::Int(names.len() as i64)),
     }
 }
 
@@ -189,21 +189,21 @@ mod tests {
         assert_eq!(out, Value::File("a.wav".into()));
     }
 
-    // ── eval_shape_arg_value ──────────────────────────────────────────────────
+    // ── eval_shape_value ──────────────────────────────────────────────────
 
     #[test]
-    fn eval_shape_arg_alias_list_returns_count() {
+    fn eval_shape_alias_list_returns_count() {
         let env = env(&[]);
-        let v = ShapeArgValue::AliasList(vec![ident("a"), ident("b"), ident("c")]);
-        let out = eval_shape_arg_value(&v, &env, &sp()).unwrap();
+        let v = ShapeValue::AliasList(vec![ident("a"), ident("b"), ident("c")]);
+        let out = eval_shape_value(&v, &env, &sp()).unwrap();
         assert_eq!(out, Scalar::Int(3));
     }
 
     #[test]
-    fn eval_shape_arg_scalar_delegates_to_subst() {
+    fn eval_shape_scalar_delegates_to_subst() {
         let env = env(&[("n", Scalar::Int(5))]);
-        let v = ShapeArgValue::Scalar(Scalar::ParamRef("n".into()));
-        let out = eval_shape_arg_value(&v, &env, &sp()).unwrap();
+        let v = ShapeValue::Scalar(Scalar::ParamRef("n".into()));
+        let out = eval_shape_value(&v, &env, &sp()).unwrap();
         assert_eq!(out, Scalar::Int(5));
     }
 

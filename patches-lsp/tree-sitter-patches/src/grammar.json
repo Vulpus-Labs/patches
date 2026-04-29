@@ -484,7 +484,7 @@
         }
       ]
     },
-    "shape_arg": {
+    "named_arg": {
       "type": "SEQ",
       "members": [
         {
@@ -514,7 +514,49 @@
         }
       ]
     },
-    "shape_block": {
+    "shorthand_arg": {
+      "type": "PREC",
+      "value": 2,
+      "content": {
+        "type": "SYMBOL",
+        "name": "param_ref"
+      }
+    },
+    "bare_arg": {
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "alias_list"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "scalar"
+          }
+        ]
+      }
+    },
+    "call_arg": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "named_arg"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "shorthand_arg"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "bare_arg"
+        }
+      ]
+    },
+    "call_block": {
       "type": "SEQ",
       "members": [
         {
@@ -529,7 +571,7 @@
               "members": [
                 {
                   "type": "SYMBOL",
-                  "name": "shape_arg"
+                  "name": "call_arg"
                 },
                 {
                   "type": "REPEAT",
@@ -542,7 +584,7 @@
                       },
                       {
                         "type": "SYMBOL",
-                        "name": "shape_arg"
+                        "name": "call_arg"
                       }
                     ]
                   }
@@ -848,7 +890,7 @@
           "members": [
             {
               "type": "SYMBOL",
-              "name": "shape_block"
+              "name": "call_block"
             },
             {
               "type": "BLANK"

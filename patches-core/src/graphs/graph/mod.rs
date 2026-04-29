@@ -3,7 +3,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::cables::{CableKind, MonoLayout, PolyLayout};
-use crate::modules::{ModuleDescriptor, ParameterMap, PortRef};
+use crate::modules::{ModuleDescriptor, ParameterMap, PortRef, StructuralParams};
 
 /// Stable identifier for a module node in the graph.
 ///
@@ -160,6 +160,10 @@ struct Edge {
 pub struct Node {
     pub module_descriptor: ModuleDescriptor,
     pub parameter_map: ParameterMap,
+    /// Structural-parameter snapshot (ADR 0060) for this node. Read by
+    /// the planner on `Install` and threaded into `Module::prepare` via
+    /// the registry. Default: empty carrier (no structural overrides).
+    pub structural: StructuralParams,
 }
 
 /// An in-memory, editable directed graph of audio modules connected by patch cables.
@@ -196,6 +200,24 @@ impl ModuleGraph {
         module_descriptor: ModuleDescriptor,
         parameter_map: &ParameterMap,
     ) -> Result<(), GraphError> {
+        self.add_module_with_structural(
+            id,
+            module_descriptor,
+            parameter_map,
+            &StructuralParams::new(),
+        )
+    }
+
+    /// Add a module with both realtime and structural parameter carriers
+    /// (ADR 0060). Used by the interpreter on the `.patches` build path so
+    /// the planner can read structural values directly from the graph node.
+    pub fn add_module_with_structural(
+        &mut self,
+        id: impl Into<NodeId>,
+        module_descriptor: ModuleDescriptor,
+        parameter_map: &ParameterMap,
+        structural: &StructuralParams,
+    ) -> Result<(), GraphError> {
         let id = id.into();
         if self.nodes.contains_key(&id) {
             return Err(GraphError::DuplicateNodeId(id));
@@ -205,6 +227,7 @@ impl ModuleGraph {
             Node {
                 module_descriptor,
                 parameter_map: parameter_map.clone(),
+                structural: structural.clone(),
             },
         );
         Ok(())

@@ -124,13 +124,13 @@ fn scale_param_ref_boundary_with_nontrivial_outer() {
 template Boosted(boost: float = 1.0) {
     in:  x
     out: mix
-    module m : Sum(channels: 1)
+    module m : Sum(1)
     m.in[0]  <- $.x
     $.mix <-[<boost>]- m.out
 }
 patch {
     module osc : Osc
-    module t   : Boosted(boost: 0.4)
+    module t   : Boosted(0.4)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.x
     out.in_left    <-[0.5]- t.mix

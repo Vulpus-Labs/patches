@@ -75,7 +75,7 @@ fn duplicate_input_connection_surfaces_as_bn0009() {
 patch {
     module a : Osc
     module b : Osc
-    module mix : Sum(channels: 1)
+    module mix : Sum(1)
     a.sine -> mix.in
     b.sine -> mix.in
 }

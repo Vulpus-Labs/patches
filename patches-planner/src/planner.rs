@@ -101,7 +101,22 @@ impl Planner {
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
     ) -> Result<ExecutionPlan, BuildError> {
-        let (mut plan, new_state) = self.builder.build_patch(graph, registry, env, &self.state)?;
+        self.build_full(graph, registry, env, tracker_data)
+    }
+
+    fn build_full(
+        &mut self,
+        graph: &ModuleGraph,
+        registry: &Registry,
+        env: &AudioEnvironment,
+        tracker_data: Option<patches_core::TrackerData>,
+    ) -> Result<ExecutionPlan, BuildError> {
+        let (mut plan, new_state) = self.builder.build_patch(
+            graph,
+            registry,
+            env,
+            &self.state,
+        )?;
 
         // ── Populate tracker_receiver_indices ────────────────────────────────
         let mut new_tracker_ids: HashSet<InstanceId> = self

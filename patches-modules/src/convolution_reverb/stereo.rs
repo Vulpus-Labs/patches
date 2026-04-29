@@ -9,7 +9,6 @@ use patches_core::{
     ModuleDescriptor, ModuleShape, MonoInput, OutputPort, StereoInput, StereoOutput,
 };
 use patches_core::{StructuralParams};
-use patches_registry::FileProcessor;
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
 
@@ -38,31 +37,6 @@ pub struct StereoConvReverb {
 }
 
 unsafe impl Send for StereoConvReverb {}
-
-impl FileProcessor for StereoConvReverb {
-    fn process_file(
-        env: &AudioEnvironment,
-        _shape: &ModuleShape,
-        _param_name: &str,
-        path: &str,
-    ) -> Result<Vec<f32>, String> {
-        let (left, right) = patches_io::read_stereo(
-            std::path::Path::new(path),
-            env.sample_rate as f64,
-        )
-        .map_err(|e| format!("failed to load '{path}': {e}"))?;
-
-        // Pack both channels: [left_data_len, left_data..., right_data...]
-        let left_pre = NonUniformConvolver::serialize_pre_fft(&left, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
-        let right_pre = NonUniformConvolver::serialize_pre_fft(&right, BLOCK_SIZE, MAX_TIER_BLOCK_SIZE);
-
-        let mut packed = Vec::with_capacity(1 + left_pre.len() + right_pre.len());
-        packed.push(left_pre.len() as f32);
-        packed.extend_from_slice(&left_pre);
-        packed.extend_from_slice(&right_pre);
-        Ok(packed)
-    }
-}
 
 impl patches_core::Module for StereoConvReverb {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {

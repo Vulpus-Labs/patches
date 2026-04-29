@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 use patches_core::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
+    StructuralParams,
 };
-#[cfg(test)]
-use patches_core::StructuralParams;
 
 pub trait ModuleBuilder: Send + Sync {
     fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor;
@@ -13,6 +12,7 @@ pub trait ModuleBuilder: Send + Sync {
         audio_environment: &AudioEnvironment,
         shape: &ModuleShape,
         params: &ParameterMap,
+        structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError>;
 }
@@ -32,9 +32,10 @@ where
         audio_environment: &AudioEnvironment,
         shape: &ModuleShape,
         params: &ParameterMap,
+        structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
-        Ok(Box::new(T::build(audio_environment, shape, params, instance_id)?))
+        Ok(Box::new(T::build(audio_environment, shape, params, structural, instance_id)?))
     }
 }
 
@@ -95,7 +96,7 @@ mod tests {
         let shape = ModuleShape { channels: 2 };
         let params = ParameterMap::new();
         let builder = Builder::<TestModule>(PhantomData);
-        let module = builder.build(&audio_environment, &shape, &params, InstanceId::next()).unwrap();
+        let module = builder.build(&audio_environment, &shape, &params, &StructuralParams::new(), InstanceId::next()).unwrap();
 
         assert_eq!(module.descriptor().module_name, "TestModule");
         assert_eq!(module.descriptor().shape.channels, 2);

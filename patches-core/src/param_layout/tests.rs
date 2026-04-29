@@ -36,7 +36,6 @@ fn empty_descriptor_layout() {
     let l = compute_layout(&d);
     assert_eq!(l.scalar_size, 0);
     assert!(l.scalars.is_empty());
-    assert!(l.buffer_slots.is_empty());
 }
 
 #[test]
@@ -78,31 +77,6 @@ fn scalar_alignment_respected() {
 }
 
 #[test]
-fn file_params_go_to_buffer_slots() {
-    let d = ModuleDescriptor::new("Sampler", empty_shape())
-        .float_param("gain", 0.0, 1.0, 0.5)
-        .file_param("sample", &["wav"]);
-    let l = compute_layout(&d);
-    assert_eq!(l.scalars.len(), 1);
-    assert_eq!(l.scalars[0].key.name, "gain");
-    assert_eq!(l.buffer_slots.len(), 1);
-    assert_eq!(l.buffer_slots[0].key.name, "sample");
-    assert_eq!(l.buffer_slots[0].slot_index, 0);
-}
-
-#[test]
-fn buffer_slot_indices_are_dense_and_ordered() {
-    let d = ModuleDescriptor::new("Multi", empty_shape())
-        .file_param_multi("ir", 3, &["wav"]);
-    let l = compute_layout(&d);
-    assert_eq!(l.buffer_slots.len(), 3);
-    for (i, b) in l.buffer_slots.iter().enumerate() {
-        assert_eq!(b.slot_index, i as u16);
-        assert_eq!(b.key.index, i);
-    }
-}
-
-#[test]
 fn song_name_is_int_scalar() {
     let d = ModuleDescriptor::new("Seq", empty_shape()).song_name_param("song");
     let l = compute_layout(&d);
@@ -117,19 +91,14 @@ fn every_parameter_appears_exactly_once() {
     let d = ModuleDescriptor::new("Mix", empty_shape())
         .float_param_multi("gain", 4, 0.0, 1.0, 0.5)
         .int_param("count", 0, 8, 1)
-        .enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A)
-        .file_param("ir", &["wav"])
-        .file_param_multi("sample", 2, &["wav"]);
+        .enum_param(EnumParamName::<ModeAB>::new("mode"), ModeAB::A);
     let l = compute_layout(&d);
 
     let mut keys: Vec<(String, usize)> = Vec::new();
     for s in &l.scalars {
         keys.push((s.key.name.clone(), s.key.index));
     }
-    for b in &l.buffer_slots {
-        keys.push((b.key.name.clone(), b.key.index));
-    }
-    let total = l.scalars.len() + l.buffer_slots.len();
+    let total = l.scalars.len();
     assert_eq!(total, d.realtime_params.len());
     let mut sorted = keys.clone();
     sorted.sort();
@@ -232,7 +201,6 @@ fn hash_regression_fixture() {
         .int_param("count", 0, 8, 1)
         .bool_param("active", true)
         .enum_param(EnumParamName::<ModeLinLog>::new("mode"), ModeLinLog::Linear)
-        .file_param("sample", &["wav", "aiff"])
         .mono_in("in")
         .poly_out("out");
     let h = compute_layout(&d).descriptor_hash;
@@ -245,4 +213,4 @@ fn hash_regression_fixture() {
 // Computed once from a trusted run; kept here as the canonical anchor.
 // If this is the first run of the test, set it to 0, run, and paste the
 // `got` value the assertion reports.
-const EXPECTED_FIXTURE_HASH: u64 = 0xdfb3_ddec_00bd_1ba5;
+const EXPECTED_FIXTURE_HASH: u64 = 0x3a89_34da_cf44_c007;

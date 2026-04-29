@@ -10,7 +10,7 @@ template inner() {
         play { foo }
     }
 
-    module seq : MasterSequencer(channels: [ch]) { song: inner_song }
+    module seq : MasterSequencer([ch]) { song: inner_song }
     module out : AudioOut
     seq.clock[ch] -> out.in_left
 }
@@ -26,7 +26,7 @@ template outer() {
     }
 
     module i : inner
-    module seq : MasterSequencer(channels: [ch]) { song: outer_song }
+    module seq : MasterSequencer([ch]) { song: outer_song }
     module out : AudioOut
     seq.clock[ch] -> out.in_left
 }

@@ -11,7 +11,7 @@ depends_on: ["0734", "0737"]
 ## Summary
 
 Wire the planner to detect structural-param diffs across plan rebuilds
-and route them through the existing arc-table instance-swap path
+and route them through the existing instance-swap path
 (ADR 0044). When a structural value changes for an existing module,
 the planner constructs a fresh `Box<dyn Module>` via
 `Module::prepare(...)`, swaps it into the slot, and retires the old
@@ -43,8 +43,30 @@ reallocation, no port re-binding.
 
 ## Notes
 
-The instance-id stays stable across structural rebuilds — observers
-keyed on instance id (taps, meters) should not see a discontinuity
-beyond what the swap itself implies. Document this explicitly in the
-ADR-0060 follow-up notes if behaviour differs from
-descriptor-changing rebuilds.
+Decision: structural rebuilds mint a **fresh `InstanceId`**, identical
+to descriptor-changing rebuilds (e.g. shape/channels change). Observers
+keyed on instance id will see the discontinuity, which matches the
+existing semantics for any module-identity change. No advantage was
+found to preserving the id, and avoiding a same-slot tombstone-then-
+install path keeps the adoption order untouched. ADR-0060 follow-up
+note updated accordingly.
+
+## Status
+
+Implemented (2026-04-29):
+
+- `Module::build` / `Registry::create` / `ModuleBuilder::build` /
+  `DylibModuleBuilder::build` take `&StructuralParams` and forward it
+  to `Module::prepare`; the transitional empty-carrier branch in
+  `patches-core/src/modules/module.rs` is removed.
+- `NodeState` carries the structural snapshot; `classify_nodes` /
+  `make_decisions` accept a `structural_by_node` map and reclassify
+  surviving nodes whose structural blob differs as `Install`.
+- Planner exposes `Planner::build_with_structural` and
+  `PatchBuilder::build_patch_with_structural`; existing entry points
+  remain (default to an empty structural map per node).
+- Unit tests in `patches-planner/src/builder/tests/structural.rs`
+  cover the rebuild path and the prepare-failure path.
+
+Graph→interpreter→planner threading of the structural map is split
+out to ticket 0746 (depends on this ticket).

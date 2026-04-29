@@ -37,14 +37,14 @@ song bassline(drums, bass) {
 }
 
 patch {
-    module seq : MasterSequencer(channels: [drums, bass]) {
+    module seq : MasterSequencer([drums, bass]) {
         autostart: true
         song: bassline,
         bpm: 120
     }
 
-    module drum_player : PatternPlayer(channels: [kick, snare, hat, ohat, clap, cymbal, tom])
-    module bass_player : PatternPlayer(channels: 1)
+    module drum_player : PatternPlayer([kick, snare, hat, ohat, clap, cymbal, tom])
+    module bass_player : PatternPlayer(1)
 
     seq.clock[bass] -> bass_player.clock
     seq.clock[drums] -> drum_player.clock
@@ -79,7 +79,7 @@ patch {
     drums_split.out_left  -> mix.in[drum_l]
     drums_split.out_right -> mix.in[drum_r]
 
-    module mix : StereoMixer(channels: [drum_l, drum_r, bass]) {
+    module mix : StereoMixer([drum_l, drum_r, bass]) {
         @drum_l { pan: -1, send_a: 0.3 }
         @drum_r { pan: 1, send_a: 0.3 }
         @bass { pan: 0, send_a: 0.3, level: 0.4 }
@@ -89,7 +89,7 @@ patch {
     module return_join : StereoJoiner
     module hi_l : Highpass { cutoff: 500Hz }
     module hi_r : Highpass { cutoff: 500Hz }
-    module delay : StereoDelay(channels: 1) {
+    module delay : StereoDelay(1) {
         delay_ms: 375,
         feedback: 0.3,
         dry_wet: 1.0,

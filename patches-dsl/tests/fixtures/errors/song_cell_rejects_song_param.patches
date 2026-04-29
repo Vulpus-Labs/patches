@@ -8,11 +8,11 @@ template bad(s: song) {
     song s2(ch) {
         play { <s> }
     }
-    module seq : MasterSequencer(channels: [ch]) { song: s2 }
+    module seq : MasterSequencer([ch]) { song: s2 }
     module out : AudioOut
     seq.clock[ch] -> out.in_left
 }
 
 patch {
-    module b : bad(s: my_song)
+    module b : bad(my_song)
 }

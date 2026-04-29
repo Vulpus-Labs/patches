@@ -129,13 +129,13 @@ template bus(n: int) {
     in:  ch[n]
     out: mix
 
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     m.in[*n] <- $.ch[*n]
     $.mix    <- m.out
 }
 
 patch {
-    module b : bus(n: 4)
+    module b : bus(4)
 }
 
 --------------------------------------------------------------------------------
@@ -186,7 +186,7 @@ template bus(gains[n]: float = 0.5) {
     in:  ch[n]
     out: mix
 
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     $.mix <- m.out
 }
 

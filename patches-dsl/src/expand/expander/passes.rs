@@ -17,8 +17,10 @@ use crate::provenance::Provenance;
 
 use super::super::composition::{expand_pattern_def, flatten_song};
 use super::super::scope::qualify;
-use super::super::substitute::{eval_shape_arg_value, expand_param_entries_with_enum};
+use super::super::substitute::expand_param_entries_with_enum;
 use super::super::{build_alias_map, BodyResult, ExpandError, ExpansionCtx};
+use crate::ast::{CallArg, ShapeValue};
+use crate::structural::StructuralCode as Code;
 
 impl<'a> Expander<'a> {
     /// Expand a slice of statements (patch body or template body).
@@ -75,22 +77,16 @@ pub(in crate::expand) fn translate_modules(
             frame.state.module_names.insert(decl.name.name.clone());
         } else {
             let inst_id = qualify(frame.ctx.namespace, &decl.name.name);
-            let instance_alias_map = build_alias_map(&decl.shape);
+            let instance_alias_map = build_alias_map(&decl.call_block);
             let has_aliases = !instance_alias_map.is_empty();
             if has_aliases {
                 frame
                     .alias_map
                     .insert(decl.name.name.clone(), instance_alias_map);
             }
-            // Shape args: resolve each to a scalar (alias lists become their count).
-            let shape = decl
-                .shape
-                .iter()
-                .map(|a| {
-                    eval_shape_arg_value(&a.value, frame.ctx.param_env, &a.span)
-                        .map(|s| (a.name.name.clone(), s))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            // Primitive modules accept at most one positional shape arg
+            // (channels). Translate the call block to FlatModule.shape.
+            let shape = primitive_shape_from_call_block(decl, frame.ctx.param_env)?;
             let empty_alias_map = HashMap::new();
             let alias_map_ref = if has_aliases {
                 frame.alias_map.get(decl.name.name.as_str()).unwrap()
@@ -122,6 +118,61 @@ pub(in crate::expand) fn translate_modules(
         }
     }
     Ok(())
+}
+
+/// Resolve a primitive module's call block to its `FlatModule.shape`.
+///
+/// Primitive modules accept at most one positional `Bare` arg (`channels`)
+/// or a single `Shorthand` `<name>` (treated as a positional `ParamRef`).
+/// Named entries (`channels:` etc.) and multiple args are rejected — those
+/// were the pre-collapse syntax (ticket 0738).
+fn primitive_shape_from_call_block(
+    decl: &crate::ast::ModuleDecl,
+    param_env: &HashMap<String, crate::ast::Scalar>,
+) -> Result<Vec<(String, crate::ast::Scalar)>, ExpandError> {
+    let cb = match &decl.call_block {
+        Some(cb) => cb,
+        None => return Ok(Vec::new()),
+    };
+    if cb.args.is_empty() {
+        return Ok(Vec::new());
+    }
+    if cb.args.len() > 1 {
+        return Err(ExpandError::other(
+            cb.span,
+            format!(
+                "module type '{}' accepts at most one positional shape arg, got {}",
+                decl.type_name.name,
+                cb.args.len()
+            ),
+        ));
+    }
+    let arg = &cb.args[0];
+    let (value, span) = match arg {
+        CallArg::Bare { value, span } => (value, *span),
+        CallArg::Shorthand { name, span } => {
+            let scalar = crate::ast::Scalar::ParamRef(name.clone());
+            return Ok(vec![(
+                "channels".to_owned(),
+                crate::expand::substitute::subst_scalar(&scalar, param_env, span)?,
+            )]);
+        }
+        CallArg::Named { name, span, .. } => {
+            return Err(ExpandError::new(
+                Code::UnknownTemplateParam,
+                *span,
+                format!(
+                    "named arg '{}:' not allowed for primitive module '{}'; pass channels positionally",
+                    name.name, decl.type_name.name
+                ),
+            ));
+        }
+    };
+    let scalar = match value {
+        ShapeValue::Scalar(s) => crate::expand::substitute::subst_scalar(s, param_env, &span)?,
+        ShapeValue::AliasList(names) => crate::ast::Scalar::Int(names.len() as i64),
+    };
+    Ok(vec![("channels".to_owned(), scalar)])
 }
 
 /// Pass 2: connections.

@@ -8,7 +8,7 @@ template player() {
         play { global_beat }
     }
 
-    module seq : MasterSequencer(channels: [ch]) { song: my_song }
+    module seq : MasterSequencer([ch]) { song: my_song }
     module out : AudioOut
     seq.clock[ch] -> out.in_left
 }

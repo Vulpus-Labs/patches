@@ -12,8 +12,8 @@ template stutter(rhythm: pattern) {
         }
     }
 
-    module seq : MasterSequencer(channels: [trigger]) { song: pattern }
-    module player : PatternPlayer(channels: 1)
+    module seq : MasterSequencer([trigger]) { song: pattern }
+    module player : PatternPlayer(1)
     seq.clock[trigger] -> player.clock
 
 
@@ -38,7 +38,7 @@ template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0)
     module osc2: PolyOsc { frequency: 0.0, <drift>, fm_type: logarithmic }
     module osc3: PolyOsc { frequency: 0.0025, <drift>, fm_type: logarithmic }
     module osc4: PolyOsc { frequency: 0.006, <drift>, fm_type: logarithmic }
-    module sum: PolySum(channels: 5)
+    module sum: PolySum(5)
     module filt: PolyLowpass { <cutoff> }
 
     $.voct -> osc0.voct
@@ -66,14 +66,14 @@ template superosc(wave: str = sawtooth, drift: float = 0.2, cutoff: float = 0.0)
 
 patch {
 
-    module stutter : stutter(rhythm: sandstorm)
+    module stutter : stutter(sandstorm)
 
     module midi : PolyMidiToCv
     module tuner : PolyTuner { octave: 1 }
     module lowsaw : superosc(wave: square, cutoff: 1.0)
     module highsaw : superosc(wave: sawtooth, cutoff: 1.0)
     module lfo: Lfo { rate: 2.0 }
-    module mix: PolyMixer(channels: [low, high]) {
+    module mix: PolyMixer([low, high]) {
         @low { level: 0.6 }
         @high { level: 0.4 }
     }
@@ -116,8 +116,8 @@ patch {
 
     mix.out -> vca.in
     vca.out -> collapse.in
-    module short_delay : Delay(channels: 1) { delay_ms: 20, dry_wet: 1.0 }
-    module delay : StereoDelay(channels: 1) { delay_ms: 750, feedback: 0.2, dry_wet: 0.5, pingpong: true, tone: 0.6 }
+    module short_delay : Delay(1) { delay_ms: 20, dry_wet: 1.0 }
+    module delay : StereoDelay(1) { delay_ms: 750, feedback: 0.2, dry_wet: 0.5, pingpong: true, tone: 0.6 }
     collapse.out -[0.3]-> stutter.in
     stutter.out -> delay.in
 

@@ -63,7 +63,7 @@ fn describe(shape: &ModuleShape) -> ModuleDescriptor {
         .int_param("n", -100, 100, 0)
         .bool_param("b", false)
         .enum_param(patches_core::params::EnumParamName::<Mode>::new("m"), Mode::A)
-        .file_param("s", &["wav"])
+        .structural_string_param("s", &["wav"])
 }
 
 impl Module for AllTags {
@@ -84,15 +84,11 @@ impl Module for AllTags {
         let i = p.fetch_int_static("n", 0);
         let b = p.fetch_bool_static("b", 0);
         let e = p.fetch_enum_static("m", 0);
-        let buf = p
-            .fetch_buffer_static("s", 0)
-            .map(|id| id.as_u64())
-            .unwrap_or(0);
         LAST_FLOAT.store(f.to_bits(), Ordering::Release);
         LAST_INT.store(i, Ordering::Release);
         LAST_BOOL.store(b, Ordering::Release);
         LAST_ENUM.store(e, Ordering::Release);
-        LAST_BUF.store(buf, Ordering::Release);
+        LAST_BUF.store(0, Ordering::Release);
         UPDATES.fetch_add(1, Ordering::Release);
     }
 

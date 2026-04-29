@@ -252,11 +252,13 @@ fn synth_tap_module(
         .iter()
         .map(|a| Ident { name: a.clone(), span })
         .collect();
-    let shape = vec![ShapeArg {
-        name: Ident { name: "channels".into(), span },
-        value: ShapeArgValue::AliasList(alias_list),
+    let call_block = Some(CallBlock {
+        args: vec![CallArg::Bare {
+            value: ShapeValue::AliasList(alias_list),
+            span,
+        }],
         span,
-    }];
+    });
 
     let params: Vec<ParamEntry> = aliases
         .iter()
@@ -281,7 +283,7 @@ fn synth_tap_module(
     ModuleDecl {
         name: Ident { name: SYNTH_TAP.to_owned(), span },
         type_name: Ident { name: TYPE_TAP.to_owned(), span },
-        shape,
+        call_block,
         params,
         span,
     }

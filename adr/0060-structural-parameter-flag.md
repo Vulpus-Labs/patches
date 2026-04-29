@@ -341,6 +341,18 @@ path and retires the old instance. No new mechanism.
   declare `ir_data` as a structural string param, decode in `prepare`,
   delete the bespoke `update_parameters` override.
 
+## Follow-up: instance-id semantics on structural rebuild
+
+Implemented in ticket 0740. A structural-param edit on a surviving
+node mints a **fresh `InstanceId`**, identical to the descriptor-
+changing rebuild path (e.g. shape/channels change). Observers keyed
+on instance id (taps, meters) will see the discontinuity. We
+considered preserving the id with a same-slot tombstone-then-install
+adoption sequence; no advantage was found, and the extra adoption-
+order subtlety did not pay for itself. The graph→interpreter
+plumbing that lets DSL-declared structural values reach the planner
+is split out to ticket 0746.
+
 ## Future work: warm-state migration
 
 Structural edits replace one instance with another: the new instance

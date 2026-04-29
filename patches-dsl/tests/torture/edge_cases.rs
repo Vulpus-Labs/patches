@@ -12,13 +12,13 @@ fn arity_one_produces_exactly_one_connection() {
 template Trivial(n: int) {
     in:  ch[n]
     out: out
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     m.in[*n] <- $.ch[*n]
     $.out    <- m.out
 }
 patch {
     module osc : Osc
-    module t   : Trivial(n: 1)
+    module t   : Trivial(1)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.ch[0]
     out.in_left[0] <-[1.0]- t.out
@@ -39,13 +39,13 @@ fn param_index_zero_is_valid() {
 template ZeroChannel(ch: int) {
     in:  x
     out: y
-    module m : Sum(channels: 4)
+    module m : Sum(4)
     m.in[ch] <- $.x
     $.y      <- m.out
 }
 patch {
     module osc : Osc
-    module t   : ZeroChannel(ch: 0)
+    module t   : ZeroChannel(0)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.x
     out.in_left[0] <-[1.0]- t.y
@@ -82,7 +82,7 @@ template Duo(freq_a: float = 440.0, freq_b: float = 880.0) {
 
     module va  : Voice(freq: <freq_a>)
     module vb  : Voice(freq: <freq_b>)
-    module mix : Sum(channels: 2)
+    module mix : Sum(2)
 
     va.gate      <- $.gate
     vb.gate      <- $.gate
@@ -138,12 +138,12 @@ fn group_param_per_index_out_of_bounds_error() {
 template Bounded(n: int, gains[n]: float = 1.0) {
     in:  x
     out: y
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     m.in[0] <- $.x
     $.y <- m.out
 }
 patch {
-    module t   : Bounded(n: 3) { gains[5]: 0.5 }
+    module t   : Bounded(3) { gains[5]: 0.5 }
     module out : AudioOut
     out.in_left[0] <-[1.0]- t.y
 }
@@ -164,12 +164,12 @@ fn group_param_no_default_and_no_value_error() {
 template NeedsGains(n: int, gains[n]: float) {
     in:  x
     out: y
-    module m : Sum(channels: <n>)
+    module m : Sum(<n>)
     m.in[0] <- $.x
     $.y <- m.out
 }
 patch {
-    module t   : NeedsGains(n: 2)
+    module t   : NeedsGains(2)
     module out : AudioOut
     out.in_left[0] <-[1.0]- t.y
 }

@@ -27,11 +27,11 @@ song switch_song(ch1) {
 }
 
 patch {
-    module seq: MasterSequencer(channels: [ch1]) {
+    module seq: MasterSequencer([ch1]) {
         song: switch_song, bpm: 120, rows_per_beat: 4,
         loop: false, autostart: true, swing: 0.5
     }
-    module player: PatternPlayer(channels: [kick])
+    module player: PatternPlayer([kick])
     module t2a: SyncToTrigger
     module out: AudioOut
 

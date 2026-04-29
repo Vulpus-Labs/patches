@@ -335,10 +335,18 @@ mod drift {
         }
     }
 
-    fn shape_arg_value_map(v: &dsl::ShapeArgValue) -> &'static str {
+    fn shape_value_map(v: &dsl::ShapeValue) -> &'static str {
         match v {
-            dsl::ShapeArgValue::Scalar(_) => "LSP: ShapeArgValue::Scalar",
-            dsl::ShapeArgValue::AliasList(_) => "LSP: ShapeArgValue::AliasList",
+            dsl::ShapeValue::Scalar(_) => "LSP: ShapeValue::Scalar",
+            dsl::ShapeValue::AliasList(_) => "LSP: ShapeValue::AliasList",
+        }
+    }
+
+    fn call_arg_map(a: &dsl::CallArg) -> &'static str {
+        match a {
+            dsl::CallArg::Bare { .. } => "LSP: CallArg::Bare",
+            dsl::CallArg::Named { .. } => "LSP: CallArg::Named",
+            dsl::CallArg::Shorthand { .. } => "LSP: CallArg::Shorthand",
         }
     }
 
@@ -474,7 +482,8 @@ mod drift {
         let _ = [
             scalar_map as fn(&_) -> _ as usize,
             value_map as fn(&_) -> _ as usize,
-            shape_arg_value_map as fn(&_) -> _ as usize,
+            shape_value_map as fn(&_) -> _ as usize,
+            call_arg_map as fn(&_) -> _ as usize,
             param_index_map as fn(&_) -> _ as usize,
             at_block_index_map as fn(&_) -> _ as usize,
             param_entry_map as fn(&_) -> _ as usize,

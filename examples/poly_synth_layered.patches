@@ -73,7 +73,7 @@ template voice(
 
     module lfo : Lfo { rate: 6.0, mode: unipolar_positive }
     module osc      : PolyOsc { drift: 0.1, fm_type: logarithmic }
-    module mix      : PolySum(channels: [body, edge])
+    module mix      : PolySum([body, edge])
     module amp_env  : PolyAdsr   { attack: <amp_attack>,  decay: <amp_decay>,
                                    sustain: <amp_sustain>, release: <amp_release> }
     module vca      : PolyVca
@@ -116,7 +116,7 @@ template noise_voice(
 
     module sine : PolyOsc
     module noise    : PolyNoise
-    module sine_noise_mix : PolySum(channels: [noise, sine])
+    module sine_noise_mix : PolySum([noise, sine])
     module highpass   : PolyHighpass { cutoff : 0.5 }
     module filt     : PolySvf { cutoff: 0.0, q: <filt_q> }
     module amp_env  : PolyAdsr { attack: <amp_attack>, decay: <amp_decay>,
@@ -168,7 +168,7 @@ patch {
     )
 
     # ── Output ──────────────────────────────────────────────────────────────────
-    module sum : StereoMixer(channels: [lo, hi]) {
+    module sum : StereoMixer([lo, hi]) {
         level[lo]: 1.0,
         level[hi]: 0.5,
         pan[lo]: -0.5,
@@ -183,7 +183,7 @@ patch {
     }
 
     # send B: two-tap multitap delay on the lo layer
-    module tap_dly : StereoDelay(channels: [tap1, tap2]) {
+    module tap_dly : StereoDelay([tap1, tap2]) {
         @tap1: { delay_ms: 700, feedback: 0.3, gain: 1.0, tone: 0.7, pingpong: true }
         @tap2: { delay_ms: 450, feedback: 0.3, gain: 1.0, tone: 0.7, pingpong: true }
     }

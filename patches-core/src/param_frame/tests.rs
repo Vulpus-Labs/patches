@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::modules::module_descriptor::{ModuleDescriptor, ModuleShape};
 use crate::modules::parameter_map::{ParameterMap, ParameterValue};
 use crate::params::EnumParamName;
@@ -22,7 +20,6 @@ fn mixed_descriptor() -> ModuleDescriptor {
         .int_param("count", 0, 8, 3)
         .bool_param("active", true)
         .enum_param(EnumParamName::<ModeABC>::new("mode"), ModeABC::B)
-        .file_param("sample", &[])
 }
 
 fn defaults_from(desc: &ModuleDescriptor) -> ParameterMap {
@@ -37,9 +34,7 @@ fn defaults_from(desc: &ModuleDescriptor) -> ParameterMap {
                 let idx = variants.iter().position(|v| v == default).unwrap_or(0);
                 ParameterValue::Enum(idx as u32)
             }
-            ParameterKind::File { .. } => {
-                ParameterValue::FloatBuffer(Arc::<[f32]>::from(vec![0.0f32].into_boxed_slice()))
-            }
+            ParameterKind::File { .. } => unreachable!(),
             ParameterKind::SongName => ParameterValue::Int(0),
         };
         m.insert(p.name.to_string(), v);
@@ -53,10 +48,8 @@ fn frame_shape_matches_layout() {
     let l = compute_layout(&d);
     let f = ParamFrame::with_layout(&l);
     assert_eq!(f.scalar_size(), l.scalar_size as usize);
-    assert_eq!(f.buffer_slot_count(), l.buffer_slots.len());
     assert_eq!(f.layout_hash(), l.descriptor_hash);
     assert!(f.scalar_area().iter().all(|b| *b == 0));
-    assert!(f.buffer_slots().iter().all(|x| *x == 0));
 }
 
 #[test]
@@ -65,7 +58,6 @@ fn frame_empty_layout_zero_length() {
     let l = compute_layout(&d);
     let f = ParamFrame::with_layout(&l);
     assert_eq!(f.scalar_area().len(), 0);
-    assert_eq!(f.buffer_slots().len(), 0);
 }
 
 #[test]
@@ -76,12 +68,8 @@ fn frame_reset_clears_bytes() {
     for b in f.scalar_area_mut() {
         *b = 0xff;
     }
-    for s in f.buffer_slots_mut() {
-        *s = 0xdead_beef;
-    }
     f.reset();
     assert!(f.scalar_area().iter().all(|b| *b == 0));
-    assert!(f.buffer_slots().iter().all(|s| *s == 0));
 }
 
 #[test]
@@ -104,9 +92,6 @@ fn pack_round_trip_all_scalar_tags() {
     assert_eq!(view.fetch_int_static("count", 0), 5);
     assert!(!view.fetch_bool_static("active", 0));
     assert_eq!(view.fetch_enum_static("mode", 0), 2);
-    // Buffer slot: default arc stub id non-zero.
-    let b = view.fetch_buffer_static("sample", 0);
-    assert!(b.is_some());
 }
 
 #[test]
@@ -212,50 +197,8 @@ fn view_perfect_hash_no_collisions_large() {
     let idx = ParamViewIndex::from_layout(&l);
     let v = ParamView::new(&idx, &f);
     for (i, n) in NAMES.iter().enumerate() {
-        assert_eq!(v.fetch_float_static(*n, 0), i as f32);
+        assert_eq!(v.fetch_float_static(n, 0), i as f32);
     }
 }
 
-// ── File rejection at pack boundary (ticket 0599) ─────────────────────────
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "pack_into: File")]
-fn pack_rejects_file_in_buffer_slot_debug() {
-    let d = mixed_descriptor();
-    let l = compute_layout(&d);
-    let defaults = defaults_from(&d);
-    let mut overrides = ParameterMap::new();
-    overrides.insert("sample".into(), ParameterValue::File("/tmp/x".into()));
-    let mut f = ParamFrame::with_layout(&l);
-    let _ = pack_into(&l, &defaults, &overrides, &mut f);
-}
-
-#[cfg(not(debug_assertions))]
-#[test]
-fn pack_rejects_file_in_buffer_slot_release() {
-    let d = mixed_descriptor();
-    let l = compute_layout(&d);
-    let defaults = defaults_from(&d);
-    let mut overrides = ParameterMap::new();
-    overrides.insert("sample".into(), ParameterValue::File("/tmp/x".into()));
-    let mut f = ParamFrame::with_layout(&l);
-    let r = pack_into(&l, &defaults, &overrides, &mut f);
-    assert!(matches!(r, Err(PackError::UnsupportedVariant)));
-}
-
-#[cfg(debug_assertions)]
-#[test]
-#[should_panic(expected = "pack_into: File")]
-fn pack_rejects_file_in_scalar_slot_debug() {
-    let d = ModuleDescriptor::new("M", empty_shape())
-        .float_param("gain", 0.0, 1.0, 0.5);
-    let l = compute_layout(&d);
-    let mut defaults = ParameterMap::new();
-    defaults.insert("gain".into(), ParameterValue::Float(0.5));
-    let mut overrides = ParameterMap::new();
-    overrides.insert("gain".into(), ParameterValue::File("/tmp/x".into()));
-    let mut f = ParamFrame::with_layout(&l);
-    let _ = pack_into(&l, &defaults, &overrides, &mut f);
-}
 

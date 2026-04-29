@@ -191,6 +191,7 @@ impl ModuleBuilder for DylibModuleBuilder {
         audio_environment: &AudioEnvironment,
         shape: &ModuleShape,
         params: &ParameterMap,
+        structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
         let descriptor = self.describe(shape);
@@ -198,11 +199,7 @@ impl ModuleBuilder for DylibModuleBuilder {
         let desc_json = json::serialize_module_descriptor(&descriptor);
         let ffi_env = FfiAudioEnvironment::from(audio_environment);
 
-        // ADR 0060 / 0739: structural params are not yet plumbed through
-        // ModuleBuilder; encode an empty map matching the descriptor's
-        // declared structural slots so old plugins keep working and
-        // future structural-aware ones receive a well-formed blob.
-        let structural_blob = pack_structural(&descriptor, &StructuralParams::new());
+        let structural_blob = pack_structural(&descriptor, structural);
 
         let mut handle: *mut c_void = std::ptr::null_mut();
         let mut error_bytes = FfiBytes::empty();

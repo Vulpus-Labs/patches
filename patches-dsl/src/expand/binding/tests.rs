@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use super::super::scope::NameScope;
 use super::*;
 use crate::ast::{
-    Ident, ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Scalar, ShapeArg,
-    ShapeArgValue, Template, Value,
+    CallArg, CallBlock, Ident, ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Scalar,
+    ShapeValue, Template, Value,
 };
 
 // ─── Fixture builders ─────────────────────────────────────────────────────────
@@ -52,8 +52,20 @@ fn template(name: &str, params: Vec<ParamDecl>) -> Template {
     }
 }
 
-fn shape_scalar(name: &str, s: Scalar) -> ShapeArg {
-    ShapeArg { name: ident(name), value: ShapeArgValue::Scalar(s), span: sp() }
+fn named_arg(name: &str, s: Scalar) -> CallArg {
+    CallArg::Named {
+        name: ident(name),
+        value: ShapeValue::Scalar(s),
+        span: sp(),
+    }
+}
+
+fn call_block_of(args: Vec<CallArg>) -> Option<CallBlock> {
+    if args.is_empty() {
+        None
+    } else {
+        Some(CallBlock { args, span: sp() })
+    }
 }
 
 fn key_value(
@@ -64,11 +76,15 @@ fn key_value(
     ParamEntry::KeyValue { name: ident(name), index, value, span: sp() }
 }
 
-fn module_decl(type_name: &str, shape: Vec<ShapeArg>, params: Vec<ParamEntry>) -> ModuleDecl {
+fn module_decl(
+    type_name: &str,
+    call_args: Vec<CallArg>,
+    params: Vec<ParamEntry>,
+) -> ModuleDecl {
     ModuleDecl {
         name: ident("inst"),
         type_name: ident(type_name),
-        shape,
+        call_block: call_block_of(call_args),
         params,
         span: sp(),
     }
@@ -79,7 +95,7 @@ fn module_decl(type_name: &str, shape: Vec<ShapeArg>, params: Vec<ParamEntry>) -
 #[test]
 fn classify_shape_scalar_binds() {
     let tpl = template("T", vec![scalar_param("n", ParamType::Int, None)]);
-    let decl = module_decl("T", vec![shape_scalar("n", Scalar::Int(4))], Vec::new());
+    let decl = module_decl("T", vec![named_arg("n", Scalar::Int(4))], Vec::new());
     let (scalars, groups) = classify_call_args(
         &decl, &tpl, &HashMap::new(), &HashMap::new(),
     ).unwrap();
@@ -90,7 +106,7 @@ fn classify_shape_scalar_binds() {
 #[test]
 fn classify_rejects_unknown_param_in_shape() {
     let tpl = template("T", vec![scalar_param("n", ParamType::Int, None)]);
-    let decl = module_decl("T", vec![shape_scalar("m", Scalar::Int(1))], Vec::new());
+    let decl = module_decl("T", vec![named_arg("m", Scalar::Int(1))], Vec::new());
     let err = classify_call_args(
         &decl, &tpl, &HashMap::new(), &HashMap::new(),
     ).unwrap_err();
@@ -108,7 +124,7 @@ fn classify_rejects_group_param_in_shape_block() {
     );
     let decl = module_decl(
         "T",
-        vec![shape_scalar("level", Scalar::Float(0.5))],
+        vec![named_arg("level", Scalar::Float(0.5))],
         Vec::new(),
     );
     let err = classify_call_args(

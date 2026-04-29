@@ -192,9 +192,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<StereoLimiter>();
     r.register::<PitchShift>();
     r.register::<ConvolutionReverb>();
-    r.register_file_processor::<ConvolutionReverb>();
     r.register::<StereoConvReverb>();
-    r.register_file_processor::<StereoConvReverb>();
     r.register::<MasterSequencer>();
     r.register::<PatternPlayer>();
     r.register::<Kick>();
@@ -301,7 +299,7 @@ mod tests {
             "MsTicker",
         ] {
             assert!(
-                r.create(name, &env, &shape, &params, InstanceId::next()).is_ok(),
+                r.create(name, &env, &shape, &params, &patches_core::StructuralParams::new(), InstanceId::next()).is_ok(),
                 "default_registry() missing module: {name}",
             );
         }

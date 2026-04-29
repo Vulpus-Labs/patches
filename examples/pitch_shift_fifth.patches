@@ -29,7 +29,7 @@ patch {
     # ── Voice modules ──
     module kbd       : PolyMidiToCv
     module osc       : PolyOsc
-    module mix       : PolySum(channels: 2)
+    module mix       : PolySum(2)
     module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.15,  sustain: 0.6,  release: 0.4 }
     module vca       : PolyVca
     module filt_env  : PolyAdsr   { attack: 0.15,  decay: 0.3,   sustain: 0.25, release: 0.4 }
@@ -37,7 +37,7 @@ patch {
     module collapse  : PolyToMono
 
     # ── Mono effects ──
-    module shifter   : PitchShift(length: 256, high_quality: true) { semitones: 7.0, mix: 0.5, mono: true }
+    module shifter   : PitchShift { length: 256, high_quality: true, semitones: 7.0, mix: 0.5, mono: true }
     module reverb : StereoConvReverb { mix: 0.3, ir_data: file("/Users/dominicfox/src/vulpus-labs-patches/examples/RoomConcertHall.aiff") }
 
     module out       : AudioOut

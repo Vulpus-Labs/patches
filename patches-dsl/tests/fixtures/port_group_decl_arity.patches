@@ -6,7 +6,7 @@ template DeclCheck(n: int) {
     m.in[0] <- $.freq
 }
 patch {
-    module d   : DeclCheck(n: 2)
+    module d   : DeclCheck(2)
     module out : AudioOut
     out.in_left[0] <-[1.0]- d.out
 }

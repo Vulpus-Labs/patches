@@ -57,7 +57,7 @@ fn undefined_song_in_master_sequencer() {
     let model = analyse_source(
         r#"
 patch {
-module seq : MasterSequencer(channels: [drums]) {
+module seq : MasterSequencer([drums]) {
     song: nonexistent_song
 }
 }

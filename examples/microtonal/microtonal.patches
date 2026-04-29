@@ -31,7 +31,7 @@ template drumz {
     in: clock
     out: out
 
-    module player : PatternPlayer(channels: [kick, snare, ch, oh])
+    module player : PatternPlayer([kick, snare, ch, oh])
     player.clock <- $.clock
 
     module kick : Kick
@@ -44,7 +44,7 @@ template drumz {
     player.trigger[ch] -> ch.trigger, oh.choke
     player.trigger[oh] -> oh.trigger
 
-    module mixer : StereoMixer(channels: [kick, snare, ch, oh]) {
+    module mixer : StereoMixer([kick, snare, ch, oh]) {
         @kick { }
         @snare { pan: -0.2 }
         @ch { pan: 0.2 }
@@ -77,7 +77,7 @@ template digital_delay(time: int) {
     in: in
     out: out
 
-    module delay : StereoDelay(channels: 1) {
+    module delay : StereoDelay(1) {
         pingpong: true
         delay_ms: <time>
         feedback: 0.4
@@ -103,10 +103,10 @@ template voice {
     in: clock
     out: signal
 
-    module player : PatternPlayer(channels: 1)
+    module player : PatternPlayer(1)
     player.clock <- $.clock
 
-    module pitch_add : Sum(channels: [base, adj])
+    module pitch_add : Sum([base, adj])
     player.cv1 -> pitch_add.in[base]
     player.cv2 -[1s]-> pitch_add.in[adj]
 
@@ -115,7 +115,7 @@ template voice {
     module osc3 : Osc { frequency: 0.02, drift: 0.5 }
 
     pitch_add.out -> osc1.voct, osc2.voct, osc3.voct
-    module osc_sum : Sum(channels: 3)
+    module osc_sum : Sum(3)
     osc1.square -> osc_sum.in[0]
     osc2.triangle -[0.5]-> osc_sum.in[1]
     osc3.sawtooth -[0.5]-> osc_sum.in[2]
@@ -139,19 +139,19 @@ template voice {
 }
 
 patch {
-    module seq_l: MasterSequencer(channels: [left]) {
+    module seq_l: MasterSequencer([left]) {
         bpm: 90
         song: microtonal_left
         swing: 0.6
     }
 
-    module seq_r: MasterSequencer(channels: [right]) {
+    module seq_r: MasterSequencer([right]) {
         bpm: 90
         song: microtonal_right
         swing: 0.6
     }
 
-    module seq_drums: MasterSequencer(channels: [drums]) {
+    module seq_drums: MasterSequencer([drums]) {
         bpm: 90
         song: drums
         swing: 0.6
@@ -160,13 +160,13 @@ patch {
     module left : voice
     module right : voice
     module drumkit : drumz
-    module delay : digital_delay(time: 400)
+    module delay : digital_delay(400)
 
     seq_l.clock[left] -> left.clock
     seq_r.clock[right] -> right.clock
     seq_drums.clock[drums] -> drumkit.clock
     
-    module mix : StereoMixer(channels: [drums_l, drums_r, left, right]) {
+    module mix : StereoMixer([drums_l, drums_r, left, right]) {
         @drums_l { pan: -1.0, send_a: 0.4 }
         @drums_r { pan: 1.0, send_a: 0.4 }
         @left { pan: -0.9, level: 0.5, send_a: 0.8 }

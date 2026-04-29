@@ -58,22 +58,11 @@ pub struct ScalarSlot {
     pub tag: ScalarTag,
 }
 
-/// A single buffer-handle parameter's position in the tail slot table.
-///
-/// The tail slot area follows the scalar area in the packed frame. Reading
-/// slot `i` is `buffer_tail[i] as FloatBufferId` (a `u64`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BufferSlot {
-    pub key: ParameterKey,
-    pub slot_index: u16,
-}
-
 /// Deterministic layout for a module's packed parameter frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamLayout {
     pub scalar_size: u32,
     pub scalars: Vec<ScalarSlot>,
-    pub buffer_slots: Vec<BufferSlot>,
     pub descriptor_hash: u64,
 }
 
@@ -90,18 +79,14 @@ pub struct ParamLayout {
 ///   6. Hash over a canonical byte encoding of shape (params + ports).
 pub fn compute_layout(descriptor: &ModuleDescriptor) -> ParamLayout {
     let mut scalars_in: Vec<(ParameterKey, ScalarTag)> = Vec::new();
-    let mut buffers_in: Vec<ParameterKey> = Vec::new();
 
     for p in &descriptor.realtime_params {
         let key = ParameterKey::new(p.name, p.index);
-        match classify(&p.parameter_type) {
-            Classified::Scalar(tag) => scalars_in.push((key, tag)),
-            Classified::Buffer => buffers_in.push(key),
-        }
+        let tag = scalar_tag(&p.parameter_type);
+        scalars_in.push((key, tag));
     }
 
     scalars_in.sort_by(|a, b| key_cmp(&a.0, &b.0));
-    buffers_in.sort_by(key_cmp);
 
     let mut offset: u32 = 0;
     let mut max_align: u32 = 1;
@@ -117,15 +102,9 @@ pub fn compute_layout(descriptor: &ModuleDescriptor) -> ParamLayout {
     }
     let scalar_size = align_up(offset, max_align);
 
-    let buffer_slots: Vec<BufferSlot> = buffers_in
-        .into_iter()
-        .enumerate()
-        .map(|(i, key)| BufferSlot { key, slot_index: i as u16 })
-        .collect();
-
     let descriptor_hash = hash::descriptor_hash(descriptor);
 
-    ParamLayout { scalar_size, scalars, buffer_slots, descriptor_hash }
+    ParamLayout { scalar_size, scalars, descriptor_hash }
 }
 
 /// Back-compat shim — delegates to [`ParameterMap::defaults`].
@@ -146,25 +125,20 @@ fn key_cmp(a: &ParameterKey, b: &ParameterKey) -> std::cmp::Ordering {
     a.name.cmp(&b.name).then_with(|| a.index.cmp(&b.index))
 }
 
-enum Classified {
-    Scalar(ScalarTag),
-    Buffer,
-}
-
-fn classify(kind: &ParameterKind) -> Classified {
+fn scalar_tag(kind: &ParameterKind) -> ScalarTag {
     match kind {
-        ParameterKind::Float { .. } => Classified::Scalar(ScalarTag::Float),
-        ParameterKind::Int { .. } => Classified::Scalar(ScalarTag::Int),
-        ParameterKind::Bool { .. } => Classified::Scalar(ScalarTag::Bool),
-        ParameterKind::Enum { .. } => Classified::Scalar(ScalarTag::Enum),
-        ParameterKind::SongName => Classified::Scalar(ScalarTag::Int),
-        ParameterKind::File { .. } => Classified::Buffer,
+        ParameterKind::Float { .. } => ScalarTag::Float,
+        ParameterKind::Int { .. } => ScalarTag::Int,
+        ParameterKind::Bool { .. } => ScalarTag::Bool,
+        ParameterKind::Enum { .. } => ScalarTag::Enum,
+        ParameterKind::SongName => ScalarTag::Int,
+        ParameterKind::File { .. } => unreachable!(
+            "ParameterKind::File only valid in structural_params, not realtime_params"
+        ),
     }
 }
 
-/// Canonical per-parameter kind tag for the hash encoding. Separate from
-/// `ScalarTag::hash_tag` because the hash distinguishes `File` from the
-/// scalar kinds (they share `BufferSlot` in layout but differ in descriptor).
+/// Canonical per-parameter kind tag for the hash encoding.
 pub(crate) fn param_kind_tag(kind: &ParameterKind) -> u8 {
     match kind {
         ParameterKind::Float { .. } => 0,

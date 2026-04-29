@@ -1,6 +1,6 @@
 //! Typed parameter name / key types (ADR 0046).
 //!
-//! Each kind of parameter (`Float`, `Int`, `Bool`, `Enum<E>`, `Buffer`) has a
+//! Each kind of parameter (`Float`, `Int`, `Bool`, `Enum<E>`) has a
 //! `*ParamName` (scalar) and `*ParamArray` (multi) type, both
 //! `#[repr(transparent)]` over `&'static str`. Scalar names are themselves
 //! `ParamKey`s; array names produce a `*ParamKey` via `.at(i)`.
@@ -13,8 +13,6 @@
 //! `EnumParamName<E>` can pass `E` through `ParamView::get`.
 
 use core::marker::PhantomData;
-
-use crate::ids::FloatBufferId;
 
 /// Rust-side representation of a `ParameterKind::Enum` variant.
 ///
@@ -46,7 +44,6 @@ macro_rules! scalar_name {
 scalar_name!(FloatParamName,    "Typed name for a scalar `Float` parameter.");
 scalar_name!(IntParamName,      "Typed name for a scalar `Int` parameter.");
 scalar_name!(BoolParamName,     "Typed name for a scalar `Bool` parameter.");
-scalar_name!(BufferParamName,   "Typed name for a scalar buffer parameter (`FloatBufferId`).");
 scalar_name!(SongNameParamName, "Typed name for a `SongName` parameter. Reads as `i64` (resolved song index).");
 
 // Migration bridge (ADR 0046 Phase B): accept `&'static str` in descriptor
@@ -55,7 +52,6 @@ scalar_name!(SongNameParamName, "Typed name for a `SongName` parameter. Reads as
 impl From<&'static str> for FloatParamName    { fn from(s: &'static str) -> Self { Self(s) } }
 impl From<&'static str> for IntParamName      { fn from(s: &'static str) -> Self { Self(s) } }
 impl From<&'static str> for BoolParamName     { fn from(s: &'static str) -> Self { Self(s) } }
-impl From<&'static str> for BufferParamName   { fn from(s: &'static str) -> Self { Self(s) } }
 impl From<&'static str> for SongNameParamName { fn from(s: &'static str) -> Self { Self(s) } }
 
 /// Typed name for a scalar enum parameter, tagged with the Rust enum `E`.
@@ -108,17 +104,14 @@ macro_rules! scalar_key {
 scalar_key!(FloatParamKey,  "Indexed typed key for a `Float` parameter slot.");
 scalar_key!(IntParamKey,    "Indexed typed key for an `Int` parameter slot.");
 scalar_key!(BoolParamKey,   "Indexed typed key for a `Bool` parameter slot.");
-scalar_key!(BufferParamKey, "Indexed typed key for a buffer parameter slot.");
 
 array_name!(FloatParamArray,  FloatParamKey,  "Typed name for a multi-instance `Float` parameter.");
 array_name!(IntParamArray,    IntParamKey,    "Typed name for a multi-instance `Int` parameter.");
 array_name!(BoolParamArray,   BoolParamKey,   "Typed name for a multi-instance `Bool` parameter.");
-array_name!(BufferParamArray, BufferParamKey, "Typed name for a multi-instance buffer parameter.");
 
 impl From<&'static str> for FloatParamArray  { fn from(s: &'static str) -> Self { Self(s) } }
 impl From<&'static str> for IntParamArray    { fn from(s: &'static str) -> Self { Self(s) } }
 impl From<&'static str> for BoolParamArray   { fn from(s: &'static str) -> Self { Self(s) } }
-impl From<&'static str> for BufferParamArray { fn from(s: &'static str) -> Self { Self(s) } }
 
 /// Indexed typed key for an enum parameter slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,13 +178,6 @@ impl ParamKey for BoolParamKey {
         v.fetch_bool_static(self.name, self.index)
     }
 }
-impl ParamKey for BufferParamKey {
-    type Value = Option<FloatBufferId>;
-    #[inline]
-    fn fetch(self, v: &ParamView<'_>) -> Option<FloatBufferId> {
-        v.fetch_buffer_static(self.name, self.index)
-    }
-}
 impl<E: ParamEnum> ParamKey for EnumParamKey<E> {
     type Value = E;
     #[inline]
@@ -220,13 +206,6 @@ impl ParamKey for BoolParamName {
     #[inline]
     fn fetch(self, v: &ParamView<'_>) -> bool {
         BoolParamKey { name: self.0, index: 0 }.fetch(v)
-    }
-}
-impl ParamKey for BufferParamName {
-    type Value = Option<FloatBufferId>;
-    #[inline]
-    fn fetch(self, v: &ParamView<'_>) -> Option<FloatBufferId> {
-        BufferParamKey { name: self.0, index: 0 }.fetch(v)
     }
 }
 impl ParamKey for SongNameParamName {

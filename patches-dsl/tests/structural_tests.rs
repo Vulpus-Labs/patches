@@ -44,7 +44,7 @@ template t(freq: float) {
 }
 
 patch {
-    module inst : t(frequency: 440)
+    module inst : t(unknown: 440)
     module out : AudioOut
     out.in_left <- inst.y
 }
