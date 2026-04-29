@@ -5,7 +5,19 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
+
+// ── prepare status codes ─────────────────────────────────────────────────────
+
+/// `prepare` succeeded; `out_handle` is non-null.
+pub const PREPARE_OK: i32 = 0;
+/// Plugin failed to construct an instance. `out_error` may carry a UTF-8
+/// description allocated by the plugin.
+pub const PREPARE_ERR_PREPARE: i32 = 1;
+/// The descriptor JSON supplied by the host could not be deserialised.
+pub const PREPARE_ERR_DESCRIPTOR_JSON: i32 = 2;
+/// The structural blob was malformed (wrong slot count, bad tag, etc.).
+pub const PREPARE_ERR_STRUCTURAL_BLOB: i32 = 3;
 
 // ── FfiBytes ─────────────────────────────────────────────────────────────────
 
@@ -252,8 +264,18 @@ pub struct FfiPluginVTable {
 
     /// Construct a plugin instance.
     ///
-    /// `structural_blob` carries the structural-parameter slot values
-    /// (ADR 0060). Empty in this slice; positional encoding lands in 0739.
+    /// `structural_blob` carries the descriptor's structural-parameter slot
+    /// values in the positional packed format defined by
+    /// [`crate::structural_frame`] (ADR 0060, ticket 0739). An empty blob
+    /// (`null` ptr / `0` len) is permitted only when the descriptor declares
+    /// no structural params.
+    ///
+    /// On success returns [`PREPARE_OK`] and writes a non-null instance
+    /// pointer into `*out_handle`. On failure returns a non-zero status
+    /// code; if `out_error` is non-null the plugin may write an
+    /// `FfiBytes` carrying a UTF-8 error message which the host frees via
+    /// `free_bytes`. Plugins must initialise both out-params (handle =
+    /// null, error = empty) before any early return.
     pub prepare: unsafe extern "C" fn(
         descriptor_json: *const u8,
         descriptor_json_len: usize,
@@ -261,7 +283,9 @@ pub struct FfiPluginVTable {
         instance_id: u64,
         structural_blob: *const u8,
         structural_blob_len: usize,
-    ) -> *mut c_void,
+        out_handle: *mut *mut c_void,
+        out_error: *mut FfiBytes,
+    ) -> i32,
 
     /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
     pub update_validated_parameters: crate::abi::UpdateValidatedParametersFn,
@@ -408,7 +432,8 @@ mod tests {
     unsafe extern "C" fn stub_prepare(
         _p: *const u8, _l: usize, _e: FfiAudioEnvironment, _i: u64,
         _sb: *const u8, _sl: usize,
-    ) -> *mut c_void { std::ptr::null_mut() }
+        _oh: *mut *mut c_void, _oe: *mut FfiBytes,
+    ) -> i32 { PREPARE_ERR_PREPARE }
     unsafe extern "C" fn stub_uvp(
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
     ) {}

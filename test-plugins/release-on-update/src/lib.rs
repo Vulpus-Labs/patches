@@ -1,11 +1,7 @@
-//! Fixture plugin that calls `env.float_buffer_release(id)` on every
-//! `update_validated_parameters` invocation. Used for:
-//! - E107 ticket 0624: call twice → host ArcTable audit trips.
-//! - E107 ticket 0625: call once → host ArcTable drains to zero.
-//!
-//! Hand-written ABI surface so we can reach `HostEnv` from
-//! `update_validated_parameters` — the stock `export_plugin!` macro
-//! drops the env argument.
+//! Fixture plugin retained as a hand-written ABI surface that exposes
+//! `HostEnv` to `update_validated_parameters`. The stock `export_plugin!`
+//! macro drops the env argument; this fixture stays in tree so future
+//! ABI tests can reach the env without re-deriving the boilerplate.
 
 use std::ffi::c_void;
 
@@ -27,7 +23,7 @@ pub struct Stub;
 
 fn describe(shape: &ModuleShape) -> ModuleDescriptor {
     ModuleDescriptor::new("ReleaseOnUpdate", shape.clone())
-        .file_param("s", &["wav"])
+        .structural_string_param("s", &["wav"])
 }
 
 // Bare-bones Module impl; we only need prepare/drop + param_index layout.
@@ -62,20 +58,32 @@ pub extern "C" fn __rop_describe(shape: FfiModuleShape) -> FfiBytes {
     FfiBytes::from_vec(json::serialize_module_descriptor(&describe(&core_shape)))
 }
 
+/// # Safety
+/// Hand-written ABI fixture; pointers must be valid for the call.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rop_prepare(
+pub unsafe extern "C" fn __rop_prepare(
     descriptor_json: *const u8,
     descriptor_json_len: usize,
     _env: FfiAudioEnvironment,
     _instance_id: u64,
     _structural_blob: *const u8,
     _structural_blob_len: usize,
-) -> *mut c_void {
+    out_handle: *mut *mut c_void,
+    out_error: *mut FfiBytes,
+) -> i32 {
+    unsafe {
+        if !out_handle.is_null() {
+            *out_handle = std::ptr::null_mut();
+        }
+        if !out_error.is_null() {
+            *out_error = FfiBytes::empty();
+        }
+    }
     let slice =
         unsafe { std::slice::from_raw_parts(descriptor_json, descriptor_json_len) };
     let descriptor = match json::deserialize_module_descriptor(slice) {
         Ok(d) => d,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return patches_ffi_common::types::PREPARE_ERR_DESCRIPTOR_JSON,
     };
     let layout = compute_layout(&descriptor);
     let param_index = ParamViewIndex::from_layout(&layout);
@@ -90,11 +98,16 @@ pub extern "C" fn __rop_prepare(
         input_buf: Vec::new(),
         output_buf: Vec::new(),
     });
-    Box::into_raw(inst) as *mut c_void
+    unsafe {
+        *out_handle = Box::into_raw(inst) as *mut c_void;
+    }
+    patches_ffi_common::types::PREPARE_OK
 }
 
+/// # Safety
+/// `handle` must be a live instance; `bytes` must be valid for `len` bytes.
 #[unsafe(no_mangle)]
-pub extern "C" fn __rop_update(
+pub unsafe extern "C" fn __rop_update(
     handle: Handle,
     bytes: *const u8,
     len: usize,
@@ -102,14 +115,11 @@ pub extern "C" fn __rop_update(
 ) {
     let inst = unsafe { &mut *(handle as *mut PluginInstance<Stub>) };
     let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
-    let view = match decode_param_frame(slice, &inst.param_index) {
+    let _view = match decode_param_frame(slice, &inst.param_index) {
         Ok(v) => v,
         Err(_) => return,
     };
-    if let Some(id) = view.fetch_buffer_static("s", 0) {
-        let env = unsafe { &*env };
-        (env.float_buffer_release)(id.as_u64());
-    }
+    let _ = env;
 }
 
 #[unsafe(no_mangle)]

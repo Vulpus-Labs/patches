@@ -78,6 +78,118 @@ pub fn decode_port_frame<'a>(
     Ok(PortView::new(layout, bytes))
 }
 
+/// Shared `prepare` body used by `export_plugin!` / `export_modules!`.
+///
+/// Decodes the descriptor JSON and structural blob, calls
+/// [`patches_core::Module::prepare`], and writes the resulting handle
+/// (or an error string) into the supplied out-params.
+///
+/// The macros generate a thin `extern "C"` wrapper that forwards to this
+/// function so the heavy lifting stays in one place and is unit-tested
+/// once via the smoke test.
+///
+/// # Safety
+/// Caller must ensure all pointers are valid for the duration of the
+/// call. `out_handle` and `out_error` must be writable; both are
+/// initialised to "no value" before any failure path returns.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn prepare_dispatch<M: patches_core::Module + 'static>(
+    descriptor_json: *const u8,
+    descriptor_json_len: usize,
+    env: crate::types::FfiAudioEnvironment,
+    instance_id: u64,
+    structural_blob: *const u8,
+    structural_blob_len: usize,
+    out_handle: *mut *mut std::ffi::c_void,
+    out_error: *mut crate::types::FfiBytes,
+) -> i32 {
+    unsafe {
+        if !out_handle.is_null() {
+            *out_handle = std::ptr::null_mut();
+        }
+        if !out_error.is_null() {
+            *out_error = crate::types::FfiBytes::empty();
+        }
+    }
+
+    let write_error = |status: i32, msg: String| -> i32 {
+        if !out_error.is_null() {
+            unsafe {
+                *out_error = crate::types::FfiBytes::from_vec(msg.into_bytes());
+            }
+        }
+        status
+    };
+
+    let slice = unsafe {
+        std::slice::from_raw_parts(descriptor_json, descriptor_json_len)
+    };
+    let descriptor = match crate::json::deserialize_module_descriptor(slice) {
+        Ok(d) => d,
+        Err(e) => {
+            return write_error(
+                crate::types::PREPARE_ERR_DESCRIPTOR_JSON,
+                format!("descriptor JSON: {e}"),
+            );
+        }
+    };
+
+    let blob_slice: &[u8] = if structural_blob.is_null() || structural_blob_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(structural_blob, structural_blob_len) }
+    };
+    // An empty descriptor (no structural slots) accepts an empty blob.
+    let structural = if blob_slice.is_empty() && descriptor.structural_params.is_empty() {
+        patches_core::modules::StructuralParams::new()
+    } else {
+        match crate::structural_frame::decode_structural_params(blob_slice, &descriptor) {
+            Ok(s) => s,
+            Err(e) => {
+                return write_error(
+                    crate::types::PREPARE_ERR_STRUCTURAL_BLOB,
+                    format!("structural blob: {e}"),
+                );
+            }
+        }
+    };
+
+    let layout = patches_core::param_layout::compute_layout(&descriptor);
+    let param_index = patches_core::param_frame::ParamViewIndex::from_layout(&layout);
+    let port_layout = crate::port_frame::PortLayout::new(
+        descriptor.inputs.len() as u32,
+        descriptor.outputs.len() as u32,
+    );
+    let input_buf = Vec::with_capacity(descriptor.inputs.len());
+    let output_buf = Vec::with_capacity(descriptor.outputs.len());
+
+    let audio_env: patches_core::AudioEnvironment = env.into();
+    let id = patches_core::modules::InstanceId::from_raw(instance_id);
+    let module = match <M as patches_core::Module>::prepare(
+        &audio_env,
+        descriptor,
+        id,
+        &structural,
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            return write_error(crate::types::PREPARE_ERR_PREPARE, format!("{e:?}"));
+        }
+    };
+
+    let instance = Box::new(PluginInstance::<M> {
+        module,
+        param_index,
+        port_layout,
+        input_buf,
+        output_buf,
+    });
+    unsafe {
+        *out_handle = Box::into_raw(instance) as *mut std::ffi::c_void;
+    }
+    crate::types::PREPARE_OK
+}
+
 /// Plugin-instance wrapper: holds the user's `Module` plus the prepared
 /// [`ParamViewIndex`] and [`PortLayout`] used to decode audio-thread frames.
 ///
@@ -118,62 +230,32 @@ macro_rules! export_plugin {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_prepare(
+        pub unsafe extern "C" fn __patches_prepare(
             descriptor_json: *const u8,
             descriptor_json_len: usize,
             env: $crate::types::FfiAudioEnvironment,
             instance_id: u64,
-            _structural_blob: *const u8,
-            _structural_blob_len: usize,
-        ) -> *mut ::std::ffi::c_void {
-            // SAFETY: host passes a valid descriptor-JSON byte slice for
-            // the duration of the call (ADR 0045 §4).
-            let slice = unsafe {
-                ::std::slice::from_raw_parts(descriptor_json, descriptor_json_len)
-            };
-            let descriptor = match $crate::json::deserialize_module_descriptor(slice)
-            {
-                Ok(d) => d,
-                Err(_) => return ::std::ptr::null_mut(),
-            };
-            let layout = $crate::param_layout::compute_layout(&descriptor);
-            let param_index =
-                $crate::param_frame::ParamViewIndex::from_layout(&layout);
-            let port_layout = $crate::port_frame::PortLayout::new(
-                descriptor.inputs.len() as u32,
-                descriptor.outputs.len() as u32,
-            );
-            let input_buf = ::std::vec::Vec::with_capacity(descriptor.inputs.len());
-            let output_buf =
-                ::std::vec::Vec::with_capacity(descriptor.outputs.len());
-            let audio_env: ::patches_core::AudioEnvironment = env.into();
-            let id = ::patches_core::modules::InstanceId::from_raw(instance_id);
-            // ADR 0060: structural blob ABI lands in 0739; pass an empty
-            // carrier for now so existing plugins continue to work unchanged.
-            let structural = ::patches_core::modules::StructuralParams::new();
-            let module = match <$module as ::patches_core::Module>::prepare(
-                &audio_env,
-                descriptor,
-                id,
-                &structural,
-            ) {
-                Ok(m) => m,
-                Err(_) => return ::std::ptr::null_mut(),
-            };
-            let instance = ::std::boxed::Box::new($crate::sdk::PluginInstance::<
-                $module,
-            > {
-                module,
-                param_index,
-                port_layout,
-                input_buf,
-                output_buf,
-            });
-            ::std::boxed::Box::into_raw(instance) as *mut ::std::ffi::c_void
+            structural_blob: *const u8,
+            structural_blob_len: usize,
+            out_handle: *mut *mut ::std::ffi::c_void,
+            out_error: *mut $crate::types::FfiBytes,
+        ) -> i32 {
+            unsafe {
+                $crate::sdk::prepare_dispatch::<$module>(
+                    descriptor_json,
+                    descriptor_json_len,
+                    env,
+                    instance_id,
+                    structural_blob,
+                    structural_blob_len,
+                    out_handle,
+                    out_error,
+                )
+            }
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_update_validated_parameters(
+        pub unsafe extern "C" fn __patches_update_validated_parameters(
             handle: $crate::abi::Handle,
             bytes: *const u8,
             len: usize,
@@ -197,7 +279,7 @@ macro_rules! export_plugin {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_set_ports(
+        pub unsafe extern "C" fn __patches_set_ports(
             handle: $crate::abi::Handle,
             bytes: *const u8,
             len: usize,
@@ -230,7 +312,7 @@ macro_rules! export_plugin {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_process(
+        pub unsafe extern "C" fn __patches_process(
             handle: *mut ::std::ffi::c_void,
             pool_ptr: *mut [::patches_core::cables::CableValue; 2],
             pool_len: usize,
@@ -251,7 +333,7 @@ macro_rules! export_plugin {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_periodic_update(
+        pub unsafe extern "C" fn __patches_periodic_update(
             handle: *mut ::std::ffi::c_void,
             pool_ptr: *const [::patches_core::cables::CableValue; 2],
             pool_len: usize,
@@ -280,7 +362,7 @@ macro_rules! export_plugin {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_drop(handle: *mut ::std::ffi::c_void) {
+        pub unsafe extern "C" fn __patches_drop(handle: *mut ::std::ffi::c_void) {
             if handle.is_null() {
                 return;
             }
@@ -358,19 +440,29 @@ macro_rules! export_plugin_with_hash_override {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_prepare(
+        pub unsafe extern "C" fn __patches_prepare(
             _descriptor_json: *const u8,
             _descriptor_json_len: usize,
             _env: $crate::types::FfiAudioEnvironment,
             _instance_id: u64,
             _structural_blob: *const u8,
             _structural_blob_len: usize,
-        ) -> *mut ::std::ffi::c_void {
-            ::std::ptr::null_mut()
+            out_handle: *mut *mut ::std::ffi::c_void,
+            out_error: *mut $crate::types::FfiBytes,
+        ) -> i32 {
+            unsafe {
+                if !out_handle.is_null() {
+                    *out_handle = ::std::ptr::null_mut();
+                }
+                if !out_error.is_null() {
+                    *out_error = $crate::types::FfiBytes::empty();
+                }
+            }
+            $crate::types::PREPARE_ERR_PREPARE
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_update_validated_parameters(
+        pub unsafe extern "C" fn __patches_update_validated_parameters(
             _h: $crate::abi::Handle,
             _b: *const u8,
             _l: usize,
@@ -379,7 +471,7 @@ macro_rules! export_plugin_with_hash_override {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_set_ports(
+        pub unsafe extern "C" fn __patches_set_ports(
             _h: $crate::abi::Handle,
             _b: *const u8,
             _l: usize,
@@ -388,7 +480,7 @@ macro_rules! export_plugin_with_hash_override {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_process(
+        pub unsafe extern "C" fn __patches_process(
             _h: *mut ::std::ffi::c_void,
             _p: *mut [::patches_core::cables::CableValue; 2],
             _l: usize,
@@ -397,7 +489,7 @@ macro_rules! export_plugin_with_hash_override {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_periodic_update(
+        pub unsafe extern "C" fn __patches_periodic_update(
             _h: *mut ::std::ffi::c_void,
             _p: *const [::patches_core::cables::CableValue; 2],
             _l: usize,
@@ -407,7 +499,7 @@ macro_rules! export_plugin_with_hash_override {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_drop(_h: *mut ::std::ffi::c_void) {}
+        pub unsafe extern "C" fn __patches_drop(_h: *mut ::std::ffi::c_void) {}
 
         #[unsafe(no_mangle)]
         pub extern "C" fn __patches_free_bytes(bytes: $crate::types::FfiBytes) {
@@ -494,59 +586,31 @@ macro_rules! export_modules {
                     )
                 }
 
-                pub extern "C" fn prepare(
+                pub unsafe extern "C" fn prepare(
                     descriptor_json: *const u8,
                     descriptor_json_len: usize,
                     env: $crate::types::FfiAudioEnvironment,
                     instance_id: u64,
-                    _structural_blob: *const u8,
-                    _structural_blob_len: usize,
-                ) -> *mut ::std::ffi::c_void {
-                    // SAFETY: host guarantees a valid descriptor-JSON slice
-                    // for the duration of the call (ADR 0045 §4).
-                    let slice = unsafe {
-                        ::std::slice::from_raw_parts(descriptor_json, descriptor_json_len)
-                    };
-                    let descriptor = match $crate::json::deserialize_module_descriptor(slice)
-                    {
-                        Ok(d) => d,
-                        Err(_) => return ::std::ptr::null_mut(),
-                    };
-                    let layout = $crate::param_layout::compute_layout(&descriptor);
-                    let param_index =
-                        $crate::param_frame::ParamViewIndex::from_layout(&layout);
-                    let port_layout = $crate::port_frame::PortLayout::new(
-                        descriptor.inputs.len() as u32,
-                        descriptor.outputs.len() as u32,
-                    );
-                    let input_buf = ::std::vec::Vec::with_capacity(descriptor.inputs.len());
-                    let output_buf =
-                        ::std::vec::Vec::with_capacity(descriptor.outputs.len());
-                    let audio_env: ::patches_core::AudioEnvironment = env.into();
-                    let id = ::patches_core::modules::InstanceId::from_raw(instance_id);
-                    let structural = ::patches_core::modules::StructuralParams::new();
-                    let module = match <$module as ::patches_core::Module>::prepare(
-                        &audio_env,
-                        descriptor,
-                        id,
-                        &structural,
-                    ) {
-                        Ok(m) => m,
-                        Err(_) => return ::std::ptr::null_mut(),
-                    };
-                    let instance = ::std::boxed::Box::new(
-                        $crate::sdk::PluginInstance::<$module> {
-                            module,
-                            param_index,
-                            port_layout,
-                            input_buf,
-                            output_buf,
-                        },
-                    );
-                    ::std::boxed::Box::into_raw(instance) as *mut ::std::ffi::c_void
+                    structural_blob: *const u8,
+                    structural_blob_len: usize,
+                    out_handle: *mut *mut ::std::ffi::c_void,
+                    out_error: *mut $crate::types::FfiBytes,
+                ) -> i32 {
+                    unsafe {
+                        $crate::sdk::prepare_dispatch::<$module>(
+                            descriptor_json,
+                            descriptor_json_len,
+                            env,
+                            instance_id,
+                            structural_blob,
+                            structural_blob_len,
+                            out_handle,
+                            out_error,
+                        )
+                    }
                 }
 
-                pub extern "C" fn update_validated_parameters(
+                pub unsafe extern "C" fn update_validated_parameters(
                     handle: $crate::abi::Handle,
                     bytes: *const u8,
                     len: usize,
@@ -568,7 +632,7 @@ macro_rules! export_modules {
                     }
                 }
 
-                pub extern "C" fn set_ports(
+                pub unsafe extern "C" fn set_ports(
                     handle: $crate::abi::Handle,
                     bytes: *const u8,
                     len: usize,
@@ -600,7 +664,7 @@ macro_rules! export_modules {
                     );
                 }
 
-                pub extern "C" fn process(
+                pub unsafe extern "C" fn process(
                     handle: *mut ::std::ffi::c_void,
                     pool_ptr: *mut [::patches_core::cables::CableValue; 2],
                     pool_len: usize,
@@ -619,7 +683,7 @@ macro_rules! export_modules {
                     ::patches_core::Module::process(&mut inst.module, &mut pool);
                 }
 
-                pub extern "C" fn periodic_update(
+                pub unsafe extern "C" fn periodic_update(
                     handle: *mut ::std::ffi::c_void,
                     pool_ptr: *const [::patches_core::cables::CableValue; 2],
                     pool_len: usize,
@@ -645,7 +709,7 @@ macro_rules! export_modules {
                     }
                 }
 
-                pub extern "C" fn drop_handle(handle: *mut ::std::ffi::c_void) {
+                pub unsafe extern "C" fn drop_handle(handle: *mut ::std::ffi::c_void) {
                     if handle.is_null() {
                         return;
                     }
@@ -728,7 +792,6 @@ mod tests {
             .float_param("gain", 0.0, 1.0, 0.5)
             .int_param("mode", -10, 10, 2)
             .bool_param("bypass", false)
-            .file_param("sample", &["wav"])
             .mono_in("in")
             .mono_out("out")
     }
@@ -761,15 +824,12 @@ mod tests {
 
         let mut frame = ParamFrame::with_layout(&layout);
         pack_into(&layout, &defaults, &params, &mut frame).unwrap();
-        frame.buffer_slots_mut()[0] = 0xDEAD_BEEF;
 
         let bytes = frame.storage_bytes();
         let view = decode_param_frame(bytes, &index).unwrap();
         assert_eq!(view.fetch_float_static("gain", 0), 0.75);
         assert_eq!(view.fetch_int_static("mode", 0), 7);
         assert!(view.fetch_bool_static("bypass", 0));
-        let bid = view.fetch_buffer_static("sample", 0).unwrap();
-        assert_eq!(bid.as_u64(), 0xDEAD_BEEF);
     }
 
     #[test]
@@ -842,11 +902,7 @@ mod tests {
             let g = p.fetch_float_static("gain", 0);
             let m = p.fetch_int_static("mode", 0);
             let b = p.fetch_bool_static("bypass", 0);
-            let s = p
-                .fetch_buffer_static("sample", 0)
-                .map(|x| x.as_u64())
-                .unwrap_or(0);
-            LAST.with(|l| *l.borrow_mut() = Some((g, m, b, s)));
+            LAST.with(|l| *l.borrow_mut() = Some((g, m, b, 0u64)));
         }
         fn descriptor(&self) -> &ModuleDescriptor {
             &self.descriptor
@@ -874,7 +930,6 @@ mod tests {
 
     fn host_env() -> HostEnv {
         HostEnv {
-            float_buffer_release: noop_release,
             song_data_release: noop_release,
         }
     }
@@ -902,14 +957,21 @@ mod tests {
         };
         let ffi_env = FfiAudioEnvironment::from(&env);
         let json_bytes = crate::json::serialize_module_descriptor(&desc);
-        let handle = __patches_prepare(
-            json_bytes.as_ptr(),
-            json_bytes.len(),
-            ffi_env,
-            99,
-            std::ptr::null(),
-            0,
-        );
+        let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut err = crate::types::FfiBytes::empty();
+        let status = unsafe {
+            __patches_prepare(
+                json_bytes.as_ptr(),
+                json_bytes.len(),
+                ffi_env,
+                99,
+                std::ptr::null(),
+                0,
+                &mut handle,
+                &mut err,
+            )
+        };
+        assert_eq!(status, crate::types::PREPARE_OK);
         assert!(!handle.is_null());
 
         // Pack a parameter frame and dispatch.
@@ -933,22 +995,23 @@ mod tests {
         );
         let mut frame = ParamFrame::with_layout(&layout);
         pack_into(&layout, &defaults, &params, &mut frame).unwrap();
-        frame.buffer_slots_mut()[0] = 0xCAFE_F00D;
         let b = frame.storage_bytes();
         let env_v = host_env();
-        __patches_update_validated_parameters(
-            handle as Handle,
-            b.as_ptr(),
-            b.len(),
-            &env_v,
-        );
+        unsafe {
+            __patches_update_validated_parameters(
+                handle as Handle,
+                b.as_ptr(),
+                b.len(),
+                &env_v,
+            );
+        }
 
         LAST.with(|l| {
             let v = l.borrow().unwrap();
             assert_eq!(v.0, 0.125);
             assert_eq!(v.1, -4);
             assert!(v.2);
-            assert_eq!(v.3, 0xCAFE_F00D);
+            assert_eq!(v.3, 0u64);
         });
 
         // set_ports
@@ -965,7 +1028,7 @@ mod tests {
         })];
         pack_ports_into(0, &inputs, &outputs, &mut port_frame).unwrap();
         let pb = port_frame.bytes();
-        __patches_set_ports(handle as Handle, pb.as_ptr(), pb.len(), &env_v);
+        unsafe { __patches_set_ports(handle as Handle, pb.as_ptr(), pb.len(), &env_v) };
         LAST_PORTS.with(|l| {
             let (i, o) = l.borrow().unwrap();
             assert_eq!(i.cable_idx, 11);
@@ -975,11 +1038,11 @@ mod tests {
         // process: trivial no-op, prove the entry point doesn't panic.
         let mut pool_mem: Vec<[CableValue; 2]> =
             vec![[CableValue::Mono(0.0); 2]; 4];
-        __patches_process(handle, pool_mem.as_mut_ptr(), pool_mem.len(), 0);
+        unsafe { __patches_process(handle, pool_mem.as_mut_ptr(), pool_mem.len(), 0) };
 
         // destroy
         let before = DROP_COUNT.with(|c| c.get());
-        __patches_drop(handle);
+        unsafe { __patches_drop(handle) };
         let after = DROP_COUNT.with(|c| c.get());
         assert_eq!(after, before + 1, "SmokeModule Drop must fire");
 

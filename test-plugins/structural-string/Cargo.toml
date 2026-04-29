@@ -1,0 +1,12 @@
+[package]
+name = "test-structural-string-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+patches-core = { path = "../../patches-core" }
+patches-ffi-common = { path = "../../patches-ffi-common" }

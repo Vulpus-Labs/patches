@@ -4,7 +4,8 @@
 //! plus a buffer id, dispatch through real `extern "C"`, read the
 //! plugin's recorded state via exported debug accessors, assert parity.
 
-use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue};
+use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, StructuralParams};
+use patches_ffi_common::structural_frame::pack_structural;
 use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
 use patches_core::AudioEnvironment;
@@ -18,7 +19,6 @@ extern "C" fn noop_release(_: u64) {}
 
 fn host_env() -> HostEnv {
     HostEnv {
-        float_buffer_release: noop_release,
         song_data_release: noop_release,
     }
 }
@@ -49,16 +49,22 @@ fn all_scalar_tags_round_trip() {
     };
     let ffi_env = FfiAudioEnvironment::from(&env);
     let desc_bytes = json::serialize_module_descriptor(&descriptor_json);
-    let handle = unsafe {
+    let blob = pack_structural(&descriptor_json, &StructuralParams::new());
+    let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut err = patches_ffi_common::types::FfiBytes::empty();
+    let status = unsafe {
         (vtable.prepare)(
             desc_bytes.as_ptr(),
             desc_bytes.len(),
             ffi_env,
             InstanceId::next().as_u64(),
-            std::ptr::null(),
-            0,
+            blob.as_ptr(),
+            blob.len(),
+            &mut handle,
+            &mut err,
         )
     };
+    assert_eq!(status, patches_ffi_common::types::PREPARE_OK);
     assert!(!handle.is_null());
 
     // Build a ParamFrame with specific values for every tag.
@@ -71,7 +77,6 @@ fn all_scalar_tags_round_trip() {
     params.insert_param("m", 0, ParameterValue::Enum(2));
     let mut frame = ParamFrame::with_layout(&layout);
     pack_into(&layout, &defaults, &params, &mut frame).unwrap();
-    frame.buffer_slots_mut()[0] = 0x1234_5678_9ABC_DEF0;
 
     let index = ParamViewIndex::from_layout(&layout);
     let view = ParamView::new(&index, &frame);
@@ -102,9 +107,6 @@ fn all_scalar_tags_round_trip() {
         let e: libloading::Symbol<unsafe extern "C" fn() -> u32> =
             lib.get(b"all_tags_last_enum").unwrap();
         assert_eq!(e(), 2);
-        let buf: libloading::Symbol<unsafe extern "C" fn() -> u64> =
-            lib.get(b"all_tags_last_buffer").unwrap();
-        assert_eq!(buf(), 0x1234_5678_9ABC_DEF0);
     }
 
     unsafe { (vtable.drop)(handle) };

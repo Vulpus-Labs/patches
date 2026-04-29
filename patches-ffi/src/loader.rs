@@ -24,23 +24,21 @@ use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
 use patches_registry::ModuleBuilder;
 
 use crate::json;
-use crate::types::{ABI_VERSION, FfiAudioEnvironment, FfiModuleShape, FfiPluginManifest, FfiPluginVTable};
+use crate::types::{
+    ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiModuleShape, FfiPluginManifest,
+    FfiPluginVTable, PREPARE_OK,
+};
+use patches_ffi_common::structural_frame::pack_structural;
 
 // ── Host environment ─────────────────────────────────────────────────────────
 
-extern "C" fn host_float_buffer_release(_id: u64) {
-    // Placeholder for ArcTable wiring; release is a no-op until E107 lands
-    // the allocator-trap audit path that exercises the real retain/release.
-}
-
 extern "C" fn host_song_data_release(_id: u64) {
-    // See note above — song-data buffers do not yet cross the FFI boundary.
+    // Song-data buffers do not yet cross the FFI boundary.
 }
 
 fn host_env() -> &'static HostEnv {
     static HOST_ENV: OnceLock<HostEnv> = OnceLock::new();
     HOST_ENV.get_or_init(|| HostEnv {
-        float_buffer_release: host_float_buffer_release,
         song_data_release: host_song_data_release,
     })
 }
@@ -200,21 +198,39 @@ impl ModuleBuilder for DylibModuleBuilder {
         let desc_json = json::serialize_module_descriptor(&descriptor);
         let ffi_env = FfiAudioEnvironment::from(audio_environment);
 
-        let handle = unsafe {
+        // ADR 0060 / 0739: structural params are not yet plumbed through
+        // ModuleBuilder; encode an empty map matching the descriptor's
+        // declared structural slots so old plugins keep working and
+        // future structural-aware ones receive a well-formed blob.
+        let structural_blob = pack_structural(&descriptor, &StructuralParams::new());
+
+        let mut handle: *mut c_void = std::ptr::null_mut();
+        let mut error_bytes = FfiBytes::empty();
+        let status = unsafe {
             (self.vtable.prepare)(
                 desc_json.as_ptr(),
                 desc_json.len(),
                 ffi_env,
                 instance_id.as_u64(),
-                std::ptr::null(),
-                0,
+                structural_blob.as_ptr(),
+                structural_blob.len(),
+                &mut handle as *mut *mut c_void,
+                &mut error_bytes as *mut FfiBytes,
             )
         };
 
-        if handle.is_null() {
+        if status != PREPARE_OK || handle.is_null() {
+            let message = if !error_bytes.ptr.is_null() && error_bytes.len > 0 {
+                let bytes = unsafe { error_bytes.as_slice() };
+                let msg = String::from_utf8_lossy(bytes).into_owned();
+                unsafe { (self.vtable.free_bytes)(error_bytes) };
+                msg
+            } else {
+                format!("plugin prepare failed (status {status})")
+            };
             return Err(BuildError::Custom {
                 module: descriptor.module_name,
-                message: "plugin prepare returned null".to_string(),
+                message,
                 origin: None,
             });
         }
