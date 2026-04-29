@@ -579,12 +579,6 @@ impl Oscilloscope {
         }
     }
 
-    pub fn with_params(identity: ProcessorIdentity, _ring_len: usize) -> Self {
-        // Ring length is now fixed; legacy parameter kept for callers
-        // that pre-date the read-time decimation API.
-        Self::new(identity)
-    }
-
     /// Pull the latest `window_samples` decimated samples (stride
     /// `decimation`) into `dst` in oldest → newest order. Returns
     /// `false` until enough raw samples have been buffered.
