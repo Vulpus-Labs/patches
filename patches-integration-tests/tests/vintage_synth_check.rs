@@ -6,8 +6,7 @@ use patches_integration_tests::{build_engine, dylib_path, env};
 use patches_modules::default_registry;
 use std::path::PathBuf;
 
-#[test]
-fn vintage_synth_demo_compiles() {
+fn check(name: &str) {
     let dylib = dylib_path("patches-vintage");
     if !dylib.exists() {
         eprintln!("skipping — vintage dylib missing at {dylib:?}");
@@ -19,11 +18,37 @@ fn vintage_synth_demo_compiles() {
 
     let src_path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent().unwrap()
-        .join("patches-vintage/examples/vintage_synth.patches");
+        .join("patches-vintage/examples")
+        .join(name);
     let src = std::fs::read_to_string(&src_path).expect("read patch");
     let file = patches_dsl::parse(&src).expect("parse");
     let result = patches_dsl::expand(&file).expect("expand");
     let build = patches_interpreter::build(&result.patch, &registry, &env())
         .expect("build");
     let _engine = build_engine(&build.graph, &registry);
+}
+
+#[test]
+fn vintage_synth_demo_compiles() {
+    check("vintage_synth.patches");
+}
+
+#[test]
+fn plucky_keys_compiles() {
+    check("plucky_keys.patches");
+}
+
+#[test]
+fn sync_bass_compiles() {
+    check("sync_bass.patches");
+}
+
+#[test]
+fn gritty_lead_compiles() {
+    check("gritty_lead.patches");
+}
+
+#[test]
+fn split_pad_lead_compiles() {
+    check("split_pad_lead.patches");
 }

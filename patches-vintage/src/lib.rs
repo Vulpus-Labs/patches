@@ -16,6 +16,7 @@ pub mod bbd_filter_proto;
 pub mod bbd_proto;
 pub mod compander;
 pub mod vbbd;
+pub mod vstereobbd;
 pub mod vchorus;
 pub mod vdco;
 pub mod vflanger;
@@ -27,6 +28,7 @@ pub mod vreverb;
 pub mod vladder;
 
 pub use vbbd::VBbd;
+pub use vstereobbd::VStereoBbd;
 pub use vchorus::VChorus;
 pub use vdco::{VDco, VPolyDco};
 pub use vflanger::VFlanger;
@@ -45,6 +47,7 @@ pub use vladder::VLadder;
 pub fn register(r: &mut patches_registry::Registry) {
     r.register::<VChorus>();
     r.register::<VBbd>();
+    r.register::<VStereoBbd>();
     r.register::<VDco>();
     r.register::<VPolyDco>();
     r.register::<VFlanger>();
@@ -64,6 +67,7 @@ pub fn register(r: &mut patches_registry::Registry) {
 patches_ffi_common::export_modules! {
     (ffi_vchorus,         VChorus,        "VChorus",        1),
     (ffi_vbbd,            VBbd,           "VBbd",           1),
+    (ffi_vstereobbd,      VStereoBbd,     "VStereoBbd",     1),
     (ffi_vdco,            VDco,           "VDco",           1),
     (ffi_vpolydco,        VPolyDco,       "VPolyDco",       1),
     (ffi_vflanger,        VFlanger,       "VFlanger",       1),
@@ -88,6 +92,7 @@ mod ffi_bundle_tests {
     const EXPECTED_NAMES: &[&str] = &[
         "VChorus",
         "VBbd",
+        "VStereoBbd",
         "VDco",
         "VPolyDco",
         "VFlanger",

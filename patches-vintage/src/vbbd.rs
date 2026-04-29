@@ -71,17 +71,17 @@ module_params! {
 /// which image-folding becomes audible. The module uses
 /// [`BbdDevice::BBD_4096`] for its taps, putting vintage analog-delay
 /// territory in range.
-const DELAY_MS_MAX: f32 = 340.0;
-const DELAY_MS_MIN: f32 = 1.0;
-const FEEDBACK_MAX: f32 = 0.95;
+pub(crate) const DELAY_MS_MAX: f32 = 340.0;
+pub(crate) const DELAY_MS_MIN: f32 = 1.0;
+pub(crate) const FEEDBACK_MAX: f32 = 0.95;
 
 /// Per-tap DSP state.
-struct Tap {
-    bbd: Bbd,
-    comp: Compressor,
-    exp: Expander,
+pub(crate) struct Tap {
+    pub(crate) bbd: Bbd,
+    pub(crate) comp: Compressor,
+    pub(crate) exp: Expander,
     /// Feedback value carried from the previous tick.
-    fb_state: f32,
+    pub(crate) fb_state: f32,
     // One-pole HP (DC block) state for the feedback path.
     fb_hp_x_prev: f32,
     fb_hp_y_prev: f32,
@@ -92,7 +92,7 @@ struct Tap {
 }
 
 impl Tap {
-    fn new(sr: f32, smoothing_interval: u32) -> Self {
+    pub(crate) fn new(sr: f32, smoothing_interval: u32) -> Self {
         Self {
             bbd: Bbd::new_with_smoothing_interval(&BbdDevice::BBD_4096, sr, smoothing_interval),
             comp: Compressor::new(CompanderParams::NE570_DEFAULT, sr),
@@ -107,7 +107,7 @@ impl Tap {
     }
 
     #[inline]
-    fn filter_feedback(&mut self, x: f32) -> f32 {
+    pub(crate) fn filter_feedback(&mut self, x: f32) -> f32 {
         let hp = x - self.fb_hp_x_prev + self.fb_hp_r * self.fb_hp_y_prev;
         self.fb_hp_x_prev = x;
         self.fb_hp_y_prev = hp;
