@@ -38,6 +38,5 @@ patch {
 
     seq.pitch        -> fv.voct
     seq.gate         -> fv.gate
-    out.in_left         <- fv.audio
-    out.in_right        <- fv.audio
+    out.in <- fv.audio
 }

@@ -8,5 +8,5 @@ template gain(level: float = 1.0) {
 patch {
     module t : gain(loud)
     module out : AudioOut
-    out.in_left <- t.out
+    out.in <- t.out
 }

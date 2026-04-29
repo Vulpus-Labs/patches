@@ -31,7 +31,7 @@ template t {
 patch {
     module inst : t
     module out : AudioOut
-    out.in_left <- inst.y
+    out.in <- inst.y
 }
 ";
     let err = validate_err(src);

@@ -2,6 +2,6 @@ patch {
     module osc1 : Osc
     module osc2 : Osc
     module out  : AudioOut
-    osc1.sine -> out.in_left
-    osc2.sine -> out.in_left
+    osc1.sine -> out.in
+    osc2.sine -> out.in
 }

@@ -8,5 +8,5 @@ template port_pick(port_name: float = 0.0) {
 patch {
     module t : port_pick
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }

@@ -44,9 +44,9 @@ fn single_template_boundary_rewired() {
     assert!(find_connection(&flat, "seq", "pitch", "v1/osc", "voct").is_some(),
         "expected seq.pitch -> v1/osc.voct");
 
-    // out.in_left <- v1.audio  rewires to  v1/vca.out -> out.in_left
-    assert!(find_connection(&flat, "v1/vca", "out", "out", "in_left").is_some(),
-        "expected v1/vca.out -> out.in_left");
+    // join.in_left <- v1.audio  rewires to  v1/vca.out -> join.in_left
+    assert!(find_connection(&flat, "v1/vca", "out", "join", "in_left").is_some(),
+        "expected v1/vca.out -> join.in_left");
 }
 
 #[test]
@@ -57,8 +57,8 @@ fn single_template_scale_composed() {
     // seq.pitch -[0.5]-> v2.voct  →  seq.pitch -> v2/osc.voct  scale=0.5
     assert_connection_scale(&flat, "seq", "pitch", "v2/osc", "voct", 0.5, 1e-12);
 
-    // out.in_right <-[0.8]- v2.audio  →  v2/vca.out -> out.in_right  scale=0.8
-    assert_connection_scale(&flat, "v2/vca", "out", "out", "in_right", 0.8, 1e-12);
+    // join.in_right <-[0.8]- v2.audio  →  v2/vca.out -> join.in_right  scale=0.8
+    assert_connection_scale(&flat, "v2/vca", "out", "join", "in_right", 0.8, 1e-12);
 }
 
 // ─── Parameter substitution ───────────────────────────────────────────────────
@@ -110,9 +110,9 @@ fn nested_template_boundary_rewired() {
     assert!(find_connection(&flat, "seq", "pitch", "fv/v/osc", "voct").is_some(),
         "expected seq.pitch -> fv/v/osc.voct\nconnections: {:#?}", connection_keys(&flat));
 
-    // out.in_left <- fv.audio  must ultimately come from fv/filt.out
-    assert!(find_connection(&flat, "fv/filt", "out", "out", "in_left").is_some(),
-        "expected fv/filt.out -> out.in_left");
+    // out.in <- fv.audio  must ultimately come from fv/filt.out
+    assert!(find_connection(&flat, "fv/filt", "out", "out", "in").is_some(),
+        "expected fv/filt.out -> out.in");
 }
 
 #[test]
@@ -146,14 +146,14 @@ template tone_gen {
 patch {
     module t : tone_gen
     module out : StereoOut
-    t.out -> out.in_left
+    t.out -> out.in
 }";
     let file = parse(src).expect("parse ok");
     let flat = expand(&file).expect("expand ok").patch;
     assert_modules_exist(&flat, &["t/osc", "out"]);
     assert!(
-        find_connection(&flat, "t/osc", "sine", "out", "in_left").is_some(),
-        "expected t/osc.sine -> out.in_left"
+        find_connection(&flat, "t/osc", "sine", "out", "in").is_some(),
+        "expected t/osc.sine -> out.in"
     );
 }
 

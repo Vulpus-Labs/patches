@@ -8,5 +8,5 @@ template DeclCheck(n: int) {
 patch {
     module d   : DeclCheck(2)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- d.out
+    out.in[0] <-[1.0]- d.out
 }

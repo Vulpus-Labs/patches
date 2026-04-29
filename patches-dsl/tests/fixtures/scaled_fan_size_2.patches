@@ -11,5 +11,5 @@ patch {
     module out : AudioOut
     osc.sine[0] -[0.5]-> fan.ch[0]
     osc.sine[0] -[0.5]-> fan.ch[1]
-    out.in_left[0] <-[1.0]- fan.mix
+    out.in[0] <-[1.0]- fan.mix
 }

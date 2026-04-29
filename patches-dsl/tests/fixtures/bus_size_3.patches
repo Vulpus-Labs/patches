@@ -12,5 +12,5 @@ patch {
     osc.sine[0] -[1.0]-> b.in[0]
     osc.sine[0] -[1.0]-> b.in[1]
     osc.sine[0] -[1.0]-> b.in[2]
-    out.in_left[0] <-[1.0]- b.out
+    out.in[0] <-[1.0]- b.out
 }

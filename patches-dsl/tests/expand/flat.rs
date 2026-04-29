@@ -12,7 +12,7 @@ fn flat_passthrough_simple() {
     let flat = parse_expand(src);
 
     assert_modules_exist(&flat, &["osc", "out"]);
-    assert_eq!(flat.connections.len(), 2, "expected 2 connections");
+    assert_eq!(flat.connections.len(), 1, "expected 1 connection");
 }
 
 #[test]
@@ -47,18 +47,22 @@ fn flat_passthrough_params_preserved() {
 #[test]
 fn flat_arrow_normalisation() {
     // Both `->` and `<-` should produce the same from/to direction.
-    let src = include_str!("../fixtures/simple.patches");
-    let flat = parse_expand(src);
-
-    // `osc.sine -> out.in_left` and `out.in_right <- osc.sine` should both
-    // appear as from=osc to=out.
-    for c in &flat.connections {
-        assert_eq!(c.from_module, "osc", "expected from=osc, got: {}", c.from_module);
-        assert!(
-            c.to_module == "out",
-            "expected to=out, got: {}",
-            c.to_module
-        );
+    let forward = "patch {
+        module osc : Osc
+        module out : AudioOut
+        osc.sine -> out.in
+    }";
+    let backward = "patch {
+        module osc : Osc
+        module out : AudioOut
+        out.in <- osc.sine
+    }";
+    for src in [forward, backward] {
+        let flat = parse_expand(src);
+        assert_eq!(flat.connections.len(), 1);
+        let c = &flat.connections[0];
+        assert_eq!(c.from_module, "osc");
+        assert_eq!(c.to_module, "out");
     }
 }
 
@@ -70,9 +74,9 @@ fn diamond_wiring_two_sources_into_one_port() {
     // and produce two distinct connections.
     let flat = parse_expand(include_str!("../fixtures/diamond_wiring.patches"));
     let to_left: Vec<_> = flat.connections.iter()
-        .filter(|c| c.to_module == "out" && c.to_port == "in_left")
+        .filter(|c| c.to_module == "out" && c.to_port == "in")
         .collect();
-    assert_eq!(to_left.len(), 2, "expected 2 connections into out.in_left");
+    assert_eq!(to_left.len(), 2, "expected 2 connections into out.in");
 }
 
 #[test]

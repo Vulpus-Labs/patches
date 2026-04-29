@@ -246,7 +246,7 @@ fn no_taps_no_synth_modules_no_manifest() {
 patch {
     module osc : Osc
     module out : AudioOut
-    osc.out -> out.in_left
+    osc.out -> out.in
 }
 ";
     let r = run(src);

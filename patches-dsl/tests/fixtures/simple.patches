@@ -1,10 +1,9 @@
 # Baseline smoke-test: flat patch, no templates.
-# Connections using both -> and <-. No scaling, no indexed ports, no shape args.
+# Single mono->stereo broadcast cable into AudioOut.
 
 patch {
     module osc : Osc { frequency: 440Hz }
     module out : AudioOut
 
-    osc.sine  -> out.in_left
-    out.in_right <- osc.sine
+    osc.sine -> out.in
 }

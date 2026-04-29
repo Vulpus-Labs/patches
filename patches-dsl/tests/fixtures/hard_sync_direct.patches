@@ -7,6 +7,5 @@ patch {
     module out    : AudioOut
 
     master.reset_out -> slave.sync
-    slave.sawtooth   -> out.in_left
-    slave.sawtooth   -> out.in_right
+    slave.sawtooth   -> out.in
 }

@@ -14,6 +14,5 @@ patch {
     master.reset_out -> s2t.in
     s2t.out          -> t2s.in
     t2s.out          -> slave.sync
-    slave.sawtooth   -> out.in_left
-    slave.sawtooth   -> out.in_right
+    slave.sawtooth   -> out.in
 }

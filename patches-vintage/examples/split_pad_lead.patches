@@ -46,7 +46,7 @@ template pad_voice(
         drive:     1.05
     }
 
-    module cut_mod : PolySum(channels: [env, lfo])
+    module cut_mod : PolySum([env, lfo])
     env.out      -[<env_amt>]-> cut_mod.in[env]
     lfo.triangle -[0.25]-> cut_mod.in[lfo]
 
@@ -134,8 +134,7 @@ patch {
     pad.audio -> pad_mix.in
 
     module chorus : VChorus { variant: dark, mode: both, hiss: 0.0, jitter: 0.15 }
-    pad_mix.out -[0.5]-> chorus.in_left
-    pad_mix.out -[0.5]-> chorus.in_right
+    pad_mix.out -[0.5]-> chorus.in
 
     # High side → lead (mono).
     module lead_mts : MidiToCv { legato: true }
@@ -159,16 +158,18 @@ patch {
 
     lead.audio -[0.75]-> flg.in
 
-    # Chorus outputs are stereo; sum to mono for the mixer channel so the
-    # pad sits as one pan-placed element.
-    module pad_sum : Sum(channels: 2)
-    chorus.out_left  -> pad_sum.in[0]
-    chorus.out_right -> pad_sum.in[1]
+    # Chorus outputs are stereo; split + sum to mono for the mixer channel
+    # so the pad sits as one pan-placed element.
+    module pad_split : StereoSplitter
+    module pad_sum   : Sum(2)
+    chorus.out -> pad_split.in
+    pad_split.out_left  -> pad_sum.in[0]
+    pad_split.out_right -> pad_sum.in[1]
 
     # Stereo bus: pad panned a bit left, lead a bit right. Both go to
     # send_a → VReverb (gentle, shared tail). Only the lead drives send_b
     # into a stereo pair of VBbds for a widening analog delay.
-    module bus : StereoMixer(channels: [pad, lead]) {
+    module bus : StereoMixer([pad, lead]) {
         @pad:  { level: 0.55, pan: -0.35, send_a: 0.35, send_b: 0.0  },
         @lead: { level: 0.6,  pan:  0.3,  send_a: 0.3,  send_b: 0.2 },
     }
@@ -183,34 +184,23 @@ patch {
         decay:   0.45
         jitter:  0.1
     }
-    bus.send_a_left  -> verb.in_left
-    bus.send_a_right -> verb.in_right
-    verb.out_left    -> bus.return_a_left
-    verb.out_right   -> bus.return_a_right
+    bus.send_a -> verb.in
+    verb.out   -> bus.return_a
 
-    # send_b — stereo pair of VBbds, lead-only.
-    module bbd_l : VBbd(channels: 1) {
+    # send_b — stereo BBD delay, lead-only.
+    module bbd : VStereoBbd(1) {
         dry_wet:  1.0
-        jitter:   0.18
+        jitter:   0.2
         delay_ms: 320
-        feedback: 0.42
+        feedback: 0.4
+        pingpong: true
     }
-    module bbd_r : VBbd(channels: 1) {
-        dry_wet:  1.0
-        jitter:   0.22
-        delay_ms: 280
-        feedback: 0.38
-    }
-    bus.send_b_left  -> bbd_l.in
-    bus.send_b_right -> bbd_r.in
-    bbd_l.out -> bus.return_b_left
-    bbd_r.out -> bus.return_b_right
+    bus.send_b -> bbd.in
+    bbd.out    -> bus.return_b
 
     module lim : StereoLimiter
-    bus.out_left  -> lim.in_left
-    bus.out_right -> lim.in_right
+    bus.out -> lim.in
 
     module out : AudioOut
-    lim.out_left  -> out.in_left
-    lim.out_right -> out.in_right
+    lim.out -> out.in
 }

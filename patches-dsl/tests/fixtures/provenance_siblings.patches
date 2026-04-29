@@ -8,6 +8,6 @@ patch {
     module a : t
     module b : t
     module out : AudioOut
-    a.b -> out.in_left
-    b.b -> out.in_right
+    a.b -> out.in
+    b.b -> out.in
 }

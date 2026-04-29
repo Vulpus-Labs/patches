@@ -17,8 +17,7 @@ patch {
     module osc : Osc { frequency: 440Hz }
     module out : AudioOut
 
-    osc.sine -> out.in_left
-    osc.sine -> out.in_right
+    osc.sine -> out.in
 }
 ```
 

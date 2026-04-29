@@ -8,5 +8,5 @@ template tone(freq: float = 440.0) {
 patch {
     module t : tone(880.0)
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }

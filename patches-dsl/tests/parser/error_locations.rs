@@ -4,7 +4,7 @@ use patches_dsl::parse;
 
 #[test]
 fn error_span_missing_arrow_points_past_first_port_ref() {
-    // "osc.sine out.in_left" — the error should point somewhere on the line with
+    // "osc.sine out.in" — the error should point somewhere on the line with
     // the malformed connection, NOT at offset 0.
     let src = include_str!("../fixtures/errors/missing_arrow.patches");
     let err = parse(src).expect_err("expected parse error");
@@ -14,7 +14,7 @@ fn error_span_missing_arrow_points_past_first_port_ref() {
         "error span should not start at 0; got {}..{}",
         err.span.start, err.span.end
     );
-    // The error should be on or after the line containing "osc.sine out.in_left".
+    // The error should be on or after the line containing "osc.sine out.in".
     let error_line_offset = src.find("osc.sine out").expect("fixture should contain the bad line");
     assert!(
         err.span.start >= error_line_offset,

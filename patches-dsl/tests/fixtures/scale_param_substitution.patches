@@ -10,5 +10,5 @@ template scaled_conn(gain: float = 1.0) {
 patch {
     module t : scaled_conn(0.5)
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }

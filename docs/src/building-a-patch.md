@@ -51,16 +51,16 @@ module dly : Delay(channels: 4)
 Modules have named input and output ports. A connection (cable) carries a signal from one output to one input:
 
 ```patches
-osc.sine -> out.in_left
+osc.sine -> out.in
 ```
 
-This reads: take the `sine` output of `osc` and feed it to the `in_left` input of `out`.
+This reads: take the `sine` output of `osc` and feed it to the `in` input of `out`. `out.in` is a stereo port; a mono source like `osc.sine` is silently broadcast to both channels.
 
 An output can drive multiple inputs (fan-out):
 
 ```patches
-osc.sine -> out.in_left
-osc.sine -> out.in_right
+osc.sine -> filt.in
+osc.sine -> meter.in
 ```
 
 But each input accepts exactly one cable. To combine signals, use a mixer:
@@ -77,7 +77,7 @@ mix.out    -> vca.in
 A cable can carry a scale factor that multiplies the signal:
 
 ```patches
-osc.sine -[0.5]-> out.in_left     # attenuate by half
+osc.sine -[0.5]-> out.in          # attenuate by half
 lfo.sine -[-1.0]-> osc.phase_mod  # invert
 mod.out  -[0.03]-> osc.phase_mod  # light FM
 ```
@@ -91,9 +91,8 @@ Modules with multi-port shape arguments use bracket notation:
 ```patches
 module mix : StereoMixer(channels: 4) { level[0]: 0.8, pan[0]: -0.5 }
 
-osc.out   -> mix.in_left[0]
-osc.out   -> mix.in_right[0]
-noise.out -> mix.in_left[1]
+osc.out   -> mix.in[0]
+noise.out -> mix.in[1]
 ```
 
 Indexed parameters can also be grouped with at-block syntax:
@@ -129,8 +128,7 @@ patch {
     osc_a.sawtooth -> mix.in[0]
     osc_b.sawtooth -> mix.in[1]
 
-    mix.out -[0.3]-> out.in_left
-    mix.out -[0.3]-> out.in_right
+    mix.out -[0.3]-> out.in
 }
 ```
 

@@ -80,10 +80,8 @@ patch {
         jitter:    0.1
     }
 
-    vca.out -[0.75]-> flg.in_left
-    vca.out -[0.75]-> flg.in_right
+    vca.out -[0.75]-> flg.in
 
     module out : AudioOut
-    flg.out_left  -> out.in_left
-    flg.out_right -> out.in_right
+    flg.out -> out.in
 }

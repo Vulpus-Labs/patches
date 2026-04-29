@@ -55,6 +55,6 @@ patch {
     module out : AudioOut
 
     clk.semiquaver -[1.0]-> top.clock
-    out.in_left               <- top.mix
-    out.in_right              <- top.mix
+    out.in               <- top.mix
+    out.in              <- top.mix
 }

@@ -10,5 +10,5 @@ patch {
     module ch  : Channel(2)
     module out : AudioOut
     osc.sine[0] -[1.0]-> ch.x
-    out.in_left[0] <-[1.0]- ch.y
+    out.in[0] <-[1.0]- ch.y
 }

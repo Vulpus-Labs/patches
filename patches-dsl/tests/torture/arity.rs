@@ -111,14 +111,14 @@ fn arity_everything_param_index_on_concrete_destination() {
 #[test]
 fn arity_everything_boost_scale_applied_via_param_ref() {
     // $.mix <-[<boost>]- m.out
-    // bus_b boost=0.9: out.in_right ← bus_b.mix → bus_b/m.out → out.in_right, scale 0.9
-    // bus_a boost=0.5: out.in_left  ← bus_a.mix → bus_a/m.out → out.in_left,  scale 0.5
+    // bus_b boost=0.9: out.in ← bus_b.mix → bus_b/m.out → out.in, scale 0.9
+    // bus_a boost=0.5: out.in  ← bus_a.mix → bus_a/m.out → out.in,  scale 0.5
     let src = include_str!("../fixtures/torture/arity_everything.patches");
     let flat = parse_expand(src);
 
     let bus_b_out = flat.connections.iter()
-        .find(|c| c.from_module == "bus_b/m" && c.to_module == "out" && c.to_port == "in_right")
-        .expect("expected bus_b/m.out → out.in_right");
+        .find(|c| c.from_module == "bus_b/m" && c.to_module == "out" && c.to_port == "in")
+        .expect("expected bus_b/m.out → out.in");
     assert!(
         (bus_b_out.scale - 0.9).abs() < 1e-12,
         "expected bus_b output scale 0.9, got {}",
@@ -126,8 +126,8 @@ fn arity_everything_boost_scale_applied_via_param_ref() {
     );
 
     let bus_a_out = flat.connections.iter()
-        .find(|c| c.from_module == "bus_a/m" && c.to_module == "out" && c.to_port == "in_left")
-        .expect("expected bus_a/m.out → out.in_left");
+        .find(|c| c.from_module == "bus_a/m" && c.to_module == "out" && c.to_port == "in")
+        .expect("expected bus_a/m.out → out.in");
     assert!(
         (bus_a_out.scale - 0.5).abs() < 1e-12,
         "expected bus_a output scale 0.5, got {}",

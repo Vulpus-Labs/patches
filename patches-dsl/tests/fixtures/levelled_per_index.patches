@@ -10,5 +10,5 @@ patch {
     module lv  : Levelled(3) { level[0]: 0.8, level[1]: 0.3 }
     module out : AudioOut
     osc.sine[0] -[1.0]-> lv.x
-    out.in_left[0] <-[1.0]- lv.y
+    out.in[0] <-[1.0]- lv.y
 }

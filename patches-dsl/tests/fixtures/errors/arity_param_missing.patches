@@ -8,5 +8,5 @@ template Bad(size: int) {
 patch {
     module b   : Bad(2)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- b.y
+    out.in[0] <-[1.0]- b.y
 }

@@ -24,12 +24,14 @@ patch {
     module seq   : MidiToCv
     module v1    : voice(attack: 0.005, sustain: 0.6)   # decay uses default
     module v2    : voice                                  # all defaults
+    module join  : StereoJoiner
     module out   : AudioOut
 
     seq.pitch        ->       v1.voct
     seq.gate         ->       v1.gate
     seq.pitch        -[0.5]-> v2.voct       # scaled template in-port  (->)
     seq.gate         ->       v2.gate
-    out.in_left         <-       v1.audio
-    out.in_right        <-[0.8]- v2.audio      # scaled template out-port (<-)
+    join.in_left   <-       v1.audio
+    join.in_right <-[0.8]- v2.audio      # scaled template out-port (<-)
+    join.out -> out.in
 }

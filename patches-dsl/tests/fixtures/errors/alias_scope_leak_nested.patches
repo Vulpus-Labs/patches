@@ -19,5 +19,5 @@ patch {
     module osc : Osc
     module out : AudioOut
     osc.sine -> o.p
-    o.q -> out.in_left
+    o.q -> out.in
 }

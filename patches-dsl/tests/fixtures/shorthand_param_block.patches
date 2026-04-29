@@ -8,5 +8,5 @@ template env_tpl(attack: float = 0.01, decay: float = 0.1) {
 patch {
     module v : env_tpl(attack: 0.005, decay: 0.2)
     module out : AudioOut
-    out.in_left <- v.out
+    out.in <- v.out
 }

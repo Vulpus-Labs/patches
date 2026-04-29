@@ -10,5 +10,5 @@ template IndexCheck(k: int, n: int) {
 patch {
     module t   : IndexCheck(k: 1, n: 2)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }

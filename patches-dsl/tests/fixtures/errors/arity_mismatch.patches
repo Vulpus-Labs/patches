@@ -10,5 +10,5 @@ template Mismatch(n: int, m: int) {
 patch {
     module t   : Mismatch(n: 2, m: 3)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }

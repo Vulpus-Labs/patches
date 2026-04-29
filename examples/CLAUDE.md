@@ -240,8 +240,11 @@ confirm port and parameter names. Don't guess.
 
 ## Conventions (match these)
 
-- **Stereo ports use `_left` / `_right` suffixes**: `in_left`, `out_right`,
-  `send_a_left`, `return_b_right`. Never `in_l` or `inL`.
+- **Stereo ports are single ports** (`in`, `out`, `send_a`, `return_b`)
+  carrying a stereo signal. A mono source feeding a stereo input is
+  silently broadcast (L = R). Use `StereoSplitter` / `StereoJoiner` only
+  where the two channels need to flow through different mono effects.
+  `_left` / `_right` survive only on those splitter/joiner modules.
 - **Trigger vs gate**: `trigger` is a one-sample pulse on note-on;
   `gate` is held high for the note duration. ADSR needs both.
 - **Attenuate poly sums**: after `PolyToMono`, scale by ~`0.1` for 16
@@ -269,8 +272,7 @@ patch {
     osc.sawtooth -> vca.in
     env.out      -> vca.cv
     vca.out      -> coll.in
-    coll.out -[0.1]-> out.in_left
-    coll.out -[0.1]-> out.in_right
+    coll.out -[0.1]-> out.in
 }
 ```
 

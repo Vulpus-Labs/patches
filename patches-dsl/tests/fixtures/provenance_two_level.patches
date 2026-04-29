@@ -13,5 +13,5 @@ template outer() {
 patch {
     module o : outer
     module out : AudioOut
-    o.b -> out.in_left
+    o.b -> out.in
 }

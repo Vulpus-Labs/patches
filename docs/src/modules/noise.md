@@ -32,8 +32,7 @@ produce independent signals.
 Noise noise
 AudioOut out
 
-noise.white -> out.in_left
-noise.white -> out.in_right
+noise.white -> out.in
 ```
 
 **Example — pink noise for modulation**

@@ -76,8 +76,8 @@ fn flat_patch_round_trip() {
         "expected node 'out'"
     );
     assert_eq!(graph.node_ids().len(), 2);
-    // simple.patches declares two connection statements: osc.sine->out.left and out.right<-osc.sine
-    assert_eq!(graph.edge_list().len(), 2);
+    // simple.patches now declares a single mono->stereo broadcast cable into AudioOut.
+    assert_eq!(graph.edge_list().len(), 1);
 }
 
 /// Parse, expand, and build `voice_template.patches`; assert namespaced node IDs.

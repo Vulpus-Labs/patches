@@ -4,7 +4,7 @@ template t(s: song) {
     in: d out: d
     module seq : MasterSequencer([ch]) { song: <s> }
     module out : AudioOut
-    seq.clock[ch] -> out.in_left
+    seq.clock[ch] -> out.in
 }
 
 patch {

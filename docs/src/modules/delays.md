@@ -99,24 +99,20 @@ module dly : StereoDelay(channels: 2) {
 
 | Port | Description |
 | --- | --- |
-| `in_left` | Left audio input |
-| `in_right` | Right audio input |
+| `in` | Stereo audio input |
 | `drywet_cv` | Additive CV for `dry_wet` |
 | `delay_cv[0]` … `delay_cv[n-1]` | Additive CV for delay time |
 | `gain_cv[0]` … `gain_cv[n-1]` | Additive CV for tap gain |
 | `fb_cv[0]` … `fb_cv[n-1]` | Additive CV for feedback amount |
 | `pan_cv[0]` … `pan_cv[n-1]` | Additive CV for tap pan |
-| `return_left[0]` … `return_left[n-1]` | Pre-gain L return per tap |
-| `return_right[0]` … `return_right[n-1]` | Pre-gain R return per tap |
+| `return[0]` … `return[n-1]` | Pre-gain stereo return per tap |
 
 **Outputs**
 
 | Port | Description |
 | --- | --- |
-| `out_left` | Left dry/wet mixed output |
-| `out_right` | Right dry/wet mixed output |
-| `send_left[0]` … `send_left[n-1]` | Pre-gain L tap signal per tap |
-| `send_right[0]` … `send_right[n-1]` | Pre-gain R tap signal per tap |
+| `out` | Stereo dry/wet mixed output |
+| `send[0]` … `send[n-1]` | Pre-gain stereo tap signal per tap |
 
 ---
 
@@ -161,8 +157,7 @@ module verb : FdnReverb {
 
 | Port | Description |
 | --- | --- |
-| `in_left` | Left audio input (if unconnected, `in_right` is used for both channels) |
-| `in_right` | Right audio input |
+| `in` | Stereo audio input (mono sources are silently broadcast L = R) |
 | `size_cv` | Additive CV for `size` |
 | `brightness_cv` | Additive CV for `brightness` |
 | `pre_delay_cv` | Additive CV for `pre_delay` |
@@ -172,8 +167,7 @@ module verb : FdnReverb {
 
 | Port | Description |
 | --- | --- |
-| `out_left` | Left reverb output |
-| `out_right` | Right reverb output |
+| `out` | Stereo reverb output |
 
 ---
 

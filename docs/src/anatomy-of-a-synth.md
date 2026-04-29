@@ -51,8 +51,7 @@ patch {
     filt.out               -> collapse.in
 
     # Stereo output — scale down to avoid clipping with many voices
-    collapse.out  -[0.12]-> out.in_left
-    collapse.out  -[0.12]-> out.in_right
+    collapse.out  -[0.12]-> out.in
 }
 ```
 
@@ -135,8 +134,7 @@ The final stage collapses all voices to mono and routes to stereo output:
 
 ```patches
 filt.out      -> collapse.in
-collapse.out -[0.12]-> out.in_left
-collapse.out -[0.12]-> out.in_right
+collapse.out -[0.12]-> out.in
 ```
 
 `PolyToMono` sums all 16 voice signals. If several voices are active simultaneously, their amplitudes add up and can easily exceed 1.0. The `-[0.12]->` scaling compensates — it is roughly 1/8, leaving headroom for eight simultaneous voices at full amplitude. In practice you would adjust this by ear: if it clips, reduce the scale; if it is too quiet, raise it.

@@ -112,7 +112,7 @@ patch {
     # ±1 octave by the DSL's scale range; we stack env across multiple sum
     # channels to reach a wider sweep. Flip the sign on any env_* channel to
     # invert that summand (brightness-down character).
-    module cutoff_mod : PolySum(channels: [env, lfo])
+    module cutoff_mod : PolySum([env, lfo])
     env.out        -[3.0]-> cutoff_mod.in[env]
     kbd.trigger -> lfo.sync
     lfo.triangle -[0.2]-> cutoff_mod.in[lfo]
@@ -128,22 +128,20 @@ patch {
     vca.out -> mix.in
 
     module chorus : VChorus { jitter: 0.2, mode: one, hiss: 0.0 }
-    module delay_l: VBbd(channels: 1) { dry_wet: 0.5, jitter: 0.2, delay_ms:  200, feedback: 0.7 }
-    module delay_r: VBbd(channels: 1) { dry_wet: 0.5, jitter: 0.2, delay_ms:  150, feedback: 0.7 }
+    module delay  : VStereoBbd(1) {
+        dry_wet:  0.5
+        jitter:   0.2
+        delay_ms: 200
+        feedback: 0.7
+        pingpong: true
+    }
 
-    mix.out -[0.4]-> chorus.in_left, chorus.in_right
+    mix.out -[0.4]-> chorus.in
 
-
-    module out : AudioOut
-
+    module out  : AudioOut
     module verb : FdnReverb { mix: 0.4, character: cathedral }
 
-    chorus.out_left -> delay_l.in
-    chorus.out_right -> delay_r.in
-
-    delay_l.out -> verb.in_left
-    delay_r.out -> verb.in_right
-
-    verb.out_left -> out.in_left
-    verb.out_right -> out.in_right
+    chorus.out -> delay.in
+    delay.out  -> verb.in
+    verb.out   -> out.in
 }

@@ -8,5 +8,5 @@ template Bus(size: int) {
 patch {
     module b   : Bus(4)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- b.y
+    out.in[0] <-[1.0]- b.y
 }

@@ -143,7 +143,7 @@ fn error_unknown_param() {
 #[test]
 fn str_param_used_as_port_label() {
     let flat = parse_expand(include_str!("../fixtures/str_param_as_port_label.patches"));
-    let conn = find_connection(&flat, "t/osc", "sine", "out", "in_left")
+    let conn = find_connection(&flat, "t/osc", "sine", "out", "in")
         .expect("expected connection with resolved port name 'sine'");
     assert_eq!(conn.from_port, "sine");
 }

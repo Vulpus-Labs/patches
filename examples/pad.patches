@@ -3,8 +3,8 @@ pattern sandstorm {
 }
 
 template stutter(rhythm: pattern) {
-    in: in_left, in_right
-    out: out_left, out_right
+    in: in
+    out: out
 
     song pattern(trigger) {
         play {

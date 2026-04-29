@@ -89,6 +89,5 @@ patch {
     module out : AudioOut
 
     lead.audio -[0.7]-> flg.in
-    flg.out -> out.in_left
-    flg.out -> out.in_right
+    flg.out -> out.in
 }

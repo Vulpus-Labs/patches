@@ -25,10 +25,12 @@ patch {
     }
     module player: PatternPlayer([kick])
     module t2a: SyncToTrigger
+    module join: StereoJoiner
     module out: AudioOut
 
     seq.clock[drums] -> player.clock
     player.trigger[kick] -> t2a.in
-    t2a.out -> out.in_left
-    player.cv1[kick] -> out.in_right
+    t2a.out -> join.in_left
+    player.cv1[kick] -> join.in_right
+    join.out -> out.in
 }

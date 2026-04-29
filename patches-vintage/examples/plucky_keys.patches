@@ -80,7 +80,7 @@ patch {
     module mix : PolyToMono
     pluck.audio -> mix.in
 
-    module slap : VBbd(channels: 1) {
+    module slap : VBbd(1) {
         dry_wet:  0.35
         jitter:   0.15
         delay_ms: 95
@@ -90,6 +90,5 @@ patch {
     module out : AudioOut
 
     mix.out -[0.12]-> slap.in
-    slap.out -> out.in_left
-    slap.out -> out.in_right
+    slap.out -> out.in
 }

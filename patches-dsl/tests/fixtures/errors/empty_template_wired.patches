@@ -5,5 +5,5 @@ template Empty {
 patch {
     module e   : Empty
     module out : AudioOut
-    out.in_left <- e.y
+    out.in <- e.y
 }

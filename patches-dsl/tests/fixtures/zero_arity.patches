@@ -8,5 +8,5 @@ template ZeroArity(n: int) {
 patch {
     module t   : ZeroArity(0)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.out
+    out.in[0] <-[1.0]- t.out
 }

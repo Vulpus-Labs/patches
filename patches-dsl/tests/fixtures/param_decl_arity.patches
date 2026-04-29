@@ -8,5 +8,5 @@ template ParamCheck(size: int, level[size]: float = 1.0) {
 patch {
     module p   : ParamCheck(2)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- p.y
+    out.in[0] <-[1.0]- p.y
 }

@@ -8,5 +8,5 @@ template pick(port: str) {
 patch {
     module t : pick(sine)
     module out : AudioOut
-    out.in_left <- t.out
+    out.in <- t.out
 }

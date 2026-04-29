@@ -14,5 +14,5 @@ patch {
     module v   : Voice(880.0)
     module out : AudioOut
     src.semiquaver -> v.gate
-    out.in_left    <- v.audio
+    out.in    <- v.audio
 }

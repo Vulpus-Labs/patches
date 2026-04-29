@@ -8,5 +8,5 @@ template needs_freq(freq: float) {
 patch {
     module v : needs_freq
     module out : AudioOut
-    out.in_left <- v.y
+    out.in <- v.y
 }

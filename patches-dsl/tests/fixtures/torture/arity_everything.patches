@@ -89,6 +89,6 @@ patch {
     osc0.sine[0] -[1.0]-> red0.src
     osc1.sine[0] -[1.0]-> red2.src
 
-    out.in_left  <- bus_a.mix
-    out.in_right <- bus_b.mix
+    out.in  <- bus_a.mix
+    out.in <- bus_b.mix
 }

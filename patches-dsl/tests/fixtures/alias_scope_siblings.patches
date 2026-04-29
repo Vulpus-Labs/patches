@@ -19,6 +19,6 @@ patch {
     module out : AudioOut
     osc.sine -> a.x
     osc.sine -> b.x
-    a.y -> out.in_left
-    b.y -> out.in_right
+    a.y -> out.in
+    b.y -> out.in
 }

@@ -13,5 +13,5 @@ patch {
     src.sine[0] -[1.0]-> fan.ch[1]
     src.sine[0] -[1.0]-> fan.ch[2]
     src.sine[0] -[1.0]-> fan.ch[3]
-    out.in_left[0] <-[1.0]- fan.mix
+    out.in[0] <-[1.0]- fan.mix
 }

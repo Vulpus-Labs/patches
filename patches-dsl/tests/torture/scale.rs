@@ -24,7 +24,7 @@ patch {
     module t   : InScaled
     module out : AudioOut
     osc.sine -[0.5]-> t.x
-    out.in_left          <- t.y
+    out.in          <- t.y
 }
 "#;
     let flat = parse_expand(src);
@@ -41,7 +41,7 @@ patch {
 #[test]
 fn scale_out_port_both_outer_and_inner_nontrivial() {
     // inner boundary:    $.y <-[0.4]- osc.sine   →  scale 0.4
-    // outer connection:  out.in_left <-[0.5]- t.y   →  scale 0.5
+    // outer connection:  out.in <-[0.5]- t.y   →  scale 0.5
     // expected final:    0.4 × 0.5 = 0.2
     let src = r#"
 template OutScaled {
@@ -56,7 +56,7 @@ patch {
     module t   : OutScaled
     module out : AudioOut
     src.sine    -> t.x
-    out.in_left <-[0.5]- t.y
+    out.in <-[0.5]- t.y
 }
 "#;
     let flat = parse_expand(src);
@@ -101,7 +101,7 @@ patch {
     module top : Outer3
     module out : AudioOut
     clk.semiquaver -[0.8]-> top.clock
-    out.in_left                <- top.mix
+    out.in                <- top.mix
 }
 "#;
     let flat = parse_expand(src);
@@ -118,7 +118,7 @@ patch {
 #[test]
 fn scale_param_ref_boundary_with_nontrivial_outer() {
     // inner boundary:   $.mix <-[<boost>]- m.out  with boost = 0.4
-    // outer connection: out.in_left <-[0.5]- t.mix
+    // outer connection: out.in <-[0.5]- t.mix
     // expected final:   0.4 × 0.5 = 0.2
     let src = r#"
 template Boosted(boost: float = 1.0) {
@@ -133,7 +133,7 @@ patch {
     module t   : Boosted(0.4)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.x
-    out.in_left    <-[0.5]- t.mix
+    out.in    <-[0.5]- t.mix
 }
 "#;
     let flat = parse_expand(src);
@@ -166,7 +166,7 @@ patch {
     module t   : Inverting
     module out : AudioOut
     osc.sine -[0.8]-> t.x
-    out.in_left           <- t.y
+    out.in           <- t.y
 }
 "#;
     let flat = parse_expand(src);
@@ -206,7 +206,7 @@ patch {
     module t   : BiScaled
     module out : AudioOut
     src.sine    -[0.8]-> t.x
-    out.in_left <-[0.7]- t.y
+    out.in <-[0.7]- t.y
 }
 "#;
     let flat = parse_expand(src);
@@ -214,8 +214,8 @@ patch {
     // In-path: src → t/inner_osc.voct, scale = 0.8 × 0.5 = 0.4
     assert_connection_scale(&flat, "src", "sine", "t/inner_osc", "voct", 0.4, 1e-12);
 
-    // Out-path: t/inner_osc.sine → out.in_left, scale = 0.3 × 0.7 = 0.21
-    assert_connection_scale(&flat, "t/inner_osc", "sine", "out", "in_left", 0.21, 1e-12);
+    // Out-path: t/inner_osc.sine → out.in, scale = 0.3 × 0.7 = 0.21
+    assert_connection_scale(&flat, "t/inner_osc", "sine", "out", "in", 0.21, 1e-12);
 }
 
 // ─── T-0253: Ten-level depth stress test ─────────────────────────────────────
@@ -301,7 +301,7 @@ patch {
     module top : L1
     module out : AudioOut
     src.sine -> top.x
-    out.in_left <- top.y
+    out.in <- top.y
 }
 "#;
     let flat = parse_expand(src);

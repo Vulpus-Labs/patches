@@ -11,6 +11,6 @@ patch {
     osc.sawtooth -[0.8]->  mix.in[0]
     lfo.sine     -[0.3]->  mix.in[1]
     mix.in[2]   <-[-0.5]-  osc.sawtooth
-    out.in_left    <- mix.out
-    out.in_right   <- mix.out
+    out.in    <- mix.out
+    out.in   <- mix.out
 }

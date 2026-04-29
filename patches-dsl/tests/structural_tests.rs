@@ -25,7 +25,7 @@ template a {
 patch {
     module inst : a
     module out  : AudioOut
-    out.in_left <- inst.y
+    out.in <- inst.y
 }
 ";
     let err = parse_and_expand_err(src);
@@ -46,7 +46,7 @@ template t(freq: float) {
 patch {
     module inst : t(unknown: 440)
     module out : AudioOut
-    out.in_left <- inst.y
+    out.in <- inst.y
 }
 ";
     let err = parse_and_expand_err(src);
@@ -123,7 +123,7 @@ fn unknown_module_in_connection_classified() {
     let src = "\
 patch {
     module out : AudioOut
-    out.in_left <- ghost.sine
+    out.in <- ghost.sine
 }
 ";
     let err = parse_and_expand_err(src);

@@ -10,5 +10,5 @@ template bad_scale(waveform: float = 0.0) {
 patch {
     module t : bad_scale(0.5)
     module out : AudioOut
-    out.in_left <- t.out
+    out.in <- t.out
 }

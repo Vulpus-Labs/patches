@@ -26,5 +26,5 @@ patch {
     module out : AudioOut
 
     osc.sine -> r.input
-    out.in_left <- r.output
+    out.in <- r.output
 }

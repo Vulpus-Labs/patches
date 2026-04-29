@@ -13,5 +13,5 @@ patch {
     module inst : a
     module out  : AudioOut
 
-    out.in_left <- inst.y
+    out.in <- inst.y
 }

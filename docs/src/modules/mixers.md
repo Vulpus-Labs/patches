@@ -98,16 +98,16 @@ module mix : StereoMixer(channels: 4)
 | `pan_cv[0]` … `pan_cv[n-1]` | Per-channel pan CV |
 | `send_a_cv[0]` … `send_a_cv[n-1]` | Per-channel send A CV |
 | `send_b_cv[0]` … `send_b_cv[n-1]` | Per-channel send B CV |
-| `return_a_left` / `return_a_right` | Send A stereo return |
-| `return_b_left` / `return_b_right` | Send B stereo return |
+| `return_a` | Send A stereo return |
+| `return_b` | Send B stereo return |
 
 **Outputs**
 
 | Port | Description |
 | --- | --- |
-| `out_left` / `out_right` | Main stereo output |
-| `send_a_left` / `send_a_right` | Send A stereo bus |
-| `send_b_left` / `send_b_right` | Send B stereo bus |
+| `out` | Main stereo output |
+| `send_a` | Send A stereo bus |
+| `send_b` | Send B stereo bus |
 
 ---
 

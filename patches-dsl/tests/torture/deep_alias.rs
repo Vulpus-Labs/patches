@@ -72,21 +72,21 @@ fn deep_alias_connections_rewired_through_three_boundaries() {
 
 #[test]
 fn deep_alias_out_port_chain_rewired() {
-    // out.in_left ← top.mix must reach top/amp.out after three out-port rewirings.
+    // out.in ← top.mix must reach top/amp.out after three out-port rewirings.
     let src = include_str!("../fixtures/torture/deep_alias.patches");
     let flat = parse_expand(src);
 
     let has_amp_left = flat.connections.iter().any(|c| {
         c.from_module == "top/amp" && c.from_port == "out"
-            && c.to_module == "out" && c.to_port == "in_left"
+            && c.to_module == "out" && c.to_port == "in"
     });
-    assert!(has_amp_left, "expected top/amp.out → out.in_left");
+    assert!(has_amp_left, "expected top/amp.out → out.in");
 
     let has_amp_right = flat.connections.iter().any(|c| {
         c.from_module == "top/amp" && c.from_port == "out"
-            && c.to_module == "out" && c.to_port == "in_right"
+            && c.to_module == "out" && c.to_port == "in"
     });
-    assert!(has_amp_right, "expected top/amp.out → out.in_right");
+    assert!(has_amp_right, "expected top/amp.out → out.in");
 }
 
 #[test]

@@ -10,7 +10,7 @@ use patches_dsl::{parse, Connection, ModuleDecl, Statement};
 
 #[test]
 fn connection_span_does_not_leak_trailing_whitespace() {
-    let src = "patch {\n    osc.sine -> out.in_left\n    lfo.sine -> out.in_right\n}\n";
+    let src = "patch {\n    osc.sine -> out.in\n    lfo.sine -> out.in\n}\n";
     let file = parse(src).expect("parse");
     let conns: Vec<&Connection> = file
         .patch
@@ -53,7 +53,7 @@ fn module_decl_span_covers_name_and_type_only() {
 
 #[test]
 fn connection_span_trims_trailing_line_comment() {
-    let src = "patch {\n    osc.sine -> out.in_left # comment\n}\n";
+    let src = "patch {\n    osc.sine -> out.in # comment\n}\n";
     let file = parse(src).expect("parse");
     let conn = file
         .patch
@@ -62,5 +62,5 @@ fn connection_span_trims_trailing_line_comment() {
         .find_map(|s| if let Statement::Connection(c) = s { Some(c) } else { None })
         .expect("connection present");
     let text = &src[conn.span.start..conn.span.end];
-    assert_eq!(text, "osc.sine -> out.in_left");
+    assert_eq!(text, "osc.sine -> out.in");
 }

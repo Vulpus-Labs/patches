@@ -27,7 +27,7 @@ fn fan_in_with_backward_arrow_parses() {
     let src = "patch {
         module mix : Mixer
         module del : Delay
-        mix.return_a_right, ~meter(bar) <- del.out_right
+        mix.return_a_right, ~meter(bar) <- del.out
     }";
     let file = parse(src).expect("parse ok");
     let conns: Vec<_> = file
@@ -56,7 +56,7 @@ fn fan_out_rejects_list_on_lhs_with_forward_arrow() {
         module a : Osc
         module b : Osc
         module out : AudioOut
-        a.out, b.out -> out.in_left
+        a.out, b.out -> out.in
     }";
     assert!(parse(src).is_err(), "list on LHS of `->` must be rejected");
 }

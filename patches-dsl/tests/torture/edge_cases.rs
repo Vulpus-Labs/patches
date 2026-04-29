@@ -21,7 +21,7 @@ patch {
     module t   : Trivial(1)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.ch[0]
-    out.in_left[0] <-[1.0]- t.out
+    out.in[0] <-[1.0]- t.out
 }
 "#;
     let flat = parse_expand(src);
@@ -48,7 +48,7 @@ patch {
     module t   : ZeroChannel(0)
     module out : AudioOut
     osc.sine[0] -[1.0]-> t.x
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let flat = parse_expand(src);
@@ -96,7 +96,7 @@ patch {
     module duo : Duo(freq_a: 261.6, freq_b: 523.2)
     module out : AudioOut
     src.semiquaver -> duo.gate
-    out.in_left       <- duo.mix
+    out.in       <- duo.mix
 }
 "#;
     let flat = parse_expand(src);
@@ -145,7 +145,7 @@ template Bounded(n: int, gains[n]: float = 1.0) {
 patch {
     module t   : Bounded(3) { gains[5]: 0.5 }
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
@@ -171,7 +171,7 @@ template NeedsGains(n: int, gains[n]: float) {
 patch {
     module t   : NeedsGains(2)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");

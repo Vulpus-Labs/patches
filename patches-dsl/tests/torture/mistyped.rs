@@ -17,7 +17,7 @@ template PortByType(gain: float = 1.0) {
 patch {
     module t   : PortByType(0.5)
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
@@ -43,7 +43,7 @@ template FloatArity(n: float = 2.5) {
 patch {
     module t   : FloatArity
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
@@ -69,7 +69,7 @@ template NegArity(n: int = -2) {
 patch {
     module t   : NegArity
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
@@ -97,7 +97,7 @@ template StringScale(label: float = 0.0) {
 patch {
     module t   : StringScale(loud)
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }
 "#;
     let file = parse(src).expect("parse ok — 'loud' is a valid unquoted string literal");
@@ -124,7 +124,7 @@ template ScalarInParamBlock(gain: float = 1.0) {
 patch {
     module t   : ScalarInParamBlock { gain: 0.5 }
     module out : AudioOut
-    out.in_left <- t.y
+    out.in <- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
@@ -150,7 +150,7 @@ template GroupInShapeBlock(n: int, gains[n]: float = 1.0) {
 patch {
     module t   : GroupInShapeBlock(n: 2, gains: 0.5)
     module out : AudioOut
-    out.in_left[0] <-[1.0]- t.y
+    out.in[0] <-[1.0]- t.y
 }
 "#;
     let file = parse(src).expect("parse ok");
