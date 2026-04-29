@@ -295,6 +295,10 @@ pub enum Intent {
         scope_decimation: Option<usize>,
         scope_window_samples: Option<usize>,
     },
+    /// JS bundle finished loading and `window.__patches` is wired up.
+    /// Host-side handler clears push-dedupe caches so the next snapshot
+    /// / tap-frame goes through unconditionally. Ticket 0752.
+    Ready,
 }
 
 impl Intent {
@@ -318,6 +322,7 @@ impl Intent {
                 if let Some(d) = scope_decimation { entry.scope_decimation = d; }
                 if let Some(w) = scope_window_samples { entry.scope_window_samples = w; }
             }
+            Intent::Ready => {}
         }
     }
 }

@@ -20,6 +20,18 @@
     if (api._renderTaps) api._renderTaps(frame);
   };
 
+  // Tell host we're wired up so it can clear push-dedupe caches and
+  // resend the current snapshot / tap frame. Ticket 0752.
+  function postReady() {
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify({ kind: "ready" }));
+    } else {
+      // ipc bridge may attach after script execution; retry briefly.
+      setTimeout(postReady, 16);
+    }
+  }
+  postReady();
+
   // dB thresholds — must match patches-player/src/tui.rs.
   var DB_AMBER_FLOOR = -18;
   var DB_RED_FLOOR = -6;
@@ -118,15 +130,27 @@
     this.draw();
   };
 
-  // Find the latest rising zero-cross (prev<0, curr>=0). Returns
-  // null if none.
-  function findLatestZeroCross(s) {
-    var n = s.length;
-    var latest = null;
-    for (var i = 1; i < n; i++) {
-      if (s[i - 1] < 0 && s[i] >= 0) latest = i;
+  // Collect all rising zero-crossings (prev<-eps, curr>=+eps). The
+  // hysteresis on `eps` (a fraction of the window's peak amplitude)
+  // suppresses retriggers from noise or harmonic ripple near zero.
+  // Ticket 0754.
+  // First rising zero-cross in s[1..end). Schmitt-armed: requires the
+  // signal to have dipped below -eps before the upward zero-cross to
+  // suppress retrigger on noise / harmonic ripple. eps = 5% of the
+  // window peak amplitude. Returns null if none.
+  function findFirstRisingCross(s, end) {
+    var peak = 0;
+    for (var i = 0; i < end; i++) {
+      var a = s[i] < 0 ? -s[i] : s[i];
+      if (a > peak) peak = a;
     }
-    return latest;
+    var eps = peak * 0.05;
+    var armed = false;
+    for (var j = 1; j < end; j++) {
+      if (s[j] < -eps) armed = true;
+      else if (armed && s[j - 1] < 0 && s[j] >= 0) return j;
+    }
+    return null;
   }
 
   ScopeWidget.prototype.draw = function () {
@@ -155,25 +179,38 @@
     var s = this.samples;
     if (!s || s.length < 2) return;
 
-    // Optional zero-cross alignment, client-side. Operates on a copy
-    // so the cached `samples` array isn't mutated for next frame.
+    // Optional auto-trigger snap. Standard analog-scope behaviour:
+    // latch the left edge to a rising zero-cross, draw a fixed-length
+    // tail at constant samples-per-pixel, leave the right edge free.
+    // The trigger search occupies the first half of the buffer; the
+    // remaining half is the displayed window — this keeps both the
+    // displayed length and the sample-per-pixel scale constant from
+    // frame to frame, so a steady tone shows a stationary waveform
+    // regardless of frequency / refresh rate. Ticket 0754.
+    // Always display a fixed-length tail of the buffer. The first
+    // quarter is reserved as a trigger search region; the remaining
+    // three-quarters are drawn across the full canvas width. Snap
+    // mode shifts the start to a rising zero-cross within the search
+    // region; unsnapped mode just uses the natural offset. Same
+    // sample-per-pixel scale either way, so wavelength is identical
+    // across modes and both edges sit at fixed canvas pixels.
     var n = s.length;
-    var view = s;
-    if (this.snap) {
-      var k = findLatestZeroCross(s);
-      if (k !== null) {
-        view = new Array(n);
-        for (var i = 0; i < n; i++) view[i] = s[(i + k) % n];
-      }
+    var searchEnd = n >> 2;
+    var displayLen = n - searchEnd;
+    var start = searchEnd;
+    if (this.snap && n >= 4) {
+      var k0 = findFirstRisingCross(s, searchEnd);
+      if (k0 !== null) start = k0;
     }
 
     ctx.strokeStyle = "#40d0e0";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (var j = 0; j < n; j++) {
-      var v = view[j];
+    var stride = (w - 1) / (displayLen - 1);
+    for (var j = 0; j < displayLen; j++) {
+      var v = s[start + j];
       if (v > 1) v = 1; else if (v < -1) v = -1;
-      var x = (j / (n - 1)) * (w - 1);
+      var x = j * stride;
       var yy = ((1 - v) / 2) * (h - 1);
       if (j === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
     }

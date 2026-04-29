@@ -40,6 +40,7 @@ fn intent_log_label(intent: &Intent) -> &'static str {
         Intent::AddPath => "add_path_requested",
         Intent::RemovePath { .. } => "remove_path_requested",
         Intent::SetTapOpts { .. } => "set_tap_opts",
+        Intent::Ready => "webview_ready",
     }
 }
 
@@ -69,11 +70,14 @@ unsafe impl Sync for HostPtr {}
 pub(crate) struct WebviewGuiHandle {
     webview: WebView,
     /// JSON of the last snapshot pushed to JS; used to skip no-op updates.
-    last_snapshot: Mutex<Option<String>>,
+    /// Shared with the IPC handler so an `Intent::Ready` from JS can
+    /// clear it after a webview tear-down/rebuild (ticket 0752).
+    last_snapshot: Arc<Mutex<Option<String>>>,
     /// Timestamp of the last push; used to cap cadence.
     last_push: Mutex<Instant>,
     /// JSON of the last tap frame pushed; used to skip no-op updates.
-    last_tap_json: Mutex<Option<String>>,
+    /// Shared with the IPC handler — see `last_snapshot`.
+    last_tap_json: Arc<Mutex<Option<String>>>,
     /// Timestamp of the last tap-frame push.
     last_tap_push: Mutex<Instant>,
     /// Reusable scratch buffers for scope/spectrum reads.
@@ -333,6 +337,10 @@ pub(crate) unsafe fn create_gui(
 
     let ipc_state = gui_state.clone();
     let ipc_host = HostPtr(host);
+    let last_snapshot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let last_tap_json: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let ipc_last_snapshot = last_snapshot.clone();
+    let ipc_last_tap_json = last_tap_json.clone();
 
     // CLAP `set_scale` reports the host DPI scale. wry's LogicalSize is
     // already DPI-aware via the parent window, but webview content
@@ -355,6 +363,14 @@ pub(crate) unsafe fn create_gui(
                     return;
                 }
             };
+            if matches!(intent, Intent::Ready) {
+                if let Ok(mut s) = ipc_last_snapshot.lock() {
+                    *s = None;
+                }
+                if let Ok(mut t) = ipc_last_tap_json.lock() {
+                    *t = None;
+                }
+            }
             if let Ok(mut g) = ipc_state.lock() {
                 // SetTapOpts fires on every selector tweak; don't
                 // pollute the status log with those.
@@ -415,9 +431,9 @@ pub(crate) unsafe fn create_gui(
 
     Some(WebviewGuiHandle {
         webview,
-        last_snapshot: Mutex::new(None),
+        last_snapshot,
         last_push: Mutex::new(Instant::now() - PUSH_INTERVAL),
-        last_tap_json: Mutex::new(None),
+        last_tap_json,
         last_tap_push: Mutex::new(Instant::now() - TAP_PUSH_INTERVAL),
         tap_scratch: Mutex::new(TapScratch::default()),
         ticker_stop,

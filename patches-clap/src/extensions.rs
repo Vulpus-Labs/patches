@@ -128,11 +128,16 @@ static STATE: clap_plugin_state = clap_plugin_state {
 /// [4 bytes LE: module_paths_count]         // optional trailing section
 /// for each:
 ///   [4 bytes LE: len] [path UTF-8 bytes]
+/// [4 bytes LE: tap_opts_count]             // optional (ticket 0753)
+/// for each:
+///   [u32 slot][u32 fft][u32 dec][u32 win]
+/// [u32 width][u32 height]                  // optional (ticket 0753)
 /// ```
 ///
-/// Legacy states written before 0566 end after the source section;
-/// `state_load` treats a clean EOF at the module-paths count as an
-/// empty list.
+/// Each trailing section is independently EOF-tolerant: a clean EOF at
+/// any section boundary is treated as "section absent" and the
+/// remaining state keeps its defaults. Legacy states written before
+/// 0566 / 0753 thus load cleanly.
 unsafe extern "C" fn state_save(
     plugin: *const clap_plugin,
     stream: *const clap_ostream,
@@ -165,6 +170,37 @@ unsafe extern "C" fn state_save(
             return false;
         }
     }
+
+    // Tap display opts (ticket 0753).
+    let tap_opts: Vec<(u32, u32, u32, u32)> = {
+        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
+        gui.tap_opts
+            .iter()
+            .map(|(slot, opts)| {
+                (
+                    *slot as u32,
+                    opts.spectrum_fft_size as u32,
+                    opts.scope_decimation as u32,
+                    opts.scope_window_samples as u32,
+                )
+            })
+            .collect()
+    };
+    let tap_count = tap_opts.len() as u32;
+    if !stream_write_all(stream, &tap_count.to_le_bytes()) {
+        return false;
+    }
+    for (slot, fft, dec, win) in &tap_opts {
+        if !stream_write_all(stream, &slot.to_le_bytes()) { return false; }
+        if !stream_write_all(stream, &fft.to_le_bytes()) { return false; }
+        if !stream_write_all(stream, &dec.to_le_bytes()) { return false; }
+        if !stream_write_all(stream, &win.to_le_bytes()) { return false; }
+    }
+
+    // Window size (ticket 0753).
+    if !stream_write_all(stream, &p.gui_width.to_le_bytes()) { return false; }
+    if !stream_write_all(stream, &p.gui_height.to_le_bytes()) { return false; }
+
     true
 }
 
@@ -229,6 +265,62 @@ unsafe extern "C" fn state_load(
     {
         let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
         gui.module_paths = p.module_paths.clone();
+    }
+
+    // Optional tap_opts section (ticket 0753).
+    match try_read_u32(stream) {
+        ReadU32::Ok(count) => {
+            let mut entries =
+                Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let slot = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n as usize,
+                    _ => return false,
+                };
+                let fft = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n as usize,
+                    _ => return false,
+                };
+                let dec = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n as usize,
+                    _ => return false,
+                };
+                let win = match try_read_u32(stream) {
+                    ReadU32::Ok(n) => n as usize,
+                    _ => return false,
+                };
+                entries.push((
+                    slot,
+                    patches_plugin_common::TapDisplayOpts {
+                        spectrum_fft_size: fft,
+                        scope_decimation: dec,
+                        scope_window_samples: win,
+                    },
+                ));
+            }
+            let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
+            gui.tap_opts.clear();
+            for (slot, opts) in entries {
+                gui.tap_opts.insert(slot, opts);
+            }
+        }
+        ReadU32::Eof => {}
+        ReadU32::Err => return false,
+    }
+
+    // Optional window size section (ticket 0753).
+    match try_read_u32(stream) {
+        ReadU32::Ok(width) => {
+            let height = match try_read_u32(stream) {
+                ReadU32::Ok(n) => n,
+                _ => return false,
+            };
+            let (w, h) = clamp_size(width, height);
+            p.gui_width = w;
+            p.gui_height = h;
+        }
+        ReadU32::Eof => {}
+        ReadU32::Err => return false,
     }
 
     // If activated, compile and push the plan.
@@ -646,6 +738,51 @@ mod tests {
         let in_ctx = InCtx { buf: Vec::new(), pos: RefCell::new(0) };
         let is = mk_istream(&in_ctx);
         unsafe {
+            assert!(matches!(try_read_u32(&is), ReadU32::Eof));
+        }
+    }
+
+    /// tap_opts section (ticket 0753) encodes as
+    /// `[count][slot fft dec win]*` and round-trips through the same
+    /// stream helpers used by `state_save` / `state_load`.
+    #[test]
+    fn tap_opts_section_round_trip() {
+        let out = OutCtx { buf: RefCell::new(Vec::new()) };
+        let os = mk_ostream(&out);
+        let entries = [(0u32, 1024u32, 16u32, 512u32), (3, 2048, 8, 1024)];
+        unsafe {
+            let count = entries.len() as u32;
+            assert!(stream_write_all(&os, &count.to_le_bytes()));
+            for (s, f, d, w) in &entries {
+                assert!(stream_write_all(&os, &s.to_le_bytes()));
+                assert!(stream_write_all(&os, &f.to_le_bytes()));
+                assert!(stream_write_all(&os, &d.to_le_bytes()));
+                assert!(stream_write_all(&os, &w.to_le_bytes()));
+            }
+            // window size trailer.
+            assert!(stream_write_all(&os, &800u32.to_le_bytes()));
+            assert!(stream_write_all(&os, &600u32.to_le_bytes()));
+        }
+
+        let in_ctx = InCtx { buf: out.buf.into_inner(), pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        unsafe {
+            let count = match try_read_u32(&is) {
+                ReadU32::Ok(n) => n,
+                _ => panic!("count"),
+            };
+            let mut got = Vec::new();
+            for _ in 0..count {
+                let s = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+                let f = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+                let d = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+                let w = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+                got.push((s, f, d, w));
+            }
+            assert_eq!(got, entries);
+            let width = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+            let height = match try_read_u32(&is) { ReadU32::Ok(n) => n, _ => panic!() };
+            assert_eq!((width, height), (800, 600));
             assert!(matches!(try_read_u32(&is), ReadU32::Eof));
         }
     }
