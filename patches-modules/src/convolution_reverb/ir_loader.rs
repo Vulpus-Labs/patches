@@ -79,11 +79,12 @@ pub(super) struct IrLoadRequest {
     pub(super) variant_idx: u8,
     pub(super) sample_rate: f32,
     pub(super) base_mix: f32,
-    /// Pre-computed spectral data from a `FloatBuffer` parameter.
-    /// When `Some`, the loader skips synthesis and builds the convolver
-    /// directly from this data via `NonUniformConvolver::from_pre_fft`.
-    /// The `Arc` is moved off the audio thread into the loader, so its
-    /// deallocation never happens on the audio thread.
+    /// Pre-computed spectral data decoded from the `ir_path` structural
+    /// param at `prepare` time. When `Some`, the loader skips synthesis
+    /// and builds the convolver directly from this data via
+    /// `NonUniformConvolver::from_pre_fft`. The `Arc` is moved off the
+    /// audio thread into the loader, so its deallocation never happens
+    /// on the audio thread.
     pub(super) pre_fft_data: Option<Arc<[f32]>>,
 }
 

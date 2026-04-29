@@ -36,16 +36,17 @@
 //! |------|------|-------|---------|-------------|
 //! | `mix` | float | 0.0--1.0 | `1.0` | Dry/wet mix |
 //! | `ir` | enum | room/hall/plate/file | `room` | Impulse response variant |
-//! | `path` | str | -- | `""` | File path for `ir: file` variant |
+//! | `ir_path` | structural str | -- | `""` | File path for `ir: file` variant |
 //!
 //! # Real-time safety
 //!
 //! IR resolution (file I/O, synthetic generation), convolver construction, and
 //! processing thread management all happen off the audio thread. On initial
-//! build these run synchronously on the control thread (via [`update_parameters`]).
-//! For parameter updates to surviving modules ([`update_validated_parameters`]),
-//! an [`ir_loader::IrLoader`] background thread handles the heavy work. The audio
-//! thread only stashes a request and polls for results in [`periodic_update`].
+//! build these run synchronously on the control thread (via `Module::prepare`
+//! and `apply_unpacked_params`). For parameter updates to surviving modules
+//! ([`update_validated_parameters`]), an [`ir_loader::IrLoader`] background
+//! thread handles the heavy work. The audio thread only stashes a request
+//! and polls for results in [`periodic_update`].
 
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
