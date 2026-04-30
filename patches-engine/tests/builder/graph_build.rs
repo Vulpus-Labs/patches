@@ -228,3 +228,127 @@ fn type_changed_node_tombstone_and_new_module() {
     // Exactly one new module installed (the new Sum; AudioOut survives).
     assert_eq!(plan_b.new_modules.len(), 1, "only the type-changed node should be new");
 }
+
+// ── Cable range lowering (ticket 0769 / ADR 0062) ─────────────────────────
+
+/// Build a minimal sine→AudioOut graph with a custom [`CableMap`] on the cable.
+fn sine_to_audio_out_with_map(map: CableMap) -> ModuleGraph {
+    let mut graph = ModuleGraph::new();
+    let sine_desc = Oscillator::describe(&ModuleShape { channels: 0 });
+    let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+    let mut sine_params = ParameterMap::new();
+    sine_params.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
+    graph.add_module("a_sine", sine_desc, &sine_params).unwrap();
+    graph.add_module("b_out", out_desc, &ParameterMap::new()).unwrap();
+    graph
+        .connect_with_map(
+            &NodeId::from("a_sine"),
+            p("sine"),
+            &NodeId::from("b_out"),
+            p("in"),
+            map,
+        )
+        .unwrap();
+    graph
+}
+
+/// `connect_with_map` plumbs the affine + clip triple through to the
+/// destination port. Mono→stereo broadcast preserves the same map on both
+/// channels (ADR 0059 §2 + ADR 0062).
+#[test]
+fn cable_map_is_copied_to_stereo_input_port() {
+    let map = CableMap { scale: 0.6, offset: 0.2, clip: Some((0.2, 0.8)) };
+    let graph = sine_to_audio_out_with_map(map);
+    let registry = default_registry();
+    let env = default_env();
+    let (_plan, state) = default_builder()
+        .build_patch(&graph, &registry, &env, &PlannerState::empty())
+        .unwrap();
+
+    let out_node = &state.nodes[&NodeId::from("b_out")];
+    let in_port = &out_node.input_ports[0];
+    let stereo = match in_port {
+        InputPort::Stereo(s) => s,
+        other => panic!("expected stereo input port, got {other:?}"),
+    };
+    assert!((stereo.scale - 0.6).abs() < 1e-6);
+    assert!((stereo.offset - 0.2).abs() < 1e-6);
+    let (lo, hi) = stereo.clip.expect("clip must propagate");
+    assert!((lo - 0.2).abs() < 1e-6 && (hi - 0.8).abs() < 1e-6);
+    assert!(stereo.broadcast_from_mono, "mono Audio source must broadcast to stereo input");
+}
+
+/// At read time a `uni(0.2, 0.8)` cable from a normalised `[0, 1]` source
+/// clips and offsets the destination signal. Driving a sine into AudioOut
+/// shifts and clamps both channels into the `[0.2, 0.8]` window.
+#[test]
+fn uni_range_clips_and_offsets_at_tick_time() {
+    // sine outputs ~[-1, 1]; treating it as a "normalised" source for this
+    // unit test means after `(scale=0.6, offset=0.2, clip=[0.2, 0.8])` the
+    // sample lands in `[-0.4, 0.8]` pre-clip, then clamps to `[0.2, 0.8]`.
+    let map = CableMap { scale: 0.6, offset: 0.2, clip: Some((0.2, 0.8)) };
+    let graph = sine_to_audio_out_with_map(map);
+    let (plan, _, module_pool) = default_build(&graph);
+    let mut buffer_pool = make_buffer_pool(256);
+
+    let stale = patches_engine::ReadyState::new_stale(module_pool);
+    let mut state = stale.rebuild(&plan, 32);
+    let mut min_v = f32::INFINITY;
+    let mut max_v = f32::NEG_INFINITY;
+    for i in 0..2000 {
+        let wi = i % 2;
+        let mut cp = CablePool::new(&mut buffer_pool, wi);
+        state.tick(&mut cp);
+        let v = match buffer_pool[AUDIO_OUT_L][wi] { CableValue::Mono(v) => v, _ => 0.0 };
+        min_v = min_v.min(v);
+        max_v = max_v.max(v);
+    }
+    assert!(
+        min_v >= 0.2 - 1e-6 && max_v <= 0.8 + 1e-6,
+        "uni clip should bound output to [0.2, 0.8], got [{min_v}, {max_v}]",
+    );
+    assert!(
+        (min_v - 0.2).abs() < 1e-3 && (max_v - 0.8).abs() < 1e-3,
+        "expected clip endpoints to be reached, got [{min_v}, {max_v}]",
+    );
+}
+
+/// Rebuilding with a different `CableMap` (as happens when a `<param>`
+/// endpoint changes) emits a `port_updates` entry carrying the new affine +
+/// clip triple, with no module reinstallation. This is the param-driven
+/// recompute path called out in ticket 0769.
+#[test]
+fn changing_cable_map_emits_port_update_with_new_triple() {
+    let registry = default_registry();
+    let env = default_env();
+    let builder = default_builder();
+
+    let map_a = CableMap::scalar(1.0);
+    let map_b = CableMap { scale: 0.5, offset: 0.25, clip: Some((0.25, 0.75)) };
+    let graph_a = sine_to_audio_out_with_map(map_a);
+    let graph_b = sine_to_audio_out_with_map(map_b);
+
+    let (_plan_a, state_a) = builder
+        .build_patch(&graph_a, &registry, &env, &PlannerState::empty())
+        .unwrap();
+    let (plan_b, state_b) = builder.build_patch(&graph_b, &registry, &env, &state_a).unwrap();
+
+    assert!(
+        plan_b.new_modules.is_empty(),
+        "a cable-map-only change must not reinstall modules"
+    );
+    let out_pool_idx = pool_index_for(&state_b, &NodeId::from("b_out"));
+    let updated = plan_b
+        .port_updates
+        .iter()
+        .find(|(idx, _, _)| *idx == out_pool_idx)
+        .expect("rebuilt cable must emit a port_update for the destination");
+    let stereo = match &updated.1[0] {
+        InputPort::Stereo(s) => s,
+        other => panic!("expected stereo input port, got {other:?}"),
+    };
+    assert!((stereo.scale - 0.5).abs() < 1e-6);
+    assert!((stereo.offset - 0.25).abs() < 1e-6);
+    let (lo, hi) = stereo.clip.expect("new clip must propagate");
+    assert!((lo - 0.25).abs() < 1e-6 && (hi - 0.75).abs() < 1e-6);
+}

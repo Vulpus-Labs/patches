@@ -121,7 +121,7 @@ pub mod source_span;
 pub use audio_environment::AudioEnvironment;
 pub use build_error::BuildError;
 pub use cable_pool::CablePool;
-pub use cables::{CableKind, CableValue, InputPort, MonoInput, MonoLayout, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput, StereoInput, StereoOutput, StereoSample};
+pub use cables::{CableKind, CableMap, CableValue, InputPort, MonoInput, MonoLayout, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput, StereoInput, StereoOutput, StereoSample};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, Node, NodeId};

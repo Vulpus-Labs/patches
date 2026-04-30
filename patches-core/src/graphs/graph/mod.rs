@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::cables::{CableKind, MonoLayout, PolyLayout};
+use crate::cables::{CableKind, CableMap, MonoLayout, PolyLayout};
 use crate::modules::{ModuleDescriptor, ParameterMap, PortRef, StructuralParams};
 
 /// Stable identifier for a module node in the graph.
@@ -152,8 +152,8 @@ struct Edge {
     to: NodeId,
     input_name: &'static str,
     input_index: usize,
-    /// Scaling factor applied to the signal at read-time. Must be in `[-10.0, 10.0]`.
-    scale: f32,
+    /// Affine + clip applied at read-time. `scale` must be in `[-10.0, 10.0]`.
+    map: CableMap,
 }
 
 /// A node in the module graph, holding a descriptor and its current parameter values.
@@ -253,6 +253,23 @@ impl ModuleGraph {
         input: PortRef,
         scale: f32,
     ) -> Result<(), GraphError> {
+        self.connect_with_map(from, output, to, input, CableMap::scalar(scale))
+    }
+
+    /// Connect with the full affine + clip [`CableMap`] (ADR 0062).
+    ///
+    /// `scale` must still be finite and in `[-10.0, 10.0]`. `offset` and the
+    /// optional `clip` window are stored as-is and applied at read-time by
+    /// the destination input port.
+    pub fn connect_with_map(
+        &mut self,
+        from: &NodeId,
+        output: PortRef,
+        to: &NodeId,
+        input: PortRef,
+        map: CableMap,
+    ) -> Result<(), GraphError> {
+        let scale = map.scale;
         if !scale.is_finite() || !(-10.0..=10.0).contains(&scale) {
             return Err(GraphError::ScaleOutOfRange(scale));
         }
@@ -360,7 +377,7 @@ impl ModuleGraph {
                 to: to.clone(),
                 input_name: input.name,
                 input_index: input.index,
-                scale,
+                map,
             },
         );
 
@@ -393,8 +410,8 @@ impl ModuleGraph {
     }
 
     /// Return a snapshot of all edges as
-    /// `(from, output_name, output_index, to, input_name, input_index, scale)` tuples.
-    pub fn edge_list(&self) -> Vec<(NodeId, &'static str, usize, NodeId, &'static str, usize, f32)> {
+    /// `(from, output_name, output_index, to, input_name, input_index, map)` tuples.
+    pub fn edge_list(&self) -> Vec<(NodeId, &'static str, usize, NodeId, &'static str, usize, CableMap)> {
         self.edges
             .values()
             .map(|e| {
@@ -405,7 +422,7 @@ impl ModuleGraph {
                     e.to.clone(),
                     e.input_name,
                     e.input_index,
-                    e.scale,
+                    e.map,
                 )
             })
             .collect()

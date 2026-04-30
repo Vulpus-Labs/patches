@@ -3,7 +3,7 @@ use std::fmt;
 
 use patches_core::{
     Provenance,
-    AudioEnvironment, CableKind, InputPort, InstanceId,
+    AudioEnvironment, CableKind, CableMap, InputPort, InstanceId,
     MonoInput, MonoOutput, Module, ModuleGraph, NodeId,
     OutputPort, PolyInput, PolyOutput, StereoInput, StereoOutput, TrackerData,
 };
@@ -263,14 +263,17 @@ type PartitionedInputs = (Vec<(usize, usize)>, Vec<(usize, usize, f32)>);
 /// Entries with `scale == 1.0` go into the unscaled list as `(scratch_index, buf_index)`.
 /// Entries with any other scale go into the scaled list as `(scratch_index, buf_index, scale)`.
 /// The scratch index is the position of each entry in `resolved` (0-based).
-fn partition_inputs(resolved: Vec<(usize, f32, bool)>) -> PartitionedInputs {
+fn partition_inputs(resolved: Vec<(usize, CableMap, bool)>) -> PartitionedInputs {
     let mut unscaled = Vec::new();
     let mut scaled = Vec::new();
-    for (j, (buf_idx, scale, _broadcast)) in resolved.into_iter().enumerate() {
-        if scale == 1.0 {
+    for (j, (buf_idx, map, _broadcast)) in resolved.into_iter().enumerate() {
+        // Range cables (offset != 0 or clip set) take the scaled path so the
+        // affine + clip is applied at read-time. Pure-scalar maps with
+        // `scale == 1.0` keep the unscaled fast path.
+        if map.is_scalar() && map.scale == 1.0 {
             unscaled.push((j, buf_idx));
         } else {
-            scaled.push((j, buf_idx, scale));
+            scaled.push((j, buf_idx, map.scale));
         }
     }
     (unscaled, scaled)
@@ -428,17 +431,20 @@ impl PatchBuilder {
                 .iter()
                 .enumerate()
                 .map(|(i, port_desc)| {
-                    let (buf_idx, scale, broadcast) = resolved_inputs[i];
+                    let (buf_idx, map, broadcast) = resolved_inputs[i];
                     let connected = connectivity.inputs[i];
+                    let scale = map.scale;
+                    let offset = map.offset;
+                    let clip = map.clip;
                     match port_desc.kind {
                         CableKind::Mono => InputPort::Mono(MonoInput {
-                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
+                            cable_idx: buf_idx, scale, offset, clip, connected,
                         }),
                         CableKind::Poly => InputPort::Poly(PolyInput {
-                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
+                            cable_idx: buf_idx, scale, offset, clip, connected,
                         }),
                         CableKind::Stereo => InputPort::Stereo(StereoInput {
-                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
+                            cable_idx: buf_idx, scale, offset, clip, connected,
                             broadcast_from_mono: broadcast,
                         }),
                     }

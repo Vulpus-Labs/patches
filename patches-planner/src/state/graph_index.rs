@@ -1,17 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
-use patches_core::cables::{CableKind, MONO_READ_SINK, POLY_READ_SINK};
+use patches_core::cables::{CableKind, CableMap, MONO_READ_SINK, POLY_READ_SINK};
 use patches_core::modules::{ModuleDescriptor, PortConnectivity};
 use patches_core::graphs::graph::{ModuleGraph, Node, NodeId};
 use super::PlanError;
 
 // ── Type aliases ──────────────────────────────────────────────────────────────
 
-type EdgeList = Vec<(NodeId, &'static str, usize, NodeId, &'static str, usize, f32)>;
-/// Per-input mapping `(buf_idx, scale, broadcast)` where `broadcast` is
+type EdgeList = Vec<(NodeId, &'static str, usize, NodeId, &'static str, usize, CableMap)>;
+/// Per-input mapping `(buf_idx, map, broadcast)` where `broadcast` is
 /// `true` for a mono producer feeding a stereo input (ADR 0059 §2 — the
 /// `StereoInput` reads the mono slot and replicates `(s, s)`).
-type InputBufferMap = HashMap<(NodeId, &'static str, usize), (usize, f32, bool)>;
+type InputBufferMap = HashMap<(NodeId, &'static str, usize), (usize, CableMap, bool)>;
 
 // ── GraphIndex ────────────────────────────────────────────────────────────────
 
@@ -99,7 +99,7 @@ impl<'a> ResolvedGraph<'a> {
         &self,
         desc: &ModuleDescriptor,
         node_id: &NodeId,
-    ) -> Vec<(usize, f32, bool)> {
+    ) -> Vec<(usize, CableMap, bool)> {
         desc.inputs
             .iter()
             .map(|port| {
@@ -112,7 +112,7 @@ impl<'a> ResolvedGraph<'a> {
                         } else {
                             MONO_READ_SINK
                         };
-                        (null_slot, 1.0, false)
+                        (null_slot, CableMap::identity(), false)
                     })
             })
             .collect()
@@ -135,7 +135,7 @@ fn build_input_buffer_map(
     graph: &ModuleGraph,
 ) -> Result<InputBufferMap, PlanError> {
     let mut map = HashMap::with_capacity(edges.len());
-    for (from, out_name, out_idx, to, in_name, in_idx, scale) in edges {
+    for (from, out_name, out_idx, to, in_name, in_idx, cable_map) in edges {
         let from_node = graph
             .get_node(from)
             .ok_or_else(|| PlanError::Internal(format!("node {from:?} missing from graph")))?;
@@ -178,7 +178,7 @@ fn build_input_buffer_map(
             })?;
         let broadcast = matches!((&out_kind, &in_kind), (CableKind::Mono, CableKind::Stereo));
 
-        map.insert((to.clone(), *in_name, *in_idx), (buf, *scale, broadcast));
+        map.insert((to.clone(), *in_name, *in_idx), (buf, *cable_map, broadcast));
     }
     Ok(map)
 }
@@ -204,7 +204,7 @@ pub(super) fn resolved_graph_for_test<'a>(
 #[cfg(test)]
 pub(super) fn graph_index_for_test<'a>(
     graph: &'a ModuleGraph,
-    edges_raw: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, f32)],
+    edges_raw: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, CableMap)],
 ) -> GraphIndex<'a> {
     let mut connected_inputs = HashSet::new();
     let mut connected_outputs = HashSet::new();
@@ -284,7 +284,11 @@ mod tests {
         let resolved = resolved_graph_for_test(&index, HashMap::new());
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(0, 1.0, false)], "unconnected port must map to (0, 1.0, false)");
+        assert_eq!(
+            result,
+            vec![(0, CableMap::identity(), false)],
+            "unconnected port must map to identity-mapped null slot"
+        );
     }
 
     #[test]
@@ -292,14 +296,18 @@ mod tests {
         let (graph, _src_id, dst_id) = two_node_graph();
         let dst_desc = &graph.get_node(&dst_id).unwrap().module_descriptor;
 
-        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32, bool)> = HashMap::new();
-        map.insert((dst_id.clone(), "in", 0), (7, 0.5, false));
+        let mut map: HashMap<(NodeId, &'static str, usize), (usize, CableMap, bool)> = HashMap::new();
+        map.insert((dst_id.clone(), "in", 0), (7, CableMap::scalar(0.5), false));
         let empty_graph = ModuleGraph::new();
         let index = graph_index_for_test(&empty_graph, &[]);
         let resolved = resolved_graph_for_test(&index, map);
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(7, 0.5, false)], "connected port must resolve to buffer 7 scale 0.5");
+        assert_eq!(
+            result,
+            vec![(7, CableMap::scalar(0.5), false)],
+            "connected port must resolve to buffer 7 scale 0.5"
+        );
     }
 
     #[test]
@@ -320,15 +328,18 @@ mod tests {
         let dst_id = NodeId::from("dst2");
         let dst_desc = &graph.get_node(&dst_id).unwrap().module_descriptor;
 
-        let mut map: HashMap<(NodeId, &'static str, usize), (usize, f32, bool)> = HashMap::new();
-        map.insert((dst_id.clone(), "x", 0), (3, 1.0, false));
-        map.insert((dst_id.clone(), "y", 0), (4, 2.0, false));
+        let mut map: HashMap<(NodeId, &'static str, usize), (usize, CableMap, bool)> = HashMap::new();
+        map.insert((dst_id.clone(), "x", 0), (3, CableMap::scalar(1.0), false));
+        map.insert((dst_id.clone(), "y", 0), (4, CableMap::scalar(2.0), false));
         let empty_graph = ModuleGraph::new();
         let index = graph_index_for_test(&empty_graph, &[]);
         let resolved = resolved_graph_for_test(&index, map);
 
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
-        assert_eq!(result, vec![(3, 1.0, false), (4, 2.0, false)]);
+        assert_eq!(
+            result,
+            vec![(3, CableMap::scalar(1.0), false), (4, CableMap::scalar(2.0), false)],
+        );
     }
 
     // ── build_input_buffer_map tests ──────────────────────────────────────────
@@ -341,7 +352,7 @@ mod tests {
         let edges = vec![(
             ghost_id.clone(), "out", 0usize,
             dst_id.clone(), "in", 0usize,
-            1.0f32,
+            CableMap::scalar(1.0),
         )];
         let output_buf = HashMap::new();
 
@@ -376,13 +387,13 @@ mod tests {
         let src_id = NodeId::from("src");
         let dst_id = NodeId::from("dst");
 
-        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, 1.0f32)];
+        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, CableMap::scalar(1.0))];
         let mut output_buf = HashMap::new();
         output_buf.insert((src_id.clone(), 0usize), 42usize);
 
         let map = build_input_buffer_map(&edges, &output_buf, &graph).unwrap();
         let entry = map.get(&(dst_id.clone(), "in", 0)).copied();
-        assert_eq!(entry, Some((42, 1.0, true)));
+        assert_eq!(entry, Some((42, CableMap::scalar(1.0), true)));
     }
 
     #[test]
@@ -409,13 +420,13 @@ mod tests {
         let src_id = NodeId::from("src");
         let dst_id = NodeId::from("dst");
 
-        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, 1.0f32)];
+        let edges = vec![(src_id.clone(), "out", 0usize, dst_id.clone(), "in", 0usize, CableMap::scalar(1.0))];
         let mut output_buf = HashMap::new();
         output_buf.insert((src_id.clone(), 0usize), 9usize);
 
         let map = build_input_buffer_map(&edges, &output_buf, &graph).unwrap();
         let entry = map.get(&(dst_id.clone(), "in", 0)).copied();
-        assert_eq!(entry, Some((9, 1.0, false)));
+        assert_eq!(entry, Some((9, CableMap::scalar(1.0), false)));
     }
 
     #[test]
@@ -425,7 +436,7 @@ mod tests {
         let edges = vec![(
             src_id.clone(), "out", 0usize,
             dst_id.clone(), "in", 0usize,
-            1.0f32,
+            CableMap::scalar(1.0),
         )];
         let output_buf = HashMap::new();
 
@@ -453,7 +464,7 @@ mod tests {
         let desc = two_port_desc();
         let node = NodeId::from("n");
         let other = NodeId::from("src");
-        let edges = vec![(other, "out", 0, node.clone(), "in", 0, 1.0)];
+        let edges = vec![(other, "out", 0, node.clone(), "in", 0, CableMap::scalar(1.0))];
         let graph = ModuleGraph::new();
         let index = graph_index_for_test(&graph, &edges);
         let c = index.compute_connectivity(&desc, &node);
@@ -466,7 +477,7 @@ mod tests {
         let desc = two_port_desc();
         let node = NodeId::from("n");
         let other = NodeId::from("dst");
-        let edges = vec![(node.clone(), "out", 1, other, "in", 0, 1.0)];
+        let edges = vec![(node.clone(), "out", 1, other, "in", 0, CableMap::scalar(1.0))];
         let graph = ModuleGraph::new();
         let index = graph_index_for_test(&graph, &edges);
         let c = index.compute_connectivity(&desc, &node);
@@ -481,8 +492,8 @@ mod tests {
         let src = NodeId::from("src");
         let dst = NodeId::from("dst");
         let edges = vec![
-            (src.clone(), "out", 0, node.clone(), "in", 1, 1.0),
-            (node.clone(), "out", 0, dst.clone(), "in", 0, 1.0),
+            (src.clone(), "out", 0, node.clone(), "in", 1, CableMap::scalar(1.0)),
+            (node.clone(), "out", 0, dst.clone(), "in", 0, CableMap::scalar(1.0)),
         ];
         let graph = ModuleGraph::new();
         let index = graph_index_for_test(&graph, &edges);
@@ -497,7 +508,7 @@ mod tests {
         let node = NodeId::from("n");
         let a = NodeId::from("a");
         let b = NodeId::from("b");
-        let edges = vec![(a.clone(), "out", 0, b.clone(), "in", 0, 1.0)];
+        let edges = vec![(a.clone(), "out", 0, b.clone(), "in", 0, CableMap::scalar(1.0))];
         let graph = ModuleGraph::new();
         let index = graph_index_for_test(&graph, &edges);
         let c = index.compute_connectivity(&desc, &node);
@@ -509,7 +520,7 @@ mod tests {
         let desc = two_port_desc();
         let node = NodeId::from("n");
         let src = NodeId::from("src");
-        let edges = vec![(src, "out", 0, node.clone(), "in", 1, 1.0)];
+        let edges = vec![(src, "out", 0, node.clone(), "in", 1, CableMap::scalar(1.0))];
         let graph = ModuleGraph::new();
         let index = graph_index_for_test(&graph, &edges);
         let c = index.compute_connectivity(&desc, &node);

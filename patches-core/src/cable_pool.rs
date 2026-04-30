@@ -98,7 +98,13 @@ impl<'a> CablePool<'a> {
     pub fn read_mono(&self, input: &MonoInput) -> f32 {
         let ri = 1 - self.wi;
         match self.pool[input.cable_idx][ri] {
-            CableValue::Mono(v) => v * input.scale,
+            CableValue::Mono(v) => {
+                let y = v * input.scale + input.offset;
+                match input.clip {
+                    Some((lo, hi)) => y.clamp(lo, hi),
+                    None => y,
+                }
+            }
             CableValue::Poly(_) => {
                 debug_assert!(
                     false,
@@ -124,10 +130,15 @@ impl<'a> CablePool<'a> {
         let ri = 1 - self.wi;
         match self.pool[input.cable_idx][ri] {
             CableValue::Poly(channels) => {
-                if input.scale == 1.0 {
+                if input.scale == 1.0 && input.offset == 0.0 && input.clip.is_none() {
                     channels
                 } else {
-                    channels.map(|v| v * input.scale)
+                    let scale = input.scale;
+                    let offset = input.offset;
+                    match input.clip {
+                        Some((lo, hi)) => channels.map(|v| (v * scale + offset).clamp(lo, hi)),
+                        None => channels.map(|v| v * scale + offset),
+                    }
                 }
             }
             CableValue::Mono(_) => {
@@ -162,18 +173,25 @@ impl<'a> CablePool<'a> {
     /// is `CableValue::Poly` and lanes 0/1 are returned.
     pub fn read_stereo(&self, input: &StereoInput) -> StereoSample {
         let ri = 1 - self.wi;
+        let apply = |v: f32| {
+            let y = v * input.scale + input.offset;
+            match input.clip {
+                Some((lo, hi)) => y.clamp(lo, hi),
+                None => y,
+            }
+        };
         match self.pool[input.cable_idx][ri] {
             CableValue::Poly(channels) => {
                 if input.broadcast_from_mono {
-                    let s = channels[0] * input.scale;
+                    let s = apply(channels[0]);
                     (s, s)
                 } else {
-                    (channels[0] * input.scale, channels[1] * input.scale)
+                    (apply(channels[0]), apply(channels[1]))
                 }
             }
             CableValue::Mono(v) => {
                 if input.broadcast_from_mono {
-                    let s = v * input.scale;
+                    let s = apply(v);
                     (s, s)
                 } else {
                     debug_assert!(

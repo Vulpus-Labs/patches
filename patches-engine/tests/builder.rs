@@ -10,8 +10,8 @@ mod builder {
     pub mod pool;
 
     use patches_core::{
-        AudioEnvironment, AUDIO_OUT_L, CablePool, CableValue, InstanceId, Module, ModuleGraph,
-        ModuleShape, NodeId, PortRef,
+        AudioEnvironment, AUDIO_OUT_L, CableMap, CablePool, CableValue, InstanceId, InputPort,
+        Module, ModuleGraph, ModuleShape, NodeId, PortRef,
     };
     use patches_core::parameter_map::{ParameterMap, ParameterValue};
     use patches_modules::{AudioOut, Oscillator, Sum};

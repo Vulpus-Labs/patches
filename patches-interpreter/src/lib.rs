@@ -139,13 +139,18 @@ pub fn build_from_bound(
         let resolved = require_resolved(bc, "connection")?;
         let from_id = patches_core::NodeId::from(resolved.from_module.clone());
         let to_id = patches_core::NodeId::from(resolved.to_module.clone());
+        let cable_map = patches_core::CableMap {
+            scale: resolved.map.scale as f32,
+            offset: resolved.map.offset as f32,
+            clip: resolved.map.clip.map(|(lo, hi)| (lo as f32, hi as f32)),
+        };
         graph
-            .connect(
+            .connect_with_map(
                 &from_id,
                 resolved.from_port,
                 &to_id,
                 resolved.to_port,
-                resolved.map.scale as f32,
+                cable_map,
             )
             .map_err(|e| {
                 InterpretError::new(

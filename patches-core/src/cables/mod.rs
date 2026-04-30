@@ -27,6 +27,42 @@ pub use ports::{InputPort, OutputPort};
 pub use stereo::{StereoInput, StereoOutput, StereoSample};
 pub use trigger::{PolyTriggerInput, TriggerInput};
 
+/// Affine map plus optional hard clip applied to a cable signal at the
+/// destination input port. Pure-scalar cables produce
+/// [`CableMap::scalar`] (`offset = 0`, `clip = None`) so downstream code
+/// can pattern-match the fast path. Range cables (`uni` / `bi` per
+/// ADR 0062) lower to a non-zero offset and a `Some(clip)`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CableMap {
+    pub scale: f32,
+    pub offset: f32,
+    /// Hard clip range, sorted as `(min, max)`.
+    pub clip: Option<(f32, f32)>,
+}
+
+impl CableMap {
+    /// Pure scalar: no offset, no clip.
+    pub const fn scalar(k: f32) -> Self {
+        Self { scale: k, offset: 0.0, clip: None }
+    }
+
+    /// `scale = 1`, no offset, no clip.
+    pub const fn identity() -> Self {
+        Self::scalar(1.0)
+    }
+
+    /// True if this map is the pure-scalar fast path.
+    pub fn is_scalar(&self) -> bool {
+        self.offset == 0.0 && self.clip.is_none()
+    }
+}
+
+impl Default for CableMap {
+    fn default() -> Self {
+        Self::identity()
+    }
+}
+
 /// Buffer pool index of the permanent mono read-null slot.
 ///
 /// Disconnected [`MonoInput`] ports resolve to this slot. Always
