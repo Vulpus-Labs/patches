@@ -1,64 +1,12 @@
-use std::any::Any;
-
-use patches_core::{
-    AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PortRef,
-};
-use patches_core::{StructuralParams, BuildError};
+use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
-use patches_modules::{AudioOut, Oscillator};
-
-// ── constants ─────────────────────────────────────────────────────────────────
+use patches_core::Module;
+use patches_modules::{AudioOut, Oscillator, Tuner};
 
 const POOL_CAP: usize = 256;
 const MODULE_CAP: usize = 64;
-
-// ── Probe module ──────────────────────────────────────────────────────────────
-
-/// A minimal module with one input and one output.
-///
-/// Local to this test file; never published.
-struct Probe {
-    instance_id: InstanceId,
-    descriptor: ModuleDescriptor,
-}
-
-impl Module for Probe {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "Probe",
-            shape: ModuleShape { channels: 0 },
-            inputs: vec![PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
-    }
-
-    fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
-        Self { instance_id, descriptor }
-    })}
-
-    fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
-
-    fn descriptor(&self) -> &ModuleDescriptor {
-        &self.descriptor
-    }
-
-    fn instance_id(&self) -> InstanceId {
-        self.instance_id
-    }
-
-    fn process(&mut self, _pool: &mut CablePool<'_>) {}
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
@@ -70,18 +18,18 @@ fn p(name: &'static str) -> PortRef {
 
 fn make_registry() -> Registry {
     let mut r = Registry::new();
-    r.register::<Probe>();
+    r.register::<Tuner>();
     r.register::<Oscillator>();
     r.register::<AudioOut>();
     r
 }
 
-/// Probe("probe") → AudioOut("out").
-/// probe.in is unconnected; probe.out feeds both left and right.
+/// Tuner("probe") → AudioOut("out").
+/// probe.in is unconnected; probe.out feeds the sink.
 fn probe_to_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph
-        .add_module("probe", Probe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("probe", Tuner::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
         .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
@@ -92,18 +40,17 @@ fn probe_to_out_graph() -> ModuleGraph {
     graph
 }
 
-/// Osc("osc") → probe.in, Probe("probe") → AudioOut("out").
+/// Osc("osc") → probe.in, Tuner("probe") → AudioOut("out").
 /// Both probe.in and probe.out are connected.
 fn probe_with_input_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
-    // 440 Hz (A4) expressed in V/oct from C0: log2(440 / 16.3516) ≈ 4.75
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
         .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &params)
         .unwrap();
     graph
-        .add_module("probe", Probe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("probe", Tuner::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
         .unwrap();
     graph
         .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
@@ -122,12 +69,10 @@ fn pool_index_for(state: &PlannerState, node_id: &NodeId) -> usize {
     state.module_alloc.pool_map[&ns.instance_id]
 }
 
-// ── tests ─────────────────────────────────────────────────────────────────────
-
-/// Connectivity notification tests are superseded by the port-objects mechanism
-/// (T-0116). The `connectivity_updates` field has been removed from `ExecutionPlan`;
-/// connectivity is now delivered via `Module::set_ports`. These tests are retained
-/// as stubs — they verify the builder succeeds but do not assert connectivity delivery.
+// Connectivity notification tests are superseded by the port-objects mechanism
+// (T-0116). The `connectivity_updates` field has been removed from `ExecutionPlan`;
+// connectivity is now delivered via `Module::set_ports`. These tests are retained
+// as stubs — they verify the builder succeeds but do not assert connectivity delivery.
 
 #[test]
 fn initial_build_succeeds() {
@@ -153,7 +98,6 @@ fn added_cable_produces_surviving_module() {
     let graph_b = probe_with_input_graph();
     let (plan_b, _) =
         build_patch(&graph_b, &registry, &env(), &state_a, POOL_CAP, MODULE_CAP).unwrap();
-    // Probe survives (no tombstone for it).
     let probe_slot = pool_index_for(&state_a, &NodeId::from("probe"));
     assert!(
         !plan_b.tombstones.contains(&probe_slot),
