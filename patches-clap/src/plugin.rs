@@ -47,7 +47,7 @@ use crate::extensions;
 use patches_dsl::manifest::{Manifest, TapDescriptor};
 use patches_plugin_common::{
     Action, CompileFailure, CompileSuccess, Controller, DiagnosticView, Env, MeterTap,
-    ScanDetails, StateDelta, TapSummary,
+    RescanProbe, ScanDetails, StateDelta, TapSummary,
 };
 
 /// The runtime state of a single plugin instance.
@@ -761,9 +761,40 @@ impl<'a> Env for ClapEnv<'a> {
             }
         }
     }
-    fn preview_scan(&mut self, paths: &[PathBuf]) -> ScanDetails {
-        let mut preview = patches_modules::default_registry();
-        scan_into_registry(paths, &mut preview, "Rescanning modules…")
+    fn probe_paths(&mut self, paths: &[PathBuf], registry: &Registry) -> RescanProbe {
+        let mut probe = RescanProbe::default();
+        if paths.is_empty() {
+            return probe;
+        }
+        // Scan into a throwaway registry so we read manifests without
+        // perturbing the live one. The Arc<Library> handles drop with
+        // the throwaway registry, releasing the dylibs.
+        let mut throwaway = Registry::new();
+        let report = patches_ffi::PluginScanner::new(paths.to_vec()).scan(&mut throwaway);
+        let names: Vec<String> = throwaway.module_names().map(|s| s.to_string()).collect();
+        for name in names {
+            let candidate = throwaway.module_version(&name).unwrap_or(0);
+            match registry.module_version(&name) {
+                None => probe.added.push(name),
+                Some(live) if live < candidate => probe.replaced.push(name),
+                _ => probe.unchanged.push(name),
+            }
+        }
+        for (path, err) in &report.errors {
+            probe.errors.push(format!("  error {}: {err}", path.display()));
+        }
+        for skip in &report.skipped {
+            if let patches_ffi::SkipReason::AbiMismatch { expected, found, path } = skip {
+                probe.errors.push(format!(
+                    "  skip {}: ABI mismatch (host {expected}, plugin {found})",
+                    path.display()
+                ));
+            }
+        }
+        probe
+    }
+    fn scan_into(&mut self, paths: &[PathBuf], registry: &mut Registry) -> ScanDetails {
+        scan_into_registry(paths, registry, "")
     }
     fn reset_and_scan(&mut self, paths: &[PathBuf]) -> (Registry, ScanDetails) {
         let mut registry = patches_modules::default_registry();

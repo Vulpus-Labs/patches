@@ -114,9 +114,14 @@ pub trait Env {
         file_path: Option<&Path>,
         registry: &Registry,
     ) -> Result<CompileSuccess, CompileFailure>;
-    /// Scan `paths` into a fresh default registry and return a summary.
-    /// Used for the rescan preview before host restart.
-    fn preview_scan(&mut self, paths: &[PathBuf]) -> ScanDetails;
+    /// Cheap probe: read each candidate bundle's manifest and diff
+    /// against `registry` without keeping libraries permanently
+    /// loaded. ABI / dlopen errors land in `RescanProbe::errors`.
+    fn probe_paths(&mut self, paths: &[PathBuf], registry: &Registry) -> RescanProbe;
+    /// Full scan into the supplied registry (modules merged in place).
+    /// Used by `Action::Reload` / `Action::LoadPath` to ensure newly-
+    /// added module paths are honoured before compile.
+    fn scan_into(&mut self, paths: &[PathBuf], registry: &mut Registry) -> ScanDetails;
     /// Build a fresh default registry, scan `paths` into it, and return
     /// both. Used by `Action::Activate` to rebuild the live registry.
     fn reset_and_scan(&mut self, paths: &[PathBuf]) -> (Registry, ScanDetails);
@@ -171,11 +176,11 @@ impl Controller {
             Action::LoadPath(path) => self.load_path(path, "Loaded", env),
             Action::AddModulePath => {
                 if let Some(dir) = env.pick_folder() {
-                    return self.add_module_path(dir);
+                    return self.add_module_path(dir, env);
                 }
                 StateDelta::default()
             }
-            Action::AddModulePathDirect(dir) => self.add_module_path(dir),
+            Action::AddModulePathDirect(dir) => self.add_module_path(dir, env),
             Action::RemoveModulePath(idx) => {
                 if idx >= self.module_paths.len() {
                     return StateDelta::default();
@@ -192,17 +197,43 @@ impl Controller {
                 }
             }
             Action::Rescan => {
-                let scan = env.preview_scan(&self.module_paths);
-                self.module_names = scan.module_names;
-                self.push_status(format!("Rescan: {}", scan.summary));
-                for line in &scan.details {
+                let probe = env.probe_paths(&self.module_paths, &self.registry);
+                self.push_status(format!(
+                    "Rescan: {} added, {} replaced, {} unchanged{}",
+                    probe.added.len(),
+                    probe.replaced.len(),
+                    probe.unchanged.len(),
+                    if probe.errors.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} errors", probe.errors.len())
+                    },
+                ));
+                for line in &probe.errors {
                     self.push_status(line.clone());
                 }
-                self.diagnostic_view = DiagnosticView::default();
-                StateDelta {
-                    requires_restart: true,
-                    snapshot_changed: true,
-                    ..Default::default()
+                // Predicted post-restart names = current registry ∪ added.
+                let mut names: Vec<String> =
+                    self.registry.module_names().map(|s| s.to_string()).collect();
+                for n in &probe.added {
+                    if !names.iter().any(|x| x == n) {
+                        names.push(n.clone());
+                    }
+                }
+                names.sort();
+                self.module_names = names;
+                if probe.is_actionable() {
+                    self.diagnostic_view = DiagnosticView::default();
+                    StateDelta {
+                        requires_restart: true,
+                        snapshot_changed: true,
+                        ..Default::default()
+                    }
+                } else {
+                    StateDelta {
+                        snapshot_changed: true,
+                        ..Default::default()
+                    }
                 }
             }
             Action::SetTapOpts {
@@ -339,6 +370,18 @@ impl Controller {
         if source_changed {
             delta.persistable_changed = true;
         }
+        // Scan-before-compile: ADR 0061. Ensures any FFI module
+        // referenced by the patch is in the registry before parse.
+        if !self.module_paths.is_empty() {
+            let scan = env.scan_into(&self.module_paths, &mut self.registry);
+            if !scan.summary.starts_with("0 loaded, 0 replaced, 0 skipped, 0 errors") {
+                self.push_status(format!("Module scan: {}", scan.summary));
+                for line in scan.details {
+                    self.push_status(line);
+                }
+            }
+            self.module_names = scan.module_names;
+        }
         match env.compile_and_push_plan(&self.dsl_source, self.file_path.as_deref(), &self.registry)
         {
             Ok(success) => {
@@ -357,7 +400,7 @@ impl Controller {
         delta
     }
 
-    fn add_module_path(&mut self, dir: PathBuf) -> StateDelta {
+    fn add_module_path(&mut self, dir: PathBuf, env: &mut dyn Env) -> StateDelta {
         if self.module_paths.iter().any(|p| p == &dir) {
             return StateDelta::default();
         }
@@ -366,6 +409,20 @@ impl Controller {
             dir.display()
         ));
         self.module_paths.push(dir);
+        // Probe preview — surface ABI / load errors immediately, and
+        // preview module additions without restarting (ADR 0061).
+        let probe = env.probe_paths(&self.module_paths, &self.registry);
+        if probe.is_actionable() {
+            self.push_status(format!(
+                "Preview: {} added, {} replaced, {} unchanged",
+                probe.added.len(),
+                probe.replaced.len(),
+                probe.unchanged.len(),
+            ));
+        }
+        for line in &probe.errors {
+            self.push_status(line.clone());
+        }
         StateDelta {
             persistable_changed: true,
             snapshot_changed: true,
@@ -394,6 +451,7 @@ mod tests {
         compile_ok: bool,
         compile_taps: Vec<TapSummary>,
         scan: ScanDetails,
+        probe: RescanProbe,
         compiled_sources: Vec<String>,
     }
 
@@ -429,7 +487,10 @@ mod tests {
                 })
             }
         }
-        fn preview_scan(&mut self, _paths: &[PathBuf]) -> ScanDetails {
+        fn probe_paths(&mut self, _paths: &[PathBuf], _registry: &Registry) -> RescanProbe {
+            self.probe.clone()
+        }
+        fn scan_into(&mut self, _paths: &[PathBuf], _registry: &mut Registry) -> ScanDetails {
             self.scan.clone()
         }
         fn reset_and_scan(&mut self, _paths: &[PathBuf]) -> (Registry, ScanDetails) {
@@ -544,20 +605,88 @@ mod tests {
     }
 
     #[test]
-    fn rescan_requires_restart_and_clears_diagnostics() {
+    fn rescan_actionable_probe_requires_restart() {
         let mut env = ok_env();
+        env.probe = RescanProbe {
+            added: vec!["Gain".into()],
+            ..Default::default()
+        };
+        let mut c = Controller::new();
+        let d = c.apply(Action::Rescan, &mut env);
+        assert!(d.requires_restart);
+        assert!(d.snapshot_changed);
+        assert!(c.module_names.iter().any(|n| n == "Gain"));
+        let last = c.status_log.back().cloned().unwrap_or_default();
+        assert!(last.contains("Rescan:"));
+    }
+
+    #[test]
+    fn rescan_idempotent_probe_skips_restart() {
+        let mut env = ok_env();
+        env.probe = RescanProbe {
+            unchanged: vec!["Gain".into()],
+            ..Default::default()
+        };
+        let mut c = Controller::new();
+        let d = c.apply(Action::Rescan, &mut env);
+        assert!(!d.requires_restart);
+        assert!(d.snapshot_changed);
+    }
+
+    #[test]
+    fn rescan_surfaces_probe_errors() {
+        let mut env = ok_env();
+        env.probe = RescanProbe {
+            errors: vec!["  skip /tmp/x: ABI mismatch".into()],
+            ..Default::default()
+        };
+        let mut c = Controller::new();
+        c.apply(Action::Rescan, &mut env);
+        assert!(c
+            .status_log
+            .iter()
+            .any(|s| s.contains("ABI mismatch")));
+    }
+
+    #[test]
+    fn add_module_path_runs_probe_preview() {
+        let mut env = ok_env();
+        env.probe = RescanProbe {
+            added: vec!["Gain".into()],
+            ..Default::default()
+        };
+        let mut c = Controller::new();
+        c.apply(Action::AddModulePathDirect("/tmp/m".into()), &mut env);
+        assert!(c.status_log.iter().any(|s| s.starts_with("Preview:")));
+    }
+
+    #[test]
+    fn load_path_runs_scan_before_compile() {
+        let path = PathBuf::from("/tmp/x.patches");
+        let mut env = ok_env();
+        env.files.insert(path.clone(), "x".into());
         env.scan = ScanDetails {
             summary: "1 loaded, 0 replaced, 0 skipped, 0 errors".into(),
             details: vec![],
             module_names: vec!["Gain".into()],
         };
         let mut c = Controller::new();
-        let d = c.apply(Action::Rescan, &mut env);
-        assert!(d.requires_restart);
-        assert!(d.snapshot_changed);
-        assert!(!d.persistable_changed);
+        c.module_paths.push("/tmp/m".into());
+        c.apply(Action::LoadPath(path), &mut env);
+        // Module scan ran (status pushed), then compile.
+        assert!(c.status_log.iter().any(|s| s.starts_with("Module scan:")));
+        assert_eq!(env.compiled_sources, vec!["x".to_string()]);
         assert_eq!(c.module_names, vec!["Gain".to_string()]);
-        assert!(c.diagnostic_view.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn load_path_skips_scan_when_no_module_paths() {
+        let path = PathBuf::from("/tmp/x.patches");
+        let mut env = ok_env();
+        env.files.insert(path.clone(), "x".into());
+        let mut c = Controller::new();
+        c.apply(Action::LoadPath(path), &mut env);
+        assert!(!c.status_log.iter().any(|s| s.starts_with("Module scan:")));
     }
 
     #[test]
