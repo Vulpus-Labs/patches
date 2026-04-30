@@ -1,4 +1,6 @@
-import { tapsSignature, cssEscape, foldStereoPairs } from "../core/taps.js";
+import {
+  tapsSignature, cssEscape, foldStereoPairs, collectLeds, tapOptValue,
+} from "../core/taps.js";
 import { meterWidget, scopeWidget, spectrumWidget } from "./widgets.js";
 import { ledsState, applyLed, resetLedNodes } from "./leds.js";
 
@@ -117,15 +119,7 @@ function rebuildTaps(taps) {
   }
   const sorted = taps.slice().sort((a, b) => a.slot - b.slot);
 
-  // LED strip: gate_led / trigger_led from any tap.
-  const leds = [];
-  for (const lt of sorted) {
-    for (const comp of lt.components ?? []) {
-      if (comp === "gate_led" || comp === "trigger_led") {
-        leds.push({ slot: lt.slot, name: lt.name, kind: comp });
-      }
-    }
-  }
+  const leds = collectLeds(sorted);
   if (leds.length > 0) {
     const strip = document.createElement("div");
     strip.className = "led-strip";
@@ -200,10 +194,7 @@ export function applyTapOpts(optsByName) {
     if (!name) continue;
     const o = optsByName[name];
     if (!o) continue;
-    let val = null;
-    if (el.dataset.scopeOpt === "decimation") val = o.scope_decimation;
-    else if (el.dataset.scopeOpt === "window") val = o.scope_window_samples;
-    else if (el.dataset.spectrumOpt === "fft_size") val = o.spectrum_fft_size;
+    const val = tapOptValue(el.dataset, o);
     if (val != null) el.value = String(val);
   }
   for (const nameKey of Object.keys(optsByName)) {

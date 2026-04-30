@@ -1,3 +1,29 @@
+// Walk a sorted tap manifest and return the LED dots that should be
+// rendered in the strip, preserving sort order. Each entry carries the
+// slot it lives at, the tap name (for labels and titles), and the
+// component kind (gate_led / trigger_led).
+export function collectLeds(sorted) {
+  const out = [];
+  for (const t of sorted) {
+    for (const comp of t.components ?? []) {
+      if (comp === "gate_led" || comp === "trigger_led") {
+        out.push({ slot: t.slot, name: t.name, kind: comp });
+      }
+    }
+  }
+  return out;
+}
+
+// Resolve the value to assign to a `select.tap-opt` element from a
+// persisted-options record `o`. Returns null if the dataset doesn't
+// describe a known field or the field isn't present on `o`.
+export function tapOptValue(dataset, o) {
+  if (dataset.scopeOpt === "decimation") return o.scope_decimation ?? null;
+  if (dataset.scopeOpt === "window") return o.scope_window_samples ?? null;
+  if (dataset.spectrumOpt === "fft_size") return o.spectrum_fft_size ?? null;
+  return null;
+}
+
 export function tapsSignature(taps) {
   if (!taps) return "";
   return taps

@@ -1,4 +1,5 @@
 import { nowHms, computeLogStamps } from "../core/log.js";
+import { formatDiagnostic } from "../core/diagnostics.js";
 
 export function renderHalt(message) {
   const el = document.getElementById("halt-banner");
@@ -24,20 +25,17 @@ export function renderDiagnostics(diags) {
     return;
   }
   for (const d of diags) {
+    const view = formatDiagnostic(d);
     const row = document.createElement("div");
-    row.className = `diag-row sev-${d.severity ?? "note"}`;
+    row.className = `diag-row ${view.sevClass}`;
     const msg = document.createElement("div");
     msg.className = "diag-message";
-    msg.textContent = d.message ?? "";
+    msg.textContent = view.message;
     row.appendChild(msg);
-    const metaParts = [];
-    if (d.location) metaParts.push(d.location);
-    if (d.label) metaParts.push(d.label);
-    if (d.code) metaParts.push(`[${d.code}]`);
-    if (metaParts.length > 0) {
+    if (view.metaText !== null) {
       const meta = document.createElement("div");
       meta.className = "diag-meta";
-      meta.textContent = metaParts.join("  ");
+      meta.textContent = view.metaText;
       row.appendChild(meta);
     }
     root.appendChild(row);
