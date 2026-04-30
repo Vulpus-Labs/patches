@@ -9,7 +9,10 @@ pub mod controller;
 pub mod gui;
 pub mod meter;
 
-pub use controller::{Action, Controller, Env, RescanProbe, SerializedState, StateDelta};
+pub use controller::{
+    Action, CompileFailure, CompileSuccess, Controller, Env, RescanProbe, ScanDetails,
+    SerializedState, StateDelta,
+};
 
 pub use gui::{
     DiagnosticView, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,

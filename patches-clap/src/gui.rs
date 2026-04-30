@@ -24,8 +24,9 @@ use wry::{Rect, WebView, WebViewBuilder};
 use patches_observation::processor::ProcessorId;
 use patches_observation::subscribers::SubscribersHandle;
 use patches_plugin_common::{
-    GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,
+    Action, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,
 };
+use std::collections::VecDeque;
 use patches_observation::processor::{ScopeReadOpts, SpectrumReadOpts};
 
 const SHELL_HTML: &str = include_str!("../assets/index.html");
@@ -322,7 +323,8 @@ impl HasDisplayHandle for ParentHandle {
 /// window API negotiated during `gui.create`.
 pub(crate) unsafe fn create_gui(
     parent: *mut c_void,
-    gui_state: Arc<Mutex<GuiState>>,
+    _gui_state: Arc<Mutex<GuiState>>,
+    action_queue: Arc<Mutex<VecDeque<Action>>>,
     host: *const clap_sys::host::clap_host,
     width: u32,
     height: u32,
@@ -335,7 +337,7 @@ pub(crate) unsafe fn create_gui(
     let raw = make_raw_window_handle(parent)?;
     let parent_handle = ParentHandle { raw };
 
-    let ipc_state = gui_state.clone();
+    let ipc_queue = action_queue.clone();
     let ipc_host = HostPtr(host);
     let last_snapshot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let last_tap_json: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -371,13 +373,11 @@ pub(crate) unsafe fn create_gui(
                     *t = None;
                 }
             }
-            if let Ok(mut g) = ipc_state.lock() {
-                // SetTapOpts fires on every selector tweak; don't
-                // pollute the status log with those.
-                if !matches!(intent, Intent::SetTapOpts { .. }) {
-                    g.push_status(format!("intent: {}", intent_log_label(&intent)));
+            let _label = intent_log_label(&intent);
+            if let Some(action) = intent.into_action() {
+                if let Ok(mut q) = ipc_queue.lock() {
+                    q.push_back(action);
                 }
-                intent.apply(&mut g);
             }
             // Ask the host to run on_main_thread so the flipped flag is
             // drained. Safe on any thread per CLAP spec.

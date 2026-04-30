@@ -67,34 +67,20 @@ impl Default for TapDisplayOpts {
 }
 
 /// Shared state between the plugin and the embedded GUI.
+///
+/// Mirror of the controller's projected state. The plugin shell writes
+/// to it after each `Controller::apply`; the GUI reads. Action queue
+/// (ADR 0061) replaces the per-button request flags that used to live
+/// here.
 #[derive(Default, Serialize)]
 pub struct GuiState {
-    /// Currently loaded file path (displayed in the UI).
+    /// Currently loaded file path (mirror of `Controller::file_path`).
     pub file_path: Option<PathBuf>,
-    /// Set to true by the Browse button; consumed by `on_main_thread`.
-    pub browse_requested: bool,
-    /// Set to true by the Reload button; consumed by `on_main_thread`.
-    pub reload_requested: bool,
-    /// Mirror of the plugin's persisted module search paths. Edited from
-    /// the GUI; written back to `PatchesClapPlugin::module_paths` by
-    /// `on_main_thread`. Changes do not auto-rescan — the user must press
-    /// the Rescan button for the new paths to take effect.
+    /// Mirror of `Controller::module_paths`.
     pub module_paths: Vec<PathBuf>,
-    /// Names of modules currently in the registry (default set plus any
-    /// loaded via FFI scan). Mirror written by `activate` after each
-    /// registry rebuild; read-only from the GUI side.
+    /// Mirror of `Controller::module_names`.
     pub module_names: Vec<String>,
-    /// Set to true by the "Add path" button; consumed by `on_main_thread`,
-    /// which opens a directory picker.
-    pub add_path_requested: bool,
-    /// Index of a module path to remove, set by a per-row delete button.
-    pub remove_path_index: Option<usize>,
-    /// Set to true by the Rescan button; triggers the hard-stop reload
-    /// flow (ADR 0044 §3).
-    pub rescan_requested: bool,
-    /// Tap manifest projection from the most recent successful compile,
-    /// ordered by slot. Cleared on a failed compile and replaced on the
-    /// next successful one.
+    /// Mirror of `Controller::taps`.
     pub taps: Vec<TapSummary>,
     /// Rolling log of the most recent status messages (newest last).
     pub status_log: VecDeque<String>,
@@ -151,11 +137,6 @@ pub struct GuiSnapshot {
     pub module_paths: Vec<String>,
     pub module_names: Vec<String>,
     pub status_log: Vec<String>,
-    pub browse_requested: bool,
-    pub reload_requested: bool,
-    pub add_path_requested: bool,
-    pub rescan_requested: bool,
-    pub remove_path_index: Option<usize>,
     pub halt_message: Option<String>,
     pub diagnostics: Vec<DiagnosticSummary>,
     pub taps: Vec<TapSummary>,
@@ -196,11 +177,6 @@ impl GuiSnapshot {
                 .collect(),
             module_names: state.module_names.clone(),
             status_log: state.status_log.iter().cloned().collect(),
-            browse_requested: state.browse_requested,
-            reload_requested: state.reload_requested,
-            add_path_requested: state.add_path_requested,
-            rescan_requested: state.rescan_requested,
-            remove_path_index: state.remove_path_index,
             halt_message: state.halt.as_ref().map(format_halt),
             diagnostics: summarise_diagnostics(&state.diagnostic_view),
             taps: state.taps.clone(),
@@ -327,15 +303,17 @@ pub enum Intent {
 }
 
 impl Intent {
-    /// Flip the corresponding flag(s) on `GuiState`. The plugin's
-    /// `on_main_thread` consumes these on the next tick.
-    pub fn apply(self, state: &mut GuiState) {
-        match self {
-            Intent::Browse => state.browse_requested = true,
-            Intent::Reload => state.reload_requested = true,
-            Intent::Rescan => state.rescan_requested = true,
-            Intent::AddPath => state.add_path_requested = true,
-            Intent::RemovePath { index } => state.remove_path_index = Some(index),
+    /// Lower a webview-posted intent into an [`Action`] for the
+    /// controller queue. Returns `None` for `Ready`, which the shell
+    /// handles inline (clears push-dedupe caches; not a state action).
+    pub fn into_action(self) -> Option<crate::controller::Action> {
+        use crate::controller::Action;
+        Some(match self {
+            Intent::Browse => Action::Browse,
+            Intent::Reload => Action::Reload,
+            Intent::Rescan => Action::Rescan,
+            Intent::AddPath => Action::AddModulePath,
+            Intent::RemovePath { index } => Action::RemoveModulePath(index),
             Intent::SetTapOpts {
                 slot,
                 spectrum_fft_size,
@@ -343,16 +321,16 @@ impl Intent {
                 scope_window_samples,
                 scope_snap,
                 spectrum_heatmap,
-            } => {
-                let entry = state.tap_opts.entry(slot).or_insert_with(TapDisplayOpts::default);
-                if let Some(n) = spectrum_fft_size { entry.spectrum_fft_size = n; }
-                if let Some(d) = scope_decimation { entry.scope_decimation = d; }
-                if let Some(w) = scope_window_samples { entry.scope_window_samples = w; }
-                if let Some(b) = scope_snap { entry.scope_snap = b; }
-                if let Some(b) = spectrum_heatmap { entry.spectrum_heatmap = b; }
-            }
-            Intent::Ready => {}
-        }
+            } => Action::SetTapOpts {
+                slot,
+                spectrum_fft_size,
+                scope_decimation,
+                scope_window_samples,
+                scope_snap,
+                spectrum_heatmap,
+            },
+            Intent::Ready => return None,
+        })
     }
 }
 
@@ -365,23 +343,17 @@ mod tests {
     }
 
     #[test]
-    fn reload_intent_flips_flag() {
-        let mut g = GuiState::default();
-        parse(r#"{"kind":"reload"}"#).apply(&mut g);
-        assert!(g.reload_requested);
-    }
-
-    #[test]
-    fn all_simple_intents_roundtrip() {
-        let mut g = GuiState::default();
-        parse(r#"{"kind":"browse"}"#).apply(&mut g);
-        parse(r#"{"kind":"rescan"}"#).apply(&mut g);
-        parse(r#"{"kind":"add_path"}"#).apply(&mut g);
-        parse(r#"{"kind":"remove_path","index":2}"#).apply(&mut g);
-        assert!(g.browse_requested);
-        assert!(g.rescan_requested);
-        assert!(g.add_path_requested);
-        assert_eq!(g.remove_path_index, Some(2));
+    fn intent_lowers_to_action() {
+        use crate::controller::Action;
+        assert!(matches!(parse(r#"{"kind":"reload"}"#).into_action(), Some(Action::Reload)));
+        assert!(matches!(parse(r#"{"kind":"browse"}"#).into_action(), Some(Action::Browse)));
+        assert!(matches!(parse(r#"{"kind":"rescan"}"#).into_action(), Some(Action::Rescan)));
+        assert!(matches!(parse(r#"{"kind":"add_path"}"#).into_action(), Some(Action::AddModulePath)));
+        match parse(r#"{"kind":"remove_path","index":2}"#).into_action() {
+            Some(Action::RemoveModulePath(2)) => {}
+            other => panic!("got {other:?}"),
+        }
+        assert!(parse(r#"{"kind":"ready"}"#).into_action().is_none());
     }
 
     #[test]

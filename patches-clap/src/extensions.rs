@@ -147,13 +147,12 @@ unsafe extern "C" fn state_save(
 ) -> bool {
     let p = plugin::plugin_ref_pub(plugin);
 
-    let path_bytes = {
-        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        gui.file_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    };
+    let path_bytes = p
+        .controller
+        .file_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let source_bytes = &p.controller.dsl_source;
 
     if !write_length_prefixed(stream, path_bytes.as_bytes()) {
@@ -175,20 +174,19 @@ unsafe extern "C" fn state_save(
     }
 
     // Tap display opts (ticket 0753).
-    let tap_opts: Vec<(u32, u32, u32, u32)> = {
-        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        gui.tap_opts
-            .iter()
-            .map(|(slot, opts)| {
-                (
-                    *slot as u32,
-                    opts.spectrum_fft_size as u32,
-                    opts.scope_decimation as u32,
-                    opts.scope_window_samples as u32,
-                )
-            })
-            .collect()
-    };
+    let tap_opts: Vec<(u32, u32, u32, u32)> = p
+        .controller
+        .tap_opts
+        .iter()
+        .map(|(slot, opts)| {
+            (
+                *slot as u32,
+                opts.spectrum_fft_size as u32,
+                opts.scope_decimation as u32,
+                opts.scope_window_samples as u32,
+            )
+        })
+        .collect();
     let tap_count = tap_opts.len() as u32;
     if !stream_write_all(stream, &tap_count.to_le_bytes()) {
         return false;
@@ -206,19 +204,18 @@ unsafe extern "C" fn state_save(
 
     // Tap display modes (snap, heatmap) — separate EOF-tolerant section
     // so legacy tap_opts states (with no mode bools) still load.
-    let tap_modes: Vec<(u32, u32, u32)> = {
-        let gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        gui.tap_opts
-            .iter()
-            .map(|(slot, o)| {
-                (
-                    *slot as u32,
-                    if o.scope_snap { 1 } else { 0 },
-                    if o.spectrum_heatmap { 1 } else { 0 },
-                )
-            })
-            .collect()
-    };
+    let tap_modes: Vec<(u32, u32, u32)> = p
+        .controller
+        .tap_opts
+        .iter()
+        .map(|(slot, o)| {
+            (
+                *slot as u32,
+                if o.scope_snap { 1 } else { 0 },
+                if o.spectrum_heatmap { 1 } else { 0 },
+            )
+        })
+        .collect();
     let mode_count = tap_modes.len() as u32;
     if !stream_write_all(stream, &mode_count.to_le_bytes()) { return false; }
     for (slot, snap, heat) in &tap_modes {
@@ -236,86 +233,80 @@ unsafe extern "C" fn state_load(
 ) -> bool {
     let p = plugin::plugin_mut_pub(plugin);
 
-    let path_bytes = match read_length_prefixed(stream) {
-        Some(b) => b,
-        None => return false,
-    };
-    let source_bytes = match read_length_prefixed(stream) {
-        Some(b) => b,
+    let serialized = match deserialize_state(stream) {
+        Some(s) => s,
         None => return false,
     };
 
-    let path_str = match String::from_utf8(path_bytes) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let source = match String::from_utf8(source_bytes) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    {
-        let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        if path_str.is_empty() {
-            gui.file_path = None;
-        } else {
-            gui.file_path = Some(std::path::PathBuf::from(&path_str));
-        }
+    if let Some((w, h)) = serialized.window_size {
+        let (w, h) = clamp_size(w, h);
+        p.gui_width = w;
+        p.gui_height = h;
     }
-    p.controller.dsl_source = source;
 
-    // Optional trailing module_paths section. A clean EOF here means a
-    // legacy state written before ticket 0566 — default to empty.
-    p.controller.module_paths = match try_read_u32(stream) {
+    plugin::apply_action(p, patches_plugin_common::Action::StateLoad(serialized));
+    if p.runtime.is_some() {
+        plugin::apply_action(p, patches_plugin_common::Action::Activate);
+    }
+    plugin::mirror_controller_to_gui(p);
+    true
+}
+
+/// Read the on-disk state stream into a `SerializedState`. Returns
+/// `None` on a corrupt stream; an EOF at any optional-section boundary
+/// is treated as "section absent" per the format docs above.
+unsafe fn deserialize_state(
+    stream: *const clap_istream,
+) -> Option<patches_plugin_common::SerializedState> {
+    let path_bytes = read_length_prefixed(stream)?;
+    let source_bytes = read_length_prefixed(stream)?;
+    let path_str = String::from_utf8(path_bytes).ok()?;
+    let source = String::from_utf8(source_bytes).ok()?;
+
+    let file_path = if path_str.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(&path_str))
+    };
+
+    // Optional module_paths section.
+    let module_paths = match try_read_u32(stream) {
         ReadU32::Ok(count) => {
             let mut out = Vec::with_capacity(count as usize);
             for _ in 0..count {
-                let bytes = match read_length_prefixed(stream) {
-                    Some(b) => b,
-                    None => return false,
-                };
-                let s = match String::from_utf8(bytes) {
-                    Ok(s) => s,
-                    Err(_) => return false,
-                };
+                let bytes = read_length_prefixed(stream)?;
+                let s = String::from_utf8(bytes).ok()?;
                 out.push(std::path::PathBuf::from(s));
             }
             out
         }
         ReadU32::Eof => Vec::new(),
-        ReadU32::Err => return false,
+        ReadU32::Err => return None,
     };
 
-    // Mirror into GUI so the path editor reflects what's persisted,
-    // even before activate runs.
-    {
-        let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        gui.module_paths = p.controller.module_paths.clone();
-    }
-
-    // Optional tap_opts section (ticket 0753).
+    // Optional tap_opts section.
+    let mut tap_opts: std::collections::HashMap<usize, patches_plugin_common::TapDisplayOpts> =
+        std::collections::HashMap::new();
     match try_read_u32(stream) {
         ReadU32::Ok(count) => {
-            let mut entries =
-                Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let slot = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
-                    _ => return false,
+                    _ => return None,
                 };
                 let fft = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
-                    _ => return false,
+                    _ => return None,
                 };
                 let dec = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
-                    _ => return false,
+                    _ => return None,
                 };
                 let win = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
-                    _ => return false,
+                    _ => return None,
                 };
-                entries.push((
+                tap_opts.insert(
                     slot,
                     patches_plugin_common::TapDisplayOpts {
                         spectrum_fft_size: fft,
@@ -323,56 +314,43 @@ unsafe extern "C" fn state_load(
                         scope_window_samples: win,
                         ..patches_plugin_common::TapDisplayOpts::default()
                     },
-                ));
-            }
-            let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-            gui.tap_opts.clear();
-            for (slot, opts) in entries {
-                gui.tap_opts.insert(slot, opts);
+                );
             }
         }
         ReadU32::Eof => {}
-        ReadU32::Err => return false,
+        ReadU32::Err => return None,
     }
 
-    // Optional window size section (ticket 0753).
-    match try_read_u32(stream) {
+    // Optional window size section.
+    let window_size = match try_read_u32(stream) {
         ReadU32::Ok(width) => {
             let height = match try_read_u32(stream) {
                 ReadU32::Ok(n) => n,
-                _ => return false,
+                _ => return None,
             };
-            let (w, h) = clamp_size(width, height);
-            p.gui_width = w;
-            p.gui_height = h;
+            Some((width, height))
         }
-        ReadU32::Eof => {}
-        ReadU32::Err => return false,
-    }
+        ReadU32::Eof => None,
+        ReadU32::Err => return None,
+    };
 
-    // Optional tap-modes section (snap, heatmap).
+    // Optional tap-modes section.
     match try_read_u32(stream) {
         ReadU32::Ok(count) => {
-            let mut entries = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let slot = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
-                    _ => return false,
+                    _ => return None,
                 };
                 let snap = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n != 0,
-                    _ => return false,
+                    _ => return None,
                 };
                 let heat = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n != 0,
-                    _ => return false,
+                    _ => return None,
                 };
-                entries.push((slot, snap, heat));
-            }
-            let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-            for (slot, snap, heat) in entries {
-                let entry = gui
-                    .tap_opts
+                let entry = tap_opts
                     .entry(slot)
                     .or_insert_with(patches_plugin_common::TapDisplayOpts::default);
                 entry.scope_snap = snap;
@@ -380,17 +358,16 @@ unsafe extern "C" fn state_load(
             }
         }
         ReadU32::Eof => {}
-        ReadU32::Err => return false,
+        ReadU32::Err => return None,
     }
 
-    // If activated, compile and push the plan.
-    if p.runtime.is_some() && !p.controller.dsl_source.is_empty() {
-        if let Err(e) = p.compile_and_push_plan() {
-            eprintln!("patches-clap: state load compile failed: {e}");
-        }
-    }
-
-    true
+    Some(patches_plugin_common::SerializedState {
+        file_path,
+        dsl_source: source,
+        module_paths,
+        tap_opts,
+        window_size,
+    })
 }
 
 // ── GUI ─────────────────────────────────────────────────────────────
@@ -548,6 +525,7 @@ unsafe extern "C" fn gui_set_parent(
     match crate::gui::create_gui(
         parent,
         p.gui_state.clone(),
+        p.action_queue.clone(),
         p.host,
         p.gui_width,
         p.gui_height,

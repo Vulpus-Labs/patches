@@ -76,8 +76,11 @@ unsafe extern "C" fn create_plugin(
         processor: None,
         plan_rx: None,
         runtime: None,
-        registry: patches_modules::default_registry(),
-        controller: patches_plugin_common::Controller::default(),
+        controller: patches_plugin_common::Controller {
+            registry: patches_modules::default_registry(),
+            ..patches_plugin_common::Controller::default()
+        },
+        action_queue: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         gui_state: std::sync::Arc::new(std::sync::Mutex::new(GuiState::default())),
         gui_handle: None,
         gui_scale: 1.0,
