@@ -88,9 +88,8 @@ pub enum Action {
     Activate,
     Deactivate,
     StateLoad(SerializedState),
-    HaltObserved(HaltInfoSnapshot),
-    PlanAdopted,
-    DiagnosticsDrained(Vec<RenderedDiagnostic>),
+    HaltObserved(Option<HaltInfoSnapshot>),
+    DiagnosticsDrained(Vec<String>),
 }
 
 /// What the shell must do after a `Controller::apply` call.
@@ -324,7 +323,40 @@ impl Controller {
                     ..Default::default()
                 }
             }
-            // Remaining host events handled in later tickets.
+            Action::HaltObserved(observed) => {
+                let same = match (&observed, &self.halt) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.slot == b.slot && a.module_name == b.module_name,
+                    _ => false,
+                };
+                if same {
+                    return StateDelta::default();
+                }
+                if let Some(info) = &observed {
+                    let first = info.payload.lines().next().unwrap_or("");
+                    self.push_status(format!(
+                        "Engine halted: module {:?} (slot {}) panicked: {} — reload the patch to recover.",
+                        info.module_name, info.slot, first,
+                    ));
+                }
+                self.halt = observed;
+                StateDelta {
+                    snapshot_changed: true,
+                    ..Default::default()
+                }
+            }
+            Action::DiagnosticsDrained(lines) => {
+                if lines.is_empty() {
+                    return StateDelta::default();
+                }
+                for line in lines {
+                    self.push_status(line);
+                }
+                StateDelta {
+                    snapshot_changed: true,
+                    ..Default::default()
+                }
+            }
             _ => StateDelta::default(),
         }
     }
@@ -739,11 +771,60 @@ mod tests {
         let mut c = Controller::new();
         for a in [
             Action::Deactivate,
-            Action::PlanAdopted,
             Action::DiagnosticsDrained(Vec::new()),
+            Action::HaltObserved(None),
         ] {
             assert_eq!(c.apply(a, &mut env), StateDelta::default());
         }
+    }
+
+    fn fake_halt(slot: usize) -> patches_engine::HaltInfoSnapshot {
+        patches_engine::HaltInfoSnapshot {
+            slot,
+            module_name: format!("M{slot}"),
+            payload: "boom".to_string(),
+        }
+    }
+
+    #[test]
+    fn halt_observed_first_time_pushes_status() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        let d = c.apply(Action::HaltObserved(Some(fake_halt(7))), &mut env);
+        assert!(d.snapshot_changed);
+        assert!(c.halt.is_some());
+        let last = c.status_log.back().cloned().unwrap_or_default();
+        assert!(last.contains("slot 7"));
+    }
+
+    #[test]
+    fn halt_observed_same_slot_is_idempotent() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        c.apply(Action::HaltObserved(Some(fake_halt(0))), &mut env);
+        let len_before = c.status_log.len();
+        let d = c.apply(Action::HaltObserved(Some(fake_halt(0))), &mut env);
+        assert_eq!(d, StateDelta::default());
+        assert_eq!(c.status_log.len(), len_before);
+    }
+
+    #[test]
+    fn halt_observed_clear_resets_state() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        c.apply(Action::HaltObserved(Some(fake_halt(0))), &mut env);
+        let d = c.apply(Action::HaltObserved(None), &mut env);
+        assert!(d.snapshot_changed);
+        assert!(c.halt.is_none());
+    }
+
+    #[test]
+    fn diagnostics_drained_pushes_each_render() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        let d = c.apply(Action::DiagnosticsDrained(Vec::new()), &mut env);
+        assert_eq!(d, StateDelta::default());
+        assert!(c.status_log.is_empty());
     }
 
     #[test]

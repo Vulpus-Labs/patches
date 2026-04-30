@@ -594,39 +594,35 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     dlog!("on_main_thread");
     let p = plugin_mut(plugin);
 
-    // Sync halt state (ADR 0051).
+    // Poll-and-synthesise audio-thread events as actions (ADR 0061).
+    // No SPSC ring back from audio: we read existing channels each tick
+    // and emit actions only when something changed.
+    let mut synthesised: Vec<Action> = Vec::new();
     if let Some(handle) = &p.halt_handle {
         let observed = handle.halt_info();
-        let changed = match (&observed, &p.controller.halt) {
-            (None, None) => false,
-            (Some(a), Some(b)) => a.slot != b.slot || a.module_name != b.module_name,
-            _ => true,
+        let same = match (&observed, &p.controller.halt) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.slot == b.slot && a.module_name == b.module_name,
+            _ => false,
         };
-        if changed {
-            if let Some(info) = &observed {
-                let first = info.payload.lines().next().unwrap_or("");
-                p.controller.push_status(format!(
-                    "Engine halted: module {:?} (slot {}) panicked: {} — reload the patch to recover.",
-                    info.module_name, info.slot, first
-                ));
-            }
-            p.controller.halt = observed;
+        if !same {
+            synthesised.push(Action::HaltObserved(observed));
         }
     }
-
-    // Drain observer diagnostics (ticket 0725).
     if let Some(reader) = p.diagnostics.as_mut() {
-        let drained = reader.drain();
-        for d in drained {
-            p.controller.push_status(d.render());
+        let lines: Vec<String> = reader.drain().iter().map(|d| d.render()).collect();
+        if !lines.is_empty() {
+            synthesised.push(Action::DiagnosticsDrained(lines));
         }
     }
 
     // Drain action queue and apply each through the controller. Single
-    // mutation entry point per ADR 0061.
+    // mutation entry point per ADR 0061. Synthesised audio-thread
+    // actions go first so a halt is visible before the action that
+    // triggered it (e.g. Reload after a panic) tries to recover.
     let actions: Vec<Action> = {
         let mut q = p.action_queue.lock().expect("action_queue mutex poisoned");
-        q.drain(..).collect()
+        synthesised.into_iter().chain(q.drain(..)).collect()
     };
     let mut needs_restart = false;
     let mut needs_dirty = false;
