@@ -11,7 +11,6 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::plugin::clap_plugin_descriptor;
 
 use crate::descriptor::*;
-use patches_plugin_common::GuiState;
 use crate::plugin::{make_clap_plugin, PatchesClapPlugin};
 
 pub static PLUGIN_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
@@ -81,11 +80,8 @@ unsafe extern "C" fn create_plugin(
             ..patches_plugin_common::Controller::default()
         },
         action_queue: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-        gui_state: std::sync::Arc::new(std::sync::Mutex::new(GuiState::default())),
         gui_handle: None,
         gui_scale: 1.0,
-        gui_width: crate::extensions::GUI_WIDTH,
-        gui_height: crate::extensions::GUI_HEIGHT,
         sample_rate: 0.0,
         prev_beat: -1.0,
         prev_bar: -1,

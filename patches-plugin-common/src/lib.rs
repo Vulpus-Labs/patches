@@ -1,9 +1,8 @@
 //! GUI-toolkit-agnostic state shared by Patches plugin crates.
 //!
-//! Today: the plain `GuiState` struct wired between the CLAP plugin
-//! (main thread) and an embedded GUI (vizia or webview) via
-//! `Arc<Mutex<GuiState>>`. Intentionally no `PluginGui` trait yet —
-//! one implementation is not enough to design an abstraction around.
+//! [`Controller`] owns the persistable + derived plugin model;
+//! [`GuiSnapshot`] is the webview projection produced by
+//! [`Controller::snapshot`].
 
 pub mod controller;
 pub mod gui;
@@ -15,7 +14,7 @@ pub use controller::{
 };
 
 pub use gui::{
-    DiagnosticView, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,
-    TapSummary, STATUS_LOG_CAPACITY,
+    DiagnosticView, GuiSnapshot, Intent, TapDisplayOpts, TapFrame, TapSlotFrame, TapSummary,
+    STATUS_LOG_CAPACITY,
 };
 pub use meter::MeterTap;

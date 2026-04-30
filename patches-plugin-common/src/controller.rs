@@ -237,6 +237,17 @@ impl Controller {
                     ..Default::default()
                 }
             }
+            Action::SetWindowSize(w, h) => {
+                let next = Some((w, h));
+                if self.window_size == next {
+                    return StateDelta::default();
+                }
+                self.window_size = next;
+                StateDelta {
+                    persistable_changed: true,
+                    ..Default::default()
+                }
+            }
             Action::Activate => {
                 let (registry, scan) = env.reset_and_scan(&self.module_paths);
                 self.registry = registry;
@@ -547,6 +558,17 @@ mod tests {
         assert!(!d.persistable_changed);
         assert_eq!(c.module_names, vec!["Gain".to_string()]);
         assert!(c.diagnostic_view.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn set_window_size_dirties_only_when_changed() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        let d1 = c.apply(Action::SetWindowSize(800, 600), &mut env);
+        assert!(d1.persistable_changed);
+        assert_eq!(c.window_size, Some((800, 600)));
+        let d2 = c.apply(Action::SetWindowSize(800, 600), &mut env);
+        assert_eq!(d2, StateDelta::default());
     }
 
     #[test]

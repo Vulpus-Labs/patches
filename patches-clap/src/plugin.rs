@@ -46,8 +46,8 @@ use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 use crate::extensions;
 use patches_dsl::manifest::{Manifest, TapDescriptor};
 use patches_plugin_common::{
-    Action, CompileFailure, CompileSuccess, Controller, DiagnosticView, Env, GuiState,
-    MeterTap, ScanDetails, StateDelta, TapSummary,
+    Action, CompileFailure, CompileSuccess, Controller, DiagnosticView, Env, MeterTap,
+    ScanDetails, StateDelta, TapSummary,
 };
 
 /// The runtime state of a single plugin instance.
@@ -75,14 +75,13 @@ pub struct PatchesClapPlugin {
     /// Canonical owner of `dsl_source`, `module_paths`, `file_path`,
     /// `tap_opts`, `module_names`, `taps`, `status_log`,
     /// `diagnostic_view`, and the live `Registry` (ADR 0061, tickets
-    /// 0758–0759). `gui_state` is a read-only mirror for the webview.
+    /// 0758–0761). Webview reads via `Controller::snapshot`.
     pub(crate) controller: Controller,
     /// Action queue drained on each `on_main_thread` tick. Webview IPC
     /// pushes; main thread drains under `Controller::apply` (ADR 0061).
     pub(crate) action_queue: Arc<Mutex<VecDeque<Action>>>,
 
     // ── GUI ─────────────────────────────────────────────────────────
-    pub(crate) gui_state: Arc<Mutex<GuiState>>,
     /// Clonable handle for polling engine halt state (ADR 0051). Populated
     /// in `activate` from the processor.
     pub(crate) halt_handle: Option<patches_engine::HaltHandle>,
@@ -92,15 +91,10 @@ pub struct PatchesClapPlugin {
     /// (ADR 0053 §7). Cloned for the GUI's main-thread tap pump.
     pub(crate) subscribers: Option<SubscribersHandle>,
     /// Observer-side diagnostic ring reader. Drained on `on_main_thread`
-    /// and surfaced through the GUI status log (ticket 0725).
+    /// and surfaced through the controller status log (ticket 0725).
     pub(crate) diagnostics: Option<DiagnosticReader>,
     pub(crate) gui_handle: Option<crate::gui::WebviewGuiHandle>,
     pub(crate) gui_scale: f64,
-    /// Current window size in logical pixels. Updated via
-    /// `gui.set_size`; persisted between `gui_destroy` and `gui_create`
-    /// so reopen restores the previous size.
-    pub(crate) gui_width: u32,
-    pub(crate) gui_height: u32,
     /// Lock-free master-output meter tap. Audio thread writes, GUI reads.
     pub(crate) meter: Arc<MeterTap>,
 
@@ -116,7 +110,7 @@ pub struct PatchesClapPlugin {
 // Safety: PatchesClapPlugin is only accessed according to CLAP's
 // threading rules — main-thread fields on the main thread, audio-thread
 // fields on the audio thread. The only cross-thread shared state is
-// `gui_state` (behind Arc<Mutex>).
+// `action_queue` (behind Arc<Mutex>).
 unsafe impl Send for PatchesClapPlugin {}
 
 impl PatchesClapPlugin {
@@ -134,7 +128,7 @@ impl PatchesClapPlugin {
     /// trigger the hard-stop rescan flow (ADR 0044 §3): host drives the
     /// stop, and `activate` rebuilds the registry from `module_paths`
     /// and recompiles `dsl_source`.
-    fn request_restart(&self) {
+    pub(crate) fn request_restart(&self) {
         if self.host.is_null() {
             return;
         }
@@ -149,7 +143,7 @@ impl PatchesClapPlugin {
     /// last `state.save`. Hosts use this to enable Save / prompt-on-close
     /// (ADR-relevant: ticket 0566 persists `module_paths`; loading a new
     /// patch and editing module paths both flip persistable state).
-    fn mark_state_dirty(&self) {
+    pub(crate) fn mark_state_dirty(&self) {
         use clap_sys::ext::state::{clap_host_state, CLAP_EXT_STATE};
         if self.host.is_null() {
             return;
@@ -316,7 +310,6 @@ unsafe extern "C" fn plugin_activate(
     // Rebuild registry + recompile via the controller. Action::Activate
     // performs the scan and (if dsl_source non-empty) compile.
     apply_action(p, Action::Activate);
-    mirror_controller_to_gui(p);
     dlog!("activate: module scan {}", p
         .controller
         .status_log
@@ -604,8 +597,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     // Sync halt state (ADR 0051).
     if let Some(handle) = &p.halt_handle {
         let observed = handle.halt_info();
-        let prev = lock_gui(&p.gui_state, |g| g.halt.clone());
-        let changed = match (&observed, &prev) {
+        let changed = match (&observed, &p.controller.halt) {
             (None, None) => false,
             (Some(a), Some(b)) => a.slot != b.slot || a.module_name != b.module_name,
             _ => true,
@@ -618,8 +610,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
                     info.module_name, info.slot, first
                 ));
             }
-            p.controller.halt = observed.clone();
-            lock_gui_mut(&p.gui_state, |g| g.halt = observed);
+            p.controller.halt = observed;
         }
     }
 
@@ -648,7 +639,6 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
             needs_restart = true;
         }
     }
-    mirror_controller_to_gui(p);
     if needs_dirty {
         p.mark_state_dirty();
     }
@@ -657,14 +647,15 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     }
 
     if let Some(handle) = &p.gui_handle {
-        handle.update(&p.gui_state);
+        let snap = p.controller.snapshot();
+        handle.update(&snap);
     }
 
     // Push a TapFrame at most once per `TAP_PUSH_INTERVAL`. Frames flow
     // through a separate channel from `applyState` so snapshot dedupe
     // doesn't suppress live tap updates.
     if let (Some(handle), Some(subs)) = (&p.gui_handle, &p.subscribers) {
-        handle.push_taps(subs, &p.gui_state);
+        handle.push_taps(subs, &p.controller.taps, &p.controller.tap_opts);
     }
 }
 
@@ -695,21 +686,6 @@ fn scan_detail_lines(report: &patches_ffi::ScanReport) -> Vec<String> {
         }
     }
     out
-}
-
-/// Mirror controller-owned fields into the GUI state so the webview
-/// snapshot path keeps working unchanged. Single direction:
-/// controller → gui_state.
-pub(crate) fn mirror_controller_to_gui(p: &PatchesClapPlugin) {
-    let c = &p.controller;
-    let mut g = p.gui_state.lock().expect("gui_state mutex poisoned");
-    g.file_path = c.file_path.clone();
-    g.module_paths = c.module_paths.clone();
-    g.module_names = c.module_names.clone();
-    g.taps = c.taps.clone();
-    g.tap_opts = c.tap_opts.clone();
-    g.status_log = c.status_log.clone();
-    g.diagnostic_view = c.diagnostic_view.clone();
 }
 
 /// Apply one [`Action`] by constructing a fresh [`ClapEnv`] view of the
@@ -839,17 +815,6 @@ fn tap_summary(d: &TapDescriptor) -> TapSummary {
     }
 }
 
-/// Read from GuiState under the lock.
-fn lock_gui<T>(state: &Mutex<GuiState>, f: impl FnOnce(&GuiState) -> T) -> T {
-    let gui = state.lock().expect("gui_state mutex poisoned");
-    f(&gui)
-}
-
-/// Mutate GuiState under the lock.
-fn lock_gui_mut(state: &Mutex<GuiState>, f: impl FnOnce(&mut GuiState)) {
-    let mut gui = state.lock().expect("gui_state mutex poisoned");
-    f(&mut gui);
-}
 
 #[cfg(test)]
 mod activate_scan_tests {
@@ -859,7 +824,6 @@ mod activate_scan_tests {
     //! activated runtime's registry.
     use super::*;
     use crate::factory::PLUGIN_DESCRIPTOR;
-    use patches_plugin_common::GuiState;
     use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
     use clap_sys::stream::clap_istream;
     use std::cell::RefCell;
@@ -931,11 +895,8 @@ mod activate_scan_tests {
                 ..Controller::default()
             },
             action_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
-            gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
-            gui_width: crate::extensions::GUI_WIDTH,
-            gui_height: crate::extensions::GUI_HEIGHT,
             sample_rate: 0.0,
             prev_beat: -1.0,
             prev_bar: -1,
@@ -1017,11 +978,8 @@ mod activate_scan_tests {
                 ..Controller::default()
             },
             action_queue: Arc::new(Mutex::new(std::collections::VecDeque::new())),
-            gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
-            gui_width: crate::extensions::GUI_WIDTH,
-            gui_height: crate::extensions::GUI_HEIGHT,
             sample_rate: 0.0,
             prev_beat: -1.0,
             prev_bar: -1,
@@ -1084,14 +1042,7 @@ mod activate_scan_tests {
                 "Gain not in post-rescan registry: {names:?}",
             );
 
-            // GUI mirror updated.
-            {
-                let gui = (*data_ptr)
-                    .gui_state
-                    .lock()
-                    .expect("gui_state mutex poisoned");
-                assert_eq!(gui.module_paths, vec![dylib.clone()]);
-            }
+            assert_eq!((*data_ptr).controller.module_paths, vec![dylib.clone()]);
 
             // Engine still ticks — dsl_source was recompiled and a plan
             // was pushed.

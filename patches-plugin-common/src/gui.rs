@@ -1,15 +1,9 @@
-//! GUI shared state.
-//!
-//! The [`GuiState`] struct is shared between the plugin (main thread)
-//! and the embedded GUI window (vizia/baseview or webview) via
-//! `Arc<Mutex<GuiState>>`.
-
-use std::collections::VecDeque;
-use std::path::PathBuf;
+//! Webview-facing types: `GuiSnapshot` projection, `Intent` wire
+//! format, `TapFrame` per-tick samples. `Controller` owns the model;
+//! `Controller::snapshot` builds [`GuiSnapshot`].
 
 use patches_core::source_map::SourceMap;
 use patches_diagnostics::{source_line_col, RenderedDiagnostic, Severity};
-use patches_engine::HaltInfoSnapshot;
 use serde::{Deserialize, Serialize};
 
 /// Upper bound on retained status messages. Older entries drop off the
@@ -66,67 +60,8 @@ impl Default for TapDisplayOpts {
     }
 }
 
-/// Shared state between the plugin and the embedded GUI.
-///
-/// Mirror of the controller's projected state. The plugin shell writes
-/// to it after each `Controller::apply`; the GUI reads. Action queue
-/// (ADR 0061) replaces the per-button request flags that used to live
-/// here.
-#[derive(Default, Serialize)]
-pub struct GuiState {
-    /// Currently loaded file path (mirror of `Controller::file_path`).
-    pub file_path: Option<PathBuf>,
-    /// Mirror of `Controller::module_paths`.
-    pub module_paths: Vec<PathBuf>,
-    /// Mirror of `Controller::module_names`.
-    pub module_names: Vec<String>,
-    /// Mirror of `Controller::taps`.
-    pub taps: Vec<TapSummary>,
-    /// Rolling log of the most recent status messages (newest last).
-    pub status_log: VecDeque<String>,
-    /// Current diagnostics plus the source map needed to render them.
-    /// Skipped in the default serialisation — webview shells project
-    /// these through a dedicated channel.
-    #[serde(skip)]
-    pub diagnostic_view: DiagnosticView,
-    /// Engine halt state (ADR 0051). `Some(_)` triggers a top-of-window
-    /// error banner; cleared by the audio callback once the rebuilt engine
-    /// reports no halt. Skipped in the default serialisation.
-    #[serde(skip)]
-    pub halt: Option<HaltInfoSnapshot>,
-    /// Per-slot display options (FFT size, scope decimation/window). The
-    /// webview drives these via `Intent::SetTapOpts`; the plugin's
-    /// `push_taps` reads them on each frame and forwards to
-    /// `SubscribersHandle::read_*_into_with`.
-    pub tap_opts: std::collections::HashMap<usize, TapDisplayOpts>,
-}
-
-impl GuiState {
-    /// Append a status message, evicting the oldest entries once the log
-    /// reaches [`STATUS_LOG_CAPACITY`].
-    pub fn push_status(&mut self, msg: impl Into<String>) {
-        if self.status_log.len() >= STATUS_LOG_CAPACITY {
-            self.status_log.pop_front();
-        }
-        self.status_log.push_back(msg.into());
-    }
-
-    /// Render the log as a single newline-joined string for display.
-    pub fn status_text(&self) -> String {
-        if self.status_log.is_empty() {
-            String::new()
-        } else {
-            self.status_log
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-    }
-}
-
-/// Versioned snapshot of [`GuiState`] projected to a shape a webview can
-/// consume. Ticket 0671.
+/// Versioned snapshot of controller state projected to a shape a
+/// webview can consume. Built by [`Controller::snapshot`].
 ///
 /// Keep the field set small and string-typed — the JS side is hand-written.
 /// Bump `v` whenever the shape changes in a breaking way.
@@ -161,28 +96,6 @@ pub struct DiagnosticSummary {
 
 impl GuiSnapshot {
     pub const VERSION: u32 = 5;
-
-    /// Project a `GuiState` into the webview-facing shape.
-    pub fn from_state(state: &GuiState) -> Self {
-        Self {
-            v: Self::VERSION,
-            file_path: state
-                .file_path
-                .as_ref()
-                .map(|p| p.display().to_string()),
-            module_paths: state
-                .module_paths
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect(),
-            module_names: state.module_names.clone(),
-            status_log: state.status_log.iter().cloned().collect(),
-            halt_message: state.halt.as_ref().map(format_halt),
-            diagnostics: summarise_diagnostics(&state.diagnostic_view),
-            taps: state.taps.clone(),
-            tap_opts: state.tap_opts.clone(),
-        }
-    }
 }
 
 pub(crate) fn summarise_diagnostics_pub(view: &DiagnosticView) -> Vec<DiagnosticSummary> {
@@ -215,14 +128,6 @@ fn severity_str(s: Severity) -> &'static str {
         Severity::Warning => "warning",
         Severity::Note => "note",
     }
-}
-
-fn format_halt(h: &HaltInfoSnapshot) -> String {
-    let first = h.payload.lines().next().unwrap_or("");
-    format!(
-        "Engine halted: module {:?} (slot {}) panicked: {}",
-        h.module_name, h.slot, first,
-    )
 }
 
 /// Per-slot live tap data pushed to the webview at frame rate, separate
@@ -275,8 +180,8 @@ impl TapFrame {
 }
 
 /// Intents posted by the webview via `window.ipc.postMessage(JSON)`.
-/// Tagged by a `kind` discriminator matching the `*_requested` flags in
-/// [`GuiState`]. Ticket 0671.
+/// Lowered to [`Action`](crate::controller::Action) via
+/// [`Intent::into_action`]. Ticket 0671.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Intent {
@@ -357,39 +262,23 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_versioned_and_projects_fields() {
-        let mut g = GuiState::default();
-        g.push_status("hello");
-        g.module_paths.push("/tmp/a".into());
-        let snap = GuiSnapshot::from_state(&g);
-        assert_eq!(snap.v, GuiSnapshot::VERSION);
-        assert_eq!(snap.v, 5);
-        assert_eq!(snap.status_log, vec!["hello".to_string()]);
-        assert_eq!(snap.module_paths, vec!["/tmp/a".to_string()]);
-        let json = serde_json::to_string(&snap).unwrap();
-        assert!(json.contains("\"v\":5"));
-    }
-
-    #[test]
     fn snapshot_carries_taps_in_slot_order() {
-        let g = GuiState {
-            taps: vec![
-                TapSummary {
-                    name: "kick".into(),
-                    slot: 0,
-                    kind: "meter".into(),
-                    components: vec!["meter".into()],
-                },
-                TapSummary {
-                    name: "snare".into(),
-                    slot: 1,
-                    kind: "compound".into(),
-                    components: vec!["meter".into(), "osc".into()],
-                },
-            ],
-            ..Default::default()
-        };
-        let snap = GuiSnapshot::from_state(&g);
+        let mut c = crate::Controller::new();
+        c.taps = vec![
+            TapSummary {
+                name: "kick".into(),
+                slot: 0,
+                kind: "meter".into(),
+                components: vec!["meter".into()],
+            },
+            TapSummary {
+                name: "snare".into(),
+                slot: 1,
+                kind: "compound".into(),
+                components: vec!["meter".into(), "osc".into()],
+            },
+        ];
+        let snap = c.snapshot();
         assert_eq!(snap.taps.len(), 2);
         assert_eq!(snap.taps[0].slot, 0);
         assert_eq!(snap.taps[1].kind, "compound");

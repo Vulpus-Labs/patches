@@ -24,9 +24,9 @@ use wry::{Rect, WebView, WebViewBuilder};
 use patches_observation::processor::ProcessorId;
 use patches_observation::subscribers::SubscribersHandle;
 use patches_plugin_common::{
-    Action, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,
+    Action, GuiSnapshot, Intent, TapDisplayOpts, TapFrame, TapSlotFrame, TapSummary,
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use patches_observation::processor::{ScopeReadOpts, SpectrumReadOpts};
 
 const SHELL_HTML: &str = include_str!("../assets/index.html");
@@ -133,18 +133,11 @@ impl WebviewGuiHandle {
         self.visible.load(Ordering::Acquire)
     }
 
-    pub(crate) fn update(&self, gui_state: &Mutex<GuiState>) {
+    pub(crate) fn update(&self, snapshot: &GuiSnapshot) {
         if !self.is_visible() {
             return;
         }
-        let snapshot = {
-            let guard = match gui_state.lock() {
-                Ok(g) => g,
-                Err(_) => return,
-            };
-            GuiSnapshot::from_state(&guard)
-        };
-        let json = match serde_json::to_string(&snapshot) {
+        let json = match serde_json::to_string(snapshot) {
             Ok(s) => s,
             Err(_) => return,
         };
@@ -178,7 +171,8 @@ impl WebviewGuiHandle {
     pub(crate) fn push_taps(
         &self,
         subs: &SubscribersHandle,
-        gui_state: &Mutex<GuiState>,
+        taps: &[TapSummary],
+        opts_by_slot: &HashMap<usize, TapDisplayOpts>,
     ) {
         if !self.is_visible() {
             return;
@@ -191,19 +185,12 @@ impl WebviewGuiHandle {
             return;
         }
 
-        // Snapshot taps + per-slot opts under a single brief lock so we
-        // don't hold gui_state while running FFTs.
-        let (taps, opts_by_slot) = match gui_state.lock() {
-            Ok(g) => (g.taps.clone(), g.tap_opts.clone()),
-            Err(_) => return,
-        };
-
         let mut scratch = match self.tap_scratch.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
         let mut slots: Vec<TapSlotFrame> = Vec::with_capacity(taps.len());
-        for tap in &taps {
+        for tap in taps {
             let want_scope = tap.components.iter().any(|c| c == "osc");
             let want_spectrum = tap.components.iter().any(|c| c == "spectrum");
             let opts = opts_by_slot
@@ -323,7 +310,6 @@ impl HasDisplayHandle for ParentHandle {
 /// window API negotiated during `gui.create`.
 pub(crate) unsafe fn create_gui(
     parent: *mut c_void,
-    _gui_state: Arc<Mutex<GuiState>>,
     action_queue: Arc<Mutex<VecDeque<Action>>>,
     host: *const clap_sys::host::clap_host,
     width: u32,

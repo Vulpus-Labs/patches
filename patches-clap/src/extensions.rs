@@ -199,8 +199,9 @@ unsafe extern "C" fn state_save(
     }
 
     // Window size (ticket 0753).
-    if !stream_write_all(stream, &p.gui_width.to_le_bytes()) { return false; }
-    if !stream_write_all(stream, &p.gui_height.to_le_bytes()) { return false; }
+    let (w, h) = p.controller.window_size.unwrap_or((GUI_WIDTH, GUI_HEIGHT));
+    if !stream_write_all(stream, &w.to_le_bytes()) { return false; }
+    if !stream_write_all(stream, &h.to_le_bytes()) { return false; }
 
     // Tap display modes (snap, heatmap) — separate EOF-tolerant section
     // so legacy tap_opts states (with no mode bools) still load.
@@ -238,17 +239,17 @@ unsafe extern "C" fn state_load(
         None => return false,
     };
 
+    // Clamp the saved window size before handing it to the controller,
+    // so out-of-range values get coerced into the supported range.
+    let mut serialized = serialized;
     if let Some((w, h)) = serialized.window_size {
-        let (w, h) = clamp_size(w, h);
-        p.gui_width = w;
-        p.gui_height = h;
+        serialized.window_size = Some(clamp_size(w, h));
     }
 
     plugin::apply_action(p, patches_plugin_common::Action::StateLoad(serialized));
     if p.runtime.is_some() {
         plugin::apply_action(p, patches_plugin_common::Action::Activate);
     }
-    plugin::mirror_controller_to_gui(p);
     true
 }
 
@@ -350,9 +351,7 @@ unsafe fn deserialize_state(
                     ReadU32::Ok(n) => n != 0,
                     _ => return None,
                 };
-                let entry = tap_opts
-                    .entry(slot)
-                    .or_insert_with(patches_plugin_common::TapDisplayOpts::default);
+                let entry = tap_opts.entry(slot).or_default();
                 entry.scope_snap = snap;
                 entry.spectrum_heatmap = heat;
             }
@@ -461,8 +460,9 @@ unsafe extern "C" fn gui_get_size(
     height: *mut u32,
 ) -> bool {
     let p = plugin::plugin_ref_pub(plugin);
-    *width = p.gui_width;
-    *height = p.gui_height;
+    let (w, h) = p.controller.window_size.unwrap_or((GUI_WIDTH, GUI_HEIGHT));
+    *width = w;
+    *height = h;
     true
 }
 
@@ -501,8 +501,12 @@ unsafe extern "C" fn gui_set_size(
 ) -> bool {
     let (w, h) = clamp_size(width, height);
     let p = plugin::plugin_mut_pub(plugin);
-    p.gui_width = w;
-    p.gui_height = h;
+    let delta = plugin::apply_action(p, patches_plugin_common::Action::SetWindowSize(w, h));
+    if delta.persistable_changed {
+        // Inline single-call site: gui_set_size runs on the main thread,
+        // so we don't go through the queue.
+        p.mark_state_dirty();
+    }
     if let Some(handle) = &p.gui_handle {
         handle.set_bounds(w, h);
     }
@@ -522,13 +526,13 @@ unsafe extern "C" fn gui_set_parent(
     #[cfg(target_os = "windows")]
     let parent = (*window).specific.win32;
 
+    let (w, h) = p.controller.window_size.unwrap_or((GUI_WIDTH, GUI_HEIGHT));
     match crate::gui::create_gui(
         parent,
-        p.gui_state.clone(),
         p.action_queue.clone(),
         p.host,
-        p.gui_width,
-        p.gui_height,
+        w,
+        h,
         p.gui_scale,
     ) {
         Some(handle) => {

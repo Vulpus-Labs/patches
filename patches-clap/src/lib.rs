@@ -10,4 +10,4 @@ pub mod factory;
 pub mod gui;
 pub mod plugin;
 
-pub use patches_plugin_common::{DiagnosticView, GuiState, STATUS_LOG_CAPACITY};
+pub use patches_plugin_common::{DiagnosticView, STATUS_LOG_CAPACITY};
