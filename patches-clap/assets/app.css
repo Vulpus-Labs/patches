@@ -217,8 +217,8 @@ main {
 
 .tap-opt {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
+  top: 4px;
+  left: 4px;
   font-size: 10px;
   padding: 1px 4px;
   background: rgba(20, 20, 20, 0.7);
@@ -306,6 +306,26 @@ main {
 
 .path-row:focus-within {
   border-color: var(--accent);
+}
+
+.module-names {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 4px;
+}
+
+.module-names .empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.module-row {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  background: #202020;
 }
 
 .halt-banner {

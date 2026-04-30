@@ -14,6 +14,7 @@
     if (api._renderStatusLog) api._renderStatusLog(snapshot && snapshot.status_log);
     if (api._renderFilePath) api._renderFilePath(snapshot && snapshot.file_path);
     if (api._renderModulePaths) api._renderModulePaths(snapshot && snapshot.module_paths);
+    if (api._renderModuleNames) api._renderModuleNames(snapshot && snapshot.module_names);
   };
 
   api.applyTaps = function (frame) {
@@ -1066,6 +1067,26 @@
       rm.dataset.removeIndex = String(i);
       rm.textContent = "Remove";
       row.appendChild(rm);
+      root.appendChild(row);
+    }
+  };
+
+  // ── Loaded modules list ─────────────────────────────────────────
+  api._renderModuleNames = function (names) {
+    var root = document.getElementById("module-names");
+    if (!root) return;
+    root.innerHTML = "";
+    if (!names || names.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "no modules loaded";
+      root.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < names.length; i++) {
+      var row = document.createElement("div");
+      row.className = "module-row";
+      row.textContent = names[i];
       root.appendChild(row);
     }
   };
