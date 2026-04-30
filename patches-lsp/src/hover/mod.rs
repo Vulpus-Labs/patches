@@ -131,18 +131,12 @@ fn hover_for_connection_group(
     }
     lines.push(String::new());
     for c in &group {
-        // Range-form rendering (offset/clip) lands in ticket 0770;
-        // for now show the affine scale only.
-        let scale = if (c.map.scale - 1.0).abs() > f64::EPSILON {
-            format!(" ×{}", c.map.scale)
-        } else {
-            String::new()
-        };
+        let map_str = render_cable_map(&c.map);
         lines.push(format!(
             "- `{}.{}` →{} `{}.{}`",
             c.from_module,
             format_port(&c.from_port, c.from_index),
-            scale,
+            map_str,
             c.to_module,
             format_port(&c.to_port, c.to_index),
         ));
@@ -153,6 +147,39 @@ fn hover_for_connection_group(
             value: lines.join("\n"),
         }),
         range: Some(span_to_range(&span, line_starts)),
+    }
+}
+
+/// Render a cable's affine + clip into a hover suffix.
+///
+/// Pure-scalar fast path renders `×k` (omitting `×1`); range cables
+/// (per ADR 0062) render as `[lo → hi]` from the clip window so hover
+/// surfaces the resolved destination interval directly. Composed
+/// affines that lost the fast path but never carried a clip fall
+/// back to `×scale +offset`.
+fn render_cable_map(map: &patches_dsl::flat::CableMap) -> String {
+    if map.is_scalar() {
+        if (map.scale - 1.0).abs() > f64::EPSILON {
+            format!(" ×{}", fmt_num(map.scale))
+        } else {
+            String::new()
+        }
+    } else if let Some((lo, hi)) = map.clip {
+        format!(" \\[{} → {}\\]", fmt_num(lo), fmt_num(hi))
+    } else {
+        format!(" ×{} +{}", fmt_num(map.scale), fmt_num(map.offset))
+    }
+}
+
+fn fmt_num(x: f64) -> String {
+    if x == 0.0 {
+        "0".to_string()
+    } else if x.fract() == 0.0 && x.abs() < 1e16 {
+        format!("{}", x as i64)
+    } else {
+        let s = format!("{:.4}", x);
+        let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+        if s.is_empty() { "0".to_string() } else { s }
     }
 }
 
@@ -274,6 +301,42 @@ mod tests {
         assert!(s.contains("level"));
         assert!(s.contains("meter") && s.contains("spectrum"), "should list components: {s}");
         assert!(s.contains("osc.out"), "should show source cable: {s}");
+    }
+
+    #[test]
+    fn render_cable_map_scalar_one_is_blank() {
+        let m = patches_dsl::flat::CableMap::identity();
+        assert_eq!(render_cable_map(&m), "");
+    }
+
+    #[test]
+    fn render_cable_map_scalar_k_shows_times() {
+        let m = patches_dsl::flat::CableMap::scalar(0.5);
+        assert_eq!(render_cable_map(&m), " ×0.5");
+    }
+
+    #[test]
+    fn render_cable_map_uni_range_shows_interval() {
+        // uni(0.2, 0.8): scale = 0.6, offset = 0.2, clip = (0.2, 0.8).
+        let m = patches_dsl::flat::CableMap {
+            scale: 0.6,
+            offset: 0.2,
+            clip: Some((0.2, 0.8)),
+        };
+        let s = render_cable_map(&m);
+        assert!(s.contains("0.2") && s.contains("0.8") && s.contains("→"), "got {s}");
+    }
+
+    #[test]
+    fn render_cable_map_bi_pitch_range() {
+        // bi(0, 6.91): scale = 3.455, offset = 3.455, clip = (0, 6.91).
+        let m = patches_dsl::flat::CableMap {
+            scale: 3.455,
+            offset: 3.455,
+            clip: Some((0.0, 6.91)),
+        };
+        let s = render_cable_map(&m);
+        assert!(s.contains("0") && s.contains("6.91"), "got {s}");
     }
 
     #[test]

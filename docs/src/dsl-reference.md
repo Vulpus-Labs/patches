@@ -109,6 +109,77 @@ osc.sine -[0.5]-> out.in
 
 The scale factor is a float multiplied onto the signal at the cable level.
 
+### Range-mapped connections
+
+A scalar `-[k]->` only multiplies the signal. To map a known source
+range affinely onto a destination range, use a **range expression**
+on the arrow (ADR 0062):
+
+```patches
+ctrl.knob -[uni(20Hz, 8kHz)]-> filter.cutoff
+lfo.out   -[bi(C2, C5)]->      osc.voct
+```
+
+Both forms hard-clip at the destination endpoints; out-of-source-range
+inputs saturate.
+
+#### `uni(lo, hi)` — `[0, 1]` → `[lo, hi]`
+
+For knob and host-control sources delivering a normalized value:
+
+```patches
+patch {
+    module knob   : Param(name: "cutoff")
+    module filt   : Svf
+    module mix    : Param(name: "wet")
+    module xfade  : Mix
+
+    knob.out -[uni(20Hz, 8kHz)]-> filt.cutoff
+    mix.out  -[uni(-0.5, 1.0)]-> xfade.amount
+}
+```
+
+#### `bi(lo, hi)` — `[-1, 1]` → `[lo, hi]`
+
+For bipolar modulation sources (LFOs, audio-rate modulators):
+
+```patches
+patch {
+    module lfo : Lfo
+    module osc : Osc
+
+    # vibrato around C4, ±1 octave; note literals lower to v/oct.
+    lfo.sine -[bi(C3, C5)]-> osc.voct
+}
+```
+
+Note literals and `Hz` / `kHz` literals mix freely inside a single
+range — both belong to the **pitch family** and lower to v/oct over
+`C0`. Other unit families (`s`, `dB`) stay in their native unit.
+Cross-family pairs are rejected at expansion time:
+
+```patches
+# error: cable range endpoints have incompatible unit families:
+#        pitch vs level
+osc.sine -[bi(440Hz, -12dB)]-> dst.in
+```
+
+Endpoints accept the same forms as scalar scales: numeric and
+unit-suffixed literals, note literals, and `<param>` references. A
+template can therefore parameterise the destination range:
+
+```patches
+template knob_to_cutoff(lo: float, hi: float) {
+    in: knob
+    out: cutoff
+    $.knob -[uni(<lo>, <hi>)]-> $.cutoff
+}
+```
+
+Range and scalar segments compose freely across template boundaries
+(see *Scale composition* below); the result is a single affine plus
+clip applied once at the destination port.
+
 ### Backward connection
 
 ```patches
