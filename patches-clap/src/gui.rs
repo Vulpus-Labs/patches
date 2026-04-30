@@ -31,7 +31,31 @@ use patches_observation::processor::{ScopeReadOpts, SpectrumReadOpts};
 
 const SHELL_HTML: &str = include_str!("../assets/index.html");
 const SHELL_CSS: &str = include_str!("../assets/app.css");
-const SHELL_JS: &str = include_str!("../assets/app.js");
+
+// JS source split by concern; concatenated inside one IIFE wrapper so
+// later fragments see earlier declarations via shared closure scope.
+// Order is dependency order — do not reorder.
+const JS_DB: &str = include_str!("../assets/js/db.js");
+const JS_WIDGETS: &str = include_str!("../assets/js/widgets.js");
+const JS_LEDS: &str = include_str!("../assets/js/leds.js");
+const JS_IPC: &str = include_str!("../assets/js/ipc.js");
+const JS_TAPS: &str = include_str!("../assets/js/taps.js");
+const JS_PANELS: &str = include_str!("../assets/js/panels.js");
+const JS_APP: &str = include_str!("../assets/js/app.js");
+
+fn shell_js() -> String {
+    let mut out = String::with_capacity(
+        128 + JS_DB.len() + JS_WIDGETS.len() + JS_LEDS.len()
+            + JS_IPC.len() + JS_TAPS.len() + JS_PANELS.len() + JS_APP.len(),
+    );
+    out.push_str("(function () {\n\"use strict\";\nconst api = (window.__patches = window.__patches || {});\n");
+    for fragment in [JS_DB, JS_WIDGETS, JS_LEDS, JS_IPC, JS_TAPS, JS_PANELS, JS_APP] {
+        out.push_str(fragment);
+        out.push('\n');
+    }
+    out.push_str("})();\n");
+    out
+}
 
 fn intent_log_label(intent: &Intent) -> &'static str {
     match intent {
@@ -48,7 +72,7 @@ fn intent_log_label(intent: &Intent) -> &'static str {
 fn shell_document() -> String {
     SHELL_HTML
         .replace("__APP_CSS__", SHELL_CSS)
-        .replace("__APP_JS__", SHELL_JS)
+        .replace("__APP_JS__", &shell_js())
 }
 
 /// Minimum interval between snapshot pushes. ~30 Hz cap.
