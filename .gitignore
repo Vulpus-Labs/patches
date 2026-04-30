@@ -8,3 +8,4 @@ target/
 mutants.out/
 mutants.out.old/
 **/.DS_STORE
+node_modules/
