@@ -66,7 +66,7 @@ fn build_and_process_with_default_gain() {
         .expect("build failed");
 
     // Set up ports: input at cable 0, output at cable 1
-    let inputs = vec![InputPort::Mono(MonoInput { cable_idx: 0, scale: 1.0, connected: true })];
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
     let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: 1, connected: true })];
     module.set_ports(&inputs, &outputs);
 
@@ -101,7 +101,7 @@ fn update_parameters_changes_gain() {
         .expect("build failed");
 
     // Set ports
-    let inputs = vec![InputPort::Mono(MonoInput { cable_idx: 0, scale: 1.0, connected: true })];
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
     let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: 1, connected: true })];
     module.set_ports(&inputs, &outputs);
 

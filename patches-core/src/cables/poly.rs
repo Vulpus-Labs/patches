@@ -36,19 +36,38 @@ impl PolyLayout {
 pub struct PolyInput {
     pub cable_idx: usize,
     pub scale: f32,
+    pub offset: f32,
+    pub clip: Option<(f32, f32)>,
     pub connected: bool,
 }
 
 impl Default for PolyInput {
     fn default() -> Self {
-        Self { cable_idx: POLY_READ_SINK, scale: 1.0, connected: false }
+        Self {
+            cable_idx: POLY_READ_SINK,
+            scale: 1.0,
+            offset: 0.0,
+            clip: None,
+            connected: false,
+        }
     }
 }
 
 impl PolyInput {
+    /// Pure-scalar `connected` input: `offset = 0.0`, `clip = None`.
+    pub fn scalar(cable_idx: usize, scale: f32) -> Self {
+        Self {
+            cable_idx,
+            scale,
+            offset: 0.0,
+            clip: None,
+            connected: true,
+        }
+    }
+
     /// Create a `PolyInput` connected to a backplane slot (e.g. `GLOBAL_MIDI`).
     pub fn backplane(cable_idx: usize) -> Self {
-        Self { cable_idx, scale: 1.0, connected: true }
+        Self::scalar(cable_idx, 1.0)
     }
 
     /// Extract the `PolyInput` at position `idx` from a port slice.
@@ -73,7 +92,14 @@ impl PolyInput {
     /// `CableValue::Mono` value — a well-formed graph never produces this.
     pub fn read(&self, pool: &[CableValue]) -> [f32; 16] {
         match pool[self.cable_idx] {
-            CableValue::Poly(channels) => channels.map(|v| v * self.scale),
+            CableValue::Poly(channels) => {
+                let scale = self.scale;
+                let offset = self.offset;
+                match self.clip {
+                    Some((lo, hi)) => channels.map(|v| (v * scale + offset).clamp(lo, hi)),
+                    None => channels.map(|v| v * scale + offset),
+                }
+            }
             CableValue::Mono(_) => {
                 debug_assert!(
                     false,

@@ -431,10 +431,14 @@ impl PatchBuilder {
                     let (buf_idx, scale, broadcast) = resolved_inputs[i];
                     let connected = connectivity.inputs[i];
                     match port_desc.kind {
-                        CableKind::Mono => InputPort::Mono(MonoInput { cable_idx: buf_idx, scale, connected }),
-                        CableKind::Poly => InputPort::Poly(PolyInput { cable_idx: buf_idx, scale, connected }),
+                        CableKind::Mono => InputPort::Mono(MonoInput {
+                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
+                        }),
+                        CableKind::Poly => InputPort::Poly(PolyInput {
+                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
+                        }),
                         CableKind::Stereo => InputPort::Stereo(StereoInput {
-                            cable_idx: buf_idx, scale, connected,
+                            cable_idx: buf_idx, scale, offset: 0.0, clip: None, connected,
                             broadcast_from_mono: broadcast,
                         }),
                     }

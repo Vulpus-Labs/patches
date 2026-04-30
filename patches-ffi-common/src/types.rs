@@ -175,20 +175,27 @@ impl From<&patches_core::InputPort> for FfiInputPort {
 
 impl From<FfiInputPort> for patches_core::InputPort {
     fn from(ffi: FfiInputPort) -> Self {
+        let connected = ffi.connected != 0;
         let mono = patches_core::MonoInput {
             cable_idx: ffi.cable_idx,
             scale: ffi.scale,
-            connected: ffi.connected != 0,
+            offset: 0.0,
+            clip: None,
+            connected,
         };
         let poly = patches_core::PolyInput {
             cable_idx: ffi.cable_idx,
             scale: ffi.scale,
-            connected: ffi.connected != 0,
+            offset: 0.0,
+            clip: None,
+            connected,
         };
         let stereo = patches_core::StereoInput {
             cable_idx: ffi.cable_idx,
             scale: ffi.scale,
-            connected: ffi.connected != 0,
+            offset: 0.0,
+            clip: None,
+            connected,
             broadcast_from_mono: ffi.broadcast != 0,
         };
         match ffi.tag {
@@ -363,11 +370,7 @@ mod tests {
 
     #[test]
     fn input_port_mono_round_trip() {
-        let orig = patches_core::InputPort::Mono(patches_core::MonoInput {
-            cable_idx: 42,
-            scale: 0.75,
-            connected: true,
-        });
+        let orig = patches_core::InputPort::Mono(patches_core::MonoInput::scalar(42, 0.75));
         let ffi: FfiInputPort = (&orig).into();
         let back: patches_core::InputPort = ffi.into();
         let m = back.expect_mono();
@@ -381,6 +384,8 @@ mod tests {
         let orig = patches_core::InputPort::Poly(patches_core::PolyInput {
             cable_idx: 7,
             scale: 0.5,
+            offset: 0.0,
+            clip: None,
             connected: false,
         });
         let ffi: FfiInputPort = (&orig).into();
@@ -396,6 +401,8 @@ mod tests {
         let orig = patches_core::InputPort::Stereo(patches_core::StereoInput {
             cable_idx: 11,
             scale: 1.0,
+            offset: 0.0,
+            clip: None,
             connected: true,
             broadcast_from_mono: true,
         });
@@ -411,12 +418,7 @@ mod tests {
         assert!(s.connected);
         assert!(s.broadcast_from_mono);
 
-        let orig_no_b = patches_core::InputPort::Stereo(patches_core::StereoInput {
-            cable_idx: 12,
-            scale: 1.0,
-            connected: true,
-            broadcast_from_mono: false,
-        });
+        let orig_no_b = patches_core::InputPort::Stereo(patches_core::StereoInput::scalar(12, 1.0));
         let ffi_no_b: FfiInputPort = (&orig_no_b).into();
         assert_eq!(ffi_no_b.broadcast, 0);
         let back_no_b: patches_core::InputPort = ffi_no_b.into();
@@ -429,11 +431,7 @@ mod tests {
 
     #[test]
     fn input_port_mono_serializes_broadcast_zero() {
-        let orig = patches_core::InputPort::Mono(patches_core::MonoInput {
-            cable_idx: 1,
-            scale: 1.0,
-            connected: true,
-        });
+        let orig = patches_core::InputPort::Mono(patches_core::MonoInput::scalar(1, 1.0));
         let ffi: FfiInputPort = (&orig).into();
         assert_eq!(ffi.broadcast, 0);
     }

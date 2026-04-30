@@ -144,7 +144,7 @@ impl Module for VOtaVcf {
             kernel: OtaLadderKernel::new_static(coeffs, poles.into()),
             in_audio: MonoInput::default(),
             in_cutoff_cv: MonoInput::default(),
-            in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
+            in_global_drift: MonoInput::scalar(GLOBAL_DRIFT, 1.0),
             out_audio: MonoOutput::default(),
         }
     })}

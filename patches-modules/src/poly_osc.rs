@@ -122,7 +122,7 @@ impl Module for PolyOsc {
             in_pulse_width: PolyInput::default(),
             in_phase_mod: PolyInput::default(),
             in_sync: PolyTriggerInput::default(),
-            in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
+            in_global_drift: MonoInput::scalar(GLOBAL_DRIFT, 1.0),
             out_sine: PolyOutput::default(),
             out_triangle: PolyOutput::default(),
             out_sawtooth: PolyOutput::default(),

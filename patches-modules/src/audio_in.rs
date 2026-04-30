@@ -41,8 +41,8 @@ impl Module for AudioIn {
         Self {
             instance_id,
             descriptor,
-            in_left: MonoInput { cable_idx: AUDIO_IN_L, scale: 1.0, connected: true },
-            in_right: MonoInput { cable_idx: AUDIO_IN_R, scale: 1.0, connected: true },
+            in_left: MonoInput::scalar(AUDIO_IN_L, 1.0),
+            in_right: MonoInput::scalar(AUDIO_IN_R, 1.0),
             out_stereo: StereoOutput::default(),
         }
     })}

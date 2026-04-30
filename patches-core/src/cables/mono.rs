@@ -27,22 +27,37 @@ impl MonoLayout {
     }
 }
 
-/// A mono input port. `cable_idx` indexes the shared cable pool; `scale` is
-/// applied on read; `connected` tracks whether a cable is attached.
+/// A mono input port. `cable_idx` indexes the shared cable pool; reads apply
+/// `v * scale + offset` then optional `clip` clamp. `connected` tracks
+/// whether a cable is attached.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MonoInput {
     pub cable_idx: usize,
     pub scale: f32,
+    pub offset: f32,
+    pub clip: Option<(f32, f32)>,
     pub connected: bool,
 }
 
 impl Default for MonoInput {
     fn default() -> Self {
-        Self { cable_idx: MONO_READ_SINK, scale: 1.0, connected: false }
+        Self {
+            cable_idx: MONO_READ_SINK,
+            scale: 1.0,
+            offset: 0.0,
+            clip: None,
+            connected: false,
+        }
     }
 }
 
 impl MonoInput {
+    /// Pure-scalar `connected` input: `offset = 0.0`, `clip = None`. Keeps
+    /// test churn down for sites that don't care about cable-range affine.
+    pub fn scalar(cable_idx: usize, scale: f32) -> Self {
+        Self { cable_idx, scale, offset: 0.0, clip: None, connected: true }
+    }
+
     pub fn from_port(port: &InputPort) -> Self {
         port.expect_mono()
     }
@@ -68,7 +83,13 @@ impl MonoInput {
     /// `CableValue::Poly` value — a well-formed graph never produces this.
     pub fn read(&self, pool: &[CableValue]) -> f32 {
         match pool[self.cable_idx] {
-            CableValue::Mono(v) => v * self.scale,
+            CableValue::Mono(v) => {
+                let y = v * self.scale + self.offset;
+                match self.clip {
+                    Some((lo, hi)) => y.clamp(lo, hi),
+                    None => y,
+                }
+            }
             CableValue::Poly(_) => {
                 debug_assert!(
                     false,

@@ -210,7 +210,7 @@ mod tests {
         let mut pool = make_pool(&[CableValue::Mono(4.0)]);
         // wi = 0, so ri = 1; both slots seeded with same value
         let cp = CablePool::new(&mut pool, 0);
-        let input = MonoInput { cable_idx: 0, scale: 0.5, connected: true };
+        let input = MonoInput::scalar(0, 0.5);
         assert_eq!(cp.read_mono(&input), 2.0);
     }
 
@@ -219,7 +219,7 @@ mod tests {
         let channels: [f32; 16] = std::array::from_fn(|i| i as f32);
         let mut pool = make_pool(&[CableValue::Poly(channels)]);
         let cp = CablePool::new(&mut pool, 0);
-        let input = PolyInput { cable_idx: 0, scale: 2.0, connected: true };
+        let input = PolyInput::scalar(0, 2.0);
         let result = cp.read_poly(&input);
         for (i, &v) in result.iter().enumerate() {
             assert_eq!(v, i as f32 * 2.0, "channel {i} mismatch");
@@ -232,7 +232,7 @@ mod tests {
         // Slot holds Poly but MonoInput tries to read it — should return 0.0, not panic
         let mut pool = vec![[CableValue::Poly([1.0; 16]); 2]];
         let cp = CablePool::new(&mut pool, 0);
-        let input = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let input = MonoInput::scalar(0, 1.0);
         assert_eq!(cp.read_mono(&input), 0.0);
     }
 
@@ -242,7 +242,7 @@ mod tests {
         // Slot holds Mono but PolyInput tries to read it — should return [0.0;16], not panic
         let mut pool = vec![[CableValue::Mono(1.0); 2]];
         let cp = CablePool::new(&mut pool, 0);
-        let input = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+        let input = PolyInput::scalar(0, 1.0);
         assert_eq!(cp.read_poly(&input), [0.0f32; 16]);
     }
 
@@ -283,7 +283,7 @@ mod tests {
     fn ping_pong_one_sample_delay_mono() {
         let mut pool = vec![[CableValue::Mono(0.0); 2]];
         let output = MonoOutput { cable_idx: 0, connected: true };
-        let input = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let input = MonoInput::scalar(0, 1.0);
 
         // Tick 0: wi=0, ri=1. Pool is [Mono(0), Mono(0)].
         // Write 42.0 into write slot (index 0).
@@ -310,7 +310,7 @@ mod tests {
         // Seed read slot (index 1) with 10.0.
         let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(10.0)]];
         let output = MonoOutput { cable_idx: 0, connected: true };
-        let input = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+        let input = MonoInput::scalar(0, 1.0);
 
         // wi=0: Module A writes 99.0, Module B reads — should see 10.0 (from read slot),
         // not 99.0 (written this tick into write slot).
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn scale_applied_at_read_time() {
         let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(8.0)]];
-        let input_scaled = MonoInput { cable_idx: 0, scale: 0.25, connected: true };
+        let input_scaled = MonoInput::scalar(0, 0.25);
 
         let cp = CablePool::new(&mut pool, 0);
         let result = cp.read_mono(&input_scaled);
@@ -341,8 +341,8 @@ mod tests {
         let channels: [f32; 16] = std::array::from_fn(|i| (i as f32 + 1.0) * 3.0);
         let mut pool = vec![[CableValue::Poly([0.0; 16]), CableValue::Poly(channels)]];
 
-        let input_unit = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
-        let input_general = PolyInput { cable_idx: 0, scale: 1.0000001, connected: true };
+        let input_unit = PolyInput::scalar(0, 1.0);
+        let input_general = PolyInput::scalar(0, 1.0000001);
 
         let cp = CablePool::new(&mut pool, 0);
         let result_fast = cp.read_poly(&input_unit);
@@ -366,7 +366,7 @@ mod tests {
         let data: [f32; 16] = std::array::from_fn(|i| i as f32);
         let mut pool = vec![[CableValue::Poly([0.0; 16]); 2]];
         let output = PolyOutput { cable_idx: 0, connected: true };
-        let input = PolyInput { cable_idx: 0, scale: 0.5, connected: true };
+        let input = PolyInput::scalar(0, 0.5);
 
         // Tick 0: write data.
         {

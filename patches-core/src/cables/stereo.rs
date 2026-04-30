@@ -10,6 +10,8 @@ pub type StereoSample = (f32, f32);
 pub struct StereoInput {
     pub cable_idx: usize,
     pub scale: f32,
+    pub offset: f32,
+    pub clip: Option<(f32, f32)>,
     pub connected: bool,
     /// When `true`, the underlying slot holds a mono signal that should be
     /// broadcast to both channels (`L = R = lane[0]`). Set by the cable
@@ -24,6 +26,8 @@ impl Default for StereoInput {
         Self {
             cable_idx: POLY_READ_SINK,
             scale: 1.0,
+            offset: 0.0,
+            clip: None,
             connected: false,
             broadcast_from_mono: false,
         }
@@ -31,6 +35,19 @@ impl Default for StereoInput {
 }
 
 impl StereoInput {
+    /// Pure-scalar `connected` input: `offset = 0.0`, `clip = None`,
+    /// `broadcast_from_mono = false`.
+    pub fn scalar(cable_idx: usize, scale: f32) -> Self {
+        Self {
+            cable_idx,
+            scale,
+            offset: 0.0,
+            clip: None,
+            connected: true,
+            broadcast_from_mono: false,
+        }
+    }
+
     /// Extract the `StereoInput` at position `idx` from a port slice.
     ///
     /// # Panics
@@ -50,18 +67,25 @@ impl StereoInput {
     /// Panics (via `debug_assert!`) in debug builds if the pool slot holds a
     /// `CableValue::Mono` — graph validation should prevent this.
     pub fn read(&self, pool: &[CableValue]) -> StereoSample {
+        let apply = |v: f32| {
+            let y = v * self.scale + self.offset;
+            match self.clip {
+                Some((lo, hi)) => y.clamp(lo, hi),
+                None => y,
+            }
+        };
         match pool[self.cable_idx] {
             CableValue::Poly(channels) => {
                 if self.broadcast_from_mono {
-                    let s = channels[0] * self.scale;
+                    let s = apply(channels[0]);
                     (s, s)
                 } else {
-                    (channels[0] * self.scale, channels[1] * self.scale)
+                    (apply(channels[0]), apply(channels[1]))
                 }
             }
             CableValue::Mono(v) => {
                 if self.broadcast_from_mono {
-                    let s = v * self.scale;
+                    let s = apply(v);
                     (s, s)
                 } else {
                     debug_assert!(

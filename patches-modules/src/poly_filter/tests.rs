@@ -72,10 +72,10 @@ fn make_bandpass_sr(center_voct: f32, bandwidth_q: f32, sr: f32) -> Box<dyn Modu
 fn set_static_ports(m: &mut Box<dyn Module>) {
     m.set_ports(
         &[
-            InputPort::Poly(PolyInput { cable_idx: 0, scale: 1.0, connected: true }),
-            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, connected: false }),
+            InputPort::Poly(PolyInput::scalar(0, 1.0)),
+            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, offset: 0.0, clip: None, connected: false }),
+            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false }),
+            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false }),
         ],
         &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
     );
@@ -85,10 +85,10 @@ fn set_static_ports(m: &mut Box<dyn Module>) {
 fn set_cutoff_cv_ports(m: &mut Box<dyn Module>) {
     m.set_ports(
         &[
-            InputPort::Poly(PolyInput { cable_idx: 0, scale: 1.0, connected: true }),
-            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, connected: true }),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, connected: false }),
+            InputPort::Poly(PolyInput::scalar(0, 1.0)),
+            InputPort::Poly(PolyInput::scalar(1, 1.0)),
+            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false }),
+            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false }),
         ],
         &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
     );

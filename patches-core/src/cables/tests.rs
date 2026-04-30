@@ -14,14 +14,14 @@ fn poly_pool(channels: [f32; 16]) -> Vec<CableValue> {
 #[test]
 fn mono_input_read_scale_one() {
     let pool = mono_pool(2.5);
-    let port = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+    let port = MonoInput::scalar(0, 1.0);
     assert_eq!(port.read(&pool), 2.5);
 }
 
 #[test]
 fn mono_input_read_with_scale() {
     let pool = mono_pool(2.0);
-    let port = MonoInput { cable_idx: 0, scale: 0.5, connected: true };
+    let port = MonoInput::scalar(0, 0.5);
     assert_eq!(port.read(&pool), 1.0);
 }
 
@@ -31,7 +31,7 @@ fn mono_input_read_with_scale() {
 fn poly_input_read_applies_scale_to_all_channels() {
     let channels: [f32; 16] = std::array::from_fn(|i| i as f32);
     let pool = poly_pool(channels);
-    let port = PolyInput { cable_idx: 0, scale: 2.0, connected: true };
+    let port = PolyInput::scalar(0, 2.0);
     let result = port.read(&pool);
     for (i, &v) in result.iter().enumerate() {
         assert_eq!(v, i as f32 * 2.0, "channel {i} mismatch");
@@ -44,7 +44,7 @@ fn poly_input_read_applies_scale_to_all_channels() {
 #[test]
 fn mono_input_kind_mismatch_returns_zero() {
     let pool = vec![CableValue::Poly([1.0; 16])];
-    let port = MonoInput { cable_idx: 0, scale: 1.0, connected: true };
+    let port = MonoInput::scalar(0, 1.0);
     assert_eq!(port.read(&pool), 0.0);
 }
 
@@ -52,7 +52,7 @@ fn mono_input_kind_mismatch_returns_zero() {
 #[test]
 fn poly_input_kind_mismatch_returns_zero() {
     let pool = vec![CableValue::Mono(1.0)];
-    let port = PolyInput { cable_idx: 0, scale: 1.0, connected: true };
+    let port = PolyInput::scalar(0, 1.0);
     assert_eq!(port.read(&pool), [0.0; 16]);
 }
 
@@ -66,8 +66,8 @@ fn is_connected_defaults_false_for_all_port_types() {
     assert!(!PolyOutput::default().is_connected(), "PolyOutput default should be disconnected");
 
     // When explicitly connected, is_connected returns true.
-    assert!(MonoInput { cable_idx: 0, scale: 1.0, connected: true }.is_connected(), "MonoInput connected");
-    assert!(PolyInput { cable_idx: 0, scale: 1.0, connected: true }.is_connected(), "PolyInput connected");
+    assert!(MonoInput::scalar(0, 1.0).is_connected(), "MonoInput connected");
+    assert!(PolyInput::scalar(0, 1.0).is_connected(), "PolyInput connected");
     assert!(MonoOutput { cable_idx: 0, connected: true }.is_connected(), "MonoOutput connected");
     assert!(PolyOutput { cable_idx: 0, connected: true }.is_connected(), "PolyOutput connected");
 }
@@ -107,7 +107,7 @@ fn make_cable_pool(values: &[CableValue]) -> Vec<[CableValue; 2]> {
 fn gate_rising_and_falling_edges() {
     let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
     let mut g = GateInput {
-        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: MonoInput::scalar(0, 1.0),
         ..Default::default()
     };
 
@@ -157,7 +157,7 @@ fn sub_trigger_zero_is_no_event() {
     let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: MonoInput::scalar(0, 1.0),
     };
     assert_eq!(t.tick(&cp), None);
 }
@@ -167,7 +167,7 @@ fn sub_trigger_positive_is_event_with_frac() {
     let mut pool = make_cable_pool(&[CableValue::Mono(0.37)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: MonoInput::scalar(0, 1.0),
     };
     assert_eq!(t.tick(&cp), Some(0.37));
 }
@@ -177,7 +177,7 @@ fn sub_trigger_one_is_boundary_event() {
     let mut pool = make_cable_pool(&[CableValue::Mono(1.0)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: MonoInput::scalar(0, 1.0),
     };
     assert_eq!(t.tick(&cp), Some(1.0));
 }
@@ -190,7 +190,7 @@ fn poly_sub_trigger_per_voice() {
     let mut pool = make_cable_pool(&[CableValue::Poly(channels)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = PolyTriggerInput {
-        inner: PolyInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: PolyInput::scalar(0, 1.0),
     };
     let out = t.tick(&cp);
     assert_eq!(out[0], Some(0.25));
@@ -234,9 +234,7 @@ fn stereo_input_reads_lr_with_scale() {
     frame[0] = 1.0;
     frame[1] = 2.0;
     let pool = vec![CableValue::Poly(frame)];
-    let port = StereoInput {
-        cable_idx: 0, scale: 0.5, connected: true, broadcast_from_mono: false,
-    };
+    let port = StereoInput::scalar(0, 0.5);
     assert_eq!(port.read(&pool), (0.5, 1.0));
 }
 
@@ -245,9 +243,7 @@ fn stereo_input_round_trip_through_output() {
     let mut pool = vec![CableValue::Poly([0.0; 16])];
     let out = StereoOutput { cable_idx: 0, connected: true };
     out.write(&mut pool, 0.7, -0.3);
-    let inp = StereoInput {
-        cable_idx: 0, scale: 1.0, connected: true, broadcast_from_mono: false,
-    };
+    let inp = StereoInput::scalar(0, 1.0);
     assert_eq!(inp.read(&pool), (0.7, -0.3));
 }
 
@@ -257,7 +253,7 @@ fn stereo_input_round_trip_through_output() {
 fn poly_gate_per_voice_edges() {
     let mut pool = make_cable_pool(&[CableValue::Poly([0.0; 16])]);
     let mut g = PolyGateInput {
-        inner: PolyInput { cable_idx: 0, scale: 1.0, connected: true },
+        inner: PolyInput::scalar(0, 1.0),
         ..Default::default()
     };
 

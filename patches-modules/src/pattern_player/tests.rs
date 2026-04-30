@@ -84,11 +84,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     pool_buf[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
     pool_buf[clock_slot] = [CableValue::Poly([0.0; 16]); 2];
 
-    let inputs = vec![InputPort::Poly(PolyInput {
-        cable_idx: clock_slot,
-        scale: 1.0,
-        connected: true,
-    })];
+    let inputs = vec![InputPort::Poly(PolyInput::scalar(clock_slot, 1.0))];
     let outputs = vec![
         OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 1, connected: true }),
         OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 2, connected: true }),

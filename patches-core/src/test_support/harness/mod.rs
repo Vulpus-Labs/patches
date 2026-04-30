@@ -663,20 +663,27 @@ impl ModuleHarness {
             .iter()
             .enumerate()
             .map(|(i, kind)| {
+                let connected = self.input_connected[i];
                 let mono = MonoInput {
                     cable_idx: RESERVED_SLOTS + i,
                     scale: 1.0,
-                    connected: self.input_connected[i],
+                    offset: 0.0,
+                    clip: None,
+                    connected,
                 };
                 let poly = PolyInput {
                     cable_idx: RESERVED_SLOTS + i,
                     scale: 1.0,
-                    connected: self.input_connected[i],
+                    offset: 0.0,
+                    clip: None,
+                    connected,
                 };
                 let stereo = crate::cables::StereoInput {
                     cable_idx: RESERVED_SLOTS + i,
                     scale: 1.0,
-                    connected: self.input_connected[i],
+                    offset: 0.0,
+                    clip: None,
+                    connected,
                     broadcast_from_mono: false,
                 };
                 match kind {

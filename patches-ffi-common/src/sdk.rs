@@ -846,11 +846,7 @@ mod tests {
     fn decode_port_frame_round_trip() {
         let layout = PortLayout::new(1, 1);
         let mut frame = PortFrame::with_layout(layout);
-        let inputs = vec![InputPort::Mono(MonoInput {
-            cable_idx: 3,
-            scale: 0.5,
-            connected: true,
-        })];
+        let inputs = vec![InputPort::Mono(MonoInput::scalar(3, 0.5))];
         let outputs = vec![OutputPort::Mono(MonoOutput {
             cable_idx: 7,
             connected: true,
@@ -1017,11 +1013,7 @@ mod tests {
         // set_ports
         let port_layout = PortLayout::new(1, 1);
         let mut port_frame = PortFrame::with_layout(port_layout);
-        let inputs = vec![InputPort::Mono(MonoInput {
-            cable_idx: 11,
-            scale: 1.0,
-            connected: true,
-        })];
+        let inputs = vec![InputPort::Mono(MonoInput::scalar(11, 1.0))];
         let outputs = vec![OutputPort::Mono(MonoOutput {
             cable_idx: 22,
             connected: true,

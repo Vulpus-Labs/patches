@@ -250,10 +250,10 @@ mod tests {
     use patches_core::{MonoInput, MonoOutput, PolyInput, PolyOutput, StereoInput};
 
     fn mono_in(idx: usize, scale: f32, connected: bool) -> InputPort {
-        InputPort::Mono(MonoInput { cable_idx: idx, scale, connected })
+        InputPort::Mono(MonoInput { cable_idx: idx, scale, offset: 0.0, clip: None, connected })
     }
     fn poly_in(idx: usize, scale: f32, connected: bool) -> InputPort {
-        InputPort::Poly(PolyInput { cable_idx: idx, scale, connected })
+        InputPort::Poly(PolyInput { cable_idx: idx, scale, offset: 0.0, clip: None, connected })
     }
     fn mono_out(idx: usize, connected: bool) -> OutputPort {
         OutputPort::Mono(MonoOutput { cable_idx: idx, connected })
@@ -337,15 +337,12 @@ mod tests {
             InputPort::Stereo(StereoInput {
                 cable_idx: 5,
                 scale: 1.0,
+                offset: 0.0,
+                clip: None,
                 connected: true,
                 broadcast_from_mono: true,
             }),
-            InputPort::Stereo(StereoInput {
-                cable_idx: 9,
-                scale: 0.5,
-                connected: true,
-                broadcast_from_mono: false,
-            }),
+            InputPort::Stereo(StereoInput::scalar(9, 0.5)),
         ];
         pack_ports_into(7, &inputs, &[], &mut frame).unwrap();
         let view = frame.view();

@@ -35,11 +35,7 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
     let mut module = builder
         .build(&env(), &shape, &ParameterMap::new(), &patches_core::StructuralParams::new(), InstanceId::next())
         .expect("build");
-    let inputs = vec![InputPort::Mono(MonoInput {
-        cable_idx: 0,
-        scale: 1.0,
-        connected: true,
-    })];
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
     let outputs = vec![OutputPort::Mono(MonoOutput {
         cable_idx: 1,
         connected: true,

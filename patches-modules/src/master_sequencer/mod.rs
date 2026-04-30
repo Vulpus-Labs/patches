@@ -119,11 +119,7 @@ impl Module for MasterSequencer {
             hosted: env.hosted,
             use_host_transport: env.hosted,
             core: SequencerCore::new(env.sample_rate, channels),
-            transport_in: PolyInput {
-                cable_idx: GLOBAL_TRANSPORT,
-                scale: 1.0,
-                connected: true,
-            },
+            transport_in: PolyInput::scalar(GLOBAL_TRANSPORT, 1.0),
             in_start: MonoInput::default(),
             in_stop: MonoInput::default(),
             in_pause: MonoInput::default(),

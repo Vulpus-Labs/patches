@@ -129,7 +129,7 @@ impl Module for Oscillator {
             in_pulse_width: MonoInput::default(),
             in_phase_mod: MonoInput::default(),
             in_sync: TriggerInput::default(),
-            in_global_drift: MonoInput { cable_idx: GLOBAL_DRIFT, scale: 1.0, connected: true },
+            in_global_drift: MonoInput::scalar(GLOBAL_DRIFT, 1.0),
             out_sine: MonoOutput::default(),
             out_triangle: MonoOutput::default(),
             out_sawtooth: MonoOutput::default(),
