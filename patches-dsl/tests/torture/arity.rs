@@ -120,18 +120,18 @@ fn arity_everything_boost_scale_applied_via_param_ref() {
         .find(|c| c.from_module == "bus_b/m" && c.to_module == "out" && c.to_port == "in")
         .expect("expected bus_b/m.out → out.in");
     assert!(
-        (bus_b_out.scale - 0.9).abs() < 1e-12,
+        (bus_b_out.map.scale - 0.9).abs() < 1e-12,
         "expected bus_b output scale 0.9, got {}",
-        bus_b_out.scale
+        bus_b_out.map.scale
     );
 
     let bus_a_out = flat.connections.iter()
         .find(|c| c.from_module == "bus_a/m" && c.to_module == "out" && c.to_port == "in")
         .expect("expected bus_a/m.out → out.in");
     assert!(
-        (bus_a_out.scale - 0.5).abs() < 1e-12,
+        (bus_a_out.map.scale - 0.5).abs() < 1e-12,
         "expected bus_a output scale 0.5, got {}",
-        bus_a_out.scale
+        bus_a_out.map.scale
     );
 }
 

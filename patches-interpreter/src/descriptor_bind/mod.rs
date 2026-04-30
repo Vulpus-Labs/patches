@@ -274,7 +274,7 @@ mod tests {
             to_module: to.into(),
             to_port: tp.into(),
             to_index: 0,
-            scale: 1.0,
+            map: patches_dsl::CableMap::scalar(1.0),
             provenance: prov.clone(),
             from_provenance: prov.clone(),
             to_provenance: prov,

@@ -87,7 +87,7 @@ pub fn connection_keys(flat: &FlatPatch) -> Vec<String> {
             format!(
                 "{}.{}[{}] -[{}]-> {}.{}[{}]",
                 c.from_module, c.from_port, c.from_index,
-                c.scale,
+                c.map.scale,
                 c.to_module, c.to_port, c.to_index
             )
         })
@@ -151,9 +151,9 @@ pub fn assert_connection_scale(
             )
         });
     assert!(
-        (conn.scale - expected_scale).abs() < tolerance,
+        (conn.map.scale - expected_scale).abs() < tolerance,
         "connection {}.{} -> {}.{}: expected scale ~{}, got {}",
         from_module, from_port, to_module, to_port,
-        expected_scale, conn.scale
+        expected_scale, conn.map.scale
     );
 }

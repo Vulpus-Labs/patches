@@ -141,17 +141,17 @@ fn deep_alias_scale_composed_across_three_boundaries() {
         c.from_module == "clk" && c.to_module == "top/mid/i/lfo" && c.to_port == "sync"
     }).expect("expected clk → top/mid/i/lfo.sync");
     assert!(
-        (lfo_conn.scale - 0.125).abs() < 1e-12,
+        (lfo_conn.map.scale - 0.125).abs() < 1e-12,
         "expected scale 0.125 (0.5^3), got {}",
-        lfo_conn.scale
+        lfo_conn.map.scale
     );
 
     let env_conn = flat.connections.iter().find(|c| {
         c.from_module == "clk" && c.to_module == "top/mid/i/env" && c.to_port == "gate"
     }).expect("expected clk → top/mid/i/env.gate");
     assert!(
-        (env_conn.scale - 0.125).abs() < 1e-12,
+        (env_conn.map.scale - 0.125).abs() < 1e-12,
         "expected scale 0.125 on env.gate connection, got {}",
-        env_conn.scale
+        env_conn.map.scale
     );
 }

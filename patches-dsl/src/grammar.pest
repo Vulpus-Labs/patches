@@ -111,7 +111,12 @@ port_ref     = ${ module_ident ~ "." ~ port_label ~ port_index? }
 // Compound-atomic: no whitespace inside "-[0.5]->" or "<-[0.5]-"
 // Scale value: a unit literal, a plain numeric literal, or a <param> reference.
 // float_unit comes first so `1s` is not consumed as `scale_num` "1".
-scale_val      = ${ param_ref | float_unit | scale_num }
+// note_lit comes before scale_num so `C1` parses as a note, not a string.
+scale_endpoint = ${ param_ref | float_unit | note_lit | scale_num }
+range_kind     = @{ "uni" | "bi" }
+range_ws       = _{ (" " | "\t")* }
+scale_range    = ${ range_kind ~ "(" ~ range_ws ~ scale_endpoint ~ range_ws ~ "," ~ range_ws ~ scale_endpoint ~ range_ws ~ ")" }
+scale_val      = ${ scale_range | scale_endpoint }
 forward_arrow  = ${ ("-[" ~ scale_val ~ "]->") | "->" }
 backward_arrow = ${ ("<-[" ~ scale_val ~ "]-") | "<-" }
 arrow          = { forward_arrow | backward_arrow }

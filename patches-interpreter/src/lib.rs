@@ -145,7 +145,7 @@ pub fn build_from_bound(
                 resolved.from_port,
                 &to_id,
                 resolved.to_port,
-                resolved.scale as f32,
+                resolved.map.scale as f32,
             )
             .map_err(|e| {
                 InterpretError::new(

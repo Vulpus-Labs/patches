@@ -13,8 +13,10 @@ use std::collections::HashMap;
 use patches_core::QName;
 
 use super::{list_keys, qualify, scalar_to_u32, ExpandError};
-use crate::ast::{PortIndex, PortLabel, PortRef, Scalar, Span};
-use crate::flat::PortDirection;
+use crate::ast::{
+    PortIndex, PortLabel, PortRef, RangeEndpoint, RangeKind, ScaleSpec, Scalar, Span, UnitFamily,
+};
+use crate::flat::{CableMap, PortDirection};
 use crate::structural::StructuralCode as Code;
 
 /// The `(module, port, index)` triple that identifies a port on a module.
@@ -37,17 +39,26 @@ impl<M> PortAddr<M> {
     }
 }
 
-/// A resolved port endpoint: fully-qualified address plus the boundary scale
-/// accumulated along the path to it.
+/// A resolved port endpoint: fully-qualified address plus the affine
+/// + clip map accumulated along the path to it (ADR 0062).
 #[derive(Debug, Clone)]
 pub(super) struct PortEntry {
     pub(super) addr: PortAddr<QName>,
-    pub(super) scale: f64,
+    pub(super) map: CableMap,
 }
 
 impl PortEntry {
-    pub(super) fn new(module: QName, port: String, index: u32, scale: f64) -> Self {
-        Self { addr: PortAddr::new(module, port, index), scale }
+    /// Construct an entry with a pure-scalar map (`CableMap::scalar(k)`).
+    pub(super) fn scalar(module: QName, port: String, index: u32, scale: f64) -> Self {
+        Self {
+            addr: PortAddr::new(module, port, index),
+            map: CableMap::scalar(scale),
+        }
+    }
+
+    /// Construct an entry with an explicit map.
+    pub(super) fn with_map(addr: PortAddr<QName>, map: CableMap) -> Self {
+        Self { addr, map }
     }
 }
 
@@ -227,35 +238,119 @@ pub(super) fn subst_port_label(
     }
 }
 
-/// Resolve `Option<Scalar>` arrow scale to a concrete `f64`.
+/// Resolve `Option<&ScaleSpec>` arrow scale to a [`CableMap`].
 ///
-/// `None` → 1.0 (implicit default).
-/// `Some(scalar)` is substituted via `param_env` then coerced to `f64`.
-/// Returns an error if the resolved scalar is not numeric.
+/// `None` → `CableMap::identity()`.
+/// `Some(ScaleSpec::Scalar)` substitutes via `param_env` and produces
+/// `CableMap::scalar(k)` (the fast path).
+/// `Some(ScaleSpec::Range)` performs unit-family resolution (ticket
+/// 0766) and lowers per ADR 0062 §Lowering:
+///
+/// - `uni(lo, hi)` → `scale = hi - lo`, `offset = lo`,
+///   `clip = Some((min(lo,hi), max(lo,hi)))`.
+/// - `bi(lo, hi)`  → `scale = (hi - lo) / 2`,
+///   `offset = (hi + lo) / 2`,
+///   `clip = Some((min(lo,hi), max(lo,hi)))`.
 pub(super) fn eval_scale(
-    scale: Option<&Scalar>,
+    scale: Option<&ScaleSpec>,
     param_env: &HashMap<String, Scalar>,
-    span: &Span,
-) -> Result<f64, ExpandError> {
+    arrow_span: &Span,
+) -> Result<CableMap, ExpandError> {
     match scale {
-        None => Ok(1.0),
-        Some(s) => {
+        None => Ok(CableMap::identity()),
+        Some(ScaleSpec::Scalar { value: s, .. }) => {
             let resolved = if let Scalar::ParamRef(name) = s {
                 param_env.get(name.as_str()).unwrap_or(s)
             } else {
                 s
             };
             match resolved {
-                Scalar::Float(f) => Ok(*f),
-                Scalar::Int(i) => Ok(*i as f64),
+                Scalar::Float(f) => Ok(CableMap::scalar(*f)),
+                Scalar::Int(i) => Ok(CableMap::scalar(*i as f64)),
                 other => Err(ExpandError::new(
                     Code::InvalidCableScale,
-                    *span,
+                    *arrow_span,
                     format!("arrow scale must resolve to a number, got {:?}", other),
                 )),
             }
         }
+        Some(ScaleSpec::Range { kind, lo, hi, span: _ }) => {
+            let (_family, lo_val, hi_val) = resolve_range_endpoints(lo, hi, param_env)?;
+            let clip_lo = lo_val.min(hi_val);
+            let clip_hi = lo_val.max(hi_val);
+            let (scale, offset) = match kind {
+                RangeKind::Uni => (hi_val - lo_val, lo_val),
+                RangeKind::Bi => ((hi_val - lo_val) / 2.0, (hi_val + lo_val) / 2.0),
+            };
+            Ok(CableMap { scale, offset, clip: Some((clip_lo, clip_hi)) })
+        }
     }
+}
+
+/// Resolve a range scale's endpoints into a unified family and
+/// concrete `(lo, hi)` f64 values.
+///
+/// Param refs are looked up in `param_env`; a resolved `Scalar::Float`
+/// or `Scalar::Int` becomes a numeric value with `UnitFamily::Plain`
+/// (parse-time unit context cannot be reconstructed from a bare
+/// scalar). Unresolved param refs likewise stay `Plain` — runtime
+/// recompute is ticket 0769.
+///
+/// `Plain` mixes with any other family; two distinct non-Plain
+/// families produce a cross-family `InvalidCableScale` error naming
+/// both sides.
+pub(super) fn resolve_range_endpoints(
+    lo: &RangeEndpoint,
+    hi: &RangeEndpoint,
+    param_env: &HashMap<String, Scalar>,
+) -> Result<(UnitFamily, f64, f64), ExpandError> {
+    let (lo_val, lo_family) = resolve_range_endpoint(lo, param_env)?;
+    let (hi_val, hi_family) = resolve_range_endpoint(hi, param_env)?;
+    let unified = lo_family.unify(hi_family).ok_or_else(|| {
+        ExpandError::new(
+            Code::InvalidCableScale,
+            hi.span,
+            format!(
+                "cable range endpoints have incompatible unit families: {} vs {}",
+                lo_family.name(),
+                hi_family.name(),
+            ),
+        )
+    })?;
+    Ok((unified, lo_val, hi_val))
+}
+
+fn resolve_range_endpoint(
+    ep: &RangeEndpoint,
+    param_env: &HashMap<String, Scalar>,
+) -> Result<(f64, UnitFamily), ExpandError> {
+    let (resolved, family) = if let Scalar::ParamRef(name) = &ep.value {
+        match param_env.get(name.as_str()) {
+            Some(s) => (s.clone(), UnitFamily::Plain),
+            None => (ep.value.clone(), ep.family),
+        }
+    } else {
+        (ep.value.clone(), ep.family)
+    };
+    let value = match resolved {
+        Scalar::Float(f) => f,
+        Scalar::Int(i) => i as f64,
+        Scalar::ParamRef(_) => {
+            // Unresolved param ref; lowering is 0769. For now treat as
+            // 0.0 so family unification still runs and downstream code
+            // sees the (intentional) "not yet implemented" error from
+            // the caller.
+            0.0
+        }
+        other => {
+            return Err(ExpandError::new(
+                Code::InvalidCableScale,
+                ep.span,
+                format!("range endpoint must resolve to a number, got {:?}", other),
+            ));
+        }
+    };
+    Ok((value, family))
 }
 
 /// Fail-fast: if `pr` refers to a known template instance, verify that
@@ -341,7 +436,7 @@ pub(super) fn resolve_from(
             )
         })
     } else {
-        Ok(PortEntry::new(
+        Ok(PortEntry::scalar(
             qualify(namespace, from_module),
             from_port.to_owned(),
             from_index,
@@ -381,7 +476,7 @@ pub(super) fn resolve_to(
             )
         })
     } else {
-        Ok(vec![PortEntry::new(
+        Ok(vec![PortEntry::scalar(
             qualify(namespace, to_module),
             to_port.to_owned(),
             to_index,

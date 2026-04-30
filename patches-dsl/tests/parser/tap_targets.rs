@@ -3,7 +3,7 @@
 //! Tap parameters were retired in ticket 0734; only the component list
 //! and tap name remain in the syntax.
 
-use patches_dsl::ast::{CableEndpoint, Direction, Scalar, Statement};
+use patches_dsl::ast::{CableEndpoint, Direction, ScaleSpec, Scalar, Statement};
 use patches_dsl::parse;
 
 fn first_connection(src: &str) -> patches_dsl::ast::Connection {
@@ -57,7 +57,10 @@ fn tap_target_with_cable_gain() {
     let src = "patch { module f : Filter() f.out -[0.3]-> ~meter(level) }";
     let conn = first_connection(src);
     assert_eq!(conn.arrow.direction, Direction::Forward);
-    assert_eq!(conn.arrow.scale, Some(Scalar::Float(0.3)));
+    assert!(matches!(
+        conn.arrow.scale.as_deref(),
+        Some(ScaleSpec::Scalar { value: Scalar::Float(v), .. }) if (v - 0.3).abs() < 1e-9
+    ));
     assert!(matches!(conn.rhs, CableEndpoint::Tap(_)));
 }
 

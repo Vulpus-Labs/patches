@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use super::frame::BodyFrame;
 use super::Expander;
 use crate::ast::{CableEndpoint, Connection, Direction, PortRef, Span};
-use crate::flat::{FlatConnection, FlatPortRef, PortDirection};
+use crate::flat::{CableMap, FlatConnection, FlatPortRef, PortDirection};
 use crate::provenance::Provenance;
 use crate::structural::StructuralCode as Code;
 
@@ -38,8 +38,8 @@ impl<'a> Expander<'a> {
         let param_env = frame.ctx.param_env;
 
         // Resolve the arrow scale (substituting any ParamRef) to a concrete f64.
-        let arrow_scale =
-            eval_scale(conn.arrow.scale.as_ref(), param_env, &conn.arrow.span)?;
+        let arrow_map =
+            eval_scale(conn.arrow.scale.as_deref(), param_env, &conn.arrow.span)?;
 
         // Normalise direction so signal always flows from → to.
         let (from_endpoint, to_endpoint) = match conn.arrow.direction {
@@ -110,7 +110,7 @@ impl<'a> Expander<'a> {
             self.emit_single_connection(
                 &from_bind,
                 &to_bind,
-                arrow_scale,
+                &arrow_map,
                 frame,
                 &conn.span,
                 &from_ref.span,
@@ -134,7 +134,7 @@ impl<'a> Expander<'a> {
         &mut self,
         from: &PortBinding,
         to: &PortBinding,
-        arrow_scale: f64,
+        arrow_map: &CableMap,
         frame: &mut BodyFrame<'_, '_>,
         span: &Span,
         from_span: &Span,
@@ -163,9 +163,14 @@ impl<'a> Expander<'a> {
                         .port_refs
                         .push(port_ref_from_addr(&entry.addr, PortDirection::Input, span, call_chain));
                 }
+                // Signal flow at this `$.in_port → inner` site:
+                //   caller → arrow → boundary → inner_resolution
+                // where the outer caller's arrow will be composed on
+                // top later. So `arrow_map` is the inner segment (s1)
+                // and `e.map` is the deeper inner segment (s2).
                 let scaled: Vec<PortEntry> = dsts
                     .into_iter()
-                    .map(|e| PortEntry { addr: e.addr, scale: arrow_scale * e.scale })
+                    .map(|e| PortEntry::with_map(e.addr, CableMap::compose(arrow_map, &e.map)))
                     .collect();
                 frame
                     .state
@@ -190,9 +195,11 @@ impl<'a> Expander<'a> {
                     .state
                     .port_refs
                     .push(port_ref_from_addr(&src.addr, PortDirection::Output, span, call_chain));
+                // `src.map` is applied first (closer to source); the
+                // body's arrow runs second.
                 frame.state.boundary.out_ports.insert(
                     to_bkey,
-                    PortEntry { addr: src.addr, scale: src.scale * arrow_scale },
+                    PortEntry::with_map(src.addr, CableMap::compose(&src.map, arrow_map)),
                 );
             }
 
@@ -214,7 +221,9 @@ impl<'a> Expander<'a> {
                     &frame.state.instance_ports,
                     span,
                 )?;
-                let composed = src.scale * arrow_scale;
+                // Signal flow: src_module → src.map → arrow → dst.map → dst_module.
+                // Compose left-to-right.
+                let composed = CableMap::compose(&src.map, arrow_map);
                 let mut dsts = resolve_to(
                     &to.addr.module,
                     &to.addr.port,
@@ -230,7 +239,7 @@ impl<'a> Expander<'a> {
                         frame.state.flat_connections.push(flat_connection(
                             &src.addr,
                             dst.addr,
-                            composed * dst.scale,
+                            CableMap::compose(&composed, &dst.map),
                             span,
                             call_chain,
                             from_prov.clone(),
@@ -240,7 +249,7 @@ impl<'a> Expander<'a> {
                     frame.state.flat_connections.push(flat_connection(
                         &src.addr,
                         last.addr,
-                        composed * last.scale,
+                        CableMap::compose(&composed, &last.map),
                         span,
                         call_chain,
                         from_prov,
@@ -283,7 +292,7 @@ fn port_ref_from_addr(
 fn flat_connection(
     src: &PortAddr<patches_core::QName>,
     dst: PortAddr<patches_core::QName>,
-    scale: f64,
+    map: CableMap,
     span: &Span,
     call_chain: &[Span],
     from_provenance: Provenance,
@@ -296,7 +305,7 @@ fn flat_connection(
         to_module: dst.module,
         to_port: dst.port,
         to_index: dst.index,
-        scale,
+        map,
         provenance: Provenance::with_chain(*span, call_chain),
         from_provenance,
         to_provenance,

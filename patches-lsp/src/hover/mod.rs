@@ -131,8 +131,10 @@ fn hover_for_connection_group(
     }
     lines.push(String::new());
     for c in &group {
-        let scale = if (c.scale - 1.0).abs() > f64::EPSILON {
-            format!(" ×{}", c.scale)
+        // Range-form rendering (offset/clip) lands in ticket 0770;
+        // for now show the affine scale only.
+        let scale = if (c.map.scale - 1.0).abs() > f64::EPSILON {
+            format!(" ×{}", c.map.scale)
         } else {
             String::new()
         };

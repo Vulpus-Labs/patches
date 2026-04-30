@@ -7,7 +7,7 @@ use patches_core::{
     cables::{CableKind, PolyLayout},
     PortDescriptor, PortRef, Provenance, QName,
 };
-use patches_dsl::flat::{FlatConnection, FlatPortRef, PortDirection};
+use patches_dsl::flat::{CableMap, FlatConnection, FlatPortRef, PortDirection};
 
 use super::errors::{BindError, BindErrorCode};
 use super::modules::ResolvedModule;
@@ -24,7 +24,10 @@ pub struct ResolvedConnection {
     pub to_port: PortRef,
     pub to_kind: CableKind,
     pub to_layout: PolyLayout,
-    pub scale: f64,
+    /// Affine + clip carried through from the expander (ADR 0062 /
+    /// ticket 0767). The graph builder still consumes only `map.scale`
+    /// today; runtime application of `offset` / `clip` lands in 0768.
+    pub map: CableMap,
     pub provenance: Provenance,
 }
 
@@ -212,7 +215,7 @@ pub(super) fn bind_connection(
         to_port: PortRef { name: to_port_desc.name, index: to_port_desc.index },
         to_kind: to_port_desc.kind.clone(),
         to_layout: to_port_desc.poly_layout,
-        scale: conn.scale,
+        map: conn.map,
         provenance: conn.provenance.clone(),
     })
 }

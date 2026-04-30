@@ -307,7 +307,7 @@ fn unknown_port_returns_error() {
             to_module: "out".into(),
             to_port: "in".to_string(),
             to_index: 0,
-            scale: 1.0,
+            map: patches_dsl::CableMap::scalar(1.0),
             provenance: prov.clone(),
             from_provenance: prov.clone(),
             to_provenance: prov,

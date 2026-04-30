@@ -6,13 +6,13 @@ use pest::iterators::Pair;
 
 use crate::ast::{
     Arrow, AtBlockIndex, CableEndpoint, CallArg, CallBlock, Connection, Direction, Ident,
-    ParamEntry, ParamIndex, PortIndex, PortLabel, PortRef, Scalar, ShapeValue, Statement,
-    TapTarget, Value,
+    ParamEntry, ParamIndex, PortIndex, PortLabel, PortRef, RangeEndpoint, RangeKind, ScaleSpec,
+    Scalar, ShapeValue, Statement, TapTarget, UnitFamily, Value,
 };
 
 use super::decls::build_module_decl;
 use super::error::ParseError;
-use super::literals::{parse_note_voct, parse_unit_value};
+use super::literals::{parse_note_voct, parse_unit_value, unit_family_of};
 use super::steps_songs::{build_pattern_block, build_song_block};
 use super::{span_of, Rule};
 
@@ -279,23 +279,72 @@ pub(super) fn build_port_ref(pair: Pair<'_, Rule>) -> Result<PortRef, ParseError
     Ok(PortRef { module, port, index, span })
 }
 
-/// Parse a `scale_val` pair into a `Scalar` (Float or ParamRef).
+/// Parse a `scale_endpoint` pair into a `(Scalar, UnitFamily)`.
 ///
-/// `scale_val = ${ param_ref | float_unit | scale_num }` — inner child is
-/// `param_ref`, `float_unit`, or `scale_num`.
-fn build_scale_val(pair: Pair<'_, Rule>) -> Result<Scalar, ParseError> {
-    // pair.as_rule() == Rule::scale_val
+/// `scale_endpoint = ${ param_ref | float_unit | note_lit | scale_num }`.
+/// Family attribution is parse-time only: notes and Hz/kHz are `Pitch`,
+/// `dB` is `Level`, `s`/`c` are `Time`, plain numbers and `<param>`
+/// refs are `Plain` (param-resolved scalars are family-erased — see
+/// `eval_scale`).
+fn build_scale_endpoint(pair: Pair<'_, Rule>) -> Result<(Scalar, UnitFamily), ParseError> {
+    // pair.as_rule() == Rule::scale_endpoint
     let inner = pair.into_inner().next().unwrap();
     let s_span = span_of(&inner);
     match inner.as_rule() {
-        Rule::scale_num => inner.as_str().parse::<f64>().map(Scalar::Float).map_err(|_| {
-            ParseError {
+        Rule::scale_num => inner
+            .as_str()
+            .parse::<f64>()
+            .map(|f| (Scalar::Float(f), UnitFamily::Plain))
+            .map_err(|_| ParseError {
                 span: s_span,
                 message: format!("invalid scale factor: {:?}", inner.as_str()),
-            }
-        }),
-        Rule::float_unit => parse_unit_value(inner.as_str(), s_span).map(Scalar::Float),
-        Rule::param_ref => Ok(Scalar::ParamRef(build_param_ref_name(inner))),
+            }),
+        Rule::float_unit => {
+            let family = unit_family_of(inner.as_str());
+            parse_unit_value(inner.as_str(), s_span).map(|f| (Scalar::Float(f), family))
+        }
+        Rule::note_lit => {
+            parse_note_voct(inner.as_str(), s_span).map(|f| (Scalar::Float(f), UnitFamily::Pitch))
+        }
+        Rule::param_ref => Ok((
+            Scalar::ParamRef(build_param_ref_name(inner)),
+            UnitFamily::Plain,
+        )),
+        _ => unreachable!("unexpected rule in scale_endpoint: {:?}", inner.as_rule()),
+    }
+}
+
+/// Build a [`RangeEndpoint`] from a `scale_endpoint` pair.
+fn build_range_endpoint(pair: Pair<'_, Rule>) -> Result<RangeEndpoint, ParseError> {
+    let span = span_of(&pair);
+    let (value, family) = build_scale_endpoint(pair)?;
+    Ok(RangeEndpoint { value, family, span })
+}
+
+/// Parse a `scale_val` pair into a [`ScaleSpec`].
+fn build_scale_val(pair: Pair<'_, Rule>) -> Result<ScaleSpec, ParseError> {
+    // pair.as_rule() == Rule::scale_val
+    let span = span_of(&pair);
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::scale_endpoint => {
+            let (value, _family) = build_scale_endpoint(inner)?;
+            Ok(ScaleSpec::Scalar { value, span })
+        }
+        Rule::scale_range => {
+            let r_span = span_of(&inner);
+            let mut children = inner.into_inner();
+            let kind_pair = children.next().unwrap();
+            debug_assert_eq!(kind_pair.as_rule(), Rule::range_kind);
+            let kind = match kind_pair.as_str() {
+                "uni" => RangeKind::Uni,
+                "bi" => RangeKind::Bi,
+                other => unreachable!("unexpected range_kind: {:?}", other),
+            };
+            let lo = build_range_endpoint(children.next().unwrap())?;
+            let hi = build_range_endpoint(children.next().unwrap())?;
+            Ok(ScaleSpec::Range { kind, lo, hi, span: r_span })
+        }
         _ => unreachable!("unexpected rule in scale_val: {:?}", inner.as_rule()),
     }
 }
@@ -305,25 +354,18 @@ pub(super) fn build_arrow(pair: Pair<'_, Rule>) -> Result<Arrow, ParseError> {
     let span = span_of(&pair);
     let inner = pair.into_inner().next().unwrap(); // forward_arrow or backward_arrow
 
-    match inner.as_rule() {
-        Rule::forward_arrow => {
-            let scale = inner
-                .into_inner()
-                .next()
-                .map(build_scale_val)
-                .transpose()?;
-            Ok(Arrow { direction: Direction::Forward, scale, span })
-        }
-        Rule::backward_arrow => {
-            let scale = inner
-                .into_inner()
-                .next()
-                .map(build_scale_val)
-                .transpose()?;
-            Ok(Arrow { direction: Direction::Backward, scale, span })
-        }
-        _ => unreachable!("unexpected rule in arrow: {:?}", inner.as_rule()),
-    }
+    let direction = match inner.as_rule() {
+        Rule::forward_arrow => Direction::Forward,
+        Rule::backward_arrow => Direction::Backward,
+        other => unreachable!("unexpected rule in arrow: {:?}", other),
+    };
+    let scale = inner
+        .into_inner()
+        .next()
+        .map(build_scale_val)
+        .transpose()?
+        .map(Box::new);
+    Ok(Arrow { direction, scale, span })
 }
 
 /// Build a `tap_target` pair into a [`TapTarget`].

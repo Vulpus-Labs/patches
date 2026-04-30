@@ -2,6 +2,7 @@
 
 mod support;
 
+mod cable_range;
 mod error_locations;
 mod literals;
 mod negative;

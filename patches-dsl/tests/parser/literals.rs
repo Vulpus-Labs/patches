@@ -1,6 +1,13 @@
 //! Unit / dB / note / note-like literal parsing.
 
-use patches_dsl::{parse, Connection, Scalar, Statement, Value};
+use patches_dsl::{parse, Connection, ScaleSpec, Scalar, Statement, Value};
+
+fn scalar_scale(arrow_scale: &Option<Box<ScaleSpec>>) -> Option<&Scalar> {
+    match arrow_scale.as_deref() {
+        Some(ScaleSpec::Scalar { value, .. }) => Some(value),
+        _ => None,
+    }
+}
 
 use super::support::assert_parse_error_contains;
 
@@ -79,7 +86,7 @@ fn scale_accepts_unit_literal() {
         Statement::Connection(c) => Some(c),
         _ => None,
     }).expect("expected connection");
-    match &conn.arrow.scale {
+    match scalar_scale(&conn.arrow.scale) {
         Some(Scalar::Float(v)) => assert!(
             (v - 1.0 / 12.0).abs() < 1e-9,
             "expected 1/12, got {v}"
@@ -134,21 +141,21 @@ fn scaled_and_indexed_ast_scales_and_indices() {
     // osc.sawtooth -[0.8]-> mix.in[0]
     let c0 = conns.iter().find(|c| {
         c.arrow.direction == Direction::Forward
-            && c.arrow.scale == Some(Scalar::Float(0.8))
+            && scalar_scale(&c.arrow.scale) == Some(&Scalar::Float(0.8))
     }).expect("expected forward connection with scale 0.8");
     assert_eq!(c0.rhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(0)));
 
     // lfo.sine -[0.3]-> mix.in[1]
     let c1 = conns.iter().find(|c| {
         c.arrow.direction == Direction::Forward
-            && c.arrow.scale == Some(Scalar::Float(0.3))
+            && scalar_scale(&c.arrow.scale) == Some(&Scalar::Float(0.3))
     }).expect("expected forward connection with scale 0.3");
     assert_eq!(c1.rhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(1)));
 
     // mix.in[2] <-[-0.5]- osc.sawtooth
     let c2 = conns.iter().find(|c| {
         c.arrow.direction == Direction::Backward
-            && c.arrow.scale == Some(Scalar::Float(-0.5))
+            && scalar_scale(&c.arrow.scale) == Some(&Scalar::Float(-0.5))
     }).expect("expected backward connection with scale -0.5");
     assert_eq!(c2.lhs.as_port().unwrap().index, Some(patches_dsl::PortIndex::Literal(2)));
 }

@@ -65,9 +65,9 @@ fn arity_expansion_scale_composed() {
     assert_eq!(into_m.len(), 2);
     for c in &into_m {
         assert!(
-            (c.scale - 0.5).abs() < 1e-12,
+            (c.map.scale - 0.5).abs() < 1e-12,
             "expected scale 0.5 on each expanded connection, got {}",
-            c.scale
+            c.map.scale
         );
     }
 }

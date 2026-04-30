@@ -32,9 +32,9 @@ patch {
         .find(|c| c.from_module == "osc" && c.to_module == "t/sink")
         .expect("expected osc → t/sink");
     assert!(
-        (conn.scale - 0.2).abs() < 1e-12,
+        (conn.map.scale - 0.2).abs() < 1e-12,
         "expected scale 0.2 (0.5 × 0.4), got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -64,9 +64,9 @@ patch {
         .find(|c| c.from_module == "t/osc" && c.to_module == "out")
         .expect("expected t/osc → out");
     assert!(
-        (conn.scale - 0.2).abs() < 1e-12,
+        (conn.map.scale - 0.2).abs() < 1e-12,
         "expected scale 0.2 (0.4 × 0.5), got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -109,9 +109,9 @@ patch {
         .find(|c| c.from_module == "clk" && c.to_module == "top/mid/i/lfo")
         .expect("expected clk → top/mid/i/lfo");
     assert!(
-        (conn.scale - 0.1).abs() < 1e-12,
+        (conn.map.scale - 0.1).abs() < 1e-12,
         "expected scale 0.1 (0.8 × 0.5³), got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -141,9 +141,9 @@ patch {
         .find(|c| c.from_module == "t/m" && c.to_module == "out")
         .expect("expected t/m → out");
     assert!(
-        (conn.scale - 0.2).abs() < 1e-12,
+        (conn.map.scale - 0.2).abs() < 1e-12,
         "expected scale 0.2 (boost 0.4 × outer 0.5), got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -174,9 +174,9 @@ patch {
         .find(|c| c.from_module == "osc" && c.to_module == "t/sink")
         .expect("expected osc → t/sink");
     assert!(
-        (conn.scale - (-0.4)).abs() < 1e-12,
+        (conn.map.scale - (-0.4)).abs() < 1e-12,
         "expected scale -0.4 (0.8 × -0.5), got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -316,8 +316,8 @@ patch {
 
     let expected = 0.9_f64.powi(10);
     assert!(
-        (conn.scale - expected).abs() < 1e-9,
+        (conn.map.scale - expected).abs() < 1e-9,
         "expected scale {} (0.9^10), got {}",
-        expected, conn.scale
+        expected, conn.map.scale
     );
 }

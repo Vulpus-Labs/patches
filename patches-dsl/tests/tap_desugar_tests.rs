@@ -237,7 +237,7 @@ patch {
     let conn = r.patch.connections.iter()
         .find(|c| c.to_module.name == SYNTH_TAP)
         .expect("cable into ~tap");
-    assert!((conn.scale - 0.3).abs() < 1e-9, "scale lost; got {}", conn.scale);
+    assert!((conn.map.scale - 0.3).abs() < 1e-9, "scale lost; got {}", conn.map.scale);
 }
 
 #[test]

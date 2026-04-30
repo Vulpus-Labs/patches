@@ -1,7 +1,7 @@
 //! Unit, note, dB and Hz literal parsing helpers shared across the pest
 //! walkers.
 
-use crate::ast::Span;
+use crate::ast::{Span, UnitFamily};
 
 use super::error::ParseError;
 
@@ -29,6 +29,23 @@ fn split_unit_suffix(s: &str, span: Span) -> Result<(&str, &'static str), ParseE
             span,
             message: format!("unrecognised unit suffix in: {s:?}"),
         })
+    }
+}
+
+/// Map a unit-suffixed literal to its [`UnitFamily`]. Hz/kHz fold into
+/// `Pitch` since both lower to v/oct over C0; `s` and `c` are `Time`;
+/// `dB` is `Level`. Strings without a recognised unit fall back to
+/// `Plain` (plain numbers and `<param>` refs use `Plain` directly).
+pub(super) fn unit_family_of(s: &str) -> UnitFamily {
+    let sl = s.to_ascii_lowercase();
+    if sl.ends_with("khz") || sl.ends_with("hz") {
+        UnitFamily::Pitch
+    } else if sl.ends_with("db") {
+        UnitFamily::Level
+    } else if sl.ends_with('c') || sl.ends_with('s') {
+        UnitFamily::Time
+    } else {
+        UnitFamily::Plain
     }
 }
 

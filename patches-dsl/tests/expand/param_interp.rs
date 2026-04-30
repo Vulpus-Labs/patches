@@ -68,9 +68,9 @@ fn scale_interpolation_param_ref() {
         .find(|c| c.from_module == "t/osc" && c.to_module == "t/out2")
         .expect("expected t/osc -> t/out2 connection");
     assert!(
-        (conn.scale - 0.5).abs() < 1e-12,
+        (conn.map.scale - 0.5).abs() < 1e-12,
         "expected scale 0.5, got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 
@@ -95,9 +95,9 @@ fn error_non_numeric_param_ref_in_scale() {
         .find(|c| c.from_port == "sine" && c.to_port == "voct")
         .expect("expected sine->voct connection");
     assert!(
-        (conn.scale - 0.5).abs() < 1e-12,
+        (conn.map.scale - 0.5).abs() < 1e-12,
         "expected scale 0.5, got {}",
-        conn.scale
+        conn.map.scale
     );
 }
 

@@ -185,16 +185,97 @@ pub enum Direction {
     Backward,
 }
 
-/// An arrow with optional scale factor.
+/// An arrow with optional scale specification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arrow {
     pub direction: Direction,
-    /// `None` means an implicit scale of 1.0.
-    ///
-    /// Only `Scalar::Float`, `Scalar::Int`, and `Scalar::ParamRef` are
-    /// meaningful here; other variants are rejected at expansion time.
-    pub scale: Option<Scalar>,
+    /// `None` means an implicit scale of 1.0. Boxed so the range form
+    /// (which holds two endpoint scalars + spans) does not bloat the
+    /// containing `Statement` enum — see `clippy::large_enum_variant`.
+    pub scale: Option<Box<ScaleSpec>>,
     pub span: Span,
+}
+
+/// Cable scale specification: either a single scalar (today's behaviour)
+/// or a range mapping (`uni(lo, hi)` / `bi(lo, hi)`, ADR 0062).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScaleSpec {
+    /// Plain multiplicative scalar. Valid endpoint scalars are
+    /// `Scalar::Float`, `Scalar::Int`, and `Scalar::ParamRef`; other
+    /// variants are rejected at expansion time.
+    Scalar { value: Scalar, span: Span },
+    /// Range form: source range `[0,1]` (uni) or `[-1,1]` (bi) mapped
+    /// onto destination range `[lo, hi]` with hard clipping. Endpoints
+    /// carry their parse-time unit family (ticket 0766) for cross-family
+    /// rejection.
+    Range {
+        kind: RangeKind,
+        lo: RangeEndpoint,
+        hi: RangeEndpoint,
+        span: Span,
+    },
+}
+
+/// One endpoint of a range scale spec, with its parse-time unit family.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangeEndpoint {
+    pub value: Scalar,
+    pub family: UnitFamily,
+    pub span: Span,
+}
+
+/// Unit family of a range endpoint, used for cross-family rejection
+/// and pitch unification (ADR 0062, ticket 0766).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitFamily {
+    /// Note literal or Hz/kHz — both lower to v/oct over C0.
+    Pitch,
+    /// Seconds (`s`) or cents (`c`).
+    Time,
+    /// Decibels (`dB`).
+    Level,
+    /// Bare number, `<param>` reference, or a param-resolved scalar
+    /// without unit context. Compatible with any other family.
+    Plain,
+}
+
+impl UnitFamily {
+    pub fn name(self) -> &'static str {
+        match self {
+            UnitFamily::Pitch => "pitch",
+            UnitFamily::Time => "time",
+            UnitFamily::Level => "level",
+            UnitFamily::Plain => "plain",
+        }
+    }
+
+    /// Unify two endpoint families. `Plain` is compatible with anything.
+    /// Returns `None` for genuine cross-family mismatches.
+    pub fn unify(self, other: UnitFamily) -> Option<UnitFamily> {
+        match (self, other) {
+            (UnitFamily::Plain, x) | (x, UnitFamily::Plain) => Some(x),
+            (a, b) if a == b => Some(a),
+            _ => None,
+        }
+    }
+}
+
+impl ScaleSpec {
+    pub fn span(&self) -> Span {
+        match self {
+            ScaleSpec::Scalar { span, .. } => *span,
+            ScaleSpec::Range { span, .. } => *span,
+        }
+    }
+}
+
+/// Source-range polarity for [`ScaleSpec::Range`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeKind {
+    /// `uni(lo, hi)` — source `[0, 1]` → destination `[lo, hi]`.
+    Uni,
+    /// `bi(lo, hi)` — source `[-1, 1]` → destination `[lo, hi]`.
+    Bi,
 }
 
 /// A cable tap target: `~taptype(name, k: v, ...)` or compound

@@ -60,7 +60,7 @@ pub(super) fn connection(
         to_module: to_module.into(),
         to_port: to_port.to_string(),
         to_index,
-        scale: 1.0,
+        map: patches_dsl::CableMap::scalar(1.0),
         provenance: prov.clone(),
         from_provenance: prov.clone(),
         to_provenance: prov,
