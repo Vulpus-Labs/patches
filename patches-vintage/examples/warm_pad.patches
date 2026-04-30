@@ -54,7 +54,7 @@ template pad_voice(
         drive:     1.1
     }
 
-    module cut_mod : PolySum(channels: [env, lfo])
+    module cut_mod : PolySum([env, lfo])
     env.out       -[<env_amt>]-> cut_mod.in[env]
     lfo.triangle  -[<lfo_amt>]-> cut_mod.in[lfo]
 
@@ -93,9 +93,7 @@ patch {
     module verb   : FdnReverb { mix: 0.45, character: cathedral }
     module out    : AudioOut
 
-    mix.out -[0.08]-> chorus.in_left, chorus.in_right
-    chorus.out_left  -> verb.in_left
-    chorus.out_right -> verb.in_right
-    verb.out_left    -> out.in_left
-    verb.out_right   -> out.in_right
+    mix.out -[0.08]-> chorus.in
+    chorus.out -> verb.in
+    verb.out   -> out.in
 }

@@ -1,7 +1,7 @@
 # ADR 0057 — Host control as boundary-crossing cables
 
-**Date:** 2026-04-26
-**Status:** Proposed
+**Date:** 2026-04-26 (amended 2026-04-30)
+**Status:** Proposed (surface syntax revised — see Amendment below)
 **Related:**
 [ADR 0054 — Tap DSL syntax and module decomposition](0054-tap-dsl-and-modules.md),
 [ADR 0048 — MIDI source and routing modules](0048-midi-source-and-routing-modules.md),
@@ -37,7 +37,7 @@ reading/writing the backplane. Host control inverts the direction.
 
 ## Decision
 
-### 1. Surface syntax — inverse `~` form
+### 1. Surface syntax — inverse `~` form (superseded — see Amendment)
 
 Host controls are declared in cable expressions as **sources**, the
 inverse direction of taps:
@@ -310,3 +310,135 @@ declaration and wiring together.
 - ADR 0050 — coefficient ramp primitive; available for smoothing
   block-rate host control values into per-sample cables where the
   module needs it.
+- ADR 0062 — cable range expressions; pairs with the block form to
+  keep declaration metadata-rich and cable references terse.
+- ADR 0063 — unified shell MVC; consumes the manifest and host-control
+  values in `Controller` for both CLAP and Ratatui shells.
+
+## Amendment (2026-04-30) — block declaration form
+
+The inline `~kind(name, k: v, ...)` source syntax in §1 does not scale.
+Host controls have many host-side parameters (display name, unit, low,
+high, midpoint, default, taper, colour) and inlining them at the cable
+site makes the wiring unreadable. The remedy is to split declaration
+from reference: declarations are top-level blocks, references are bare
+names usable anywhere a source would be.
+
+### Surface syntax (replaces §1)
+
+A host control is declared at top-level patch scope with a block whose
+keyword is the kind:
+
+```text
+knob frequency_knob {
+    displayName: "Frequency",
+    unit: "Hz",
+    low: 20Hz,
+    high: 2000Hz,
+    midpoint: 1000Hz,
+    default: 440Hz,
+    taper: exp,
+    colour: blue,
+}
+
+slider vca_attack {
+    displayName: "Attack",
+    unit: "s",
+    low: 0.001s,
+    high: 2.0s,
+    default: 0.01s,
+}
+
+toggle reverb_bypass {
+    displayName: "Bypass reverb",
+    default: false,
+}
+```
+
+Rules:
+
+- Block keywords: `knob | slider | toggle`. The keyword fixes the kind;
+  it is no longer a field. New kinds (e.g. `xy_pad`) add new keywords.
+- Block name (`frequency_knob`, `vca_attack`, `reverb_bypass`) is the
+  host control's identifier. Names are unique across all host controls
+  in the patch. Same namespace constraint as before; separate from tap
+  names.
+- Top-level patch scope only. Templates may not declare host controls
+  (same reasoning as §1: exposure is a top-down decision).
+- Fields are optional except where required for the kind: `low` /
+  `high` are mandatory for `knob` / `slider`; `default` is mandatory
+  for `toggle`. `default` falls back to `midpoint` falls back to `low`
+  for `knob` / `slider` if omitted; `midpoint` is a UI hint, not a
+  value. `colour`, `taper`, `unit`, `displayName` are pure UI hints
+  forwarded verbatim to the host via the manifest.
+- Field literals follow existing DSL conventions: unit-suffixed
+  literals (`20Hz`, `0.5s`, `-12dB`), note literals (`C2`), bare
+  numbers, strings, identifiers (`exp`, `blue`).
+
+### Reference syntax
+
+A declared host control is referenced by bare name in cable
+expressions, as if it were a source module's output:
+
+```text
+frequency_knob -[uni(20Hz, 2000Hz)]-> filter.cutoff
+vca_attack     -[uni(0.001s, 2.0s)]-> vca.attack_cv
+reverb_bypass                       -> reverb.bypass
+```
+
+The cable's range expression (ADR 0062) maps the normalized control
+value into the destination range. The declaration's `low` / `high`
+configure the **host-side** surface (what the DAW shows the user); the
+cable's `uni(...)` configures the **patch-side** mapping. They are
+independent: a knob declared `low: 20Hz, high: 2000Hz` may drive
+multiple cables with different `uni(...)` ranges, since the underlying
+control value is a normalized scalar.
+
+### Lost: the `~` sigil on sources
+
+§1's framing of `~` as a universal "boundary-crossing cable" marker
+held only because both directions had the same shape (inline, terse,
+no metadata). Once sources gain rich declarations and sinks (taps)
+remain inline, the symmetry is fictional. The amendment drops `~` on
+the source side. `~` stays for taps:
+
+```text
+~tap(out_left, mode: scope) <- mixer.out_left
+```
+
+The "one sigil, two directions" claim in §Consequences is replaced by:
+**taps inline with `~`, controls declared as blocks**. Asymmetric
+problems → asymmetric syntax.
+
+### Desugaring (unchanged in shape, updated in trigger)
+
+The expander collects all `knob` / `slider` / `toggle` blocks (instead
+of inline `~kind(...)` forms), groups them, and synthesises the
+implicit `~host_control` module exactly as §2 specified. Slot
+ordering (§3), the `HostControl` module's runtime behaviour (§4),
+manifest construction (§5), CLAP parameter mapping (§6), and
+relationships to MIDI (§7) and patch parameters (§8) are unchanged.
+
+A reference to `frequency_knob` in a cable lowers to
+`~host_control.out[frequency_knob]` at expansion time, the same form
+the inline syntax produced.
+
+### Namespace
+
+Host control names occupy a separate namespace from module instance
+names. Cable parsing resolves an identifier first as a host control,
+then as a module. A name colliding with a module instance is a parse
+error with a diagnostic naming both declaration sites.
+
+### Manifest
+
+`HostControlDescriptor` (§5) is unchanged. The block fields populate
+`HostControlParamMap` directly: every field except the kind keyword
+becomes a manifest entry. Per-kind validation remains deferred to the
+CLAP plugin at parameter-publication time.
+
+### Migration of in-flight examples
+
+No `.patches` files in tree use the inline `~kind(...)` form (the
+feature is unimplemented). The amendment lands without a migration
+path; the inline form is removed before first implementation.
