@@ -4,23 +4,27 @@
 // quantised to the ~30 Hz tap-push cadence.
 const TRIGGER_DECAY_MS = 140;
 
-// LED on-colour per kind, used as the lit-state RGB. Brightness is
-// modulated continuously by the scalar (0..1) so the dot fades with
-// the trigger / gate decay tail rather than snapping on/off.
 const LED_COLOURS = {
   gate_led: [64, 192, 96],     // #40c060
   trigger_led: [224, 160, 64], // #e0a040
 };
 // Perceptual gamma: low scalar values should read clearly *off* even
-// though the audio-side decay is exponential. Rapid retriggers leave a
-// visible afterglow rather than a constant-on impression.
+// though the audio-side decay is exponential.
 const LED_GAMMA = 2.4;
 
-// Mutated by taps.js (rebuildTaps) and read by tickTriggerLeds + taps render.
-let ledNodes = Object.create(null);    // (slot+":"+kind) → element
-const triggerFireTime = Object.create(null); // slot → last-fire ms (perf clock)
+// Mutable state shared with adapter/taps.js (which writes ledNodes
+// inside rebuildTaps) and adapter/taps.js + this module's rAF loop
+// (which read both fields).
+export const ledsState = {
+  ledNodes: Object.create(null),    // (slot+":"+kind) → element
+  triggerFireTime: Object.create(null), // slot → last-fire ms
+};
 
-function applyLed(node, kind, value) {
+export function resetLedNodes() {
+  ledsState.ledNodes = Object.create(null);
+}
+
+export function applyLed(node, kind, value) {
   if (!node) return;
   const rgb = LED_COLOURS[kind] ?? [200, 200, 200];
   let v = value;
@@ -34,10 +38,9 @@ function applyLed(node, kind, value) {
   node.style.borderColor = v > 0.4 ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : "";
 }
 
-// rAF loop driving trigger LED decays. Cheap: handful of nodes, one
-// style write each per frame, only while triggers exist.
 function tickTriggerLeds() {
   const now = performance.now();
+  const { ledNodes, triggerFireTime } = ledsState;
   for (const key of Object.keys(ledNodes)) {
     const sep = key.indexOf(":");
     if (sep < 0) continue;
@@ -57,4 +60,7 @@ function tickTriggerLeds() {
   }
   requestAnimationFrame(tickTriggerLeds);
 }
-requestAnimationFrame(tickTriggerLeds);
+
+export function startLedDecayLoop() {
+  requestAnimationFrame(tickTriggerLeds);
+}

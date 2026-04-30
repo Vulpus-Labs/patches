@@ -1,7 +1,11 @@
-function sendIpc(msg) {
+export function sendIpc(msg) {
   if (!window.ipc?.postMessage) return false;
   window.ipc.postMessage(JSON.stringify(msg));
   return true;
+}
+
+export function postIntent(name, extra) {
+  sendIpc({ kind: name, ...extra });
 }
 
 // Tell host we're wired up so it can clear push-dedupe caches and
@@ -12,14 +16,10 @@ function postReady(attempts) {
     return;
   }
   if (!sendIpc({ kind: "ready" })) {
-    // ipc bridge may attach after script execution; retry briefly.
     setTimeout(() => postReady(attempts + 1), 16);
   }
 }
-postReady(0);
 
-function postIntent(name, extra) {
-  sendIpc({ kind: name, ...extra });
+export function startReadyHandshake() {
+  postReady(0);
 }
-
-api.postIntent = postIntent;

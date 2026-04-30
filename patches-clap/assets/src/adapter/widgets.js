@@ -1,6 +1,10 @@
+import { DB_FLOOR, ampToDb, dbToRatio, dbColour } from "../core/db.js";
+import { findFirstRisingCross } from "../core/scope.js";
+import { SPECTRUM_DB_MAX, heatColour, makeScales } from "../core/spectrum.js";
+
 // Canvas2D meter widget. `orientation` is "vertical" or "horizontal".
 // `update({ peak, rms })` redraws from a linear-amplitude pair.
-function meterWidget(canvas, orientation) {
+export function meterWidget(canvas, orientation) {
   const horizontal = orientation === "horizontal";
   let peakDb = DB_FLOOR;
   let rmsDb = DB_FLOOR;
@@ -41,32 +45,7 @@ function meterWidget(canvas, orientation) {
   return { update, draw };
 }
 
-// Oscilloscope widget — line plot over the full buffer width, ±1.0
-// amplitude rails. `update(samples)` accepts any Float32Array-like;
-// the widget owns no buffer state.
-// `snap` (boolean) — if true, rotate the buffer so the latest rising
-// zero-cross sits at index 0. Toggleable client-side at no cost since
-// the server sends raw decimated samples.
-// First rising zero-cross in s[1..end). Schmitt-armed: requires the
-// signal to have dipped below -eps before the upward zero-cross to
-// suppress retrigger on noise / harmonic ripple. eps = 5% of the
-// window peak amplitude. Returns null if none. Ticket 0754.
-function findFirstRisingCross(s, end) {
-  let peak = 0;
-  for (let i = 0; i < end; i++) {
-    const a = s[i] < 0 ? -s[i] : s[i];
-    if (a > peak) peak = a;
-  }
-  const eps = peak * 0.05;
-  let armed = false;
-  for (let j = 1; j < end; j++) {
-    if (s[j] < -eps) armed = true;
-    else if (armed && s[j - 1] < 0 && s[j] >= 0) return j;
-  }
-  return null;
-}
-
-function scopeWidget(canvas, opts) {
+export function scopeWidget(canvas, opts) {
   let samples = null;
   let snap = !!opts?.snap;
 
@@ -90,12 +69,6 @@ function scopeWidget(canvas, opts) {
 
     if (!samples || samples.length < 2) return;
 
-    // Always display a fixed-length tail of the buffer. The first
-    // quarter is reserved as a trigger search region; the remaining
-    // three-quarters are drawn across the full canvas width. Snap
-    // mode shifts the start to a rising zero-cross within the search
-    // region; unsnapped mode just uses the natural offset. Same
-    // sample-per-pixel scale either way.
     const n = samples.length;
     const searchEnd = n >> 2;
     const displayLen = n - searchEnd;
@@ -129,73 +102,15 @@ function scopeWidget(canvas, opts) {
     draw();
   }
 
-  const getSnap = () => snap;
-
-  return { update, draw, setSnap, getSnap };
+  return { update, draw, setSnap, getSnap: () => snap };
 }
 
-// Spectrum widget — log-X frequency, dB-Y magnitude with floor at
-// DB_FLOOR (-60). Bin centre frequency is `k * sampleRate / fftSize`.
-// Two display modes:
-//   "curve":   filled area under a smooth line per latest frame.
-//   "heatmap": rolling waterfall, latest column on the right.
-// Defaults match patches-observation::processor::SPECTRUM_FFT_SIZE
-// (1024) and a 48 kHz host rate.
-const SPECTRUM_DB_MAX = 6;
-
-// Magma-ish ramp: dark purple → orange → pale yellow.
-const HEAT_STOPS = [
-  [0.00,   0,   0,   8],
-  [0.20,  40,  10,  90],
-  [0.40, 130,  35, 120],
-  [0.60, 215,  70,  80],
-  [0.80, 250, 150,  60],
-  [1.00, 252, 250, 200],
-];
-function heatColour(t) {
-  if (t < 0) t = 0; else if (t > 1) t = 1;
-  for (let i = 1; i < HEAT_STOPS.length; i++) {
-    if (t <= HEAT_STOPS[i][0]) {
-      const a = HEAT_STOPS[i - 1];
-      const b = HEAT_STOPS[i];
-      const u = (t - a[0]) / (b[0] - a[0]);
-      return [
-        Math.round(a[1] + (b[1] - a[1]) * u),
-        Math.round(a[2] + (b[2] - a[2]) * u),
-        Math.round(a[3] + (b[3] - a[3]) * u),
-      ];
-    }
-  }
-  const last = HEAT_STOPS[HEAT_STOPS.length - 1];
-  return [last[1], last[2], last[3]];
-}
-
-function spectrumWidget(canvas, opts = {}) {
+export function spectrumWidget(canvas, opts = {}) {
   const sampleRate = opts.sampleRate ?? 48000;
   const fftSize = opts.fftSize ?? 1024;
   let mags = null;
   let mode = opts.mode === "heatmap" ? "heatmap" : "curve";
-  // Heatmap backing buffer: ImageData scrolled left by 1 column per
-  // frame. Allocated lazily on first heatmap draw.
   let heatImage = null;
-
-  function scales(w, h) {
-    const binHz = sampleRate / fftSize;
-    const fMin = binHz;
-    let fMax = sampleRate / 2;
-    if (fMax <= fMin) fMax = fMin * 10;
-    const logMin = Math.log10(fMin);
-    const logMax = Math.log10(fMax);
-    return {
-      binHz, fMin, fMax, logMin, logMax,
-      xFor: (freq) => ((Math.log10(freq) - logMin) / (logMax - logMin)) * (w - 1),
-      yFor: (db) => {
-        if (db < DB_FLOOR) db = DB_FLOOR;
-        if (db > SPECTRUM_DB_MAX) db = SPECTRUM_DB_MAX;
-        return ((SPECTRUM_DB_MAX - db) / (SPECTRUM_DB_MAX - DB_FLOOR)) * (h - 1);
-      },
-    };
-  }
 
   function drawGrid(ctx, w, h, s) {
     ctx.strokeStyle = "#303030";
@@ -220,7 +135,7 @@ function spectrumWidget(canvas, opts = {}) {
   function drawCurve(ctx, w, h) {
     ctx.fillStyle = "#0f0f0f";
     ctx.fillRect(0, 0, w, h);
-    const s = scales(w, h);
+    const s = makeScales(sampleRate, fftSize, w, h);
     drawGrid(ctx, w, h, s);
 
     if (!mags || mags.length < 2) return;
@@ -294,7 +209,7 @@ function spectrumWidget(canvas, opts = {}) {
   }
 
   function drawHeatmap(ctx, w, h) {
-    const s = scales(w, h);
+    const s = makeScales(sampleRate, fftSize, w, h);
 
     if (!heatImage || heatImage.width !== w || heatImage.height !== h) {
       heatImage = ctx.createImageData(w, h);
@@ -364,11 +279,5 @@ function spectrumWidget(canvas, opts = {}) {
     draw();
   }
 
-  const getMode = () => mode;
-
-  return { update, draw, setMode, getMode };
+  return { update, draw, setMode, getMode: () => mode };
 }
-
-api.spectrumWidget = spectrumWidget;
-api.scopeWidget = scopeWidget;
-api.meterWidget = meterWidget;

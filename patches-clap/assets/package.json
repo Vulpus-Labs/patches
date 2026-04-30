@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "build": "node build/bundle.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.28.0",
     "vitest": "^2.1.0"
   }
 }

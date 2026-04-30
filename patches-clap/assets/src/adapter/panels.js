@@ -1,5 +1,6 @@
-// ── Halt banner ─────────────────────────────────────────────────
-api._renderHalt = (message) => {
+import { nowHms, computeLogStamps } from "../core/log.js";
+
+export function renderHalt(message) {
   const el = document.getElementById("halt-banner");
   if (!el) return;
   if (message) {
@@ -9,10 +10,9 @@ api._renderHalt = (message) => {
     el.textContent = "";
     el.hidden = true;
   }
-};
+}
 
-// ── Diagnostics list ────────────────────────────────────────────
-api._renderDiagnostics = (diags) => {
+export function renderDiagnostics(diags) {
   const root = document.getElementById("diagnostics");
   if (!root) return;
   root.innerHTML = "";
@@ -42,32 +42,17 @@ api._renderDiagnostics = (diags) => {
     }
     root.appendChild(row);
   }
-};
-
-// ── Event log ───────────────────────────────────────────────────
-const pad2 = (n) => (n < 10 ? `0${n}` : `${n}`);
-function nowHms() {
-  const d = new Date();
-  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
 }
 
-// Track timestamps per status-log line. The Rust side does not stamp
-// entries (yet); we stamp on first sight so the UI shows when the
-// entry *arrived*, matching the TUI's `format_hms` column.
 let logStamps = [];
-let lastStatusLog = [];
+let prevStatusLen = 0;
 
-api._renderStatusLog = (lines) => {
+export function renderStatusLog(lines) {
   const el = document.getElementById("event-log");
   if (!el) return;
   lines = lines ?? [];
-  if (lines.length < lastStatusLog.length) {
-    logStamps = logStamps.slice(lastStatusLog.length - lines.length);
-  }
-  for (let i = logStamps.length; i < lines.length; i++) {
-    logStamps.push(nowHms());
-  }
-  lastStatusLog = lines.slice();
+  logStamps = computeLogStamps(logStamps, prevStatusLen, lines.length, nowHms());
+  prevStatusLen = lines.length;
 
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
   el.innerHTML = "";
@@ -82,10 +67,9 @@ api._renderStatusLog = (lines) => {
     el.appendChild(row);
   }
   if (atBottom) el.scrollTop = el.scrollHeight;
-};
+}
 
-// ── File header ─────────────────────────────────────────────────
-api._renderFilePath = (path) => {
+export function renderFilePath(path) {
   const el = document.getElementById("file-path");
   if (!el) return;
   if (path) {
@@ -95,10 +79,9 @@ api._renderFilePath = (path) => {
     el.textContent = "no patch loaded";
     el.classList.remove("has-path");
   }
-};
+}
 
-// ── Module scan paths list ──────────────────────────────────────
-api._renderModulePaths = (paths) => {
+export function renderModulePaths(paths) {
   const root = document.getElementById("module-paths");
   if (!root) return;
   root.innerHTML = "";
@@ -123,10 +106,9 @@ api._renderModulePaths = (paths) => {
     row.appendChild(rm);
     root.appendChild(row);
   }
-};
+}
 
-// ── Loaded modules list ─────────────────────────────────────────
-api._renderModuleNames = (names) => {
+export function renderModuleNames(names) {
   const root = document.getElementById("module-names");
   if (!root) return;
   root.innerHTML = "";
@@ -143,9 +125,9 @@ api._renderModuleNames = (names) => {
     row.textContent = name;
     root.appendChild(row);
   }
-};
+}
 
-function activateTab(name) {
+export function activateTab(name) {
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("is-active", tab.dataset.pane === name);
   }
