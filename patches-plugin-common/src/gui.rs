@@ -80,6 +80,10 @@ pub struct GuiState {
     /// `on_main_thread`. Changes do not auto-rescan — the user must press
     /// the Rescan button for the new paths to take effect.
     pub module_paths: Vec<PathBuf>,
+    /// Names of modules currently in the registry (default set plus any
+    /// loaded via FFI scan). Mirror written by `activate` after each
+    /// registry rebuild; read-only from the GUI side.
+    pub module_names: Vec<String>,
     /// Set to true by the "Add path" button; consumed by `on_main_thread`,
     /// which opens a directory picker.
     pub add_path_requested: bool,
@@ -145,6 +149,7 @@ pub struct GuiSnapshot {
     pub v: u32,
     pub file_path: Option<String>,
     pub module_paths: Vec<String>,
+    pub module_names: Vec<String>,
     pub status_log: Vec<String>,
     pub browse_requested: bool,
     pub reload_requested: bool,
@@ -174,7 +179,7 @@ pub struct DiagnosticSummary {
 }
 
 impl GuiSnapshot {
-    pub const VERSION: u32 = 4;
+    pub const VERSION: u32 = 5;
 
     /// Project a `GuiState` into the webview-facing shape.
     pub fn from_state(state: &GuiState) -> Self {
@@ -189,6 +194,7 @@ impl GuiSnapshot {
                 .iter()
                 .map(|p| p.display().to_string())
                 .collect(),
+            module_names: state.module_names.clone(),
             status_log: state.status_log.iter().cloned().collect(),
             browse_requested: state.browse_requested,
             reload_requested: state.reload_requested,
@@ -201,6 +207,10 @@ impl GuiSnapshot {
             tap_opts: state.tap_opts.clone(),
         }
     }
+}
+
+pub(crate) fn summarise_diagnostics_pub(view: &DiagnosticView) -> Vec<DiagnosticSummary> {
+    summarise_diagnostics(view)
 }
 
 fn summarise_diagnostics(view: &DiagnosticView) -> Vec<DiagnosticSummary> {
@@ -381,11 +391,11 @@ mod tests {
         g.module_paths.push("/tmp/a".into());
         let snap = GuiSnapshot::from_state(&g);
         assert_eq!(snap.v, GuiSnapshot::VERSION);
-        assert_eq!(snap.v, 4);
+        assert_eq!(snap.v, 5);
         assert_eq!(snap.status_log, vec!["hello".to_string()]);
         assert_eq!(snap.module_paths, vec!["/tmp/a".to_string()]);
         let json = serde_json::to_string(&snap).unwrap();
-        assert!(json.contains("\"v\":4"));
+        assert!(json.contains("\"v\":5"));
     }
 
     #[test]

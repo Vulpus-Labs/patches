@@ -9,6 +9,7 @@ publish = false
 patches-core = { path = "../patches-core" }
 patches-engine = { path = "../patches-engine" }
 patches-diagnostics = { path = "../patches-diagnostics" }
+patches-registry = { path = "../patches-registry" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

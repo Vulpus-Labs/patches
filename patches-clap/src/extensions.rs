@@ -154,7 +154,7 @@ unsafe extern "C" fn state_save(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let source_bytes = &p.dsl_source;
+    let source_bytes = &p.controller.dsl_source;
 
     if !write_length_prefixed(stream, path_bytes.as_bytes()) {
         return false;
@@ -163,11 +163,11 @@ unsafe extern "C" fn state_save(
         return false;
     }
 
-    let count = p.module_paths.len() as u32;
+    let count = p.controller.module_paths.len() as u32;
     if !stream_write_all(stream, &count.to_le_bytes()) {
         return false;
     }
-    for mp in &p.module_paths {
+    for mp in &p.controller.module_paths {
         let s = mp.to_string_lossy();
         if !write_length_prefixed(stream, s.as_bytes()) {
             return false;
@@ -262,11 +262,11 @@ unsafe extern "C" fn state_load(
             gui.file_path = Some(std::path::PathBuf::from(&path_str));
         }
     }
-    p.dsl_source = source;
+    p.controller.dsl_source = source;
 
     // Optional trailing module_paths section. A clean EOF here means a
     // legacy state written before ticket 0566 — default to empty.
-    p.module_paths = match try_read_u32(stream) {
+    p.controller.module_paths = match try_read_u32(stream) {
         ReadU32::Ok(count) => {
             let mut out = Vec::with_capacity(count as usize);
             for _ in 0..count {
@@ -290,7 +290,7 @@ unsafe extern "C" fn state_load(
     // even before activate runs.
     {
         let mut gui = p.gui_state.lock().expect("gui_state mutex poisoned");
-        gui.module_paths = p.module_paths.clone();
+        gui.module_paths = p.controller.module_paths.clone();
     }
 
     // Optional tap_opts section (ticket 0753).
@@ -384,7 +384,7 @@ unsafe extern "C" fn state_load(
     }
 
     // If activated, compile and push the plan.
-    if p.runtime.is_some() && !p.dsl_source.is_empty() {
+    if p.runtime.is_some() && !p.controller.dsl_source.is_empty() {
         if let Err(e) = p.compile_and_push_plan() {
             eprintln!("patches-clap: state load compile failed: {e}");
         }

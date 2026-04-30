@@ -5,8 +5,11 @@
 //! `Arc<Mutex<GuiState>>`. Intentionally no `PluginGui` trait yet —
 //! one implementation is not enough to design an abstraction around.
 
+pub mod controller;
 pub mod gui;
 pub mod meter;
+
+pub use controller::{Action, Controller, Env, RescanProbe, SerializedState, StateDelta};
 
 pub use gui::{
     DiagnosticView, GuiSnapshot, GuiState, Intent, TapDisplayOpts, TapFrame, TapSlotFrame,

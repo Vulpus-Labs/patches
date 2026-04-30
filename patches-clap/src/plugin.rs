@@ -44,7 +44,7 @@ use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 use crate::error::CompileError;
 use crate::extensions;
 use patches_dsl::manifest::{Manifest, TapDescriptor};
-use patches_plugin_common::{DiagnosticView, GuiState, MeterTap, TapSummary};
+use patches_plugin_common::{Controller, DiagnosticView, GuiState, MeterTap, TapSummary};
 
 /// The runtime state of a single plugin instance.
 ///
@@ -69,11 +69,10 @@ pub struct PatchesClapPlugin {
     pub(crate) registry: Registry,
 
     // ── DSL state ───────────────────────────────────────────────────
-    pub(crate) dsl_source: String,
-
-    /// Persisted module search paths. Populated at `create_plugin` (empty)
-    /// or `state_load`. Rescanned at every `activate` into `registry`.
-    pub(crate) module_paths: Vec<std::path::PathBuf>,
+    /// Canonical owner of `dsl_source` and `module_paths` (ADR 0061,
+    /// ticket 0758). Other persistable fields (`tap_opts`, `window_size`,
+    /// `file_path`) move into the controller in 0761.
+    pub(crate) controller: Controller,
 
     // ── GUI ─────────────────────────────────────────────────────────
     pub(crate) gui_state: Arc<Mutex<GuiState>>,
@@ -125,7 +124,7 @@ impl PatchesClapPlugin {
             .ok_or_else(|| CompileError::new(patches_host::CompileErrorKind::NotActivated))?;
 
         let file_path = lock_gui(&self.gui_state, |g| g.file_path.clone());
-        let mut source = InMemorySource::new(self.dsl_source.clone());
+        let mut source = InMemorySource::new(self.controller.dsl_source.clone());
         if let Some(path) = file_path {
             source = source.with_master_path(path);
         }
@@ -177,6 +176,31 @@ impl PatchesClapPlugin {
         }
         unsafe {
             if let Some(f) = (*self.host).request_restart {
+                f(self.host);
+            }
+        }
+    }
+
+    /// Tell the host the plugin's persistable state has changed since the
+    /// last `state.save`. Hosts use this to enable Save / prompt-on-close
+    /// (ADR-relevant: ticket 0566 persists `module_paths`; loading a new
+    /// patch and editing module paths both flip persistable state).
+    fn mark_state_dirty(&self) {
+        use clap_sys::ext::state::{clap_host_state, CLAP_EXT_STATE};
+        if self.host.is_null() {
+            return;
+        }
+        unsafe {
+            let get_ext = match (*self.host).get_extension {
+                Some(f) => f,
+                None => return,
+            };
+            let raw = get_ext(self.host, CLAP_EXT_STATE.as_ptr());
+            if raw.is_null() {
+                return;
+            }
+            let ext = &*(raw as *const clap_host_state);
+            if let Some(f) = ext.mark_dirty {
                 f(self.host);
             }
         }
@@ -328,23 +352,28 @@ unsafe extern "C" fn plugin_activate(
     // Rebuild the registry from scratch: default set plus a fresh scan
     // of any module paths the host persisted. Ticket 0566.
     p.registry = patches_modules::default_registry();
-    if !p.module_paths.is_empty() {
-        let scanner = patches_ffi::PluginScanner::new(p.module_paths.clone());
+    if !p.controller.module_paths.is_empty() {
+        let scanner = patches_ffi::PluginScanner::new(p.controller.module_paths.clone());
         let report = scanner.scan(&mut p.registry);
         let summary = report.summary();
         dlog!("activate: module scan {}", summary);
         lock_gui_mut(&p.gui_state, |g| {
             g.push_status(format!("Module scan: {summary}"));
+            push_scan_details(g, &report);
         });
     }
-    // Mirror persisted paths into the GUI so the editor reflects the
-    // authoritative list after state_load or host-driven restart.
+    // Mirror persisted paths + active registry contents into the GUI so
+    // the editor reflects the authoritative list after state_load or
+    // host-driven restart.
+    let mut names: Vec<String> = p.registry.module_names().map(|s| s.to_string()).collect();
+    names.sort();
     lock_gui_mut(&p.gui_state, |g| {
-        g.module_paths = p.module_paths.clone();
+        g.module_paths = p.controller.module_paths.clone();
+        g.module_names = names;
     });
 
     // If we already have DSL source (e.g. from state_load), compile now.
-    if !p.dsl_source.is_empty() {
+    if !p.controller.dsl_source.is_empty() {
         if let Err(e) = p.compile_and_push_plan() {
             eprintln!("patches-clap: initial compile failed: {e}");
             let view = p.take_diagnostic_view(&e);
@@ -666,6 +695,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
             .pick_file()
         {
             lock_gui_mut(&p.gui_state, |g| g.file_path = Some(path.clone()));
+            p.mark_state_dirty();
             set_status_from_load(p, &path, "Loaded");
             gui_dirty = true;
         }
@@ -688,15 +718,16 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     if add_path {
         lock_gui_mut(&p.gui_state, |g| g.add_path_requested = false);
         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-            if !p.module_paths.iter().any(|existing| existing == &dir) {
-                p.module_paths.push(dir.clone());
+            if !p.controller.module_paths.iter().any(|existing| existing == &dir) {
+                p.controller.module_paths.push(dir.clone());
                 lock_gui_mut(&p.gui_state, |g| {
-                    g.module_paths = p.module_paths.clone();
+                    g.module_paths = p.controller.module_paths.clone();
                     g.push_status(format!(
                         "Added module path: {} (press Rescan to load)",
                         dir.display()
                     ));
                 });
+                p.mark_state_dirty();
                 gui_dirty = true;
             }
         }
@@ -705,15 +736,16 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     // Handle GUI "Remove module path" request.
     let remove_index = lock_gui_mut_take(&p.gui_state, |g| g.remove_path_index.take());
     if let Some(idx) = remove_index {
-        if idx < p.module_paths.len() {
-            let removed = p.module_paths.remove(idx);
+        if idx < p.controller.module_paths.len() {
+            let removed = p.controller.module_paths.remove(idx);
             lock_gui_mut(&p.gui_state, |g| {
-                g.module_paths = p.module_paths.clone();
+                g.module_paths = p.controller.module_paths.clone();
                 g.push_status(format!(
                     "Removed module path: {} (press Rescan to apply)",
                     removed.display()
                 ));
             });
+            p.mark_state_dirty();
             gui_dirty = true;
         }
     }
@@ -721,9 +753,29 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     // Handle GUI Rescan request — hard-stop reload via host restart.
     let rescan = lock_gui(&p.gui_state, |g| g.rescan_requested);
     if rescan {
+        // Preview-scan into a throwaway registry so the GUI reflects the
+        // new module set immediately, independent of when the host
+        // honours `request_restart`. Activate will rebuild the live
+        // registry with the same paths.
+        let mut preview = patches_modules::default_registry();
+        let report = if !p.controller.module_paths.is_empty() {
+            let scanner = patches_ffi::PluginScanner::new(p.controller.module_paths.clone());
+            Some(scanner.scan(&mut preview))
+        } else {
+            None
+        };
+        let mut names: Vec<String> = preview.module_names().map(|s| s.to_string()).collect();
+        names.sort();
         lock_gui_mut(&p.gui_state, |g| {
             g.rescan_requested = false;
-            g.push_status("Rescanning modules…");
+            match &report {
+                Some(r) => {
+                    g.push_status(format!("Rescan: {}", r.summary()));
+                    push_scan_details(g, r);
+                }
+                None => g.push_status("Rescanning modules…".to_string()),
+            }
+            g.module_names = names;
             // Clear stale diagnostics so the post-restart compile starts
             // from a clean slate.
             g.diagnostic_view = DiagnosticView::default();
@@ -760,6 +812,33 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     // doesn't suppress live tap updates.
     if let (Some(handle), Some(subs)) = (&p.gui_handle, &p.subscribers) {
         handle.push_taps(subs, &p.gui_state);
+    }
+}
+
+/// Push per-entry detail from a [`ScanReport`] into the status log so
+/// the user sees *why* a module failed to load (ABI mismatch, dlopen
+/// error, etc.) rather than just an error count.
+fn push_scan_details(g: &mut GuiState, report: &patches_ffi::ScanReport) {
+    use patches_ffi::SkipReason;
+    for (path, err) in &report.errors {
+        g.push_status(format!("  error {}: {err}", path.display()));
+    }
+    for skip in &report.skipped {
+        match skip {
+            SkipReason::AbiMismatch { expected, found, path } => g.push_status(format!(
+                "  skip {}: ABI mismatch (host {expected}, plugin {found})",
+                path.display()
+            )),
+            SkipReason::LowerVersion { name, existing, candidate, path } => g.push_status(
+                format!(
+                    "  skip {}: {name} v{candidate} <= existing v{existing}",
+                    path.display()
+                ),
+            ),
+            SkipReason::DuplicateInBundle { name, path } => {
+                g.push_status(format!("  skip {}: duplicate {name} in bundle", path.display()))
+            }
+        }
     }
 }
 
@@ -810,7 +889,11 @@ fn set_status_from_load(
 ) {
     match std::fs::read_to_string(path) {
         Ok(source) => {
-            p.dsl_source = source;
+            let changed = p.controller.dsl_source != source;
+            p.controller.dsl_source = source;
+            if changed {
+                p.mark_state_dirty();
+            }
             match p.compile_and_push_plan() {
                 Ok(()) => lock_gui_mut(&p.gui_state, |g| {
                     g.push_status(success_msg);
@@ -907,8 +990,7 @@ mod activate_scan_tests {
             plan_rx: None,
             runtime: None,
             registry: default_registry(),
-            dsl_source: String::new(),
-            module_paths: Vec::new(),
+            controller: Controller::default(),
             gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
@@ -949,7 +1031,7 @@ mod activate_scan_tests {
 
             // module_paths populated from the saved state.
             assert_eq!(
-                (*data_ptr).module_paths,
+                (*data_ptr).controller.module_paths,
                 vec![PathBuf::from(&dylib_str)],
             );
 
@@ -990,8 +1072,10 @@ mod activate_scan_tests {
             // Minimal patch that exercises the engine without needing
             // the Gain module — we only verify audio continuity, not
             // that the Gain module is in use.
-            dsl_source: "out_left = 0\nout_right = 0\n".to_string(),
-            module_paths: Vec::new(),
+            controller: Controller {
+                dsl_source: "out_left = 0\nout_right = 0\n".to_string(),
+                ..Controller::default()
+            },
             gui_state: Arc::new(Mutex::new(GuiState::default())),
             gui_handle: None,
             gui_scale: 1.0,
@@ -1046,7 +1130,7 @@ mod activate_scan_tests {
             // Simulate a GUI rescan: add a module path and run the
             // host-side deactivate → activate cycle that `request_restart`
             // would drive.
-            (*data_ptr).module_paths.push(dylib.clone());
+            (*data_ptr).controller.module_paths.push(dylib.clone());
             deactivate(plugin_ptr);
             assert!((*data_ptr).processor.is_none());
             assert!(activate(plugin_ptr, 48_000.0, 32, 1024));
