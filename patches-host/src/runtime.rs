@@ -9,11 +9,17 @@ use std::time::Duration;
 use patches_core::AudioEnvironment;
 use patches_engine::{HaltHandle, PatchProcessor, Planner};
 use patches_observation::{ManifestPublication, ReplanProducer};
-use patches_planner::ExecutionPlan;
+use patches_planner::{ExecutionPlan, PlanMeta};
 use patches_registry::Registry;
 use rtrb::{Consumer, Producer};
 
 use crate::{load_patch, CompileError, HostFileSource, LoadedPatch};
+
+/// Bundle pushed onto the plan-delivery ring buffer. The audio thread pops one
+/// of these per callback and feeds both the plan and (when monitoring is
+/// enabled) the slot-indexed [`PlanMeta`] into the processor via
+/// [`PatchProcessor::adopt_plan_with_meta`].
+pub type AdoptionMessage = (ExecutionPlan, Option<Box<PlanMeta>>);
 
 /// The composition shared by every host: planner on the main thread, a
 /// [`PatchProcessor`] (handed off to the audio callback at activation
@@ -23,10 +29,10 @@ pub struct HostRuntime {
     /// Holds the processor until the host's audio callback claims it.
     processor: Option<PatchProcessor>,
     /// Producer end of the plan ring — main thread pushes new plans.
-    plan_tx: Producer<ExecutionPlan>,
+    plan_tx: Producer<AdoptionMessage>,
     /// Consumer end — handed to the audio callback alongside the
     /// processor.
-    plan_rx: Option<Consumer<ExecutionPlan>>,
+    plan_rx: Option<Consumer<AdoptionMessage>>,
     /// Joined when the runtime is dropped (after the processor and its
     /// cleanup_tx are dropped, signalling the cleanup thread to exit).
     cleanup_thread: Option<JoinHandle<()>>,
@@ -51,8 +57,8 @@ impl HostRuntime {
     /// Construct a runtime from the pieces the builder assembles.
     pub(crate) fn from_parts(
         processor: PatchProcessor,
-        plan_tx: Producer<ExecutionPlan>,
-        plan_rx: Consumer<ExecutionPlan>,
+        plan_tx: Producer<AdoptionMessage>,
+        plan_rx: Consumer<AdoptionMessage>,
         cleanup_thread: JoinHandle<()>,
         env: AudioEnvironment,
         tap_rate: f32,
@@ -114,7 +120,7 @@ impl HostRuntime {
     /// Take the processor and plan consumer for installation in the
     /// audio callback. Subsequent calls return `None`.
     pub fn take_audio_endpoints(&mut self)
-        -> Option<(PatchProcessor, Consumer<ExecutionPlan>)>
+        -> Option<(PatchProcessor, Consumer<AdoptionMessage>)>
     {
         match (self.processor.take(), self.plan_rx.take()) {
             (Some(p), Some(rx)) => Some((p, rx)),
@@ -134,19 +140,25 @@ impl HostRuntime {
         &mut self,
         source: &dyn HostFileSource,
         registry: &Registry,
-    ) -> Result<(LoadedPatch, ExecutionPlan), CompileError> {
+    ) -> Result<(LoadedPatch, ExecutionPlan, Option<Box<PlanMeta>>), CompileError> {
         let loaded = load_patch(source, registry, &self.env)?;
         let sm = loaded.source_map.clone();
-        let plan = self
+        let (plan, meta) = self
             .planner
-            .build_with_tracker_data(
+            .build_with_tracker_data_and_meta(
                 &loaded.build_result.graph,
                 registry,
                 &self.env,
                 loaded.build_result.tracker_data.clone(),
             )
             .map_err(|e| CompileError::from(e).with_source_map(sm))?;
-        Ok((loaded, plan))
+        Ok((loaded, plan, meta.map(Box::new)))
+    }
+
+    /// Toggle production of [`PlanMeta`] alongside each plan. Required by
+    /// hosts that wire a CPU monitor observer (ADR 0065).
+    pub fn set_monitor(&mut self, enabled: bool) {
+        self.planner.set_monitor(enabled);
     }
 
     /// Compile and best-effort push the plan onto the audio-thread
@@ -158,10 +170,10 @@ impl HostRuntime {
         source: &dyn HostFileSource,
         registry: &Registry,
     ) -> Result<LoadedPatch, CompileError> {
-        let (loaded, mut plan) = self.compile(source, registry)?;
+        let (loaded, mut plan, meta) = self.compile(source, registry)?;
         let g = self.next_generation();
         plan.tap_manifest_generation = g;
-        let _ = self.plan_tx.push(plan);
+        let _ = self.plan_tx.push((plan, meta));
         self.publish_manifest(&loaded, g);
         Ok(loaded)
     }
@@ -175,17 +187,18 @@ impl HostRuntime {
         source: &dyn HostFileSource,
         registry: &Registry,
     ) -> Result<LoadedPatch, CompileError> {
-        let (loaded, mut plan) = self.compile(source, registry)?;
+        let (loaded, mut plan, meta) = self.compile(source, registry)?;
         let g = self.next_generation();
         plan.tap_manifest_generation = g;
+        let mut msg = (plan, meta);
         loop {
-            match self.plan_tx.push(plan) {
+            match self.plan_tx.push(msg) {
                 Ok(()) => {
                     self.publish_manifest(&loaded, g);
                     return Ok(loaded);
                 }
                 Err(rtrb::PushError::Full(returned)) => {
-                    plan = returned;
+                    msg = returned;
                     thread::sleep(Duration::from_millis(10));
                 }
             }
@@ -213,6 +226,6 @@ pub trait HostAudioCallback {
     fn install(
         &mut self,
         processor: PatchProcessor,
-        plan_rx: Consumer<ExecutionPlan>,
+        plan_rx: Consumer<AdoptionMessage>,
     );
 }

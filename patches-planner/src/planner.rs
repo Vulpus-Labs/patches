@@ -4,7 +4,7 @@ use std::sync::Arc;
 use patches_core::{AudioEnvironment, InstanceId, ModuleGraph, NodeId};
 use patches_registry::Registry;
 
-use crate::builder::{BuildError, ExecutionPlan, PatchBuilder};
+use crate::builder::{BuildError, ExecutionPlan, PatchBuilder, PlanMeta};
 use crate::state::PlannerState;
 
 /// Default module pool capacity.
@@ -101,7 +101,26 @@ impl Planner {
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
     ) -> Result<ExecutionPlan, BuildError> {
+        let (plan, _) = self.build_full(graph, registry, env, tracker_data)?;
+        Ok(plan)
+    }
+
+    /// Like [`build_with_tracker_data`](Self::build_with_tracker_data) but also
+    /// returns [`PlanMeta`] when monitoring is enabled via
+    /// [`set_monitor`](Self::set_monitor). When disabled, meta is `None`.
+    pub fn build_with_tracker_data_and_meta(
+        &mut self,
+        graph: &ModuleGraph,
+        registry: &Registry,
+        env: &AudioEnvironment,
+        tracker_data: Option<patches_core::TrackerData>,
+    ) -> Result<(ExecutionPlan, Option<PlanMeta>), BuildError> {
         self.build_full(graph, registry, env, tracker_data)
+    }
+
+    /// Toggle production of [`PlanMeta`] alongside each plan.
+    pub fn set_monitor(&mut self, enabled: bool) {
+        self.builder.monitor_enabled = enabled;
     }
 
     fn build_full(
@@ -110,8 +129,8 @@ impl Planner {
         registry: &Registry,
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
-    ) -> Result<ExecutionPlan, BuildError> {
-        let (mut plan, new_state) = self.builder.build_patch(
+    ) -> Result<(ExecutionPlan, Option<PlanMeta>), BuildError> {
+        let (mut plan, meta, new_state) = self.builder.build_patch_with_meta(
             graph,
             registry,
             env,
@@ -146,7 +165,7 @@ impl Planner {
 
         self.tracker_receiver_instance_ids = new_tracker_ids;
         self.state = new_state;
-        Ok(plan)
+        Ok((plan, meta))
     }
 
     /// Return the [`InstanceId`] assigned to `node` in the most recent build.

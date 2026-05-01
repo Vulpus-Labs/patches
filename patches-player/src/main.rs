@@ -16,31 +16,31 @@ use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
 use patches_diagnostics::RenderedDiagnostic;
-use patches_engine::{new_event_queue, EventScheduler, MidiConnector, OversamplingFactor};
+use patches_engine::{
+    monitor_channel, new_event_queue, EventScheduler, MidiConnector, MonitorAttach,
+    MonitorConfig, OversamplingFactor, DEFAULT_MONITOR_CAPACITY,
+};
 use patches_host::{CompileError, HostBuilder, LoadedPatch, PathSource};
 use patches_observation::{spawn_observer, tap_ring};
 
+mod controller_env;
+mod cpu_monitor;
 mod diagnostic_render;
 mod splash;
 mod tui;
+
+use controller_env::{EnvSideChannel, RatatuiEnv};
+use patches_plugin_common::{Action, Controller, Env as _};
 
 /// Render a [`CompileError`] to stderr using the source map it carries.
 fn render_compile_error(err: &CompileError) {
     for d in err.to_rendered_diagnostics() {
         diagnostic_render::render_to_stderr(&d, &err.source_map);
     }
-}
-
-/// Format compile errors as a list of one-line strings for the event log.
-fn compile_error_lines(err: &CompileError) -> Vec<String> {
-    err.to_rendered_diagnostics()
-        .iter()
-        .map(|d| format!("compile error: {}", d.message))
-        .collect()
 }
 
 /// Render the warnings carried by a successful load.
@@ -54,17 +54,41 @@ fn render_load_warnings(loaded: &LoadedPatch) {
     }
 }
 
-fn load_warning_lines(loaded: &LoadedPatch) -> Vec<String> {
-    let mut out: Vec<String> = loaded
-        .expand_warnings
-        .iter()
-        .map(|w| format!("dsl warning: {w}"))
-        .collect();
-    for w in &loaded.layering_warnings {
-        let d = RenderedDiagnostic::from_layering_warning(w);
-        out.push(format!("warning: {}", d.message));
+/// Persist current controller settings to the sidecar (ADR 0063 §5;
+/// ticket 0776). Failure is non-fatal — surface in the view log.
+fn flush_sidecar(
+    controller: &Controller,
+    runtime: &mut patches_host::HostRuntime,
+    side: &mut EnvSideChannel,
+    view: &mut tui::View,
+) {
+    let file_path = match controller.file_path.as_ref() {
+        Some(p) => p.clone(),
+        None => return,
+    };
+    let mut env = RatatuiEnv { runtime, side };
+    let sidecar = match env.sidecar_path(&file_path) {
+        Some(p) => p,
+        None => return,
+    };
+    let settings = controller.persisted_settings();
+    if let Err(e) = patches_plugin_common::Env::save_sidecar(&mut env, &sidecar, &settings) {
+        view.log.push(format!("sidecar save failed: {e}"));
     }
-    out
+}
+
+/// Drain newly-appended controller status entries into the view's
+/// event log. `cursor` tracks how many we've already drained so that
+/// repeated calls don't duplicate lines.
+fn drain_status(view: &mut tui::View, controller: &Controller, cursor: &mut usize) {
+    let total = controller.status_log.len();
+    if *cursor > total {
+        *cursor = 0; // log was rotated; replay from the start.
+    }
+    for line in controller.status_log.iter().skip(*cursor) {
+        view.log.push(line.clone());
+    }
+    *cursor = total;
 }
 
 fn refresh_watched(watched: &mut HashMap<PathBuf, SystemTime>, deps: &[PathBuf]) {
@@ -252,9 +276,13 @@ fn run_tui(
     oversampling: OversamplingFactor,
     device_config: DeviceConfig,
     module_paths: Vec<PathBuf>,
+    monitor_enabled: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let CommonSetup { mut sound, mut runtime, source, registry, sample_rate, .. } =
-        common_setup(path, oversampling, device_config, module_paths)?;
+    let CommonSetup { mut sound, mut runtime, source: _source, registry, sample_rate, .. } =
+        common_setup(path, oversampling, device_config, module_paths.clone())?;
+    if monitor_enabled {
+        runtime.set_monitor(true);
+    }
 
     // Stand up the observer thread + tap ring before the first compile so
     // the planner's manifest publication reaches the observer (ADR 0056).
@@ -265,23 +293,64 @@ fn run_tui(
     );
     let subs_handle = observer.subscribers.clone();
 
-    let initial = match runtime.compile_and_push_blocking(&source, &registry) {
-        Ok(loaded) => loaded,
-        Err(e) => {
-            render_compile_error(&e);
-            return Err("failed to load patch".into());
-        }
+    // Build the unified controller; seed persistable state from CLI args.
+    // The registry was already populated with module-path scans by
+    // `common_setup`; hand it to the controller verbatim so a subsequent
+    // controller-driven scan would rediscover the same modules.
+    let mut controller = Controller::new();
+    controller.registry = registry;
+    controller.module_paths = module_paths.clone();
+    controller.module_names = controller
+        .registry
+        .module_names()
+        .map(|s| s.to_string())
+        .collect();
+    controller.module_names.sort();
+    controller.file_path = Some(PathBuf::from(path));
+    let mut side = EnvSideChannel::default();
+
+    let initial_delta = {
+        let mut env = RatatuiEnv { runtime: &mut runtime, side: &mut side };
+        controller.apply(Action::LoadPath(PathBuf::from(path)), &mut env)
     };
-    let initial_warnings = load_warning_lines(&initial);
-    let initial_taps = tui::taps_from_manifest(&initial.manifest);
-    let dependencies = initial.dependencies.clone();
-    drop(initial);
+    let _ = initial_delta;
+    if !controller.diagnostic_view.diagnostics.is_empty() && side.last_manifest.is_none() {
+        for d in &controller.diagnostic_view.diagnostics {
+            diagnostic_render::render_to_stderr(
+                d,
+                controller
+                    .diagnostic_view
+                    .source_map
+                    .as_ref()
+                    .unwrap_or(&patches_core::source_map::SourceMap::new()),
+            );
+        }
+        return Err("failed to load patch".into());
+    }
+    let initial_taps = side
+        .last_manifest
+        .as_ref()
+        .map(tui::taps_from_manifest)
+        .unwrap_or_default();
+    let dependencies = std::mem::take(&mut side.last_dependencies);
+    let initial_expand_warnings = std::mem::take(&mut side.last_expand_warnings);
 
     let halt_handle = runtime.halt_handle();
     let (mut processor, plan_rx) = runtime
         .take_audio_endpoints()
         .ok_or("audio endpoints already taken")?;
     processor.set_tap_producer(Some(tap_tx));
+
+    let cpu_monitor = if monitor_enabled {
+        let (mon_tx, mon_rx) = monitor_channel(DEFAULT_MONITOR_CAPACITY);
+        processor.set_monitor(Some(MonitorAttach {
+            config: MonitorConfig::default(),
+            tx: mon_tx,
+        }));
+        Some(cpu_monitor::spawn_cpu_monitor(mon_rx, sample_rate))
+    } else {
+        None
+    };
 
     let record_muted = record_path.map(|_| Arc::new(AtomicBool::new(true)));
 
@@ -311,14 +380,30 @@ fn run_tui(
         muted: record_muted,
     };
     let mut view = tui::View::new(header, initial_taps, record);
-    view.log.push(format!("loaded {path}"));
-    for w in initial_warnings {
+    if let Some(m) = cpu_monitor.as_ref() {
+        view.attach_cpu_snapshot(m.snapshot.clone());
+    }
+    // Drain controller status log into the view; subsequent reloads
+    // append more entries which we drain incrementally below.
+    let mut last_status_drained: usize = 0;
+    drain_status(&mut view, &controller, &mut last_status_drained);
+    for w in initial_expand_warnings {
         view.log.push(w);
+    }
+    let snap = controller.snapshot();
+    if !snap.module_paths.is_empty() {
+        view.log.push(format!("module paths: {}", snap.module_paths.join(", ")));
     }
     view.log.push(midi_msg);
 
     let mut watched: HashMap<PathBuf, SystemTime> = HashMap::new();
     refresh_watched(&mut watched, &dependencies);
+    let _ = dependencies;
+
+    // Sidecar debounce window (ADR 0063 §5; ticket 0776). Settings
+    // edits flush after the loop has been quiet for this long.
+    const SIDECAR_DEBOUNCE: Duration = Duration::from_millis(500);
+    let mut dirty_at: Option<Instant> = None;
 
     let external_quit = Arc::new(AtomicBool::new(false));
     let mut halt_reported = false;
@@ -327,7 +412,7 @@ fn run_tui(
     let mut terminal = tui::enter_terminal()?;
     let _ = splash::show_until_dismissed(
         &mut terminal,
-        Duration::from_secs(5),
+        Duration::from_secs(3),
         &external_quit,
     );
     let outcome = tui::run(
@@ -372,36 +457,67 @@ fn run_tui(
                         .unwrap_or(false)
                 });
                 if changed {
-                    match runtime.compile_and_push_blocking(&source, &registry) {
-                        Ok(loaded) => {
-                            for w in load_warning_lines(&loaded) {
-                                view.log.push(w);
-                            }
-                            view.set_taps(tui::taps_from_manifest(&loaded.manifest));
-                            view.seed_drop_baselines(&subs_handle);
-                            view.log.push("reloaded");
-                            refresh_watched(&mut watched, &loaded.dependencies);
+                    // Clear last_manifest so a failed compile is
+                    // distinguishable from a successful one (the env
+                    // populates these only on Ok).
+                    side.last_manifest = None;
+                    side.last_dependencies.clear();
+                    side.last_expand_warnings.clear();
+                    let delta = {
+                        let mut env = RatatuiEnv {
+                            runtime: &mut runtime,
+                            side: &mut side,
+                        };
+                        controller.apply(Action::Reload, &mut env)
+                    };
+                    if delta.persistable_changed {
+                        dirty_at = Some(Instant::now());
+                    }
+                    drain_status(view, &controller, &mut last_status_drained);
+                    if let Some(m) = side.last_manifest.take() {
+                        for w in std::mem::take(&mut side.last_expand_warnings) {
+                            view.log.push(w);
                         }
-                        Err(e) => {
-                            view.log.push("parse error (keeping current patch):");
-                            for line in compile_error_lines(&e) {
-                                view.log.push(line);
-                            }
-                            for (p, last) in watched.iter_mut() {
-                                if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
-                                    *last = t;
-                                }
+                        view.set_taps(tui::taps_from_manifest(&m));
+                        view.seed_drop_baselines(&subs_handle);
+                        view.log.push("reloaded");
+                        let new_deps = std::mem::take(&mut side.last_dependencies);
+                        refresh_watched(&mut watched, &new_deps);
+                    } else {
+                        view.log.push("parse error (keeping current patch):");
+                        for d in &controller.diagnostic_view.diagnostics {
+                            view.log.push(format!("compile error: {}", d.message));
+                        }
+                        for (p, last) in watched.iter_mut() {
+                            if let Ok(t) = fs::metadata(p).and_then(|m| m.modified()) {
+                                *last = t;
                             }
                         }
                     }
                 }
             }
+
+            // Sidecar debounce flush. Only fires when the loop has been
+            // quiet for SIDECAR_DEBOUNCE; sequential mutations within
+            // the window collapse to a single save.
+            if let Some(t) = dirty_at {
+                if t.elapsed() >= SIDECAR_DEBOUNCE {
+                    flush_sidecar(&controller, &mut runtime, &mut side, view);
+                    dirty_at = None;
+                }
+            }
         },
     );
+
+    // Final flush so a pending debounced save isn't lost on quit.
+    if dirty_at.is_some() {
+        flush_sidecar(&controller, &mut runtime, &mut side, &mut view);
+    }
 
     let restore = tui::leave_terminal(&mut terminal);
     sound.stop();
     observer.stop();
+    drop(cpu_monitor);
 
     outcome?;
     restore?;
@@ -420,6 +536,7 @@ fn print_usage() {
     eprintln!("  --no-stdin                 (legacy/--no-tui) run without stdin");
     eprintln!("  --no-tui                   Use the legacy stdout frontend");
     eprintln!("  --module-path <DIR|FILE>   Scan directory or file for FFI plugin bundles (repeatable)");
+    eprintln!("  --monitor                  Enable per-instance CPU monitor tab (ADR 0065)");
 }
 
 fn main() {
@@ -431,6 +548,7 @@ fn main() {
     let mut list_devices = false;
     let mut device_config = DeviceConfig::default();
     let mut module_paths: Vec<PathBuf> = Vec::new();
+    let mut monitor_enabled = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -445,6 +563,7 @@ fn main() {
                 }
             },
             "--list-devices" => list_devices = true,
+            "--monitor" | "--cpu-monitor" => monitor_enabled = true,
             "--output-device" => match args.next() {
                 Some(name) => device_config.output_device = Some(name),
                 None => {
@@ -526,6 +645,7 @@ fn main() {
             oversampling,
             device_config,
             module_paths,
+            monitor_enabled,
         )
     };
 

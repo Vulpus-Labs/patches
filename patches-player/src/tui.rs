@@ -198,6 +198,8 @@ pub enum Tab {
     Meters,
     Spectrum,
     Scope,
+    Events,
+    Cpu,
 }
 
 /// Spectrum-tab render mode.
@@ -215,7 +217,9 @@ impl Tab {
         match self {
             Tab::Meters => Tab::Spectrum,
             Tab::Spectrum => Tab::Scope,
-            Tab::Scope => Tab::Meters,
+            Tab::Scope => Tab::Events,
+            Tab::Events => Tab::Cpu,
+            Tab::Cpu => Tab::Meters,
         }
     }
     pub fn label(self) -> &'static str {
@@ -223,6 +227,8 @@ impl Tab {
             Tab::Meters => "meters",
             Tab::Spectrum => "spectrum",
             Tab::Scope => "scope",
+            Tab::Events => "events",
+            Tab::Cpu => "cpu",
         }
     }
 }
@@ -320,6 +326,14 @@ pub struct View {
     drop_seen: HashMap<String, u64>,
     /// Last time a drop-count line was logged per tap name (rate-limit).
     drop_logged_at: HashMap<String, Instant>,
+    /// Last time a `trigger_led` tap fired, keyed by tap name. UI owns
+    /// the visual decay (audio side latches a fired flag and clears on
+    /// read; the flash envelope is a UI concern).
+    trigger_flash_at: HashMap<String, Instant>,
+    /// Optional snapshot from the CPU-monitor observer thread. Present
+    /// only when `--monitor` was passed at startup; absence drives the
+    /// "no CPU tab" behaviour (ADR 0065).
+    pub cpu_snapshot: Option<Arc<std::sync::Mutex<crate::cpu_monitor::CpuSnapshot>>>,
 }
 
 impl View {
@@ -344,7 +358,16 @@ impl View {
             heatmap_bins: 0,
             drop_seen: HashMap::new(),
             drop_logged_at: HashMap::new(),
+            trigger_flash_at: HashMap::new(),
+            cpu_snapshot: None,
         }
+    }
+
+    pub fn attach_cpu_snapshot(
+        &mut self,
+        snap: Arc<std::sync::Mutex<crate::cpu_monitor::CpuSnapshot>>,
+    ) {
+        self.cpu_snapshot = Some(snap);
     }
 
     /// Replace the active tap list (e.g. on patch reload). Drop-counter
@@ -355,6 +378,7 @@ impl View {
             taps.iter().map(|t| t.name.as_str()).collect();
         self.drop_seen.retain(|name, _| surviving.contains(name.as_str()));
         self.drop_logged_at.retain(|name, _| surviving.contains(name.as_str()));
+        self.trigger_flash_at.retain(|name, _| surviving.contains(name.as_str()));
         let max_scroll = taps.len().saturating_sub(1);
         if self.meter_scroll > max_scroll {
             self.meter_scroll = max_scroll;
@@ -444,6 +468,20 @@ impl View {
         }
     }
 
+    /// Drain `trigger_led` fires from the observer and stamp the UI-side
+    /// flash time. Must be called once per frame so a flash isn't lost
+    /// while the user is on a non-meter tab — `take_trigger` is
+    /// destructive (latch + clear), and missing a read forfeits the
+    /// flash. Decay envelope is computed at draw time from the stamp.
+    pub fn pump_leds(&mut self, handle: &SubscribersHandle) {
+        let now = Instant::now();
+        for tap in &self.taps {
+            if tap.has(TapType::TriggerLed) && handle.take_trigger(tap.slot) {
+                self.trigger_flash_at.insert(tap.name.clone(), now);
+            }
+        }
+    }
+
     pub fn toggle_record_mute(&mut self) {
         match (&self.record.record_path, &self.record.muted) {
             (Some(_), Some(flag)) => {
@@ -528,6 +566,40 @@ const NAME_W: u16 = 16;
 const METRIC_W: u16 = 8; // " -60.0dB"
 const GAP_W: u16 = 1;
 const MIN_BAR_W: u16 = 8;
+/// Width (cells) reserved on the right edge of a meter row for LED
+/// dots: ` G T` (gate then trigger). Always reserved so meter rows
+/// align with LED-only rows. Each dot is one cell; mirrors the CLAP
+/// webview's `gate_led` / `trigger_led` slot widgets.
+const LED_W: u16 = 4;
+/// Trigger-flash decay time constant. Matches `TRIGGER_DECAY_MS` in the
+/// CLAP webview (`assets/src/core/leds.js`) so feel is consistent
+/// across the two frontends.
+const TRIGGER_DECAY_MS: f32 = 140.0;
+/// Perceptual gamma for gate scalar → display intensity. Audio-side
+/// gate decay is exponential; gamma > 1 makes low values read clearly
+/// *off*. Matches the CLAP `LED_GAMMA`.
+const LED_GAMMA: f32 = 2.4;
+/// Base RGB for a fully-lit `gate_led` dot. Matches CLAP `LED_COLOURS`.
+const GATE_RGB: (u8, u8, u8) = (64, 192, 96);
+/// Base RGB for a fully-lit `trigger_led` dot.
+const TRIGGER_RGB: (u8, u8, u8) = (224, 160, 64);
+
+fn led_color(base: (u8, u8, u8), intensity: f32) -> Color {
+    let v = intensity.clamp(0.0, 1.0).powf(LED_GAMMA);
+    Color::Rgb(
+        (base.0 as f32 * v) as u8,
+        (base.1 as f32 * v) as u8,
+        (base.2 as f32 * v) as u8,
+    )
+}
+
+fn trigger_intensity(age_ms: f32) -> f32 {
+    if age_ms.is_nan() || age_ms < 0.0 {
+        return 0.0;
+    }
+    let v = (-age_ms / TRIGGER_DECAY_MS).exp();
+    if v < 0.001 { 0.0 } else { v }
+}
 
 /// Number of meter rows visible in the given pane height. At least 1.
 fn visible_rows(pane_height: u16) -> usize {
@@ -633,7 +705,12 @@ fn draw_meters(
     let meter_taps: Vec<&TapEntry> = view
         .taps
         .iter()
-        .filter(|t| t.has(TapType::Meter) || t.has(TapType::StereoMeter))
+        .filter(|t| {
+            t.has(TapType::Meter)
+                || t.has(TapType::StereoMeter)
+                || t.has(TapType::GateLed)
+                || t.has(TapType::TriggerLed)
+        })
         .collect();
 
     // Group adjacent stereo halves into paired rows. `~stereo_meter(foo)`
@@ -648,18 +725,21 @@ fn draw_meters(
         return;
     }
 
-    // Reserve space for two metric columns (peak, rms) with gaps.
+    // Reserve space for two metric columns (peak, rms) with gaps and
+    // the LED column on the right edge.
     let metrics_total = METRIC_W * 2 + GAP_W;
-    let min_required = NAME_W + GAP_W + MIN_BAR_W + GAP_W + metrics_total;
+    let min_required = NAME_W + GAP_W + MIN_BAR_W + GAP_W + metrics_total + GAP_W + LED_W;
     if inner.width < min_required || inner.height < 1 {
         let p = Paragraph::new("(meter pane too narrow)");
         f.render_widget(p, inner);
         return;
     }
 
-    let bar_w = inner.width - NAME_W - GAP_W - GAP_W - metrics_total;
+    let bar_w = inner.width - NAME_W - GAP_W - GAP_W - metrics_total - GAP_W - LED_W;
     let bar_x = inner.x + NAME_W + GAP_W;
     let metrics_x = bar_x + bar_w + GAP_W;
+    let led_x = metrics_x + METRIC_W + GAP_W + METRIC_W + GAP_W;
+    let now = Instant::now();
 
     let visible = visible_rows(inner.height);
     let max_scroll = meter_rows.len().saturating_sub(visible);
@@ -681,7 +761,11 @@ fn draw_meters(
         let name = truncate_name(&label, NAME_W as usize);
         buf.set_string(inner.x, y, &name, Style::default());
 
-        // Bar with sub-cell RMS fill and peak tick overlay.
+        let has_meter = tap.has(TapType::Meter) || tap.has(TapType::StereoMeter);
+
+        // Bar with sub-cell RMS fill and peak tick overlay. Only meter
+        // taps populate the bar/dB columns; LED-only taps leave them
+        // blank so the row still aligns with surrounding meter rows.
         let peak_db = amp_to_db(handle.read(tap.slot, ProcessorId::MeterPeak));
         let rms_db = amp_to_db(handle.read(tap.slot, ProcessorId::MeterRms));
         let bar_cells_f = bar_w as f64;
@@ -690,41 +774,63 @@ fn draw_meters(
         let rms_color = db_colour(rms_db);
         let peak_color = db_colour(peak_db);
 
-        for cell in 0..bar_w as usize {
-            let x = bar_x + cell as u16;
-            let cell_eighths_filled =
-                rms_eighths.saturating_sub(cell * 8).min(8);
-            let (ch, color) = if cell_eighths_filled > 0 {
-                (STIPPLE_BRAILLE[cell_eighths_filled - 1], rms_color)
-            } else {
-                ('·', Color::DarkGray)
-            };
-            if let Some(c) = buf.cell_mut((x, y)) {
-                c.set_char(ch).set_style(Style::default().fg(color));
+        if has_meter {
+            for cell in 0..bar_w as usize {
+                let x = bar_x + cell as u16;
+                let cell_eighths_filled =
+                    rms_eighths.saturating_sub(cell * 8).min(8);
+                let (ch, color) = if cell_eighths_filled > 0 {
+                    (STIPPLE_BRAILLE[cell_eighths_filled - 1], rms_color)
+                } else {
+                    ('·', Color::DarkGray)
+                };
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_char(ch).set_style(Style::default().fg(color));
+                }
             }
-        }
-        // Peak tick. Draw only if it lies past the RMS fill so it
-        // remains visible; otherwise the hatch already conveys the
-        // signal level.
-        let peak_cell_clamped = peak_cell.min(bar_w.saturating_sub(1) as usize);
-        let rms_cells = rms_eighths / 8;
-        if peak_cell_clamped >= rms_cells && peak_db > DB_FLOOR {
-            let x = bar_x + peak_cell_clamped as u16;
-            if let Some(c) = buf.cell_mut((x, y)) {
-                c.set_char('│').set_style(Style::default().fg(peak_color));
+            // Peak tick. Draw only if it lies past the RMS fill so it
+            // remains visible; otherwise the hatch already conveys the
+            // signal level.
+            let peak_cell_clamped = peak_cell.min(bar_w.saturating_sub(1) as usize);
+            let rms_cells = rms_eighths / 8;
+            if peak_cell_clamped >= rms_cells && peak_db > DB_FLOOR {
+                let x = bar_x + peak_cell_clamped as u16;
+                if let Some(c) = buf.cell_mut((x, y)) {
+                    c.set_char('│').set_style(Style::default().fg(peak_color));
+                }
             }
+
+            // dB readouts: peak then RMS, right-aligned within METRIC_W.
+            let peak_str = format_db(peak_db);
+            let rms_str = format_db(rms_db);
+            buf.set_string(metrics_x, y, &peak_str, Style::default().fg(peak_color));
+            buf.set_string(
+                metrics_x + METRIC_W + GAP_W,
+                y,
+                &rms_str,
+                Style::default().fg(rms_color),
+            );
         }
 
-        // dB readouts: peak then RMS, right-aligned within METRIC_W.
-        let peak_str = format_db(peak_db);
-        let rms_str = format_db(rms_db);
-        buf.set_string(metrics_x, y, &peak_str, Style::default().fg(peak_color));
-        buf.set_string(
-            metrics_x + METRIC_W + GAP_W,
-            y,
-            &rms_str,
-            Style::default().fg(rms_color),
-        );
+        // LED dots: gate (steady-state, gamma-mapped scalar) and
+        // trigger (UI-side exponential decay from the last fire stamp).
+        // Cells are blank when the tap doesn't declare the component.
+        if tap.has(TapType::GateLed) {
+            let v = handle.read(tap.slot, ProcessorId::GateLed).clamp(0.0, 1.0);
+            if let Some(c) = buf.cell_mut((led_x + 1, y)) {
+                c.set_char('●').set_style(Style::default().fg(led_color(GATE_RGB, v)));
+            }
+        }
+        if tap.has(TapType::TriggerLed) {
+            let v = view
+                .trigger_flash_at
+                .get(&tap.name)
+                .map(|t| trigger_intensity(now.duration_since(*t).as_secs_f32() * 1000.0))
+                .unwrap_or(0.0);
+            if let Some(c) = buf.cell_mut((led_x + 3, y)) {
+                c.set_char('●').set_style(Style::default().fg(led_color(TRIGGER_RGB, v)));
+            }
+        }
 
         // Drop indicator overlays the right edge of the name column.
         let drops = handle.dropped(tap.slot);
@@ -1134,7 +1240,12 @@ fn draw_scope(
     view: &mut View,
     handle: &SubscribersHandle,
 ) {
-    let block = Block::default().borders(Borders::ALL).title("scope");
+    let title = format!(
+        "scope  ({:.1} ms) [snap {}]",
+        view.scope_window_ms,
+        if view.scope_snap_zero { "on" } else { "off" },
+    );
+    let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -1314,10 +1425,8 @@ fn draw_footer(f: &mut Frame, area: Rect, _view: &View) {
         Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" rec mute  "),
         Span::styled("↑/↓", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" log scroll  "),
-        Span::styled("j/k", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" meter scroll  "),
-        Span::styled("1/2/Tab", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" scroll  "),
+        Span::styled("1-5/Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" tab  "),
         Span::styled("f", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" fft  "),
@@ -1340,7 +1449,6 @@ fn draw(f: &mut Frame, view: &mut View, handle: &SubscribersHandle) {
             Constraint::Length(2),
             Constraint::Length(2),
             Constraint::Min(6),
-            Constraint::Length(8),
             Constraint::Length(2),
         ])
         .split(area);
@@ -1350,21 +1458,47 @@ fn draw(f: &mut Frame, view: &mut View, handle: &SubscribersHandle) {
         Tab::Meters => draw_meters(f, chunks[2], view, handle),
         Tab::Spectrum => draw_spectrum(f, chunks[2], view, handle),
         Tab::Scope => draw_scope(f, chunks[2], view, handle),
+        Tab::Events => draw_log(f, chunks[2], view),
+        Tab::Cpu => draw_cpu(f, chunks[2], view),
     }
-    draw_log(f, chunks[3], view);
-    draw_footer(f, chunks[4], view);
+    draw_footer(f, chunks[3], view);
+}
+
+fn draw_cpu(f: &mut Frame, area: Rect, view: &View) {
+    use ratatui::widgets::Paragraph;
+    let snap = match view.cpu_snapshot.as_ref().and_then(|m| m.lock().ok().map(|g| g.clone())) {
+        Some(s) => s,
+        None => return,
+    };
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(format!(
+        "block: {:.1}% (samples {})  periodic: {:.1}%  window: {} blocks",
+        snap.block_pct, snap.block_samples, snap.periodic_pct, snap.window_blocks,
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(format!(
+        "{:<32}  {:<16}  {:>6}",
+        "instance", "type", "% blk"
+    )));
+    for row in &snap.rows {
+        lines.push(Line::from(format!(
+            "{:<32}  {:<16}  {:>5.1}%",
+            truncate_name(&row.name, 32),
+            truncate_name(&row.type_name, 16),
+            row.pct,
+        )));
+    }
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_tabs(f: &mut Frame, area: Rect, view: &View) {
-    let titles: Vec<&str> = [Tab::Meters, Tab::Spectrum, Tab::Scope]
-        .iter()
-        .map(|t| t.label())
-        .collect();
-    let active_index = match view.tab {
-        Tab::Meters => 0,
-        Tab::Spectrum => 1,
-        Tab::Scope => 2,
-    };
+    let mut tabs_present: Vec<Tab> =
+        vec![Tab::Meters, Tab::Spectrum, Tab::Scope, Tab::Events];
+    if view.cpu_snapshot.is_some() {
+        tabs_present.push(Tab::Cpu);
+    }
+    let titles: Vec<&str> = tabs_present.iter().map(|t| t.label()).collect();
+    let active_index = tabs_present.iter().position(|t| *t == view.tab).unwrap_or(0);
     let tabs = Tabs::new(titles)
         .select(active_index)
         .block(Block::default().borders(Borders::BOTTOM))
@@ -1414,6 +1548,7 @@ pub fn run<F: FnMut(&mut View)>(
 
         on_tick(view);
         view.pump_heatmap(handle);
+        view.pump_leds(handle);
 
         terminal.draw(|f| draw(f, view, handle))?;
         // Note: draw takes &mut View to allow reusing `spectrum_scratch`.
@@ -1426,22 +1561,39 @@ pub fn run<F: FnMut(&mut View)>(
                     match k.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(LoopOutcome::Quit),
                         KeyCode::Char('r') => view.toggle_record_mute(),
-                        KeyCode::Up => {
-                            view.log_scroll = view.log_scroll.saturating_add(1);
-                        }
-                        KeyCode::Down => {
-                            view.log_scroll = view.log_scroll.saturating_sub(1);
-                        }
-                        KeyCode::Char('k') => {
-                            view.meter_scroll = view.meter_scroll.saturating_sub(1);
-                        }
-                        KeyCode::Char('j') => {
-                            view.meter_scroll = view.meter_scroll.saturating_add(1);
-                        }
+                        KeyCode::Up => match view.tab {
+                            Tab::Meters => {
+                                view.meter_scroll = view.meter_scroll.saturating_sub(1);
+                            }
+                            Tab::Events => {
+                                view.log_scroll = view.log_scroll.saturating_add(1);
+                            }
+                            Tab::Spectrum | Tab::Scope | Tab::Cpu => {}
+                        },
+                        KeyCode::Down => match view.tab {
+                            Tab::Meters => {
+                                view.meter_scroll = view.meter_scroll.saturating_add(1);
+                            }
+                            Tab::Events => {
+                                view.log_scroll = view.log_scroll.saturating_sub(1);
+                            }
+                            Tab::Spectrum | Tab::Scope | Tab::Cpu => {}
+                        },
                         KeyCode::Char('1') => view.tab = Tab::Meters,
                         KeyCode::Char('2') => view.tab = Tab::Spectrum,
                         KeyCode::Char('3') => view.tab = Tab::Scope,
-                        KeyCode::Tab => view.tab = view.tab.next(),
+                        KeyCode::Char('4') => view.tab = Tab::Events,
+                        KeyCode::Char('5') => {
+                            if view.cpu_snapshot.is_some() {
+                                view.tab = Tab::Cpu;
+                            }
+                        }
+                        KeyCode::Tab => {
+                            view.tab = view.tab.next();
+                            if view.tab == Tab::Cpu && view.cpu_snapshot.is_none() {
+                                view.tab = view.tab.next();
+                            }
+                        }
                         KeyCode::Char('z') => {
                             view.scope_snap_zero = !view.scope_snap_zero;
                             view.log.push(format!(
@@ -1692,6 +1844,10 @@ mod tests {
         assert_eq!(t, Tab::Spectrum);
         t = t.next();
         assert_eq!(t, Tab::Scope);
+        t = t.next();
+        assert_eq!(t, Tab::Events);
+        t = t.next();
+        assert_eq!(t, Tab::Cpu);
         t = t.next();
         assert_eq!(t, Tab::Meters);
     }

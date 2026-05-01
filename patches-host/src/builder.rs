@@ -13,9 +13,9 @@
 
 use patches_core::AudioEnvironment;
 use patches_engine::{kernel::spawn_cleanup_thread, CleanupAction, PatchProcessor};
-use patches_planner::ExecutionPlan;
 use rtrb::RingBuffer;
 
+use crate::runtime::AdoptionMessage;
 use crate::HostRuntime;
 
 /// Default sizes for the runtime's buffer/module pools and ring buffers.
@@ -69,7 +69,7 @@ impl HostBuilder {
             cleanup_tx,
         );
 
-        let (plan_tx, plan_rx) = RingBuffer::<ExecutionPlan>::new(self.plan_ring);
+        let (plan_tx, plan_rx) = RingBuffer::<AdoptionMessage>::new(self.plan_ring);
 
         let tap_rate = env.sample_rate * self.oversampling_factor as f32;
         Ok(HostRuntime::from_parts(

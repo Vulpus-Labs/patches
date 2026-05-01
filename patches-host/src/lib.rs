@@ -18,5 +18,5 @@ pub mod source;
 pub use builder::HostBuilder;
 pub use error::{CompileError, CompileErrorKind};
 pub use load::{load_patch, LoadedPatch};
-pub use runtime::{HostAudioCallback, HostRuntime};
+pub use runtime::{AdoptionMessage, HostAudioCallback, HostRuntime};
 pub use source::{HostFileSource, InMemorySource, LoadedSource, PathSource};

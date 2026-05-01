@@ -1,6 +1,7 @@
 mod cleanup;
 pub mod decimator;
 pub mod halt;
+pub mod monitor;
 pub mod processor;
 pub mod kernel;
 pub mod execution_state;
@@ -22,5 +23,9 @@ pub use patches_io_ring::{tap_ring, TapRingConsumer, TapRingProducer, TapRingSha
 // should import from `patches_planner` directly.
 pub use patches_planner::{
     build_patch, BuildError, BufferAllocState, ExecutionPlan, ModuleAllocState, ModuleSlot,
-    NodeState, PatchBuilder, Planner, PlannerState,
+    NodeState, PatchBuilder, PlanMeta, Planner, PlannerState,
+};
+pub use monitor::{
+    monitor_channel, MonitorAttach, MonitorBlock, MonitorConfig, MonitorMessage, MonitorState,
+    DEFAULT_MONITOR_BLOCK_SAMPLES, DEFAULT_MONITOR_CAPACITY, DEFAULT_MONITOR_DECIMATION_K,
 };

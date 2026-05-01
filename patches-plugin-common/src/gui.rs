@@ -78,7 +78,9 @@ pub struct GuiSnapshot {
     /// Per-slot display options projected for the webview to restore
     /// selector values after a window close/reopen or state reload.
     /// Keyed by slot index. Ticket 0752 follow-up.
-    pub tap_opts: std::collections::HashMap<usize, TapDisplayOpts>,
+    pub tap_opts: std::collections::HashMap<String, TapDisplayOpts>,
+    /// Preset names available for the current patch (ticket 0777).
+    pub preset_names: Vec<String>,
 }
 
 /// Compact, webview-facing projection of a [`RenderedDiagnostic`].
@@ -95,7 +97,7 @@ pub struct DiagnosticSummary {
 }
 
 impl GuiSnapshot {
-    pub const VERSION: u32 = 5;
+    pub const VERSION: u32 = 7;
 }
 
 pub(crate) fn summarise_diagnostics_pub(view: &DiagnosticView) -> Vec<DiagnosticSummary> {
@@ -194,7 +196,7 @@ pub enum Intent {
     /// its current value. Posted by the webview when the user picks
     /// an FFT size, decimation, or window length.
     SetTapOpts {
-        slot: usize,
+        name: String,
         spectrum_fft_size: Option<usize>,
         scope_decimation: Option<usize>,
         scope_window_samples: Option<usize>,
@@ -220,14 +222,14 @@ impl Intent {
             Intent::AddPath => Action::AddModulePath,
             Intent::RemovePath { index } => Action::RemoveModulePath(index),
             Intent::SetTapOpts {
-                slot,
+                name,
                 spectrum_fft_size,
                 scope_decimation,
                 scope_window_samples,
                 scope_snap,
                 spectrum_heatmap,
             } => Action::SetTapOpts {
-                slot,
+                name,
                 spectrum_fft_size,
                 scope_decimation,
                 scope_window_samples,

@@ -7,20 +7,34 @@ use std::path::{Path, PathBuf};
 use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::HaltInfoSnapshot;
 use patches_registry::Registry;
+use serde::{Deserialize, Serialize};
 
 use crate::gui::{
     DiagnosticView, GuiSnapshot, TapDisplayOpts, TapSummary, STATUS_LOG_CAPACITY,
 };
 
-/// Snapshot of persistable state read/written by the host's
-/// `state_load` / `state_save` hooks.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SerializedState {
+/// Patch identity — *which* patch is loaded. Local-machine-only:
+/// path is meaningful only on the originating machine, source is the
+/// authoritative content. Persisted in the CLAP state envelope so a
+/// project file can re-find its patch on reopen. Excluded from
+/// presets (preset semantics are "settings to apply to *some* patch").
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchIdentity {
     pub file_path: Option<PathBuf>,
     pub dsl_source: String,
-    pub module_paths: Vec<PathBuf>,
-    pub tap_opts: HashMap<usize, TapDisplayOpts>,
+}
+
+/// Portable user settings that move with presets. Cross-patch-safe:
+/// every map keys by name, so applying to a different patch
+/// silently drops bindings that don't resolve.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersistedSettings {
+    /// Host-control values keyed by name. Populated by ADR 0057;
+    /// empty until then.
+    pub host_controls: HashMap<String, f32>,
+    pub tap_opts: HashMap<String, TapDisplayOpts>,
     pub window_size: Option<(u32, u32)>,
+    pub module_paths: Vec<PathBuf>,
 }
 
 /// Outcome of a cheap rescan probe — diff against the currently
@@ -75,7 +89,7 @@ pub enum Action {
     RemoveModulePath(usize),
     Rescan,
     SetTapOpts {
-        slot: usize,
+        name: String,
         spectrum_fft_size: Option<usize>,
         scope_decimation: Option<usize>,
         scope_window_samples: Option<usize>,
@@ -87,7 +101,22 @@ pub enum Action {
     // Host events
     Activate,
     Deactivate,
-    StateLoad(SerializedState),
+    StateLoad {
+        identity: PatchIdentity,
+        settings: PersistedSettings,
+    },
+    /// Save current persistable settings as a named preset under the
+    /// current patch identity (ADR 0063 §6; ticket 0777).
+    SavePreset {
+        name: String,
+    },
+    /// Load a named preset and apply its [`PersistedSettings`] to the
+    /// current patch. Names that don't resolve in the current patch
+    /// degrade gracefully — they sit in the controller until
+    /// reconciliation against a fresh manifest drops them.
+    LoadPreset {
+        name: String,
+    },
     HaltObserved(Option<HaltInfoSnapshot>),
     DiagnosticsDrained(Vec<String>),
 }
@@ -124,6 +153,175 @@ pub trait Env {
     /// Build a fresh default registry, scan `paths` into it, and return
     /// both. Used by `Action::Activate` to rebuild the live registry.
     fn reset_and_scan(&mut self, paths: &[PathBuf]) -> (Registry, ScanDetails);
+
+    /// Resolve the sidecar location for a given patch path. `None`
+    /// means this env doesn't use sidecars (CLAP — host owns persistence).
+    /// ADR 0063 §5; ticket 0775.
+    fn sidecar_path(&self, _patch_path: &Path) -> Option<PathBuf> {
+        None
+    }
+    /// Read the sidecar at `path`. `Ok(None)` for missing-but-not-error
+    /// (the common case on a fresh patch). Default impl: not supported.
+    fn load_sidecar(&mut self, _path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+        Ok(None)
+    }
+    /// Write `settings` to `path`. Default impl: no-op (CLAP).
+    fn save_sidecar(
+        &mut self,
+        _path: &Path,
+        _settings: &PersistedSettings,
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    /// Resolve the on-disk preset path for `(patch_stem, preset_name)`.
+    /// `None` means presets are unsupported on this env. Default: none.
+    /// ADR 0063 §6; ticket 0777.
+    fn preset_path(&self, _patch_stem: &str, _preset_name: &str) -> Option<PathBuf> {
+        None
+    }
+    /// List preset names for the patch identified by `patch_stem`.
+    /// Default: empty.
+    fn list_presets(&mut self, _patch_stem: &str) -> Vec<String> {
+        Vec::new()
+    }
+    /// Read a preset's `PersistedSettings`. `Ok(None)` for missing.
+    /// Default: not supported.
+    fn load_preset(&mut self, _path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+        Ok(None)
+    }
+    /// Write `settings` as a preset at `path`. Default: no-op.
+    fn save_preset(
+        &mut self,
+        _path: &Path,
+        _settings: &PersistedSettings,
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Schema version embedded in every preset envelope (ticket 0777).
+pub const PRESET_SCHEMA_VERSION: u32 = 1;
+
+/// On-disk envelope for a saved preset. Carries a schema version and
+/// a snapshot of [`PersistedSettings`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PresetEnvelope {
+    pub v: u32,
+    pub settings: PersistedSettings,
+}
+
+impl PresetEnvelope {
+    pub fn new(settings: PersistedSettings) -> Self {
+        Self {
+            v: PRESET_SCHEMA_VERSION,
+            settings,
+        }
+    }
+}
+
+/// Default preset library root: `$XDG_DATA_HOME/patches/presets` (or
+/// `~/.local/share/patches/presets`). Returns `None` if neither var is
+/// set, which lets `preset_path` default to "unsupported" cleanly.
+pub fn default_preset_library_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| {
+                let mut p = PathBuf::from(h);
+                p.push(".local/share");
+                p
+            })
+        })?;
+    let mut p = base;
+    p.push("patches");
+    p.push("presets");
+    Some(p)
+}
+
+/// JSON-on-disk preset I/O against [`default_preset_library_dir`]. Both
+/// shells route through this; `Env` impls just delegate.
+pub fn xdg_preset_path(patch_stem: &str, preset_name: &str) -> Option<PathBuf> {
+    let mut p = default_preset_library_dir()?;
+    p.push(patch_stem);
+    p.push(format!("{preset_name}.json"));
+    Some(p)
+}
+
+pub fn xdg_list_presets(patch_stem: &str) -> Vec<String> {
+    let dir = match default_preset_library_dir() {
+        Some(d) => {
+            let mut p = d;
+            p.push(patch_stem);
+            p
+        }
+        None => return Vec::new(),
+    };
+    let mut out: Vec<String> = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x == "json") {
+                    p.file_stem().map(|s| s.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    out.sort();
+    out
+}
+
+pub fn xdg_save_preset(path: &Path, settings: &PersistedSettings) -> std::io::Result<()> {
+    let envelope = PresetEnvelope::new(settings.clone());
+    let json = serde_json::to_string_pretty(&envelope)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("preset: {e}")))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, json)
+}
+
+pub fn xdg_load_preset(path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+    let bytes = match std::fs::read_to_string(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let env: PresetEnvelope = serde_json::from_str(&bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("preset: {e}")))?;
+    if env.v != PRESET_SCHEMA_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("preset schema v{} (expected v{})", env.v, PRESET_SCHEMA_VERSION),
+        ));
+    }
+    Ok(Some(env.settings))
+}
+
+/// Schema version embedded in every sidecar envelope. Bump when the
+/// shape of [`PersistedSettings`] changes incompatibly so older readers
+/// can refuse to load rather than silently misinterpret bytes.
+pub const SIDECAR_SCHEMA_VERSION: u32 = 1;
+
+/// On-disk envelope for the Ratatui sidecar (ticket 0775). Carries a
+/// schema version alongside the settings payload.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SidecarEnvelope {
+    pub v: u32,
+    pub settings: PersistedSettings,
+}
+
+impl SidecarEnvelope {
+    pub fn new(settings: PersistedSettings) -> Self {
+        Self {
+            v: SIDECAR_SCHEMA_VERSION,
+            settings,
+        }
+    }
 }
 
 /// Persistable + derived plugin model.
@@ -133,8 +331,11 @@ pub struct Controller {
     pub file_path: Option<PathBuf>,
     pub dsl_source: String,
     pub module_paths: Vec<PathBuf>,
-    pub tap_opts: HashMap<usize, TapDisplayOpts>,
+    pub tap_opts: HashMap<String, TapDisplayOpts>,
     pub window_size: Option<(u32, u32)>,
+    /// Host-control values keyed by name. Populated by ADR 0057;
+    /// empty until then. Persisted via `PersistedSettings`.
+    pub host_controls: HashMap<String, f32>,
 
     // Derived / live.
     pub registry: Registry,
@@ -143,6 +344,9 @@ pub struct Controller {
     pub halt: Option<HaltInfoSnapshot>,
     pub taps: Vec<TapSummary>,
     pub module_names: Vec<String>,
+    /// Preset names available for the current patch identity. Refreshed
+    /// on `LoadPath` and after `SavePreset`. Ticket 0777.
+    pub preset_names: Vec<String>,
 }
 
 impl Controller {
@@ -236,14 +440,19 @@ impl Controller {
                 }
             }
             Action::SetTapOpts {
-                slot,
+                name,
                 spectrum_fft_size,
                 scope_decimation,
                 scope_window_samples,
                 scope_snap,
                 spectrum_heatmap,
             } => {
-                let entry = self.tap_opts.entry(slot).or_default();
+                if name.is_empty() {
+                    // Unnamed taps are not addressable for opts. Drop
+                    // silently (ADR 0063 §5; ticket 0773).
+                    return StateDelta::default();
+                }
+                let entry = self.tap_opts.entry(name).or_default();
                 let before = *entry;
                 if let Some(n) = spectrum_fft_size {
                     entry.spectrum_fft_size = n;
@@ -312,12 +521,82 @@ impl Controller {
                     ..Default::default()
                 }
             }
-            Action::StateLoad(s) => {
-                self.file_path = s.file_path;
-                self.dsl_source = s.dsl_source;
-                self.module_paths = s.module_paths;
-                self.tap_opts = s.tap_opts;
-                self.window_size = s.window_size;
+            Action::Deactivate => {
+                // Clear derived/live fields the audio side will rebuild
+                // on next Activate. Persistable fields (file_path,
+                // dsl_source, module_paths, tap_opts, window_size)
+                // survive — they drive the next Activate.
+                self.registry = Registry::default();
+                self.taps.clear();
+                self.module_names.clear();
+                self.halt = None;
+                self.diagnostic_view = DiagnosticView::default();
+                StateDelta {
+                    snapshot_changed: true,
+                    ..Default::default()
+                }
+            }
+            Action::SavePreset { name } => {
+                let stem = self.patch_stem();
+                if let Some(path) = env.preset_path(&stem, &name) {
+                    let settings = self.persisted_settings();
+                    match env.save_preset(&path, &settings) {
+                        Ok(()) => {
+                            self.preset_names = env.list_presets(&stem);
+                            self.push_status(format!("Saved preset {name}"));
+                            return StateDelta {
+                                snapshot_changed: true,
+                                ..Default::default()
+                            };
+                        }
+                        Err(e) => {
+                            self.push_status(format!("Save preset {name} failed: {e}"));
+                        }
+                    }
+                } else {
+                    self.push_status("Presets unsupported on this env");
+                }
+                StateDelta::default()
+            }
+            Action::LoadPreset { name } => {
+                let stem = self.patch_stem();
+                let path = match env.preset_path(&stem, &name) {
+                    Some(p) => p,
+                    None => {
+                        self.push_status("Presets unsupported on this env");
+                        return StateDelta::default();
+                    }
+                };
+                match env.load_preset(&path) {
+                    Ok(Some(settings)) => {
+                        self.module_paths = settings.module_paths;
+                        self.tap_opts = settings.tap_opts;
+                        self.window_size = settings.window_size;
+                        self.host_controls = settings.host_controls;
+                        self.push_status(format!("Loaded preset {name}"));
+                        StateDelta {
+                            persistable_changed: true,
+                            snapshot_changed: true,
+                            ..Default::default()
+                        }
+                    }
+                    Ok(None) => {
+                        self.push_status(format!("Preset {name} not found"));
+                        StateDelta::default()
+                    }
+                    Err(e) => {
+                        self.push_status(format!("Load preset {name} failed: {e}"));
+                        StateDelta::default()
+                    }
+                }
+            }
+            Action::StateLoad { identity, settings } => {
+                self.file_path = identity.file_path;
+                self.dsl_source = identity.dsl_source;
+                self.module_paths = settings.module_paths;
+                self.tap_opts = settings.tap_opts;
+                self.window_size = settings.window_size;
+                self.host_controls = settings.host_controls;
                 StateDelta {
                     snapshot_changed: true,
                     ..Default::default()
@@ -357,7 +636,6 @@ impl Controller {
                     ..Default::default()
                 }
             }
-            _ => StateDelta::default(),
         }
     }
 
@@ -377,6 +655,7 @@ impl Controller {
             diagnostics: crate::gui::summarise_diagnostics_pub(&self.diagnostic_view),
             taps: self.taps.clone(),
             tap_opts: self.tap_opts.clone(),
+            preset_names: self.preset_names.clone(),
         }
     }
 
@@ -423,6 +702,34 @@ impl Controller {
                     self.diagnostic_view.diagnostics.extend(success.warnings);
                 }
                 self.push_status(success_msg);
+                // Refresh available preset list under this patch stem.
+                self.preset_names = env.list_presets(&self.patch_stem());
+                // Sidecar restore (ADR 0063 §5; ticket 0776). Failure
+                // is non-fatal — surface in the status log and carry on
+                // with the (possibly default) current settings.
+                if let Some(file_path) = self.file_path.clone() {
+                    if let Some(sidecar) = env.sidecar_path(&file_path) {
+                        match env.load_sidecar(&sidecar) {
+                            Ok(Some(settings)) => {
+                                self.module_paths = settings.module_paths;
+                                self.tap_opts = settings.tap_opts;
+                                self.window_size = settings.window_size;
+                                self.host_controls = settings.host_controls;
+                                self.push_status(format!(
+                                    "Loaded sidecar: {}",
+                                    sidecar.display()
+                                ));
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                self.push_status(format!(
+                                    "Sidecar load failed ({}): {e}",
+                                    sidecar.display()
+                                ));
+                            }
+                        }
+                    }
+                }
             }
             Err(failure) => {
                 self.diagnostic_view = failure.view;
@@ -430,6 +737,26 @@ impl Controller {
             }
         }
         delta
+    }
+
+    /// Patch identity stem used to group presets. Falls back to a
+    /// stable placeholder if no file_path is set.
+    fn patch_stem(&self) -> String {
+        self.file_path
+            .as_ref()
+            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "_unknown".to_string())
+    }
+
+    /// Snapshot of the current persistable settings, for shells that
+    /// need to write a sidecar on dirty (ADR 0063 §5; ticket 0776).
+    pub fn persisted_settings(&self) -> PersistedSettings {
+        PersistedSettings {
+            host_controls: self.host_controls.clone(),
+            tap_opts: self.tap_opts.clone(),
+            window_size: self.window_size,
+            module_paths: self.module_paths.clone(),
+        }
     }
 
     fn add_module_path(&mut self, dir: PathBuf, env: &mut dyn Env) -> StateDelta {
@@ -485,6 +812,12 @@ mod tests {
         scan: ScanDetails,
         probe: RescanProbe,
         compiled_sources: Vec<String>,
+        sidecar_for: Option<PathBuf>,
+        sidecar_payload: Option<PersistedSettings>,
+        saved_sidecars: Vec<(PathBuf, PersistedSettings)>,
+        preset_root: Option<PathBuf>,
+        presets: HashMap<PathBuf, PersistedSettings>,
+        preset_listings: HashMap<String, Vec<String>>,
     }
 
     impl Env for FakeEnv {
@@ -527,6 +860,38 @@ mod tests {
         }
         fn reset_and_scan(&mut self, _paths: &[PathBuf]) -> (Registry, ScanDetails) {
             (Registry::default(), self.scan.clone())
+        }
+        fn sidecar_path(&self, _patch_path: &Path) -> Option<PathBuf> {
+            self.sidecar_for.clone()
+        }
+        fn load_sidecar(&mut self, _path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+            Ok(self.sidecar_payload.clone())
+        }
+        fn save_sidecar(
+            &mut self,
+            path: &Path,
+            settings: &PersistedSettings,
+        ) -> std::io::Result<()> {
+            self.saved_sidecars.push((path.to_path_buf(), settings.clone()));
+            Ok(())
+        }
+        fn preset_path(&self, stem: &str, name: &str) -> Option<PathBuf> {
+            let root = self.preset_root.as_ref()?;
+            Some(root.join(stem).join(format!("{name}.json")))
+        }
+        fn list_presets(&mut self, stem: &str) -> Vec<String> {
+            self.preset_listings.get(stem).cloned().unwrap_or_default()
+        }
+        fn save_preset(
+            &mut self,
+            path: &Path,
+            settings: &PersistedSettings,
+        ) -> std::io::Result<()> {
+            self.presets.insert(path.to_path_buf(), settings.clone());
+            Ok(())
+        }
+        fn load_preset(&mut self, path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+            Ok(self.presets.get(path).cloned())
         }
     }
 
@@ -738,7 +1103,7 @@ mod tests {
         let mut c = Controller::new();
         let d = c.apply(
             Action::SetTapOpts {
-                slot: 0,
+                name: "kick".into(),
                 spectrum_fft_size: Some(2048),
                 scope_decimation: None,
                 scope_window_samples: None,
@@ -748,12 +1113,12 @@ mod tests {
             &mut env,
         );
         assert!(d.persistable_changed);
-        assert_eq!(c.tap_opts.get(&0).unwrap().spectrum_fft_size, 2048);
+        assert_eq!(c.tap_opts.get("kick").unwrap().spectrum_fft_size, 2048);
 
         // Re-apply same value — no change.
         let d2 = c.apply(
             Action::SetTapOpts {
-                slot: 0,
+                name: "kick".into(),
                 spectrum_fft_size: Some(2048),
                 scope_decimation: None,
                 scope_window_samples: None,
@@ -766,11 +1131,29 @@ mod tests {
     }
 
     #[test]
+    fn set_tap_opts_with_empty_name_is_dropped() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        let d = c.apply(
+            Action::SetTapOpts {
+                name: String::new(),
+                spectrum_fft_size: Some(2048),
+                scope_decimation: None,
+                scope_window_samples: None,
+                scope_snap: None,
+                spectrum_heatmap: None,
+            },
+            &mut env,
+        );
+        assert_eq!(d, StateDelta::default());
+        assert!(c.tap_opts.is_empty());
+    }
+
+    #[test]
     fn unimplemented_host_events_return_default_delta() {
         let mut env = ok_env();
         let mut c = Controller::new();
         for a in [
-            Action::Deactivate,
             Action::DiagnosticsDrained(Vec::new()),
             Action::HaltObserved(None),
         ] {
@@ -828,6 +1211,25 @@ mod tests {
     }
 
     #[test]
+    fn deactivate_clears_derived_fields_keeps_persistable() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        c.file_path = Some("/tmp/a.patches".into());
+        c.dsl_source = "x".into();
+        c.module_paths.push("/tmp/m".into());
+        c.taps.push(TapSummary::default());
+        c.module_names.push("Gain".into());
+        let d = c.apply(Action::Deactivate, &mut env);
+        assert!(d.snapshot_changed);
+        assert!(c.taps.is_empty());
+        assert!(c.module_names.is_empty());
+        // Persistable survives.
+        assert_eq!(c.dsl_source, "x");
+        assert_eq!(c.module_paths.len(), 1);
+        assert!(c.file_path.is_some());
+    }
+
+    #[test]
     fn activate_rebuilds_registry_and_compiles() {
         let mut env = ok_env();
         env.scan = ScanDetails {
@@ -858,20 +1260,167 @@ mod tests {
         let mut env = ok_env();
         let mut c = Controller::new();
         c.dsl_source = "stale".into();
-        let s = SerializedState {
+        let identity = PatchIdentity {
             file_path: Some("/tmp/x.patches".into()),
             dsl_source: "fresh".into(),
+        };
+        let settings = PersistedSettings {
             module_paths: vec!["/tmp/m".into()],
             tap_opts: Default::default(),
             window_size: Some((800, 600)),
+            host_controls: Default::default(),
         };
-        let d = c.apply(Action::StateLoad(s), &mut env);
+        let d = c.apply(Action::StateLoad { identity, settings }, &mut env);
         assert!(d.snapshot_changed);
         assert!(!d.persistable_changed);
         assert_eq!(c.dsl_source, "fresh");
         assert_eq!(c.file_path.as_deref(), Some(std::path::Path::new("/tmp/x.patches")));
         assert_eq!(c.module_paths, vec![PathBuf::from("/tmp/m")]);
         assert_eq!(c.window_size, Some((800, 600)));
+    }
+
+    #[test]
+    fn load_path_restores_sidecar_when_present() {
+        let path = PathBuf::from("/tmp/x.patches");
+        let sidecar = PathBuf::from("/tmp/x.patches.state");
+        let mut env = ok_env();
+        env.files.insert(path.clone(), "src".into());
+        env.sidecar_for = Some(sidecar.clone());
+        env.sidecar_payload = Some(PersistedSettings {
+            host_controls: Default::default(),
+            tap_opts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "kick".to_string(),
+                    TapDisplayOpts {
+                        spectrum_fft_size: 4096,
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+            window_size: Some((1024, 768)),
+            module_paths: vec![PathBuf::from("/tmp/m")],
+        });
+        let mut c = Controller::new();
+        c.apply(Action::LoadPath(path), &mut env);
+        assert_eq!(c.window_size, Some((1024, 768)));
+        assert_eq!(c.tap_opts.get("kick").unwrap().spectrum_fft_size, 4096);
+        assert_eq!(c.module_paths, vec![PathBuf::from("/tmp/m")]);
+        assert!(c
+            .status_log
+            .iter()
+            .any(|s| s.starts_with("Loaded sidecar:")));
+    }
+
+    #[test]
+    fn load_path_with_missing_sidecar_keeps_defaults() {
+        let path = PathBuf::from("/tmp/x.patches");
+        let mut env = ok_env();
+        env.files.insert(path.clone(), "src".into());
+        env.sidecar_for = Some(PathBuf::from("/tmp/x.patches.state"));
+        // sidecar_payload is None → load_sidecar returns Ok(None).
+        let mut c = Controller::new();
+        c.window_size = Some((100, 100));
+        c.apply(Action::LoadPath(path), &mut env);
+        // Settings unchanged by missing sidecar.
+        assert_eq!(c.window_size, Some((100, 100)));
+        assert!(!c
+            .status_log
+            .iter()
+            .any(|s| s.starts_with("Loaded sidecar:")));
+    }
+
+    #[test]
+    fn persisted_settings_mirrors_controller_fields() {
+        let mut c = Controller::new();
+        c.window_size = Some((1, 2));
+        c.module_paths.push("/tmp/m".into());
+        c.tap_opts.insert("k".into(), TapDisplayOpts::default());
+        let s = c.persisted_settings();
+        assert_eq!(s.window_size, Some((1, 2)));
+        assert_eq!(s.module_paths, vec![PathBuf::from("/tmp/m")]);
+        assert!(s.tap_opts.contains_key("k"));
+    }
+
+    #[test]
+    fn save_preset_writes_to_resolved_path_and_updates_listing() {
+        let mut env = ok_env();
+        env.preset_root = Some(PathBuf::from("/lib"));
+        let mut c = Controller::new();
+        c.file_path = Some("/tmp/A.patches".into());
+        c.tap_opts.insert(
+            "kick".into(),
+            TapDisplayOpts {
+                spectrum_fft_size: 4096,
+                ..Default::default()
+            },
+        );
+        // After save, FakeEnv reports the new listing.
+        env.preset_listings
+            .insert("A".into(), vec!["bright".into()]);
+        let d = c.apply(
+            Action::SavePreset {
+                name: "bright".into(),
+            },
+            &mut env,
+        );
+        assert!(d.snapshot_changed);
+        let stored_at = PathBuf::from("/lib/A/bright.json");
+        let saved = env.presets.get(&stored_at).expect("preset stored");
+        assert_eq!(saved.tap_opts.get("kick").unwrap().spectrum_fft_size, 4096);
+        assert_eq!(c.preset_names, vec!["bright".to_string()]);
+    }
+
+    #[test]
+    fn cross_patch_load_keeps_unmatched_names_for_later_reconciliation() {
+        let mut env = ok_env();
+        env.preset_root = Some(PathBuf::from("/lib"));
+        // Save against patch A, then load against patch B (same preset
+        // name lookup uses B's stem, so we write the preset directly
+        // into FakeEnv at B's resolved path to simulate a manual move).
+        let mut payload = PersistedSettings::default();
+        payload.tap_opts.insert(
+            "kick".into(),
+            TapDisplayOpts {
+                spectrum_fft_size: 4096,
+                ..Default::default()
+            },
+        );
+        env.presets
+            .insert(PathBuf::from("/lib/B/bright.json"), payload);
+
+        let mut c = Controller::new();
+        c.file_path = Some("/tmp/B.patches".into());
+        let d = c.apply(
+            Action::LoadPreset {
+                name: "bright".into(),
+            },
+            &mut env,
+        );
+        assert!(d.persistable_changed);
+        // Unmatched-by-current-manifest names land verbatim; later
+        // reconciliation prunes them. For now we just hold them.
+        assert_eq!(c.tap_opts.get("kick").unwrap().spectrum_fft_size, 4096);
+    }
+
+    #[test]
+    fn load_preset_missing_is_status_logged_and_no_op() {
+        let mut env = ok_env();
+        env.preset_root = Some(PathBuf::from("/lib"));
+        let mut c = Controller::new();
+        c.file_path = Some("/tmp/A.patches".into());
+        let d = c.apply(
+            Action::LoadPreset {
+                name: "nope".into(),
+            },
+            &mut env,
+        );
+        assert_eq!(d, StateDelta::default());
+        assert!(c
+            .status_log
+            .iter()
+            .any(|s| s.contains("Preset nope not found")));
     }
 
     #[test]

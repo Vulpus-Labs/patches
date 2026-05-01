@@ -5,7 +5,9 @@ use std::time::Instant;
 use cpal::traits::DeviceTrait;
 use cpal::{Stream, StreamConfig};
 
-use patches_planner::ExecutionPlan;
+use patches_planner::{ExecutionPlan, PlanMeta};
+
+type AdoptionMessage = (ExecutionPlan, Option<Box<PlanMeta>>);
 use patches_engine::decimator::Decimator;
 use patches_engine::execution_state::SUB_BLOCK_SIZE;
 use patches_engine::midi::{AudioClock, EventQueueConsumer};
@@ -21,7 +23,7 @@ use crate::engine::EngineError;
 /// capture, and MIDI sub-block scheduling.
 pub(crate) struct AudioCallback {
     processor: PatchProcessor,
-    plan_rx: rtrb::Consumer<ExecutionPlan>,
+    plan_rx: rtrb::Consumer<AdoptionMessage>,
     channels: usize,
     /// `channels.trailing_zeros()` — the right-shift to convert a sample count to a frame count.
     channel_shift: u32,
@@ -68,7 +70,7 @@ unsafe impl Send for AudioCallback {}
 impl AudioCallback {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        plan_rx: rtrb::Consumer<ExecutionPlan>,
+        plan_rx: rtrb::Consumer<AdoptionMessage>,
         processor: PatchProcessor,
         channels: usize,
         event_queue: Option<EventQueueConsumer>,
@@ -169,8 +171,8 @@ impl AudioCallback {
 
     /// Adopt a new plan if one has been published — wait-free, no allocation.
     fn receive_plan(&mut self) {
-        if let Ok(new_plan) = self.plan_rx.pop() {
-            self.processor.adopt_plan(new_plan);
+        if let Ok((new_plan, meta)) = self.plan_rx.pop() {
+            self.processor.adopt_plan_with_meta(new_plan, meta.map(|b| *b));
         }
     }
 

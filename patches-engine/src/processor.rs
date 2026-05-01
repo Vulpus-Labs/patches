@@ -22,8 +22,9 @@ use patches_core::{
     MAX_STASH, MAX_TAPS,
 };
 
-use patches_planner::ExecutionPlan;
+use patches_planner::{ExecutionPlan, PlanMeta};
 use crate::cleanup::CleanupAction;
+use crate::monitor::{MonitorAttach, MonitorMessage, MonitorState};
 use crate::execution_state::ReadyState;
 use crate::halt::{payload_summary, HaltHandle, HaltInfoSnapshot, HaltState};
 use crate::midi::EventQueueConsumer;
@@ -101,6 +102,13 @@ pub struct PatchProcessor {
     /// field; stamped onto every emitted `TapBlockFrame` so the observer
     /// can drop frames whose slot semantics are stale.
     tap_manifest_generation: u32,
+    /// Per-instance CPU monitor state (ADR 0065 / tickets 0778, 0779).
+    /// `None` when monitoring is disabled — the default. When `Some`, the
+    /// per-sample dispatch path splits to bracket the round-robin selected
+    /// module, and one [`crate::monitor::MonitorBlock`] is pushed per audio
+    /// block. Also carries the SPSC producer used for the [`PlanMeta`] drop
+    /// ladder in [`adopt_plan_with_meta`](Self::adopt_plan_with_meta).
+    monitor: Option<MonitorState>,
 }
 
 impl PatchProcessor {
@@ -156,7 +164,18 @@ impl PatchProcessor {
             tap_block_idx: 0,
             tap_sample_counter: 0,
             tap_manifest_generation: 0,
+            monitor: None,
         }
+    }
+
+    /// Attach (or detach) the per-instance CPU monitor (ADR 0065).
+    ///
+    /// Passing `Some(MonitorAttach { config, tx })` enables the split
+    /// dispatch path and starts emitting one [`crate::monitor::MonitorBlock`]
+    /// every `config.block_samples` samples. Passing `None` reverts to the
+    /// byte-identical fast path.
+    pub fn set_monitor(&mut self, attach: Option<MonitorAttach>) {
+        self.monitor = attach.map(MonitorState::new);
     }
 
     /// Attach an observer-ring producer. Called by the engine builder once
@@ -187,7 +206,20 @@ impl PatchProcessor {
     /// Tombstones removed modules, installs new ones, applies parameter and
     /// port diffs, zeros freed cable slots, and replaces the current plan.
     /// Evicted modules and plans are pushed to the cleanup ring buffer.
-    pub fn adopt_plan(&mut self, mut plan: ExecutionPlan) {
+    pub fn adopt_plan(&mut self, plan: ExecutionPlan) {
+        self.adopt_plan_with_meta(plan, None)
+    }
+
+    /// Like [`adopt_plan`](Self::adopt_plan) but additionally routes
+    /// per-instance monitor metadata (ADR 0065) through a drop ladder:
+    /// monitor SPSC → cleanup ring → in-thread drop. `meta` is `None` when
+    /// the planner did not produce metadata (monitor disabled at build
+    /// time); the audio-thread cost is then exactly zero.
+    pub fn adopt_plan_with_meta(
+        &mut self,
+        mut plan: ExecutionPlan,
+        meta: Option<PlanMeta>,
+    ) {
         // Move the real state out, leaving a valid empty placeholder.
         let state = mem::replace(&mut self.state, ReadyState::empty());
         let mut stale = state.make_stale();
@@ -285,6 +317,37 @@ impl PatchProcessor {
                 self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
                 drop(action);
             }
+        }
+
+        // Monitor metadata drop ladder (ADR 0065): try the monitor SPSC; on
+        // full / unset, route through the cleanup ring so the heap drop
+        // happens off-thread; in-thread drop only as last resort if cleanup
+        // is also full.
+        if let Some(meta) = meta {
+            let boxed = Box::new(meta);
+            let pending = match self.monitor.as_mut() {
+                Some(m) => match m.tx_mut().push(MonitorMessage::PlanMeta(boxed)) {
+                    Ok(()) => None,
+                    Err(rtrb::PushError::Full(MonitorMessage::PlanMeta(b))) => Some(b),
+                    Err(rtrb::PushError::Full(_)) => unreachable!(),
+                },
+                None => Some(boxed),
+            };
+            if let Some(boxed) = pending {
+                if let Err(rtrb::PushError::Full(action)) =
+                    self.cleanup_tx.push(CleanupAction::DropPlanMeta(boxed))
+                {
+                    self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
+                    drop(action);
+                }
+            }
+        }
+
+        // ADR 0065: any partial-block accumulation is stale (selection idx
+        // referenced the prior active set). Discard it; the next block start
+        // picks a fresh slot from the new set.
+        if let Some(m) = self.monitor.as_mut() {
+            m.reset_block();
         }
     }
 
@@ -416,9 +479,16 @@ impl PatchProcessor {
         let state = &mut self.state;
         let buffer_pool = &mut self.buffer_pool;
         let backplane = &mut self.tap_backplane[..];
+        let monitor = self.monitor.as_mut();
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let mut cable_pool = CablePool::with_backplane(buffer_pool, wi, backplane);
-            state.tick(&mut cable_pool);
+            // Off path is byte-identical to today's dispatch (ADR 0065): the
+            // outer match here is per-sample, not per-module, and the `None`
+            // arm calls the unchanged `tick`.
+            match monitor {
+                None => state.tick(&mut cable_pool),
+                Some(m) => state.tick_monitored(&mut cable_pool, m),
+            }
         }));
         if let Err(payload) = result {
             let slot = self.halt.current_module_slot.load(Ordering::Relaxed);
@@ -575,5 +645,207 @@ mod tap_block_tests {
         let expected: Vec<u64> =
             (0..4).map(|i| (i as u64) * TAP_BLOCK as u64).collect();
         assert_eq!(times, expected);
+    }
+}
+
+#[cfg(test)]
+mod monitor_tests {
+    use super::*;
+    use crate::monitor::{
+        monitor_channel, MonitorAttach, MonitorBlock, MonitorConfig, MonitorMessage,
+    };
+    use patches_core::parameter_map::ParameterMap;
+    use patches_core::{
+        AudioEnvironment, BuildError, CablePool, InstanceId, Module, ModuleDescriptor,
+        ModuleShape, StructuralParams,
+    };
+    use patches_planner::{ExecutionPlan, ParamState};
+    use std::any::Any;
+    use std::time::Duration;
+
+    /// A module whose `process` does a configurable number of black-boxed
+    /// fp ops, giving a roughly proportional, deterministic-ish cost.
+    struct SpinModule {
+        id: InstanceId,
+        desc: ModuleDescriptor,
+        spin: u32,
+    }
+
+    impl SpinModule {
+        fn new(spin: u32) -> Self {
+            Self {
+                id: InstanceId::next(),
+                desc: ModuleDescriptor {
+                    module_name: "Spin",
+                    shape: ModuleShape { channels: 0 },
+                    inputs: vec![],
+                    outputs: vec![],
+                    realtime_params: vec![],
+                    structural_params: vec![],
+                },
+                spin,
+            }
+        }
+    }
+
+    impl Module for SpinModule {
+        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
+            ModuleDescriptor {
+                module_name: "Spin",
+                shape: ModuleShape { channels: 0 },
+                inputs: vec![],
+                outputs: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
+            }
+        }
+        fn prepare(
+            _env: &AudioEnvironment,
+            descriptor: ModuleDescriptor,
+            instance_id: InstanceId,
+            _structural: &StructuralParams,
+        ) -> Result<Self, BuildError> {
+            Ok(Self { id: instance_id, desc: descriptor, spin: 0 })
+        }
+        fn update_validated_parameters(
+            &mut self,
+            _params: &patches_core::param_frame::ParamView<'_>,
+        ) {}
+        fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
+        fn instance_id(&self) -> InstanceId { self.id }
+        fn process(&mut self, _pool: &mut CablePool<'_>) {
+            let mut acc = 0.0f32;
+            for i in 0..self.spin {
+                acc = std::hint::black_box(acc + (i as f32) * 1.0000001);
+            }
+            std::hint::black_box(acc);
+        }
+        fn as_any(&self) -> &dyn Any { self }
+    }
+
+    fn empty_param_state() -> ParamState {
+        ParamState::new_for_descriptor(
+            &ModuleDescriptor {
+                module_name: "Spin",
+                shape: ModuleShape { channels: 0 },
+                inputs: vec![],
+                outputs: vec![],
+                realtime_params: vec![],
+                structural_params: vec![],
+            },
+            &ParameterMap::new(),
+        )
+    }
+
+    #[test]
+    fn off_path_does_not_emit_records() {
+        let (cleanup_tx, _rx) = rtrb::RingBuffer::<CleanupAction>::new(8);
+        let mut p = PatchProcessor::new(64, 8, 1, cleanup_tx);
+        for _ in 0..1024 {
+            p.tick();
+        }
+        assert!(p.monitor.is_none());
+    }
+
+    #[test]
+    fn block_boundary_emits_one_record() {
+        let (cleanup_tx, _rx) = rtrb::RingBuffer::<CleanupAction>::new(64);
+        let mut p = PatchProcessor::new(64, 8, 1, cleanup_tx);
+        let (tx, mut rx) = monitor_channel(64);
+        p.set_monitor(Some(MonitorAttach {
+            config: MonitorConfig { decimation_k: 16, block_samples: 128 },
+            tx,
+        }));
+
+        // Install a single Spin module via a plan adoption.
+        let mut plan = ExecutionPlan::empty();
+        plan.new_modules.push((4, Box::new(SpinModule::new(50))));
+        plan.new_module_param_state.push(empty_param_state());
+        plan.active_indices = vec![4];
+        p.adopt_plan(plan);
+
+        // 127 ticks: no Block record yet.
+        for _ in 0..127 {
+            p.tick();
+        }
+        let mut blocks = 0;
+        while let Ok(msg) = rx.pop() {
+            if matches!(msg, MonitorMessage::Block(_)) {
+                blocks += 1;
+            }
+        }
+        assert_eq!(blocks, 0, "no block record before block_samples ticks");
+
+        // 128th tick triggers the push.
+        p.tick();
+        let mut found: Option<MonitorBlock> = None;
+        while let Ok(msg) = rx.pop() {
+            if let MonitorMessage::Block(b) = msg {
+                found = Some(b);
+            }
+        }
+        let b = found.expect("expected one Block record at block boundary");
+        assert_eq!(b.block_samples, 128);
+        assert_eq!(b.module_slot, 4);
+        // ceil(128 / 16) = 8 timed samples per block.
+        assert_eq!(b.module_samples_timed, 8);
+        assert!(b.module_accum > Duration::ZERO);
+    }
+
+    /// Two modules with a ~10x cost ratio: observer-side estimates should
+    /// converge such that the heavier module's mean per-sample cost exceeds
+    /// the lighter one. Tolerance is loose because OS scheduling and CPU
+    /// noise dominate at these scales; we only check direction + magnitude
+    /// within an order of magnitude.
+    #[test]
+    fn estimates_converge_to_expected_ratio() {
+        let (cleanup_tx, _rx) = rtrb::RingBuffer::<CleanupAction>::new(64);
+        let mut p = PatchProcessor::new(64, 8, 1, cleanup_tx);
+        let (tx, mut rx) = monitor_channel(1024);
+        p.set_monitor(Some(MonitorAttach {
+            config: MonitorConfig { decimation_k: 4, block_samples: 64 },
+            tx,
+        }));
+
+        // Slot 4: light (spin=20). Slot 5: heavy (spin=400).
+        let mut plan = ExecutionPlan::empty();
+        plan.new_modules.push((4, Box::new(SpinModule::new(20))));
+        plan.new_module_param_state.push(empty_param_state());
+        plan.new_modules.push((5, Box::new(SpinModule::new(400))));
+        plan.new_module_param_state.push(empty_param_state());
+        plan.active_indices = vec![4, 5];
+        p.adopt_plan(plan);
+
+        // 256 blocks → 128 selections per slot under round-robin (rr_cursor
+        // alternates). Plenty for the loose ratio check.
+        for _ in 0..(256 * 64) {
+            p.tick();
+        }
+
+        let mut accum = std::collections::HashMap::<usize, (Duration, u64)>::new();
+        while let Ok(msg) = rx.pop() {
+            if let MonitorMessage::Block(b) = msg {
+                let e = accum.entry(b.module_slot).or_insert((Duration::ZERO, 0));
+                e.0 += b.module_accum;
+                e.1 += b.module_samples_timed as u64;
+            }
+        }
+        let mean_ns = |slot: usize| -> f64 {
+            let (d, n) = accum.get(&slot).copied().unwrap_or((Duration::ZERO, 0));
+            if n == 0 { 0.0 } else { d.as_nanos() as f64 / n as f64 }
+        };
+        let light = mean_ns(4);
+        let heavy = mean_ns(5);
+        assert!(light > 0.0 && heavy > 0.0,
+            "both slots should accumulate samples: light={light}ns heavy={heavy}ns");
+        let ratio = heavy / light;
+        // Expected ~20x; accept a wide [3.0, 50.0] band to absorb timer
+        // overhead (Instant bracket bias inflates the light estimate more)
+        // and CI scheduler jitter.
+        assert!(
+            (3.0..50.0).contains(&ratio),
+            "heavy/light ratio {ratio:.2} out of [3, 50] tolerance band \
+             (light={light:.1}ns heavy={heavy:.1}ns)"
+        );
     }
 }

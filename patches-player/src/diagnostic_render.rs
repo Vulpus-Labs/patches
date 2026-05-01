@@ -33,16 +33,16 @@ fn write_report(d: &RenderedDiagnostic, source_map: &SourceMap, use_color: bool,
         Severity::Warning => ReportKind::Warning,
         Severity::Note => ReportKind::Advice,
     };
-    let primary_span = snippet_span(&d.primary);
+    let primary_span = snippet_span(&d.primary, source_map);
     let mut builder = Report::build(kind, primary_span.clone())
         .with_config(Config::default().with_color(use_color))
         .with_message(&d.message);
     if let Some(code) = &d.code {
         builder = builder.with_code(code);
     }
-    builder = builder.with_label(label_for(&d.primary, use_color));
+    builder = builder.with_label(label_for(&d.primary, source_map, use_color));
     for rel in &d.related {
-        builder = builder.with_label(label_for(rel, use_color));
+        builder = builder.with_label(label_for(rel, source_map, use_color));
     }
     let report = builder.finish();
     let cache = MapCache::new(source_map);
@@ -50,12 +50,34 @@ fn write_report(d: &RenderedDiagnostic, source_map: &SourceMap, use_color: bool,
     let _ = report.write(cache, out);
 }
 
-fn snippet_span(s: &Snippet) -> (SourceId, std::ops::Range<usize>) {
-    (s.source, s.range.clone())
+/// ariadne 0.6 indexes spans by `char` offset, but our `Snippet` carries
+/// byte offsets. Translate so that sources containing multi-byte UTF-8
+/// (comments with box-drawing or em-dashes) line up with the right span.
+fn byte_to_char(text: &str, byte_offset: usize) -> usize {
+    let bound = byte_offset.min(text.len());
+    let mut chars = 0;
+    for (i, _) in text.char_indices() {
+        if i >= bound {
+            return chars;
+        }
+        chars += 1;
+    }
+    chars
 }
 
-fn label_for(s: &Snippet, use_color: bool) -> Label<(SourceId, std::ops::Range<usize>)> {
-    let mut l = Label::new(snippet_span(s)).with_message(&s.label);
+fn translate_range(source_map: &SourceMap, source: SourceId, range: &std::ops::Range<usize>) -> std::ops::Range<usize> {
+    match source_map.source_text(source) {
+        Some(text) => byte_to_char(text, range.start)..byte_to_char(text, range.end),
+        None => range.clone(),
+    }
+}
+
+fn snippet_span(s: &Snippet, source_map: &SourceMap) -> (SourceId, std::ops::Range<usize>) {
+    (s.source, translate_range(source_map, s.source, &s.range))
+}
+
+fn label_for(s: &Snippet, source_map: &SourceMap, use_color: bool) -> Label<(SourceId, std::ops::Range<usize>)> {
+    let mut l = Label::new(snippet_span(s, source_map)).with_message(&s.label);
     if use_color {
         l = l.with_color(match s.kind {
             SnippetKind::Primary => Color::Red,

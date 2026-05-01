@@ -9,8 +9,10 @@ pub mod gui;
 pub mod meter;
 
 pub use controller::{
-    Action, CompileFailure, CompileSuccess, Controller, Env, RescanProbe, ScanDetails,
-    SerializedState, StateDelta,
+    default_preset_library_dir, xdg_list_presets, xdg_load_preset, xdg_preset_path,
+    xdg_save_preset, Action, CompileFailure, CompileSuccess, Controller, Env, PatchIdentity,
+    PersistedSettings, PresetEnvelope, RescanProbe, ScanDetails, SidecarEnvelope, StateDelta,
+    PRESET_SCHEMA_VERSION, SIDECAR_SCHEMA_VERSION,
 };
 
 pub use gui::{

@@ -6,7 +6,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 
 use patches_core::AudioEnvironment;
-use patches_planner::ExecutionPlan;
+use patches_planner::{ExecutionPlan, PlanMeta};
+
+type AdoptionMessage = (ExecutionPlan, Option<Box<PlanMeta>>);
 use patches_engine::execution_state::SUB_BLOCK_SIZE;
 use patches_engine::midi::{AudioClock, EventQueueConsumer};
 use patches_engine::oversampling::OversamplingFactor;
@@ -219,7 +221,7 @@ impl SoundEngine {
     pub fn start(
         &mut self,
         processor: PatchProcessor,
-        plan_rx: rtrb::Consumer<ExecutionPlan>,
+        plan_rx: rtrb::Consumer<AdoptionMessage>,
         event_queue: Option<EventQueueConsumer>,
         record_path: Option<&str>,
         record_muted: Option<Arc<AtomicBool>>,

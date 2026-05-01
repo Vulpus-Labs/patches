@@ -44,6 +44,8 @@
 //! | `dry_wet` | float | 0.0--1.0 | `0.3` | Dry/wet mix |
 //! | `size` | float | 0.0--1.0 | `0.5` | Room size (scales all four delays) |
 //! | `decay` | float | 0.0--0.95 | `0.7` | FDN feedback coefficient |
+//! | `damping` | float | 0.0--1.0 | `0.5` | HF damping in feedback (0 bright, 1 dark) |
+//! | `jitter` | float | 0.0--1.0 | `0.0` | BBD clock jitter amount |
 
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -61,12 +63,24 @@ module_params! {
         dry_wet: Float,
         size:    Float,
         decay:   Float,
+        damping: Float,
         jitter:  Float,
     }
 }
 
 const DECAY_MAX: f32 = 0.95;
 const N: usize = 8;
+
+/// Two-pole reconstruction / damping LPF on each BBD output. `damping = 0`
+/// → bright (8 kHz), `damping = 1` → dark (1.2 kHz). Even the brightest
+/// setting must suppress the BBD clock images: at the longest delay
+/// (~78 ms), clock = 1024/0.078 ≈ 13 kHz, so the cascade's 12 dB/oct
+/// rolloff above 8 kHz is what removes audible clock whine. This filter
+/// also serves as the recirculation HF damping (since `y_prev = y` is
+/// taken after filtering), giving per-pass tail darkening that real
+/// plates/rooms have.
+const DAMP_FC_MIN_HZ: f32 = 1_200.0;
+const DAMP_FC_MAX_HZ: f32 = 8_000.0;
 
 /// Mutually-coprime base delays in milliseconds. Scaled by `size` into
 /// the 1024-stage BBD's honest range (≲ 85 ms).
@@ -101,6 +115,18 @@ fn hadamard8(v: [f32; N]) -> [f32; N] {
     ]
 }
 
+/// Map `damping` ∈ [0, 1] to a one-pole LPF coefficient at sample rate `sr`.
+/// Linear in log-cutoff so the control feel is even.
+#[inline]
+fn damping_coeff(sr: f32, damping: f32) -> f32 {
+    let lo = DAMP_FC_MIN_HZ.ln();
+    let hi = DAMP_FC_MAX_HZ.ln();
+    // damping = 0 → max cutoff (bright), damping = 1 → min cutoff (dark)
+    let fc = (hi + (lo - hi) * damping).exp();
+    let a = 1.0 - (-std::f32::consts::TAU * fc / sr).exp();
+    a.clamp(0.0, 1.0)
+}
+
 /// Vintage BBD reverb. See the module-level documentation.
 pub struct VReverb {
     instance_id: InstanceId,
@@ -114,6 +140,14 @@ pub struct VReverb {
     dry_wet: f32,
     size: f32,
     decay: f32,
+    /// One-pole LPF coefficient `a = 1 - exp(-2π fc / sr)` shared by
+    /// both stages of the per-line cascade.
+    damp_a: f32,
+    /// First-stage LPF state per line.
+    damp_z1: [f32; N],
+    /// Second-stage LPF state per line (cascaded for 12 dB/oct).
+    damp_z2: [f32; N],
+    sr: f32,
 
     in_stereo: StereoInput,
     drywet_cv: MonoInput,
@@ -133,6 +167,7 @@ impl Module for VReverb {
             .float_param(params::dry_wet, 0.0, 1.0, 0.3)
             .float_param(params::size, 0.0, 1.0, 0.5)
             .float_param(params::decay, 0.0, DECAY_MAX, 0.7)
+            .float_param(params::damping, 0.0, 1.0, 0.5)
             .float_param(params::jitter, 0.0, 1.0, 0.0)
     }
 
@@ -160,6 +195,10 @@ impl Module for VReverb {
             dry_wet: 0.3,
             size: 0.5,
             decay: 0.7,
+            damp_a: damping_coeff(sr, 0.5),
+            damp_z1: [0.0; N],
+            damp_z2: [0.0; N],
+            sr,
             in_stereo: StereoInput::default(),
             drywet_cv: MonoInput::default(),
             size_cv: MonoInput::default(),
@@ -172,6 +211,8 @@ impl Module for VReverb {
         self.dry_wet = p.get(params::dry_wet).clamp(0.0, 1.0);
         self.size = p.get(params::size).clamp(0.0, 1.0);
         self.decay = p.get(params::decay).clamp(0.0, DECAY_MAX);
+        let damping = p.get(params::damping).clamp(0.0, 1.0);
+        self.damp_a = damping_coeff(self.sr, damping);
         let jitter = p.get(params::jitter).clamp(0.0, 1.0);
         for b in self.bbds.iter_mut() {
             b.set_jitter_amount(jitter);
@@ -210,12 +251,22 @@ impl Module for VReverb {
         let mixed = hadamard8(self.y_prev);
 
         let mut y = [0.0_f32; N];
+        let a = self.damp_a;
         for k in 0..N {
             let drive_src = if k < N / 2 { x_l } else { x_r };
             // Soft-clip the recirculating path: Hadamard + tanh is
             // strictly passive, so this bounds the loop at `decay < 1`.
             let drive = drive_src + fast_tanh(decay * mixed[k]);
-            y[k] = self.bbds[k].process(drive);
+            // Two-pole LPF (cascaded one-poles) on the BBD output.
+            // Doubles as reconstruction filter (kills BBD clock images
+            // at audible long-delay clock rates) and recirculation HF
+            // damping (since y feeds y_prev next sample).
+            let raw = self.bbds[k].process(drive);
+            let s1 = self.damp_z1[k] + a * (raw - self.damp_z1[k]);
+            self.damp_z1[k] = s1;
+            let s2 = self.damp_z2[k] + a * (s1 - self.damp_z2[k]);
+            self.damp_z2[k] = s2;
+            y[k] = s2;
         }
         self.y_prev = y;
 

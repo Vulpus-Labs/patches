@@ -21,9 +21,15 @@ patches-diagnostics = { path = "../patches-diagnostics" }
 patches-ffi         = { path = "../patches-ffi" }
 patches-alloc-trap  = { path = "../patches-alloc-trap" }
 patches-observation = { path = "../patches-observation" }
+patches-plugin-common = { path = "../patches-plugin-common" }
 ariadne             = "0.6"
 ratatui             = "0.29"
 crossterm           = "0.28"
+rtrb                = "0.3"
+serde_json          = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 # Splash image is decoded at compile time and baked into the binary as

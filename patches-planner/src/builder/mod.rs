@@ -135,6 +135,36 @@ pub struct ModuleSlot {
     pub output_buffers: Vec<usize>,
 }
 
+/// Slot-indexed instance metadata that travels alongside an [`ExecutionPlan`].
+///
+/// Built by the planner when CPU monitoring is enabled, consumed by the
+/// monitor observer to label per-instance cost estimates. `names[slot]` and
+/// `types[slot]` are indexed by module pool slot index (the same indices that
+/// appear in [`ExecutionPlan::active_indices`] / `periodic_indices`); slots
+/// outside the active set hold `None` / `""`. Routed through the audio thread
+/// via [`crate::adopt_plan_with_meta`]-equivalent surfaces in
+/// `patches-engine`; never stored on the plan itself so its lifetime is
+/// orthogonal to plan reuse / cleanup.
+///
+/// `Arc<str>` for instance names: cheap to clone, `Send`, and matches the
+/// underlying representation of [`patches_core::NodeId`] without forcing
+/// callers across the audio-thread boundary to handle non-`Send` `Rc`.
+pub struct PlanMeta {
+    /// Per-slot instance display name (slash-joined `QName`), or `None` if
+    /// the slot is unused.
+    pub names: Vec<Option<Arc<str>>>,
+    /// Per-slot module type name (`&'static str` from the descriptor), or
+    /// `""` if the slot is unused.
+    pub types: Vec<&'static str>,
+}
+
+impl PlanMeta {
+    /// Empty meta — no slots populated.
+    pub fn empty() -> Self {
+        Self { names: Vec::new(), types: Vec::new() }
+    }
+}
+
 /// A fully resolved, allocation-free execution structure produced by [`PatchBuilder::build_patch`].
 ///
 /// Modules are **not** owned by the plan; they live in an externally-owned module pool
@@ -295,11 +325,21 @@ pub struct PatchBuilder {
     /// Module pool slot capacity; must match the [`SoundEngine`]'s pool so that
     /// [`BuildErrorKind::ModulePoolExhausted`] is detected at plan-build time.
     pub module_pool_capacity: usize,
+    /// When true, [`build_patch_with_meta`](Self::build_patch_with_meta)
+    /// produces a [`PlanMeta`] alongside the plan. Default: false (zero
+    /// allocation, zero traversal on the disabled path).
+    pub monitor_enabled: bool,
 }
 
 impl PatchBuilder {
     pub fn new(pool_capacity: usize, module_pool_capacity: usize) -> Self {
-        Self { pool_capacity, module_pool_capacity }
+        Self { pool_capacity, module_pool_capacity, monitor_enabled: false }
+    }
+
+    /// Enable per-instance CPU monitor metadata production. See [`PlanMeta`].
+    pub fn with_monitor(mut self, enabled: bool) -> Self {
+        self.monitor_enabled = enabled;
+        self
     }
 
     /// Build an [`ExecutionPlan`] from `graph`, diffing against `prev_state`.
@@ -313,6 +353,20 @@ impl PatchBuilder {
         env: &AudioEnvironment,
         prev_state: &PlannerState,
     ) -> Result<(ExecutionPlan, PlannerState), BuildError> {
+        let (plan, _meta, state) = self.build_patch_with_meta(graph, registry, env, prev_state)?;
+        Ok((plan, state))
+    }
+
+    /// Like [`build_patch`](Self::build_patch) but additionally returns
+    /// [`PlanMeta`] when [`monitor_enabled`](Self::monitor_enabled) is set.
+    /// When disabled, returns `None` for the meta (no allocation).
+    pub fn build_patch_with_meta(
+        &self,
+        graph: &ModuleGraph,
+        registry: &Registry,
+        env: &AudioEnvironment,
+        prev_state: &PlannerState,
+    ) -> Result<(ExecutionPlan, Option<PlanMeta>, PlannerState), BuildError> {
         // ── Decision phase ───────────────────────────────────────────────────
         // Structural parameters are read directly from each `graph::Node`
         // (ADR 0060). The interpreter populates them via
@@ -390,6 +444,12 @@ impl PatchBuilder {
         let mut node_states: HashMap<NodeId, NodeState> = HashMap::with_capacity(order.len());
         let mut to_zero_poly: Vec<usize> = Vec::new();
         let mut periodic_indices: Vec<usize> = Vec::new();
+        // Slot-indexed monitor metadata, only when enabled (ADR 0065).
+        let mut meta: Option<PlanMeta> = if self.monitor_enabled {
+            Some(PlanMeta::empty())
+        } else {
+            None
+        };
 
         for (id, decision) in decisions {
             let node = index.get_node(&id).ok_or_else(|| {
@@ -402,6 +462,15 @@ impl PatchBuilder {
                     "instance {instance_id:?} missing from module_diff slot_map"
                 ))
             })?;
+
+            if let Some(m) = meta.as_mut() {
+                if m.names.len() <= pool_index {
+                    m.names.resize(pool_index + 1, None);
+                    m.types.resize(pool_index + 1, "");
+                }
+                m.names[pool_index] = Some(Arc::from(id.as_str()));
+                m.types[pool_index] = node.module_descriptor.module_name;
+            }
 
             let resolved_inputs = resolved.resolve_input_buffers(desc, &id);
 
@@ -584,6 +653,7 @@ impl PatchBuilder {
                 tracker_receiver_indices: Vec::new(),
                 tap_manifest_generation: 0,
             },
+            meta,
             PlannerState {
                 nodes: node_states,
                 buffer_alloc: BufferAllocState {

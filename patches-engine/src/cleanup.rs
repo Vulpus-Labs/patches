@@ -8,7 +8,7 @@
 use patches_core::Module;
 
 use patches_ffi_common::param_frame::ParamFrame;
-use patches_planner::{ExecutionPlan, ParamState};
+use patches_planner::{ExecutionPlan, ParamState, PlanMeta};
 
 /// Default module pool capacity: number of `Option<Box<dyn Module>>` slots
 /// pre-allocated on the audio thread.
@@ -39,4 +39,9 @@ pub enum CleanupAction {
     /// parameter update installs a newer frame. The old frame's `Vec<u64>`
     /// storage drops off-thread to keep the update path allocation-free.
     DropParamFrame(Box<ParamFrame>),
+    /// Slot-indexed monitor metadata (ADR 0065) routed off the audio thread
+    /// when the monitor channel is full or absent. The vectors inside hold
+    /// owned heap allocations (`Arc<str>`, `Vec<...>`) that must drop
+    /// off-thread.
+    DropPlanMeta(Box<PlanMeta>),
 }

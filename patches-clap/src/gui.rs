@@ -176,7 +176,7 @@ impl WebviewGuiHandle {
         &self,
         subs: &SubscribersHandle,
         taps: &[TapSummary],
-        opts_by_slot: &HashMap<usize, TapDisplayOpts>,
+        opts_by_name: &HashMap<String, TapDisplayOpts>,
     ) {
         if !self.is_visible() {
             return;
@@ -197,8 +197,8 @@ impl WebviewGuiHandle {
         for tap in taps {
             let want_scope = tap.components.iter().any(|c| c == "osc");
             let want_spectrum = tap.components.iter().any(|c| c == "spectrum");
-            let opts = opts_by_slot
-                .get(&tap.slot)
+            let opts = opts_by_name
+                .get(&tap.name)
                 .copied()
                 .unwrap_or_else(TapDisplayOpts::default);
             let p = subs.read(tap.slot, ProcessorId::MeterPeak);

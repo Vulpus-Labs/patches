@@ -128,13 +128,13 @@ static STATE: clap_plugin_state = clap_plugin_state {
 /// [4 bytes LE: module_paths_count]         // optional trailing section
 /// for each:
 ///   [4 bytes LE: len] [path UTF-8 bytes]
-/// [4 bytes LE: tap_opts_count]             // optional (ticket 0753)
-/// for each:
-///   [u32 slot][u32 fft][u32 dec][u32 win]
+/// [4 bytes LE: tap_opts_count]             // optional (ticket 0753;
+/// for each:                                 //  name-keyed since 0773)
+///   [u32 name_len][name UTF-8][u32 fft][u32 dec][u32 win]
 /// [u32 width][u32 height]                  // optional (ticket 0753)
 /// [u32 tap_modes_count]                    // optional
 /// for each:
-///   [u32 slot][u32 snap][u32 heatmap]
+///   [u32 name_len][name UTF-8][u32 snap][u32 heatmap]
 /// ```
 ///
 /// Each trailing section is independently EOF-tolerant: a clean EOF at
@@ -173,14 +173,14 @@ unsafe extern "C" fn state_save(
         }
     }
 
-    // Tap display opts (ticket 0753).
-    let tap_opts: Vec<(u32, u32, u32, u32)> = p
+    // Tap display opts (ticket 0753, name-keyed since 0773).
+    let tap_opts: Vec<(&str, u32, u32, u32)> = p
         .controller
         .tap_opts
         .iter()
-        .map(|(slot, opts)| {
+        .map(|(name, opts)| {
             (
-                *slot as u32,
+                name.as_str(),
                 opts.spectrum_fft_size as u32,
                 opts.scope_decimation as u32,
                 opts.scope_window_samples as u32,
@@ -191,8 +191,8 @@ unsafe extern "C" fn state_save(
     if !stream_write_all(stream, &tap_count.to_le_bytes()) {
         return false;
     }
-    for (slot, fft, dec, win) in &tap_opts {
-        if !stream_write_all(stream, &slot.to_le_bytes()) { return false; }
+    for (name, fft, dec, win) in &tap_opts {
+        if !write_length_prefixed(stream, name.as_bytes()) { return false; }
         if !stream_write_all(stream, &fft.to_le_bytes()) { return false; }
         if !stream_write_all(stream, &dec.to_le_bytes()) { return false; }
         if !stream_write_all(stream, &win.to_le_bytes()) { return false; }
@@ -205,13 +205,13 @@ unsafe extern "C" fn state_save(
 
     // Tap display modes (snap, heatmap) — separate EOF-tolerant section
     // so legacy tap_opts states (with no mode bools) still load.
-    let tap_modes: Vec<(u32, u32, u32)> = p
+    let tap_modes: Vec<(&str, u32, u32)> = p
         .controller
         .tap_opts
         .iter()
-        .map(|(slot, o)| {
+        .map(|(name, o)| {
             (
-                *slot as u32,
+                name.as_str(),
                 if o.scope_snap { 1 } else { 0 },
                 if o.spectrum_heatmap { 1 } else { 0 },
             )
@@ -219,8 +219,8 @@ unsafe extern "C" fn state_save(
         .collect();
     let mode_count = tap_modes.len() as u32;
     if !stream_write_all(stream, &mode_count.to_le_bytes()) { return false; }
-    for (slot, snap, heat) in &tap_modes {
-        if !stream_write_all(stream, &slot.to_le_bytes()) { return false; }
+    for (name, snap, heat) in &tap_modes {
+        if !write_length_prefixed(stream, name.as_bytes()) { return false; }
         if !stream_write_all(stream, &snap.to_le_bytes()) { return false; }
         if !stream_write_all(stream, &heat.to_le_bytes()) { return false; }
     }
@@ -234,31 +234,36 @@ unsafe extern "C" fn state_load(
 ) -> bool {
     let p = plugin::plugin_mut_pub(plugin);
 
-    let serialized = match deserialize_state(stream) {
-        Some(s) => s,
+    let (identity, mut settings) = match deserialize_state(stream) {
+        Some(pair) => pair,
         None => return false,
     };
 
     // Clamp the saved window size before handing it to the controller,
     // so out-of-range values get coerced into the supported range.
-    let mut serialized = serialized;
-    if let Some((w, h)) = serialized.window_size {
-        serialized.window_size = Some(clamp_size(w, h));
+    if let Some((w, h)) = settings.window_size {
+        settings.window_size = Some(clamp_size(w, h));
     }
 
-    plugin::apply_action(p, patches_plugin_common::Action::StateLoad(serialized));
+    plugin::apply_action(
+        p,
+        patches_plugin_common::Action::StateLoad { identity, settings },
+    );
     if p.runtime.is_some() {
         plugin::apply_action(p, patches_plugin_common::Action::Activate);
     }
     true
 }
 
-/// Read the on-disk state stream into a `SerializedState`. Returns
+/// Read the on-disk state stream into the persisted halves. Returns
 /// `None` on a corrupt stream; an EOF at any optional-section boundary
 /// is treated as "section absent" per the format docs above.
 unsafe fn deserialize_state(
     stream: *const clap_istream,
-) -> Option<patches_plugin_common::SerializedState> {
+) -> Option<(
+    patches_plugin_common::PatchIdentity,
+    patches_plugin_common::PersistedSettings,
+)> {
     let path_bytes = read_length_prefixed(stream)?;
     let source_bytes = read_length_prefixed(stream)?;
     let path_str = String::from_utf8(path_bytes).ok()?;
@@ -285,16 +290,14 @@ unsafe fn deserialize_state(
         ReadU32::Err => return None,
     };
 
-    // Optional tap_opts section.
-    let mut tap_opts: std::collections::HashMap<usize, patches_plugin_common::TapDisplayOpts> =
+    // Optional tap_opts section (name-keyed since 0773).
+    let mut tap_opts: std::collections::HashMap<String, patches_plugin_common::TapDisplayOpts> =
         std::collections::HashMap::new();
     match try_read_u32(stream) {
         ReadU32::Ok(count) => {
             for _ in 0..count {
-                let slot = match try_read_u32(stream) {
-                    ReadU32::Ok(n) => n as usize,
-                    _ => return None,
-                };
+                let name_bytes = read_length_prefixed(stream)?;
+                let name = String::from_utf8(name_bytes).ok()?;
                 let fft = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n as usize,
                     _ => return None,
@@ -307,8 +310,11 @@ unsafe fn deserialize_state(
                     ReadU32::Ok(n) => n as usize,
                     _ => return None,
                 };
+                if name.is_empty() {
+                    continue;
+                }
                 tap_opts.insert(
-                    slot,
+                    name,
                     patches_plugin_common::TapDisplayOpts {
                         spectrum_fft_size: fft,
                         scope_decimation: dec,
@@ -335,14 +341,12 @@ unsafe fn deserialize_state(
         ReadU32::Err => return None,
     };
 
-    // Optional tap-modes section.
+    // Optional tap-modes section (name-keyed since 0773).
     match try_read_u32(stream) {
         ReadU32::Ok(count) => {
             for _ in 0..count {
-                let slot = match try_read_u32(stream) {
-                    ReadU32::Ok(n) => n as usize,
-                    _ => return None,
-                };
+                let name_bytes = read_length_prefixed(stream)?;
+                let name = String::from_utf8(name_bytes).ok()?;
                 let snap = match try_read_u32(stream) {
                     ReadU32::Ok(n) => n != 0,
                     _ => return None,
@@ -351,7 +355,10 @@ unsafe fn deserialize_state(
                     ReadU32::Ok(n) => n != 0,
                     _ => return None,
                 };
-                let entry = tap_opts.entry(slot).or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                let entry = tap_opts.entry(name).or_default();
                 entry.scope_snap = snap;
                 entry.spectrum_heatmap = heat;
             }
@@ -360,13 +367,18 @@ unsafe fn deserialize_state(
         ReadU32::Err => return None,
     }
 
-    Some(patches_plugin_common::SerializedState {
-        file_path,
-        dsl_source: source,
-        module_paths,
-        tap_opts,
-        window_size,
-    })
+    Some((
+        patches_plugin_common::PatchIdentity {
+            file_path,
+            dsl_source: source,
+        },
+        patches_plugin_common::PersistedSettings {
+            host_controls: std::collections::HashMap::new(),
+            tap_opts,
+            window_size,
+            module_paths,
+        },
+    ))
 }
 
 // ── GUI ─────────────────────────────────────────────────────────────
@@ -784,9 +796,10 @@ mod tests {
         }
     }
 
-    /// tap_opts section (ticket 0753) encodes as
-    /// `[count][slot fft dec win]*` and round-trips through the same
-    /// stream helpers used by `state_save` / `state_load`.
+    /// Round-trip raw u32 entries through the stream helpers. Shape is
+    /// pre-0773 (slot-keyed) but the test only exercises
+    /// `stream_write_all` / `try_read_u32`, not the live tap_opts
+    /// section format.
     #[test]
     fn tap_opts_section_round_trip() {
         let out = OutCtx { buf: RefCell::new(Vec::new()) };

@@ -39,15 +39,16 @@ use patches_core::{AudioEnvironment, MidiEvent, BASE_PERIODIC_UPDATE_INTERVAL};
 use patches_observation::{spawn_observer, tap_ring, ObserverHandle};
 use patches_observation::subscribers::{DiagnosticReader, SubscribersHandle};
 use patches_registry::Registry;
-use patches_planner::ExecutionPlan;
+use patches_host::AdoptionMessage;
 use patches_engine::PatchProcessor;
 use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 
 use crate::extensions;
 use patches_dsl::manifest::{Manifest, TapDescriptor};
 use patches_plugin_common::{
-    Action, CompileFailure, CompileSuccess, Controller, DiagnosticView, Env, MeterTap,
-    RescanProbe, ScanDetails, StateDelta, TapSummary,
+    xdg_list_presets, xdg_load_preset, xdg_preset_path, xdg_save_preset, Action, CompileFailure,
+    CompileSuccess, Controller, DiagnosticView, Env, MeterTap, PersistedSettings, RescanProbe,
+    ScanDetails, StateDelta, TapSummary,
 };
 
 /// The runtime state of a single plugin instance.
@@ -64,7 +65,7 @@ pub struct PatchesClapPlugin {
     /// Taken out of [`HostRuntime`] at activate time so the CLAP audio
     /// callback can drive it.
     pub(crate) processor: Option<PatchProcessor>,
-    pub(crate) plan_rx: Option<rtrb::Consumer<ExecutionPlan>>,
+    pub(crate) plan_rx: Option<rtrb::Consumer<AdoptionMessage>>,
 
     // ── Main-thread state ───────────────────────────────────────────
     /// Owns the planner, plan-tx producer, cleanup thread and audio env.
@@ -322,9 +323,9 @@ unsafe extern "C" fn plugin_activate(
     // Immediately adopt any pending plan so audio starts right away.
     if !p.controller.dsl_source.is_empty() {
         if let Some(rx) = &mut p.plan_rx {
-            if let Ok(plan) = rx.pop() {
+            if let Ok((plan, meta)) = rx.pop() {
                 if let Some(proc) = &mut p.processor {
-                    proc.adopt_plan(plan);
+                    proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
                 }
             }
         }
@@ -349,6 +350,10 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     if let Some(obs) = p.observer.take() {
         obs.stop();
     }
+
+    // Lower to controller after audio-side teardown so the derived
+    // model (taps, registry, halt) matches the now-inert engine.
+    apply_action(p, Action::Deactivate);
 }
 
 unsafe extern "C" fn plugin_start_processing(_plugin: *const clap_plugin) -> bool {
@@ -403,9 +408,9 @@ unsafe extern "C" fn plugin_process(
 
     // Adopt any pending plan.
     if let Some(rx) = &mut p.plan_rx {
-        if let Ok(plan) = rx.pop() {
+        if let Ok((plan, meta)) = rx.pop() {
             dlog!("process: adopting plan, {} active modules", plan.active_indices.len());
-            proc.adopt_plan(plan);
+            proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
             // Reset counter so we log output levels after the new plan.
             PROCESS_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
         }
@@ -797,6 +802,18 @@ impl<'a> Env for ClapEnv<'a> {
         let details = scan_into_registry(paths, &mut registry, "");
         (registry, details)
     }
+    fn preset_path(&self, patch_stem: &str, preset_name: &str) -> Option<PathBuf> {
+        xdg_preset_path(patch_stem, preset_name)
+    }
+    fn list_presets(&mut self, patch_stem: &str) -> Vec<String> {
+        xdg_list_presets(patch_stem)
+    }
+    fn load_preset(&mut self, path: &Path) -> std::io::Result<Option<PersistedSettings>> {
+        xdg_load_preset(path)
+    }
+    fn save_preset(&mut self, path: &Path, settings: &PersistedSettings) -> std::io::Result<()> {
+        xdg_save_preset(path, settings)
+    }
 }
 
 fn scan_into_registry(
@@ -1041,9 +1058,9 @@ mod activate_scan_tests {
             // adopt the pending plan first.
             let tick_once = |p: &mut PatchesClapPlugin| {
                 if let Some(rx) = &mut p.plan_rx {
-                    if let Ok(plan) = rx.pop() {
+                    if let Ok((plan, meta)) = rx.pop() {
                         if let Some(proc) = &mut p.processor {
-                            proc.adopt_plan(plan);
+                            proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
                         }
                     }
                 }

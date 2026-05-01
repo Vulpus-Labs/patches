@@ -1,17 +1,19 @@
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use patches_core::{BASE_PERIODIC_UPDATE_INTERVAL, CablePool, Module};
 
 use patches_planner::ExecutionPlan;
 use crate::halt::{HaltState, NO_SLOT};
+use crate::monitor::{MonitorBlock, MonitorMessage, MonitorState};
 use crate::pool::ModulePool;
 
 /// Number of samples per MIDI sub-block.
 ///
 /// Every `SUB_BLOCK_SIZE` samples the audio callback drains the MIDI event
 /// queue and delivers pending events via the `GLOBAL_MIDI` backplane slot.
-pub const SUB_BLOCK_SIZE: u64 = 64;
+pub const SUB_BLOCK_SIZE: u64 = 16;
 
 // ── PtrArray ──────────────────────────────────────────────────────────────────
 
@@ -272,6 +274,123 @@ impl ReadyState {
             }
         }
         halt.clear_slot();
+    }
+
+    /// Process one sample with per-block CPU monitoring (ADR 0065 / ticket
+    /// 0779). Splits each phase into `0..sel`, `sel`, `sel+1..n` so the
+    /// untimed ranges retain the byte-identical inner loop while only the
+    /// selected slot pays a per-call branch (decimation gate).
+    ///
+    /// Pushes one [`MonitorBlock`] to `m.tx` at the end of every block; on
+    /// full ring the record is dropped silently.
+    #[allow(clippy::needless_range_loop)]
+    pub fn tick_monitored(&mut self, cable_pool: &mut CablePool<'_>, m: &mut MonitorState) {
+        // Block start: stamp time, reset accumulators, snap the round-robin
+        // selection against the *current* active/periodic counts.
+        if m.in_block_idx == 0 {
+            m.block_start = Some(Instant::now());
+            m.module_accum = Duration::ZERO;
+            m.module_samples_timed = 0;
+            m.periodic_accum = Duration::ZERO;
+            let an = self.active_modules.ptrs.len();
+            m.selected_active_idx = (an > 0).then(|| m.rr_cursor % an);
+            m.selected_module_slot = m
+                .selected_active_idx
+                .map(|i| self.active_slots[i])
+                .unwrap_or(usize::MAX);
+            let pn = self.periodic_modules.ptrs.len();
+            m.selected_periodic_idx = (pn > 0).then(|| m.rr_cursor % pn);
+        }
+
+        // Periodic phase, split if due. The selected periodic module is
+        // bracketed each firing; others run untimed.
+        if self.sample_counter == 0 {
+            let halt = &self.halt;
+            let slots = &self.periodic_slots;
+            let n = self.periodic_modules.ptrs.len();
+            let psel = m.selected_periodic_idx;
+            let (lo, hi) = match psel {
+                Some(s) => (s, s + 1),
+                None => (n, n),
+            };
+            // SAFETY: pointer arrays were populated by rebuild() before this
+            // ReadyState was created.
+            unsafe {
+                for i in 0..lo {
+                    halt.mark_slot(slots[i]);
+                    (&mut *self.periodic_modules.ptrs[i].as_ptr()).periodic_update(cable_pool);
+                }
+                if let Some(s) = psel {
+                    halt.mark_slot(slots[s]);
+                    let t0 = Instant::now();
+                    (&mut *self.periodic_modules.ptrs[s].as_ptr()).periodic_update(cable_pool);
+                    m.periodic_accum += t0.elapsed();
+                }
+                for i in hi..n {
+                    halt.mark_slot(slots[i]);
+                    (&mut *self.periodic_modules.ptrs[i].as_ptr()).periodic_update(cable_pool);
+                }
+            }
+            halt.clear_slot();
+        }
+        self.sample_counter = (self.sample_counter + 1) & (self.periodic_update_interval - 1);
+
+        // Active phase, split. The selected slot is bracketed only every Kth
+        // sample within the block.
+        let halt = &self.halt;
+        let slots = &self.active_slots;
+        let n = self.active_modules.ptrs.len();
+        let asel = m.selected_active_idx;
+        let timed_now = asel.is_some() && m.in_block_idx.is_multiple_of(m.decimation_k);
+        let (lo, hi) = match asel {
+            Some(s) => (s, s + 1),
+            None => (n, n),
+        };
+        // SAFETY: pointer arrays were populated by rebuild().
+        unsafe {
+            for i in 0..lo {
+                halt.mark_slot(slots[i]);
+                (&mut *self.active_modules.ptrs[i].as_ptr()).process(cable_pool);
+            }
+            if let Some(s) = asel {
+                halt.mark_slot(slots[s]);
+                if timed_now {
+                    let t0 = Instant::now();
+                    (&mut *self.active_modules.ptrs[s].as_ptr()).process(cable_pool);
+                    m.module_accum += t0.elapsed();
+                    m.module_samples_timed += 1;
+                } else {
+                    (&mut *self.active_modules.ptrs[s].as_ptr()).process(cable_pool);
+                }
+            }
+            for i in hi..n {
+                halt.mark_slot(slots[i]);
+                (&mut *self.active_modules.ptrs[i].as_ptr()).process(cable_pool);
+            }
+        }
+        halt.clear_slot();
+
+        // Block boundary: emit one record (drop on full) and roll RR cursor.
+        m.in_block_idx += 1;
+        if m.in_block_idx >= m.block_samples {
+            let block_dur = m
+                .block_start
+                .take()
+                .map(|t| t.elapsed())
+                .unwrap_or(Duration::ZERO);
+            let rec = MonitorBlock {
+                block_duration: block_dur,
+                periodic_duration: m.periodic_accum,
+                module_slot: m.selected_module_slot,
+                module_accum: m.module_accum,
+                module_samples_timed: m.module_samples_timed,
+                block_samples: m.block_samples,
+            };
+            // Drop silently on full — audio thread must not block.
+            let _ = m.tx.push(MonitorMessage::Block(rec));
+            m.in_block_idx = 0;
+            m.rr_cursor = m.rr_cursor.wrapping_add(1);
+        }
     }
 
     /// Shared halt state — cloned into the processor for post-panic recording

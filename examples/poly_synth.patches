@@ -101,6 +101,7 @@ patch {
         dry_wet: 0.5
         size: 1.0
         decay: 0.8
+        damping: 0.8
     }
 
     

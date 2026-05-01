@@ -398,6 +398,9 @@ mod tests {
             Ok(CleanupAction::DropParamFrame(_)) => {
                 panic!("expected DropPlan, got DropParamFrame")
             }
+            Ok(CleanupAction::DropPlanMeta(_)) => {
+                panic!("expected DropPlan, got DropPlanMeta")
+            }
             Err(_) => panic!("expected a DropPlan action on the cleanup ring buffer"),
         }
     }
