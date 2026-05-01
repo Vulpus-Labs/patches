@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build Windows binary
+    name: Build Windows binaries
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,44 +20,127 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Build patch_player
-        run: cargo build --release -p patches-player
+      - name: Build patch_player, CLAP plugin, vintage dylib
+        run: |
+          cargo build --release -p patches-player
+          cargo build --release -p patches-clap
+          cargo build --release -p patches-vintage
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/release/patch_player.exe staging/
+          cp target/release/patches_clap.dll staging/Patches.clap
+          cp target/release/patches_vintage.dll staging/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-windows-x86_64
-          path: target/release/patch_player.exe
+          path: staging/*
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS binary (${{ matrix.target }})
-    runs-on: macos-latest
+    name: Build macOS binaries (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        target:
-          - aarch64-apple-darwin
-          - x86_64-apple-darwin
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-13
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
+      - name: Build patch_player, CLAP plugin, vintage dylib
+        run: |
+          cargo build --release -p patches-player --target ${{ matrix.target }}
+          cargo build --release -p patches-clap   --target ${{ matrix.target }}
+          cargo build --release -p patches-vintage --target ${{ matrix.target }}
 
-      - name: Build patch_player
-        run: cargo build --release -p patches-player --target ${{ matrix.target }}
-
-      - name: Ad-hoc sign binary
-        run: codesign --sign - target/${{ matrix.target }}/release/patch_player
+      - name: Stage and ad-hoc sign
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/patch_player           staging/
+          cp target/${{ matrix.target }}/release/libpatches_clap.dylib  staging/Patches.clap
+          cp target/${{ matrix.target }}/release/libpatches_vintage.dylib staging/
+          codesign --sign - staging/patch_player
+          codesign --sign - staging/Patches.clap
+          codesign --sign - staging/libpatches_vintage.dylib
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-macos-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/patch_player
+          path: staging/*
+          if-no-files-found: error
+
+  build-vsix:
+    name: Build VSIX (${{ matrix.vscode-target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - vscode-target: darwin-arm64
+            cargo-target: aarch64-apple-darwin
+            runner: macos-latest
+            binary: patches-lsp
+          - vscode-target: darwin-x64
+            cargo-target: x86_64-apple-darwin
+            runner: macos-13
+            binary: patches-lsp
+          - vscode-target: win32-x64
+            cargo-target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            binary: patches-lsp.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.cargo-target }}
+
+      - name: Build patches-lsp
+        run: cargo build --release -p patches-lsp --target ${{ matrix.cargo-target }}
+
+      - name: Ad-hoc sign binary (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --sign - target/${{ matrix.cargo-target }}/release/${{ matrix.binary }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Prepare extension
+        working-directory: patches-vscode
+        run: |
+          npm ci --ignore-scripts
+          npx tsc -p ./
+
+      - name: Copy LSP binary into extension
+        shell: bash
+        run: |
+          mkdir -p patches-vscode/server
+          cp target/${{ matrix.cargo-target }}/release/${{ matrix.binary }} patches-vscode/server/
+
+      - name: Package VSIX
+        working-directory: patches-vscode
+        run: npx @vscode/vsce package --target ${{ matrix.vscode-target }} -o ../
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vscode-target }}
+          path: "*.vsix"
           if-no-files-found: error
 
   build-docs:
@@ -83,9 +166,6 @@ jobs:
         working-directory: docs
         run: mdbook build
 
-      - name: List build output
-        run: find docs/book -type f | sort
-
       - name: Upload PDF artifact
         uses: actions/upload-artifact@v4
         with:
@@ -95,7 +175,7 @@ jobs:
 
   package-and-release:
     name: Package and publish release
-    needs: [build-windows, build-macos, build-docs]
+    needs: [build-windows, build-macos, build-vsix, build-docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,32 +189,44 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
+          set -e
           VERSION_BARE="${VERSION#v}"
+
+          stage_common() {
+            local DIR="$1"
+            mkdir -p "${DIR}/examples"
+            cp artifacts/release-docs-pdf/patches-manual.pdf "${DIR}/"
+            cp -r examples/* "${DIR}/examples/"
+          }
 
           # Windows zip
           WIN_DIR="patches-${VERSION_BARE}-windows-x86_64"
-          mkdir -p "${WIN_DIR}/examples"
-          cp artifacts/release-windows-x86_64/patch_player.exe "${WIN_DIR}/"
-          cp artifacts/release-docs-pdf/patches-manual.pdf "${WIN_DIR}/"
-          cp -r examples/* "${WIN_DIR}/examples/"
+          mkdir -p "${WIN_DIR}"
+          cp artifacts/release-windows-x86_64/* "${WIN_DIR}/"
+          cp artifacts/vsix-win32-x64/*.vsix "${WIN_DIR}/" || true
+          stage_common "${WIN_DIR}"
           zip -r "${WIN_DIR}.zip" "${WIN_DIR}"
 
-          # macOS aarch64 tarball
+          # macOS aarch64
           MAC_ARM_DIR="patches-${VERSION_BARE}-macos-aarch64"
-          mkdir -p "${MAC_ARM_DIR}/examples"
-          cp artifacts/release-macos-aarch64-apple-darwin/patch_player "${MAC_ARM_DIR}/"
+          mkdir -p "${MAC_ARM_DIR}"
+          cp -R artifacts/release-macos-aarch64-apple-darwin/* "${MAC_ARM_DIR}/"
           chmod +x "${MAC_ARM_DIR}/patch_player"
-          cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_ARM_DIR}/"
-          cp -r examples/* "${MAC_ARM_DIR}/examples/"
+          cp artifacts/vsix-darwin-arm64/*.vsix "${MAC_ARM_DIR}/" || true
+          cp scripts/macos-unquarantine.sh "${MAC_ARM_DIR}/"
+          chmod +x "${MAC_ARM_DIR}/macos-unquarantine.sh"
+          stage_common "${MAC_ARM_DIR}"
           tar -czf "${MAC_ARM_DIR}.tar.gz" "${MAC_ARM_DIR}"
 
-          # macOS x86_64 tarball
+          # macOS x86_64
           MAC_X64_DIR="patches-${VERSION_BARE}-macos-x86_64"
-          mkdir -p "${MAC_X64_DIR}/examples"
-          cp artifacts/release-macos-x86_64-apple-darwin/patch_player "${MAC_X64_DIR}/"
+          mkdir -p "${MAC_X64_DIR}"
+          cp -R artifacts/release-macos-x86_64-apple-darwin/* "${MAC_X64_DIR}/"
           chmod +x "${MAC_X64_DIR}/patch_player"
-          cp artifacts/release-docs-pdf/patches-manual.pdf "${MAC_X64_DIR}/"
-          cp -r examples/* "${MAC_X64_DIR}/examples/"
+          cp artifacts/vsix-darwin-x64/*.vsix "${MAC_X64_DIR}/" || true
+          cp scripts/macos-unquarantine.sh "${MAC_X64_DIR}/"
+          chmod +x "${MAC_X64_DIR}/macos-unquarantine.sh"
+          stage_common "${MAC_X64_DIR}"
           tar -czf "${MAC_X64_DIR}.tar.gz" "${MAC_X64_DIR}"
 
       - name: Create GitHub Release
