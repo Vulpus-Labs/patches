@@ -20,15 +20,31 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Build patch_player, CLAP plugin, vintage dylib
-        run: |
-          cargo build --release -p patches-player
-          cargo build --release -p patches-clap
-          cargo build --release -p patches-vintage
+      - name: Setup Node.js (for patches-clap JS bundle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build patch_player
+        shell: bash
+        run: cargo build --release -p patches-player
+
+      - name: Build CLAP plugin
+        shell: bash
+        run: cargo build --release -p patches-clap
+
+      - name: Build vintage dylib
+        shell: bash
+        run: cargo build --release -p patches-vintage
+
+      - name: List target/release
+        shell: bash
+        run: ls -la target/release/
 
       - name: Stage artifacts
         shell: bash
         run: |
+          set -e
           mkdir -p staging
           cp target/release/patch_player.exe staging/
           cp target/release/patches_clap.dll staging/Patches.clap
@@ -58,6 +74,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Setup Node.js (for patches-clap JS bundle)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Build patch_player, CLAP plugin, vintage dylib
         run: |
