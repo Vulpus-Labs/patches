@@ -215,11 +215,11 @@ pub enum SpectrumMode {
 impl Tab {
     pub fn next(self) -> Self {
         match self {
+            Tab::Events => Tab::Meters,
             Tab::Meters => Tab::Spectrum,
             Tab::Spectrum => Tab::Scope,
-            Tab::Scope => Tab::Events,
-            Tab::Events => Tab::Cpu,
-            Tab::Cpu => Tab::Meters,
+            Tab::Scope => Tab::Cpu,
+            Tab::Cpu => Tab::Events,
         }
     }
     pub fn label(self) -> &'static str {
@@ -1493,7 +1493,7 @@ fn draw_cpu(f: &mut Frame, area: Rect, view: &View) {
 
 fn draw_tabs(f: &mut Frame, area: Rect, view: &View) {
     let mut tabs_present: Vec<Tab> =
-        vec![Tab::Meters, Tab::Spectrum, Tab::Scope, Tab::Events];
+        vec![Tab::Events, Tab::Meters, Tab::Spectrum, Tab::Scope];
     if view.cpu_snapshot.is_some() {
         tabs_present.push(Tab::Cpu);
     }
@@ -1579,10 +1579,10 @@ pub fn run<F: FnMut(&mut View)>(
                             }
                             Tab::Spectrum | Tab::Scope | Tab::Cpu => {}
                         },
-                        KeyCode::Char('1') => view.tab = Tab::Meters,
-                        KeyCode::Char('2') => view.tab = Tab::Spectrum,
-                        KeyCode::Char('3') => view.tab = Tab::Scope,
-                        KeyCode::Char('4') => view.tab = Tab::Events,
+                        KeyCode::Char('1') => view.tab = Tab::Events,
+                        KeyCode::Char('2') => view.tab = Tab::Meters,
+                        KeyCode::Char('3') => view.tab = Tab::Spectrum,
+                        KeyCode::Char('4') => view.tab = Tab::Scope,
                         KeyCode::Char('5') => {
                             if view.cpu_snapshot.is_some() {
                                 view.tab = Tab::Cpu;
@@ -1838,18 +1838,18 @@ mod tests {
     }
 
     #[test]
-    fn tab_cycles_meters_spectrum_scope_and_back() {
-        let mut t = Tab::Meters;
+    fn tab_cycles_events_first() {
+        let mut t = Tab::Events;
+        t = t.next();
+        assert_eq!(t, Tab::Meters);
         t = t.next();
         assert_eq!(t, Tab::Spectrum);
         t = t.next();
         assert_eq!(t, Tab::Scope);
         t = t.next();
-        assert_eq!(t, Tab::Events);
-        t = t.next();
         assert_eq!(t, Tab::Cpu);
         t = t.next();
-        assert_eq!(t, Tab::Meters);
+        assert_eq!(t, Tab::Events);
     }
 
     #[test]
