@@ -94,11 +94,14 @@ patch {
     }
     module player: PatternPlayer([ch])
     module t2a: SyncToTrigger
+    module join: StereoJoiner
     module out: AudioOut
 
     seq.clock[c] -> player.clock
-    player.cv1[ch] -> out.in
     player.trigger[ch] -> t2a.in
+    player.cv1[ch] -> join.in_left
+    t2a.out -> join.in_right
+    join.out -> out.in
 }
 "#;
     let mut engine = build_engine(src);
