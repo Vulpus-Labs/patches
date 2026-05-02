@@ -22,11 +22,13 @@ use crate::shape_render::{module_shape_from_args, render_indexed_ports, render_s
 /// intersects `range`. Requires `flat` + `references` (cached pipeline
 /// artifact) and the registry so port descriptors can be rendered with
 /// the concrete shape.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_inlay_hints(
     uri: &Url,
     range: Range,
     flat: &FlatPatch,
     references: &PatchReferences,
+    source: &str,
     source_map: &SourceMap,
     line_index: &[usize],
     registry: &Registry,
@@ -35,8 +37,8 @@ pub(crate) fn compute_inlay_hints(
         return Vec::new();
     };
 
-    let visible_start = position_to_byte_offset(line_index, range.start);
-    let visible_end = position_to_byte_offset(line_index, range.end);
+    let visible_start = position_to_byte_offset(source, line_index, range.start);
+    let visible_end = position_to_byte_offset(source, line_index, range.end);
 
     let mut hints = Vec::new();
     for (call_span, tref) in &references.template_by_call_site {
@@ -54,7 +56,7 @@ pub(crate) fn compute_inlay_hints(
         };
         let _ = tref; // template name retained for future richer labels
 
-        let position = byte_offset_to_position(line_index, call_span.end);
+        let position = byte_offset_to_position(source, line_index, call_span.end);
         hints.push(InlayHint {
             position,
             label: InlayHintLabel::String(format!(" {{{label}}}")),
@@ -136,8 +138,8 @@ fn build_hint_label(
     }
 }
 
-fn position_to_byte_offset(line_index: &[usize], pos: Position) -> usize {
-    crate::lsp_util::position_to_byte_offset(line_index, pos)
+fn position_to_byte_offset(source: &str, line_index: &[usize], pos: Position) -> usize {
+    crate::lsp_util::position_to_byte_offset(source, line_index, pos)
 }
 
 // Keep these re-exports used even if render paths change.

@@ -25,8 +25,8 @@ fn hz_to_voct(hz: f32) -> f32 {
 
 fn simple_graph(freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    let osc_desc = Oscillator::describe(&ModuleShape { channels: 0 });
-    let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+    let osc_desc = Oscillator::describe(&ModuleShape::default());
+    let out_desc = AudioOut::describe(&ModuleShape::default());
     let mut pm = ParameterMap::new();
     pm.insert("frequency".to_string(), ParameterValue::Float(freq));
     graph.add_module("osc", osc_desc, &pm).unwrap();
@@ -77,8 +77,8 @@ impl Module for Counter {
 }
 
 fn counter_graph() -> ModuleGraph {
-    let counter_desc = Counter::describe(&ModuleShape { channels: 0 });
-    let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+    let counter_desc = Counter::describe(&ModuleShape::default());
+    let out_desc = AudioOut::describe(&ModuleShape::default());
     let mut g = ModuleGraph::new();
     g.add_module("counter", counter_desc, &ParameterMap::new()).unwrap();
     g.add_module("out", out_desc, &ParameterMap::new()).unwrap();

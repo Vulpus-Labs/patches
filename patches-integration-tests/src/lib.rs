@@ -100,7 +100,7 @@ impl Module for ImpulseSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "ImpulseSource",
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             realtime_params: vec![],
@@ -141,7 +141,7 @@ const CONST_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
 
 impl Module for ConstSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ConstSource", ModuleShape { channels: 0 })
+        ModuleDescriptor::new("ConstSource", ModuleShape::default())
             .mono_out("out")
             .float_param(CONST_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
     }
@@ -184,7 +184,7 @@ const SINE_SOURCE_FREQ_HZ:   FloatParamName = FloatParamName::new("freq_hz");
 
 impl Module for SineSource {
     fn describe(_: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("SineSource", ModuleShape { channels: 0 })
+        ModuleDescriptor::new("SineSource", ModuleShape::default())
             .mono_out("out")
             .float_param(SINE_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
             .float_param(SINE_SOURCE_FREQ_HZ, 0.0, 24_000.0, 1_000.0)

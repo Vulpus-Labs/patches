@@ -20,13 +20,13 @@
 //! - Shape argument validation (delegated to `Registry::describe`).
 //! - Parameter name/type/range validation (via [`crate::convert_params`]).
 //! - Connection port existence on both endpoints.
-//! - Cable kind and poly-layout agreement.
+//! - Cable kind, poly-layout, and mono-layout agreement.
+//! - Cable-map scale range (`[-10.0, 10.0]`).
 //! - Orphan port-ref existence against the resolved descriptor.
 //!
 //! Concerns that stay in [`crate::build`]:
 //!
 //! - Module instantiation (needs [`AudioEnvironment`](patches_core::AudioEnvironment)).
-//! - Scale-range validation (graph state).
 //! - Song/pattern shape checks, MasterSequencer song references.
 //! - Relative file-path resolution against the patch's base dir.
 //!

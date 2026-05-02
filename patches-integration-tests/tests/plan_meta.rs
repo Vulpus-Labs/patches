@@ -10,8 +10,8 @@ fn osc_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(freq));
-    graph.add_module(osc_id, Oscillator::describe(&ModuleShape { channels: 0 }), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module(osc_id, Oscillator::describe(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -92,7 +92,7 @@ fn meta_tracks_renames_removals_and_additions_across_reloads() {
     let mut graph_c = osc_out_graph("osc_b", 2.0);
     let mut p_c = ParameterMap::new();
     p_c.insert("frequency".to_string(), ParameterValue::Float(3.0));
-    graph_c.add_module("osc_c", Oscillator::describe(&ModuleShape { channels: 0 }), &p_c).unwrap();
+    graph_c.add_module("osc_c", Oscillator::describe(&ModuleShape::default()), &p_c).unwrap();
     graph_c
         .connect(&NodeId::from("osc_c"), p("sine"), &NodeId::from("out"), p("in"), 0.0)
         .unwrap_err(); // input already connected; ignore — only need the node added

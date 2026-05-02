@@ -140,9 +140,20 @@ impl ParameterDescriptor {
 /// port counts and identity hash. Construction-time knobs that don't shape
 /// the descriptor (former `length`, `high_quality`) live in
 /// `structural_params` on the modules that consume them.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModuleShape {
     pub channels: usize,
+}
+
+impl Default for ModuleShape {
+    /// `channels = 1`. Modules with `*_multi` port families use this as
+    /// the implicit count when the DSL omits a shape arg, so a default
+    /// shape still surfaces one entry per family (hover, descriptor
+    /// lookup, completions). Use `ModuleShape { channels: N }` directly
+    /// for higher counts.
+    fn default() -> Self {
+        Self { channels: 1 }
+    }
 }
 
 /// Describes the full layout of a module.

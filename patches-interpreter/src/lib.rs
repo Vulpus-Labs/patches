@@ -203,17 +203,17 @@ pub fn build_from_bound(
 /// silently ignored (the registry's `describe` implementation is responsible
 /// for validating shape semantics).
 pub(crate) fn shape_from_args(args: &[(String, Scalar)]) -> patches_core::ModuleShape {
-    let mut channels = 0usize;
+    let mut shape = patches_core::ModuleShape::default();
     for (name, scalar) in args {
         if name.as_str() == "channels" {
             if let Scalar::Int(n) = scalar {
-                channels = *n as usize;
+                shape.channels = *n as usize;
             }
         }
         // Other keys (former `length`, `high_quality`) are now structural
         // params and travel via the params block (ADR 0060, ticket 0738).
     }
-    patches_core::ModuleShape { channels }
+    shape
 }
 
 /// Format a single `port[alias]` (when alias known) or `port/index` label.

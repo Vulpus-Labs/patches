@@ -24,9 +24,9 @@ fn node_text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
     &source[node.start_byte()..node.end_byte()]
 }
 
-fn node_range(node: Node<'_>, line_starts: &[usize]) -> Range {
-    let start = byte_offset_to_position(line_starts, node.start_byte());
-    let end = byte_offset_to_position(line_starts, node.end_byte());
+fn node_range(node: Node<'_>, source: &str, line_starts: &[usize]) -> Range {
+    let start = byte_offset_to_position(source, line_starts, node.start_byte());
+    let end = byte_offset_to_position(source, line_starts, node.end_byte());
     Range::new(start, end)
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn hover_for_tap_type(
             kind: MarkupKind::Markdown,
             value: s,
         }),
-        range: Some(node_range(node, line_starts)),
+        range: Some(node_range(node, source, line_starts)),
     })
 }
 
@@ -79,7 +79,7 @@ pub(crate) fn hover_for_tap_name(
             kind: MarkupKind::Markdown,
             value: s,
         }),
-        range: Some(node_range(name_node, line_starts)),
+        range: Some(node_range(name_node, source, line_starts)),
     })
 }
 

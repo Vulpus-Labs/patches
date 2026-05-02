@@ -11,9 +11,9 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
     // Graph A: two sines → AudioOut
     let mut graph_a = ModuleGraph::new();
     {
-        let sine_a = Oscillator::describe(&ModuleShape { channels: 0 });
-        let sine_b = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+        let sine_a = Oscillator::describe(&ModuleShape::default());
+        let sine_b = Oscillator::describe(&ModuleShape::default());
+        let out_desc = AudioOut::describe(&ModuleShape::default());
         let mut pa = ParameterMap::new();
         pa.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         let mut pb = ParameterMap::new();
@@ -34,8 +34,8 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
     // Graph B: only sine_a (sine_b removed)
     let mut graph_b = ModuleGraph::new();
     {
-        let sine_a = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+        let sine_a = Oscillator::describe(&ModuleShape::default());
+        let out_desc = AudioOut::describe(&ModuleShape::default());
         let mut pa = ParameterMap::new();
         pa.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_b.add_module("sine_a", sine_a, &pa).unwrap();
@@ -75,8 +75,8 @@ fn parameter_only_change_produces_parameter_updates_no_new_modules() {
     // Rebuild with same topology but different frequency.
     let mut graph_b = ModuleGraph::new();
     {
-        let sine_desc = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+        let sine_desc = Oscillator::describe(&ModuleShape::default());
+        let out_desc = AudioOut::describe(&ModuleShape::default());
         let mut sine_params = ParameterMap::new();
         sine_params.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(880.0)));
         graph_b.add_module("a_sine", sine_desc, &sine_params).unwrap();
@@ -140,9 +140,9 @@ fn topology_change_and_parameter_diff_coexist() {
     // Graph A: sine_a (440 Hz) + sine_b (880 Hz) → AudioOut.
     let mut graph_a = ModuleGraph::new();
     {
-        let s_a = Oscillator::describe(&ModuleShape { channels: 0 });
-        let s_b = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out = AudioOut::describe(&ModuleShape { channels: 0 });
+        let s_a = Oscillator::describe(&ModuleShape::default());
+        let s_b = Oscillator::describe(&ModuleShape::default());
+        let out = AudioOut::describe(&ModuleShape::default());
         let mut pa = ParameterMap::new();
         pa.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         let mut pb = ParameterMap::new();
@@ -161,9 +161,9 @@ fn topology_change_and_parameter_diff_coexist() {
     // Graph B: sine_a (changed to 660 Hz) + new sine_c (1000 Hz), sine_b removed.
     let mut graph_b = ModuleGraph::new();
     {
-        let s_a = Oscillator::describe(&ModuleShape { channels: 0 });
-        let s_c = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out = AudioOut::describe(&ModuleShape { channels: 0 });
+        let s_a = Oscillator::describe(&ModuleShape::default());
+        let s_c = Oscillator::describe(&ModuleShape::default());
+        let out = AudioOut::describe(&ModuleShape::default());
         let mut pa = ParameterMap::new();
         pa.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(660.0)));
         let mut pc = ParameterMap::new();

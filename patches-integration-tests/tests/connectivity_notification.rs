@@ -29,10 +29,10 @@ fn make_registry() -> Registry {
 fn probe_to_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph
-        .add_module("probe", Tuner::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("probe", Tuner::describe(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in"), 1.0)
@@ -47,13 +47,13 @@ fn probe_with_input_graph() -> ModuleGraph {
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
-        .add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &params)
+        .add_module("osc", Oscillator::describe(&ModuleShape::default()), &params)
         .unwrap();
     graph
-        .add_module("probe", Tuner::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("probe", Tuner::describe(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new())
+        .add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("in"), 1.0)

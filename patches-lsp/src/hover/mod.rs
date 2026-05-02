@@ -66,6 +66,7 @@ pub(crate) fn compute_hover(
 /// an authored region whose expansion produced no nodes (empty template body,
 /// etc.). The caller falls back to the tolerant tree-sitter hover in those
 /// cases.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_expansion_hover(
     uri: &Url,
     byte_offset: usize,
@@ -73,6 +74,7 @@ pub(crate) fn compute_expansion_hover(
     bound: &BoundPatch,
     references: &PatchReferences,
     source_map: &SourceMap,
+    source: &str,
     line_index: &[usize],
 ) -> Option<Hover> {
     let source_id = source_id_for_uri(source_map, uri)?;
@@ -80,7 +82,9 @@ pub(crate) fn compute_expansion_hover(
     // A call-site hit beats a definition-site hit: hovering on `module v :
     // voice` (the call site) should show the expansion, not the template
     // signature — the tolerant hover already covers the signature.
-    if let Some(h) = hover_at_call_site(source_id, byte_offset, flat, references, line_index) {
+    if let Some(h) =
+        hover_at_call_site(source_id, byte_offset, flat, references, source, line_index)
+    {
         return Some(h);
     }
 
@@ -88,7 +92,7 @@ pub(crate) fn compute_expansion_hover(
     match node {
         FlatNodeRef::Module(i) => {
             let m = flat.modules.get(i)?;
-            Some(hover_for_module(m, bound, line_index))
+            Some(hover_for_module(m, bound, source, line_index))
         }
         FlatNodeRef::Connection(i) => {
             let anchor = flat.connections.get(i)?;
@@ -96,12 +100,13 @@ pub(crate) fn compute_expansion_hover(
                 flat,
                 references,
                 anchor,
+                source,
                 line_index,
             ))
         }
         FlatNodeRef::PortRef(i) => {
             let p = flat.port_refs.get(i)?;
-            Some(hover_for_port_ref(p, line_index))
+            Some(hover_for_port_ref(p, source, line_index))
         }
         FlatNodeRef::Pattern(_) | FlatNodeRef::Song(_) => None,
     }
@@ -114,6 +119,7 @@ fn hover_for_connection_group(
     flat: &FlatPatch,
     references: &PatchReferences,
     anchor: &FlatConnection,
+    source: &str,
     line_starts: &[usize],
 ) -> Hover {
     let span = anchor.provenance.site;
@@ -146,7 +152,7 @@ fn hover_for_connection_group(
             kind: MarkupKind::Markdown,
             value: lines.join("\n"),
         }),
-        range: Some(span_to_range(&span, line_starts)),
+        range: Some(span_to_range(&span, source, line_starts)),
     }
 }
 
@@ -189,15 +195,19 @@ pub(super) fn span_len(s: &CoreSpan) -> usize {
     s.end.saturating_sub(s.start)
 }
 
-pub(super) fn span_to_range(span: &CoreSpan, line_starts: &[usize]) -> Range {
-    let start = byte_offset_to_position(line_starts, span.start);
-    let end = byte_offset_to_position(line_starts, span.end);
+pub(super) fn span_to_range(span: &CoreSpan, source: &str, line_starts: &[usize]) -> Range {
+    let start = byte_offset_to_position(source, line_starts, span.start);
+    let end = byte_offset_to_position(source, line_starts, span.end);
     Range::new(start, end)
 }
 
-pub(super) fn node_to_range(node: tree_sitter::Node, line_starts: &[usize]) -> Range {
-    let start = byte_offset_to_position(line_starts, node.start_byte());
-    let end = byte_offset_to_position(line_starts, node.end_byte());
+pub(super) fn node_to_range(
+    node: tree_sitter::Node,
+    source: &str,
+    line_starts: &[usize],
+) -> Range {
+    let start = byte_offset_to_position(source, line_starts, node.start_byte());
+    let end = byte_offset_to_position(source, line_starts, node.end_byte());
     Range::new(start, end)
 }
 

@@ -28,7 +28,7 @@ impl PanicOnProcess {
             id: InstanceId::next(),
             desc: ModuleDescriptor {
                 module_name: Self::NAME,
-                shape: ModuleShape { channels: 0 },
+                shape: ModuleShape::default(),
                 inputs: vec![],
                 outputs: vec![],
                 realtime_params: vec![],
@@ -62,7 +62,7 @@ impl PanicOnPeriodic {
             id: InstanceId::next(),
             desc: ModuleDescriptor {
                 module_name: Self::NAME,
-                shape: ModuleShape { channels: 0 },
+                shape: ModuleShape::default(),
                 inputs: vec![],
                 outputs: vec![],
                 realtime_params: vec![],
@@ -93,7 +93,7 @@ fn empty_param_state(name: &'static str) -> ParamState {
     ParamState::new_for_descriptor(
         &ModuleDescriptor {
             module_name: name,
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![],
             outputs: vec![],
             realtime_params: vec![],

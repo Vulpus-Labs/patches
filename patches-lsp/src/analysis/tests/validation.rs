@@ -9,7 +9,7 @@ fn valid_patch_zero_diagnostics() {
 patch {
 module osc : Osc
 module out : AudioOut
-osc.sine -> out.in_left
+osc.sine -> out.in
 }
 "#,
     );
@@ -204,7 +204,7 @@ fn unknown_output_port() {
 patch {
 module osc : Osc
 module out : AudioOut
-osc.nonexistent_port -> out.in_left
+osc.nonexistent_port -> out.in
 }
 "#,
     );
@@ -230,7 +230,7 @@ module seq : MasterSequencer([bass, drums]) {
     drums: x.x.x.x.x.x.x.x.
 }
 module out : AudioOut
-seq.cock -> out.in_left
+seq.cock -> out.in
 }
 "#,
     );
@@ -280,7 +280,7 @@ module osc : Osc
 patch {
 module v : voice
 module out : AudioOut
-v.audio -> out.in_left
+v.audio -> out.in
 }
 "#,
     );

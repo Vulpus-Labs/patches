@@ -10,8 +10,8 @@ fn sine_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(freq));
-    graph.add_module(osc_id, Oscillator::describe(&ModuleShape { channels: 0 }), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module(osc_id, Oscillator::describe(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -23,10 +23,10 @@ fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
     pa.insert("frequency".to_string(), ParameterValue::Float(freq_a));
     let mut pb = ParameterMap::new();
     pb.insert("frequency".to_string(), ParameterValue::Float(freq_b));
-    graph.add_module("osc_a", Oscillator::describe(&ModuleShape { channels: 0 }), &pa).unwrap();
-    graph.add_module("osc_b", Oscillator::describe(&ModuleShape { channels: 0 }), &pb).unwrap();
+    graph.add_module("osc_a", Oscillator::describe(&ModuleShape::default()), &pa).unwrap();
+    graph.add_module("osc_b", Oscillator::describe(&ModuleShape::default()), &pb).unwrap();
     graph.add_module("mix", Sum::describe(&ModuleShape { channels: 2 }), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from("osc_a"), p("sine"), &NodeId::from("mix"), pi("in", 0), 1.0).unwrap();
     graph.connect(&NodeId::from("osc_b"), p("sine"), &NodeId::from("mix"), pi("in", 1), 1.0).unwrap();
     graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -37,7 +37,7 @@ fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
 fn sum_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph.add_module("osc", Sum::describe(&ModuleShape { channels: 1 }), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -436,7 +436,7 @@ fn shape_change_forces_re_instantiation() {
     ).unwrap();
     graph_a.add_module(
         "out",
-        AudioOut::describe(&ModuleShape { channels: 0 }),
+        AudioOut::describe(&ModuleShape::default()),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.connect(
@@ -463,7 +463,7 @@ fn shape_change_forces_re_instantiation() {
     ).unwrap();
     graph_b.add_module(
         "out",
-        AudioOut::describe(&ModuleShape { channels: 0 }),
+        AudioOut::describe(&ModuleShape::default()),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.connect(

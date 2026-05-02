@@ -61,7 +61,7 @@ fn env_sr() -> AudioEnvironment {
 }
 
 fn shape() -> ModuleShape {
-    ModuleShape { channels: 0 }
+    ModuleShape::default()
 }
 
 fn params_freq(v: f32) -> ParameterMap {

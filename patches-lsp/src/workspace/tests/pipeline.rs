@@ -15,7 +15,7 @@ fn staged_clean_patch_emits_no_pipeline_codes() {
     // Nothing else can trigger an unused-output (SG0001) warning.
     tmp.write(
         "a.patches",
-        "patch {\n    module v : Vca\n    module out : AudioOut\n    v.out -> out.in_left\n    v.out -> out.in_right\n}\n",
+        "patch {\n    module v : Vca\n    module out : AudioOut\n    v.out -> out.in\n}\n",
     );
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");

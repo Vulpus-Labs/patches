@@ -53,10 +53,10 @@ impl DocumentWorkspace {
         let model = analysis::analyse_with_env(&file, &self.registry_read(), &env);
 
         let mut root_diags: Vec<Diagnostic> =
-            lsp_util::syntax_to_lsp_diagnostics(&line_index, &syntax_diags);
+            lsp_util::syntax_to_lsp_diagnostics(&source, &line_index, &syntax_diags);
         root_diags.extend(include_diags.into_iter().map(|(span, msg)| {
-            let start = lsp_util::byte_offset_to_position(&line_index, span.start);
-            let end = lsp_util::byte_offset_to_position(&line_index, span.end);
+            let start = lsp_util::byte_offset_to_position(&source, &line_index, span.start);
+            let end = lsp_util::byte_offset_to_position(&source, &line_index, span.end);
             Diagnostic {
                 range: Range::new(start, end),
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -129,10 +129,11 @@ impl DocumentWorkspace {
         let env = collect_external_templates(state, uri);
         let model = analysis::analyse_with_env(&file, &self.registry_read(), &env);
 
-        let mut root_diags = lsp_util::syntax_to_lsp_diagnostics(&line_index, &syntax_diags);
+        let mut root_diags =
+            lsp_util::syntax_to_lsp_diagnostics(&source, &line_index, &syntax_diags);
         root_diags.extend(include_diags.into_iter().map(|(span, msg)| {
-            let start = lsp_util::byte_offset_to_position(&line_index, span.start);
-            let end = lsp_util::byte_offset_to_position(&line_index, span.end);
+            let start = lsp_util::byte_offset_to_position(&source, &line_index, span.start);
+            let end = lsp_util::byte_offset_to_position(&source, &line_index, span.end);
             Diagnostic {
                 range: Range::new(start, end),
                 severity: Some(DiagnosticSeverity::ERROR),

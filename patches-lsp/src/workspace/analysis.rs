@@ -158,6 +158,7 @@ impl DocumentWorkspace {
             &run,
             source_map.as_ref(),
             uri,
+            root_text,
             &root_line_index,
             &state.documents,
         );
@@ -187,10 +188,12 @@ impl DocumentWorkspace {
 /// when they received at least one diagnostic this run; caller-side
 /// diffing against a previous artifact handles clearing stale include
 /// buckets.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_pipeline_diagnostics<T>(
     run: &pipeline::AccumulatedRun<T>,
     source_map: Option<&SourceMap>,
     root_uri: &Url,
+    root_source: &str,
     root_line_index: &[usize],
     documents: &HashMap<Url, DocumentState>,
 ) -> Vec<(Url, Vec<Diagnostic>)>
@@ -220,14 +223,15 @@ where
     // Per-URI line indexes, lazily built so we don't rescan unchanged
     // open-editor documents' sources.
     let mut line_indexes: HashMap<Url, Vec<usize>> = HashMap::new();
+    let mut sources: HashMap<Url, String> = HashMap::new();
     let mut groups: Vec<(Url, Vec<Diagnostic>)> = vec![(root_uri.clone(), Vec::new())];
 
     for r in &rendered {
         let uri = uri_for_source(r.primary.source, sm).unwrap_or_else(|| root_uri.clone());
-        let li: &[usize] = if &uri == root_uri {
-            root_line_index
+        let (src, li): (&str, &[usize]) = if &uri == root_uri {
+            (root_source, root_line_index)
         } else {
-            let entry = line_indexes.entry(uri.clone()).or_insert_with(|| {
+            let li_entry = line_indexes.entry(uri.clone()).or_insert_with(|| {
                 if let Some(doc) = documents.get(&uri) {
                     doc.line_index.clone()
                 } else {
@@ -235,9 +239,16 @@ where
                     lsp_util::build_line_index(text)
                 }
             });
-            entry.as_slice()
+            let src_entry = sources.entry(uri.clone()).or_insert_with(|| {
+                if let Some(doc) = documents.get(&uri) {
+                    doc.source.clone()
+                } else {
+                    sm.source_text(r.primary.source).unwrap_or("").to_string()
+                }
+            });
+            (src_entry.as_str(), li_entry.as_slice())
         };
-        let diag = lsp_util::rendered_to_lsp_diagnostic(r, sm, li);
+        let diag = lsp_util::rendered_to_lsp_diagnostic(r, sm, src, li);
         if let Some(group) = groups.iter_mut().find(|(u, _)| u == &uri) {
             group.1.push(diag);
         } else {

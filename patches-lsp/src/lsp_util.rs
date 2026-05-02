@@ -39,27 +39,64 @@ pub(crate) fn build_line_index(source: &str) -> Vec<usize> {
     starts
 }
 
-/// Convert a byte offset to an LSP Position (line/character).
-pub(crate) fn byte_offset_to_position(line_starts: &[usize], offset: usize) -> Position {
-    let line = match line_starts.binary_search(&offset) {
+/// Convert a byte offset to an LSP Position (line, UTF-16 character).
+///
+/// The character column is in UTF-16 code units (LSP default). Walk the
+/// line's UTF-8 bytes and accumulate `len_utf16()` per char so that spans
+/// over multi-byte source (e.g. `§`, emoji) report correct columns —
+/// otherwise editors highlight the wrong range and offsets reported in
+/// diagnostics drift after every multi-byte char.
+pub(crate) fn byte_offset_to_position(
+    source: &str,
+    line_starts: &[usize],
+    offset: usize,
+) -> Position {
+    let bounded = offset.min(source.len());
+    let line = match line_starts.binary_search(&bounded) {
         Ok(exact) => exact,
         Err(insert) => insert.saturating_sub(1),
     };
-    let col = offset.saturating_sub(line_starts[line]);
-    Position::new(line as u32, col as u32)
+    let line_start = line_starts[line];
+    let mut col = 0u32;
+    for (i, ch) in source[line_start..].char_indices() {
+        if line_start + i >= bounded {
+            break;
+        }
+        col += ch.len_utf16() as u32;
+    }
+    Position::new(line as u32, col)
 }
 
-/// Convert a source-text Position (line/character) to a byte offset using
-/// a precomputed line index.
-pub(crate) fn position_to_byte_offset(line_index: &[usize], position: Position) -> usize {
+/// Convert a source-text Position (line/character) to a byte offset.
+///
+/// LSP positions are UTF-16 code units (default `PositionEncodingKind::UTF16`),
+/// not bytes. Treating `position.character` as a byte offset panics inside
+/// `&source[..n]` whenever a line contains a multi-byte char (e.g. `§`,
+/// emoji), and silently misaligns spans on `byte_offset_to_position`'s
+/// counterpart. This walks the line's chars and counts UTF-16 units.
+pub(crate) fn position_to_byte_offset(
+    source: &str,
+    line_index: &[usize],
+    position: Position,
+) -> usize {
     let line = position.line as usize;
-    if line < line_index.len() {
-        let line_start = line_index[line];
-        line_start + position.character as usize
-    } else {
-        // Past end of file — return length (last line_start is a sentinel).
-        *line_index.last().unwrap_or(&0)
+    if line >= line_index.len() {
+        return source.len();
     }
+    let line_start = line_index[line];
+    let target_u16 = position.character as usize;
+    let rest = &source[line_start..];
+    let mut u16_count = 0usize;
+    for (byte_offset, ch) in rest.char_indices() {
+        if u16_count >= target_u16 {
+            return line_start + byte_offset;
+        }
+        if ch == '\n' {
+            return line_start + byte_offset;
+        }
+        u16_count += ch.len_utf16();
+    }
+    line_start + rest.len()
 }
 
 // ─── Diagnostic conversion ───────────────────────────────────────────────
@@ -67,24 +104,26 @@ pub(crate) fn position_to_byte_offset(line_index: &[usize], position: Position) 
 /// Convert internal diagnostics to LSP diagnostics.
 #[cfg(test)]
 pub(crate) fn to_lsp_diagnostics(
+    source: &str,
     line_index: &[usize],
     syntax_diags: &[Diagnostic],
     semantic_diags: &[Diagnostic],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let mut out = syntax_to_lsp_diagnostics(line_index, syntax_diags);
-    out.extend(semantic_to_lsp_diagnostics(line_index, semantic_diags));
+    let mut out = syntax_to_lsp_diagnostics(source, line_index, syntax_diags);
+    out.extend(semantic_to_lsp_diagnostics(source, line_index, semantic_diags));
     out
 }
 
 /// Convert syntax (tree-sitter) diagnostics only — always published.
 pub(crate) fn syntax_to_lsp_diagnostics(
+    source: &str,
     line_index: &[usize],
     syntax_diags: &[Diagnostic],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let mut out = Vec::new();
     for diag in syntax_diags {
-        let start = byte_offset_to_position(line_index, diag.span.start);
-        let end = byte_offset_to_position(line_index, diag.span.end);
+        let start = byte_offset_to_position(source, line_index, diag.span.start);
+        let end = byte_offset_to_position(source, line_index, diag.span.end);
         out.push(tower_lsp::lsp_types::Diagnostic {
             range: Range::new(start, end),
             severity: Some(DiagnosticSeverity::ERROR),
@@ -99,13 +138,14 @@ pub(crate) fn syntax_to_lsp_diagnostics(
 /// Convert tolerant-AST semantic diagnostics to LSP form. Published only
 /// on the tree-sitter fallback path (pest stage 2 failed) — ADR 0038.
 pub(crate) fn semantic_to_lsp_diagnostics(
+    source: &str,
     line_index: &[usize],
     semantic_diags: &[Diagnostic],
 ) -> Vec<tower_lsp::lsp_types::Diagnostic> {
     let mut out = Vec::new();
     for diag in semantic_diags {
-        let start = byte_offset_to_position(line_index, diag.span.start);
-        let end = byte_offset_to_position(line_index, diag.span.end);
+        let start = byte_offset_to_position(source, line_index, diag.span.start);
+        let end = byte_offset_to_position(source, line_index, diag.span.end);
         let severity = match diag.kind.severity() {
             crate::ast_builder::Severity::Error => DiagnosticSeverity::ERROR,
             crate::ast_builder::Severity::Warning => DiagnosticSeverity::WARNING,
@@ -141,6 +181,7 @@ pub(crate) fn semantic_to_lsp_diagnostics(
 pub(crate) fn rendered_to_lsp_diagnostic(
     rendered: &RenderedDiagnostic,
     source_map: &SourceMap,
+    target_source: &str,
     target_line_index: &[usize],
 ) -> tower_lsp::lsp_types::Diagnostic {
     let severity = match rendered.severity {
@@ -149,7 +190,7 @@ pub(crate) fn rendered_to_lsp_diagnostic(
         Severity::Note => DiagnosticSeverity::INFORMATION,
     };
 
-    let range = snippet_to_range(&rendered.primary, target_line_index);
+    let range = snippet_to_range(&rendered.primary, target_source, target_line_index);
     let related = build_related_information(rendered, source_map);
 
     tower_lsp::lsp_types::Diagnostic {
@@ -163,9 +204,9 @@ pub(crate) fn rendered_to_lsp_diagnostic(
     }
 }
 
-fn snippet_to_range(snippet: &Snippet, line_index: &[usize]) -> Range {
-    let start = byte_offset_to_position(line_index, snippet.range.start);
-    let end = byte_offset_to_position(line_index, snippet.range.end);
+fn snippet_to_range(snippet: &Snippet, source: &str, line_index: &[usize]) -> Range {
+    let start = byte_offset_to_position(source, line_index, snippet.range.start);
+    let end = byte_offset_to_position(source, line_index, snippet.range.end);
     Range::new(start, end)
 }
 
@@ -209,7 +250,7 @@ fn byte_offset_to_lsp_pos_in(text: &str, offset: usize) -> Position {
             line += 1;
             col = 0;
         } else {
-            col += 1;
+            col += ch.len_utf16() as u32;
         }
     }
     Position::new(line, col)
@@ -314,29 +355,73 @@ mod tests {
 
     #[test]
     fn byte_offset_to_pos_first_line() {
-        let idx = build_line_index("hello\nworld");
-        let pos = byte_offset_to_position(&idx, 3);
+        let src = "hello\nworld";
+        let idx = build_line_index(src);
+        let pos = byte_offset_to_position(src, &idx, 3);
         assert_eq!(pos, Position::new(0, 3));
     }
 
     #[test]
     fn byte_offset_to_pos_second_line() {
-        let idx = build_line_index("hello\nworld");
-        let pos = byte_offset_to_position(&idx, 8);
+        let src = "hello\nworld";
+        let idx = build_line_index(src);
+        let pos = byte_offset_to_position(src, &idx, 8);
         assert_eq!(pos, Position::new(1, 2));
     }
 
     #[test]
+    fn byte_offset_to_pos_utf8_multibyte() {
+        // `§` is 2 UTF-8 bytes, 1 UTF-16 unit. Byte offset 3 is just after
+        // `§ `, which should be UTF-16 column 2.
+        let src = "§ x";
+        let idx = build_line_index(src);
+        let pos = byte_offset_to_position(src, &idx, 3);
+        assert_eq!(pos, Position::new(0, 2));
+    }
+
+    #[test]
+    fn byte_offset_to_pos_supplementary_plane() {
+        // `🎵` is 4 UTF-8 bytes, 2 UTF-16 units (surrogate pair). After
+        // `a🎵` (byte 5) UTF-16 col is 3.
+        let src = "a🎵b";
+        let idx = build_line_index(src);
+        let pos = byte_offset_to_position(src, &idx, 5);
+        assert_eq!(pos, Position::new(0, 3));
+    }
+
+    #[test]
     fn position_to_byte_offset_first_line() {
-        let idx = build_line_index("hello\nworld");
-        let off = position_to_byte_offset(&idx, Position::new(0, 3));
+        let src = "hello\nworld";
+        let idx = build_line_index(src);
+        let off = position_to_byte_offset(src, &idx, Position::new(0, 3));
         assert_eq!(off, 3);
     }
 
     #[test]
     fn position_to_byte_offset_second_line() {
-        let idx = build_line_index("hello\nworld");
-        let off = position_to_byte_offset(&idx, Position::new(1, 2));
+        let src = "hello\nworld";
+        let idx = build_line_index(src);
+        let off = position_to_byte_offset(src, &idx, Position::new(1, 2));
         assert_eq!(off, 8);
+    }
+
+    #[test]
+    fn position_to_byte_offset_multibyte_utf8() {
+        // `§` is 2 bytes UTF-8, 1 UTF-16 code unit. Cursor after `§ ` (char 2)
+        // should land at byte 3 (after the §).
+        let src = "§ x";
+        let idx = build_line_index(src);
+        let off = position_to_byte_offset(src, &idx, Position::new(0, 2));
+        assert_eq!(off, 3);
+    }
+
+    #[test]
+    fn position_to_byte_offset_supplementary_plane() {
+        // `🎵` is 4 bytes UTF-8, 2 UTF-16 code units (surrogate pair).
+        let src = "a🎵b";
+        let idx = build_line_index(src);
+        // After `a🎵` = 3 UTF-16 units → byte 5.
+        let off = position_to_byte_offset(src, &idx, Position::new(0, 3));
+        assert_eq!(off, 5);
     }
 }

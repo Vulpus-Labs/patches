@@ -80,6 +80,7 @@ pub(super) fn finalize_buckets(
     if stage_2_failed {
         if let Some(doc) = state.documents.get(uri) {
             root_diags.extend(lsp_util::semantic_to_lsp_diagnostics(
+                &doc.source,
                 &doc.line_index,
                 &doc.model.diagnostics,
             ));

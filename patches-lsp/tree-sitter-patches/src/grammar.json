@@ -1104,6 +1104,10 @@
         },
         {
           "type": "STRING",
+          "value": "stereo_meter"
+        },
+        {
+          "type": "STRING",
           "value": "osc"
         },
         {

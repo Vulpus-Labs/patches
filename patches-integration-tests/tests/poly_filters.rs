@@ -52,7 +52,7 @@ impl Module for PolySineSource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolySineSource",
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             realtime_params: vec![ParameterDescriptor {
@@ -112,7 +112,7 @@ fn make_filter_graph(
     filter_params: &ParameterMap,
     source_freq: f32,
 ) -> ModuleGraph {
-    let shape = ModuleShape { channels: 0 };
+    let shape = ModuleShape::default();
     let mut graph = ModuleGraph::new();
 
     let mut src_params = ParameterMap::new();

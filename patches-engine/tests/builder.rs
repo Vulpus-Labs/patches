@@ -38,8 +38,8 @@ mod builder {
 
     pub(crate) fn sine_to_audio_out_graph() -> ModuleGraph {
         let mut graph = ModuleGraph::new();
-        let sine_desc = Oscillator::describe(&ModuleShape { channels: 0 });
-        let out_desc = AudioOut::describe(&ModuleShape { channels: 0 });
+        let sine_desc = Oscillator::describe(&ModuleShape::default());
+        let out_desc = AudioOut::describe(&ModuleShape::default());
         let mut sine_params = ParameterMap::new();
         sine_params.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph.add_module("a_sine", sine_desc, &sine_params).unwrap();

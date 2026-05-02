@@ -206,6 +206,46 @@ pub(super) fn bind_connection(
         });
     }
 
+    // Mono layout compatibility (Audio ↔ Trigger). Only applies when both
+    // endpoints carry a mono `f32` — i.e. not the mono→stereo broadcast path
+    // (which already requires the source to be `MonoLayout::Audio`).
+    if from_port_desc.kind == CableKind::Mono
+        && to_port_desc.kind == CableKind::Mono
+        && !from_port_desc.mono_layout.compatible_with(to_port_desc.mono_layout)
+    {
+        errors.push(BindError::new(
+            BindErrorCode::MonoLayoutMismatch,
+            conn.provenance.clone(),
+            format!(
+                "mono layout mismatch: '{}.{}' ({:?}) → '{}.{}' ({:?})",
+                conn.from_module, conn.from_port, from_port_desc.mono_layout,
+                conn.to_module, conn.to_port, to_port_desc.mono_layout,
+            ),
+        ));
+        return BoundConnection::Unresolved(UnresolvedConnection {
+            raw: conn.clone(),
+            reason: BindErrorCode::MonoLayoutMismatch,
+        });
+    }
+
+    // Scale must be finite and in [-10.0, 10.0] (mirrors the graph
+    // builder's `GraphError::ScaleOutOfRange` defensive check). Caught
+    // here so the LSP flags it before the engine load fails.
+    let scale = conn.map.scale;
+    if !scale.is_finite() || !(-10.0..=10.0).contains(&scale) {
+        errors.push(BindError::new(
+            BindErrorCode::ParameterConversion,
+            conn.provenance.clone(),
+            format!(
+                "scale {scale} is out of range; must be finite and in [-10.0, 10.0]"
+            ),
+        ));
+        return BoundConnection::Unresolved(UnresolvedConnection {
+            raw: conn.clone(),
+            reason: BindErrorCode::ParameterConversion,
+        });
+    }
+
     BoundConnection::Resolved(ResolvedConnection {
         from_module: conn.from_module.clone(),
         from_port: PortRef { name: from_port_desc.name, index: from_port_desc.index },

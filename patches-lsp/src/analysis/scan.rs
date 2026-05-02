@@ -152,13 +152,22 @@ pub(crate) fn extract_modules(body: &[ast::Statement], scope: &str, out: &mut Ve
                 .shape
                 .iter()
                 .filter_map(|sa| {
-                    let n = sa.name.as_ref()?.name.clone();
                     let v = match &sa.value {
                         Some(ast::ShapeArgValue::Scalar(ast::Scalar::Int(i))) => ShapeValue::Int(*i),
                         Some(ast::ShapeArgValue::AliasList(ids)) => {
                             ShapeValue::AliasList(ids.iter().map(|id| id.name.clone()).collect())
                         }
                         _ => ShapeValue::Other,
+                    };
+                    // A positional bare arg (no `name:`) is the implicit
+                    // `channels` shape arg — `Mixer([a, b])` and
+                    // `Mixer(channels: [a, b])` mean the same thing.
+                    let n = match sa.name.as_ref() {
+                        Some(id) => id.name.clone(),
+                        None if matches!(v, ShapeValue::AliasList(_) | ShapeValue::Int(_)) => {
+                            "channels".to_string()
+                        }
+                        None => return None,
                     };
                     Some((n, v))
                 })

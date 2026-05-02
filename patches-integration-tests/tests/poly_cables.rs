@@ -40,7 +40,7 @@ impl Module for PolyProbe {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolyProbe",
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![PortDescriptor { name: "poly_in", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             realtime_params: vec![],
@@ -120,7 +120,7 @@ impl Module for PolySource {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PolySource",
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             realtime_params: vec![],
@@ -181,10 +181,10 @@ fn connected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("src", PolySource::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("src", PolySource::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("poly_out"), &NodeId::from("probe"), p("poly_in"), 1.0).unwrap();
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -198,9 +198,9 @@ fn disconnected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
@@ -291,8 +291,8 @@ fn kind_mismatch_at_connect() {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("osc", Oscillator::describe(&ModuleShape { channels: 0 }), &osc_params).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     let result = graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("poly_in"), 1.0);
     assert!(

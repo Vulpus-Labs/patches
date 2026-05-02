@@ -58,7 +58,9 @@ pub(crate) fn module_shape_from_args(args: &[(String, Scalar)]) -> ModuleShape {
 /// inlay-hint label. Empty string when no shape fields are set.
 pub(crate) fn render_shape_inline(shape: &ModuleShape) -> String {
     let mut parts = Vec::new();
-    if shape.channels > 0 {
+    // Skip the default channel count — rendering `channels=1` on every
+    // hint is noise once `ModuleShape::default()` is `channels: 1`.
+    if shape.channels != ModuleShape::default().channels {
         parts.push(format!("channels={}", shape.channels));
     }
     parts.join(", ")

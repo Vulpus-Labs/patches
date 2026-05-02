@@ -51,7 +51,7 @@ pub(super) fn try_hover_port(
                 kind: MarkupKind::Markdown,
                 value: format!("**template port** `{port_name}`"),
             }),
-            range: Some(node_to_range(port_label_node, line_starts)),
+            range: Some(node_to_range(port_label_node, source, line_starts)),
         });
     }
 
@@ -82,12 +82,16 @@ pub(super) fn try_hover_port(
             kind: MarkupKind::Markdown,
             value,
         }),
-        range: Some(node_to_range(port_label_node, line_starts)),
+        range: Some(node_to_range(port_label_node, source, line_starts)),
     })
 }
 
 /// Hover for a flat port reference (expansion-aware path).
-pub(super) fn hover_for_port_ref(p: &FlatPortRef, line_starts: &[usize]) -> Hover {
+pub(super) fn hover_for_port_ref(
+    p: &FlatPortRef,
+    source: &str,
+    line_starts: &[usize],
+) -> Hover {
     let dir = match p.direction {
         patches_dsl::flat::PortDirection::Input => "input",
         patches_dsl::flat::PortDirection::Output => "output",
@@ -102,7 +106,7 @@ pub(super) fn hover_for_port_ref(p: &FlatPortRef, line_starts: &[usize]) -> Hove
             kind: MarkupKind::Markdown,
             value,
         }),
-        range: Some(span_to_range(&p.provenance.site, line_starts)),
+        range: Some(span_to_range(&p.provenance.site, source, line_starts)),
     }
 }
 

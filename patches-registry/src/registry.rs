@@ -42,7 +42,7 @@ impl Registry {
     where
         T: Module + 'static,
     {
-        let name = T::describe(&ModuleShape { channels: 0 }).module_name;
+        let name = T::describe(&ModuleShape::default()).module_name;
         self.versions.insert(name.to_string(), 0);
         self.builders
             .insert(name.to_string(), Box::new(Builder::<T>(PhantomData)));
@@ -94,6 +94,7 @@ impl Registry {
     }
 
     pub fn describe(&self, name: &str, shape: &ModuleShape) -> Result<ModuleDescriptor, BuildError> {
+        validate_shape(name, shape)?;
         self.builders
             .get(name)
             .map(|builder| builder.describe(shape))
@@ -109,6 +110,11 @@ impl Registry {
         structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
+        // No `validate_shape` here: shape-independent modules record
+        // `ModuleShape { channels: 0 }` as a sentinel in their descriptor,
+        // and the planner re-passes that descriptor shape into `create`
+        // (state/mod.rs `NodeDecision::Install`). Validation belongs at
+        // describe-time, where the shape originates from authored DSL.
         let builder = self
             .builders
             .get(name)
@@ -116,6 +122,22 @@ impl Registry {
 
         builder.build(audio_environment, shape, params, structural, instance_id)
     }
+}
+
+/// Reject shapes that violate invariants every module relies on. `channels`
+/// is the count of `*_multi` port families and parameter array entries —
+/// 0 means the descriptor would carry no entries for those families and
+/// the module would silently behave as if they didn't exist. Treat it as
+/// a planner-stage error.
+fn validate_shape(name: &str, shape: &ModuleShape) -> Result<(), BuildError> {
+    if shape.channels == 0 {
+        return Err(BuildError::InvalidShape {
+            module: name.to_string(),
+            reason: "channels must be >= 1".to_string(),
+            origin: None,
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

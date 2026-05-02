@@ -33,6 +33,9 @@ pub enum BindErrorCode {
     DuplicateInputConnection,
     /// Poly layout mismatch between connection endpoints (ADR 0033).
     PolyLayoutMismatch,
+    /// Mono layout mismatch (Audio ↔ Trigger) between connection endpoints
+    /// (ADR 0047).
+    MonoLayoutMismatch,
 }
 
 impl BindErrorCode {
@@ -48,6 +51,7 @@ impl BindErrorCode {
             Self::CableKindMismatch => "BN0008",
             Self::DuplicateInputConnection => "BN0009",
             Self::PolyLayoutMismatch => "BN0012",
+            Self::MonoLayoutMismatch => "BN0013",
         }
     }
 
@@ -63,6 +67,7 @@ impl BindErrorCode {
             Self::CableKindMismatch => "cable kind mismatch",
             Self::DuplicateInputConnection => "duplicate input connection",
             Self::PolyLayoutMismatch => "poly layout mismatch",
+            Self::MonoLayoutMismatch => "mono layout mismatch",
         }
     }
 }

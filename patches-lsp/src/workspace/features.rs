@@ -78,7 +78,8 @@ impl DocumentWorkspace {
             tracing::debug!(%uri, "completions: document not open in workspace");
             return Vec::new();
         };
-        let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
+        let byte_offset =
+            lsp_util::position_to_byte_offset(&doc.source, &doc.line_index, position);
         let registry = self.registry_read();
         completions::compute_completions(
             &doc.tree,
@@ -99,7 +100,7 @@ impl DocumentWorkspace {
                 tracing::debug!(%uri, "hover: document not open in workspace");
                 return None;
             };
-            lsp_util::position_to_byte_offset(&doc.line_index, position)
+            lsp_util::position_to_byte_offset(&doc.source, &doc.line_index, position)
         };
 
         if let Some(h) = self.with_expansion_context(&mut state, uri, |ctx| {
@@ -114,6 +115,7 @@ impl DocumentWorkspace {
                 bound,
                 ctx.references,
                 ctx.source_map,
+                &ctx.doc.source,
                 &ctx.doc.line_index,
             )
         }) {
@@ -149,7 +151,7 @@ impl DocumentWorkspace {
                 tracing::debug!(%uri, "peek_expansion: document not open in workspace");
                 return None;
             };
-            lsp_util::position_to_byte_offset(&doc.line_index, position)
+            lsp_util::position_to_byte_offset(&doc.source, &doc.line_index, position)
         };
         self.with_expansion_context(&mut state, uri, |ctx| {
             let Some(result) =
@@ -159,8 +161,16 @@ impl DocumentWorkspace {
                 return None;
             };
             let range = Range::new(
-                lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.start),
-                lsp_util::byte_offset_to_position(&ctx.doc.line_index, result.call_site.end),
+                lsp_util::byte_offset_to_position(
+                    &ctx.doc.source,
+                    &ctx.doc.line_index,
+                    result.call_site.start,
+                ),
+                lsp_util::byte_offset_to_position(
+                    &ctx.doc.source,
+                    &ctx.doc.line_index,
+                    result.call_site.end,
+                ),
             );
             Some((range, result.markdown))
         })
@@ -178,6 +188,7 @@ impl DocumentWorkspace {
                 range,
                 ctx.flat,
                 ctx.references,
+                &ctx.doc.source,
                 ctx.source_map,
                 &ctx.doc.line_index,
                 &registry,
@@ -194,15 +205,16 @@ impl DocumentWorkspace {
             tracing::debug!(%uri, "goto_definition: document not open in workspace");
             return None;
         };
-        let byte_offset = lsp_util::position_to_byte_offset(&doc.line_index, position);
+        let byte_offset =
+            lsp_util::position_to_byte_offset(&doc.source, &doc.line_index, position);
         let Some((target_uri, target_span)) =
             navigation::goto_definition(&doc.model.navigation, &state.nav_index, byte_offset)
         else {
             tracing::debug!(%uri, byte_offset, "goto_definition: no navigation target at cursor");
             return None;
         };
-        let target_line_index = if &target_uri == uri {
-            &doc.line_index
+        let (target_source, target_line_index) = if &target_uri == uri {
+            (&doc.source, &doc.line_index)
         } else {
             let Some(target_doc) = state.documents.get(&target_uri) else {
                 tracing::debug!(
@@ -212,10 +224,15 @@ impl DocumentWorkspace {
                 );
                 return None;
             };
-            &target_doc.line_index
+            (&target_doc.source, &target_doc.line_index)
         };
-        let start = lsp_util::byte_offset_to_position(target_line_index, target_span.start);
-        let end = lsp_util::byte_offset_to_position(target_line_index, target_span.end);
+        let start = lsp_util::byte_offset_to_position(
+            target_source,
+            target_line_index,
+            target_span.start,
+        );
+        let end =
+            lsp_util::byte_offset_to_position(target_source, target_line_index, target_span.end);
         Some(Location {
             uri: target_uri,
             range: Range::new(start, end),

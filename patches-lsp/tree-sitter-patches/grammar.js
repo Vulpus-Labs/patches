@@ -153,7 +153,14 @@ module.exports = grammar({
     // `~a+b+c(name, ...)`. The component set is closed; non-listed
     // components produce an ERROR node localised to the tap target.
     tap_type: (_) =>
-      choice("meter", "osc", "spectrum", "gate_led", "trigger_led"),
+      choice(
+        "meter",
+        "stereo_meter",
+        "osc",
+        "spectrum",
+        "gate_led",
+        "trigger_led",
+      ),
     tap_components: ($) => seq($.tap_type, repeat(seq("+", $.tap_type))),
     tap_name: ($) => $.ident,
     tap_target: ($) =>

@@ -38,7 +38,7 @@ impl Module for PeriodicCounter {
     fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
         ModuleDescriptor {
             module_name: "PeriodicCounter",
-            shape: ModuleShape { channels: 0 },
+            shape: ModuleShape::default(),
             inputs: vec![],
             outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
             realtime_params: vec![],
@@ -106,8 +106,8 @@ fn make_registry() -> Registry {
 
 fn counter_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    graph.add_module("counter", PeriodicCounter::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("counter", PeriodicCounter::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph
 }
 
@@ -215,8 +215,8 @@ fn ramp_completes_in_one_interval_at_2x() {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("cutoff".to_string(), ParameterValue::Float(4.0)); // initial
-    graph.add_module("filter", ResonantLowpass::describe(&ModuleShape { channels: 0 }), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape { channels: 0 }), &ParameterMap::new()).unwrap();
+    graph.add_module("filter", ResonantLowpass::describe(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     let (plan, _) = build_patch(&graph, &registry, &env, &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
 

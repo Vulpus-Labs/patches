@@ -14,17 +14,18 @@ use crate::shape_render::format_port_ref;
 /// Find the smallest call-site span in [`PatchReferences::call_sites`] that
 /// encloses `(source, offset)`, then summarise every module expanded under it.
 pub(super) fn hover_at_call_site(
-    source: SourceId,
+    source_id: SourceId,
     offset: usize,
     flat: &FlatPatch,
     references: &PatchReferences,
+    source: &str,
     line_starts: &[usize],
 ) -> Option<Hover> {
     let (call_site, refs) = references
         .call_sites
         .iter()
         .filter(|(s, _)| {
-            s.source == source
+            s.source == source_id
                 && s.source != SourceId::SYNTHETIC
                 && s.start <= offset
                 && offset < s.end
@@ -83,7 +84,7 @@ pub(super) fn hover_at_call_site(
         }
     }
 
-    let range = span_to_range(call_site, line_starts);
+    let range = span_to_range(call_site, source, line_starts);
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,

@@ -60,7 +60,13 @@ pub(super) fn complete_at_block_aliases(
         if call_arg.kind() != "call_arg" {
             continue;
         }
-        if let Some(alias_list) = first_named_child_of_kind(call_arg, "alias_list") {
+        let alias_list = first_named_child_of_kind(call_arg, "alias_list").or_else(|| {
+            // Grammar wraps positional args in `bare_arg`; the alias list
+            // lives one level deeper.
+            first_named_child_of_kind(call_arg, "bare_arg")
+                .and_then(|ba| first_named_child_of_kind(ba, "alias_list"))
+        });
+        if let Some(alias_list) = alias_list {
             let mut alias_cursor = alias_list.walk();
             for ident in alias_list.named_children(&mut alias_cursor) {
                 if ident.kind() == "ident" {

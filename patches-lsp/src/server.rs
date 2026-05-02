@@ -469,7 +469,7 @@ mod tests {
         let registry = default_registry();
         let model = analysis::analyse(&file, &registry);
         let line_index = lsp_util::build_line_index(source);
-        let lsp_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+        let lsp_diags = lsp_util::to_lsp_diagnostics(source, &line_index, &syntax_diags, &model.diagnostics);
         assert!(!lsp_diags.is_empty(), "expected at least one diagnostic");
     }
 
@@ -483,7 +483,7 @@ mod tests {
         let registry = default_registry();
         let model = analysis::analyse(&file, &registry);
         let line_index = lsp_util::build_line_index(source);
-        let lsp_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+        let lsp_diags = lsp_util::to_lsp_diagnostics(source, &line_index, &syntax_diags, &model.diagnostics);
         assert!(lsp_diags.iter().any(|d| d.message.contains("unknown module type")));
     }
 
@@ -495,7 +495,7 @@ mod tests {
         let registry = default_registry();
         let model = analysis::analyse(&file, &registry);
         let line_index = lsp_util::build_line_index(source);
-        lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics)
+        lsp_util::to_lsp_diagnostics(source, &line_index, &syntax_diags, &model.diagnostics)
     }
 
     #[test]
@@ -602,14 +602,14 @@ mod tests {
         let (file, syntax_diags) = ast_builder::build_ast(&tree, bad_source);
         let model = analysis::analyse(&file, &registry);
         let line_index = lsp_util::build_line_index(bad_source);
-        let bad_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+        let bad_diags = lsp_util::to_lsp_diagnostics(bad_source, &line_index, &syntax_diags, &model.diagnostics);
         assert!(!bad_diags.is_empty());
 
         let tree = parser.parse(good_source, None).unwrap();
         let (file, syntax_diags) = ast_builder::build_ast(&tree, good_source);
         let model = analysis::analyse(&file, &registry);
         let line_index = lsp_util::build_line_index(good_source);
-        let good_diags = lsp_util::to_lsp_diagnostics(&line_index, &syntax_diags, &model.diagnostics);
+        let good_diags = lsp_util::to_lsp_diagnostics(good_source, &line_index, &syntax_diags, &model.diagnostics);
         assert!(good_diags.is_empty(), "expected clean after fix: {good_diags:?}");
     }
 }

@@ -17,7 +17,7 @@ pub enum BuildError {
     },
 
     InvalidShape {
-        module: &'static str,
+        module: String,
         reason: String,
         origin: Option<Provenance>,
     },
