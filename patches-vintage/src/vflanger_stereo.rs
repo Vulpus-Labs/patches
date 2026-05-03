@@ -37,8 +37,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind, ParameterTemplate,
+    PortTemplate, StereoInput, StereoOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -72,21 +73,34 @@ pub struct VFlangerStereo {
 }
 
 impl Module for VFlangerStereo {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VFlangerStereo", shape.clone())
-            .stereo_in("in")
-            .mono_in("rate_cv")
-            .mono_in("depth_cv")
-            .mono_in("manual_cv")
-            .mono_in("feedback_cv")
-            .stereo_out("out")
-            .float_param(params::rate_hz, 0.05, 12.0, 0.5)
-            .float_param(params::depth, 0.0, 1.0, 0.5)
-            .float_param(params::manual_ms, 0.3, 8.0, 2.0)
-            .float_param(params::feedback, -0.93, 0.93, 0.3)
-            .float_param(params::mix, 0.0, 1.0, 0.5)
-            .bool_param(params::lf_bypass, true)
-            .float_param(params::jitter, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VFlangerStereo",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::stereo("in"),
+                PortTemplate::mono("rate_cv"),
+                PortTemplate::mono("depth_cv"),
+                PortTemplate::mono("manual_cv"),
+                PortTemplate::mono("feedback_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::rate_hz.as_str(),   kind: ParameterKind::Float { min: 0.05, max: 12.0, default: 0.5 } },
+                ParameterTemplate { name: params::depth.as_str(),     kind: ParameterKind::Float { min: 0.0,  max: 1.0,  default: 0.5 } },
+                ParameterTemplate { name: params::manual_ms.as_str(), kind: ParameterKind::Float { min: 0.3,  max: 8.0,  default: 2.0 } },
+                ParameterTemplate { name: params::feedback.as_str(),  kind: ParameterKind::Float { min: -0.93, max: 0.93, default: 0.3 } },
+                ParameterTemplate { name: params::mix.as_str(),       kind: ParameterKind::Float { min: 0.0,  max: 1.0,  default: 0.5 } },
+                ParameterTemplate { name: params::lf_bypass.as_str(), kind: ParameterKind::Bool { default: true } },
+                ParameterTemplate { name: params::jitter.as_str(),    kind: ParameterKind::Float { min: 0.0,  max: 1.0,  default: 0.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

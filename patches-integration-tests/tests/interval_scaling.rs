@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
-    AudioEnvironment, BASE_PERIODIC_UPDATE_INTERVAL, CableKind, CablePool, InstanceId, Module,
-    ModuleDescriptor, ModuleGraph, ModuleShape, MonoLayout, PolyLayout, PortDescriptor,
+    AudioEnvironment, BASE_PERIODIC_UPDATE_INTERVAL, CablePool, InstanceId, Module,
+    ModuleDescriptor, ModuleGraph, ModuleShape,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
@@ -35,15 +35,23 @@ struct PeriodicCounter {
 }
 
 impl Module for PeriodicCounter {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "PeriodicCounter",
-            shape: ModuleShape::default(),
-            inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PeriodicCounter",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -106,8 +114,8 @@ fn make_registry() -> Registry {
 
 fn counter_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    graph.add_module("counter", PeriodicCounter::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("counter", patches_core::describe_for::<PeriodicCounter>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph
 }
 
@@ -215,8 +223,8 @@ fn ramp_completes_in_one_interval_at_2x() {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("cutoff".to_string(), ParameterValue::Float(4.0)); // initial
-    graph.add_module("filter", ResonantLowpass::describe(&ModuleShape::default()), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("filter", patches_core::describe_for::<ResonantLowpass>(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     let (plan, _) = build_patch(&graph, &registry, &env, &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
 

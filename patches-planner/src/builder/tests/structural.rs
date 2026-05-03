@@ -26,9 +26,27 @@ struct StructuralProbe {
 }
 
 impl Module for StructuralProbe {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("StructuralProbe", ModuleShape { channels: 0 })
-            .structural_string_param("path", &[])
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, ParameterTemplate,
+        };
+        use patches_core::ParameterKind;
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "StructuralProbe",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[ParameterTemplate {
+                name: "path",
+                kind: ParameterKind::File { extensions: &[] },
+            }],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -72,7 +90,7 @@ fn registry() -> Registry {
 
 fn graph_with_probe(path: &str) -> ModuleGraph {
     let mut g = ModuleGraph::new();
-    let desc = StructuralProbe::describe(&ModuleShape { channels: 0 });
+    let desc = patches_core::describe_for::<StructuralProbe>(&ModuleShape { channels: 0 });
     let mut sp = StructuralParams::new();
     sp.insert("path", 0, StructuralValue::String(path.into()));
     g.add_module_with_structural("probe", desc, &ParameterMap::new(), &sp).unwrap();

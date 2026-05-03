@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, PolyInput, PolyOutput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PolyInput, PolyOutput, PortTemplate,
     TrackerData, ReceivesTrackerData, TransportFrame,
     GLOBAL_TRANSPORT,
 };
@@ -92,21 +93,57 @@ pub struct MasterSequencer {
 }
 
 impl Module for MasterSequencer {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("MasterSequencer", shape.clone())
-            .mono_in("start")
-            .mono_in("stop")
-            .mono_in("pause")
-            .mono_in("resume")
-            .poly_out_multi("clock", n)
-            .float_param(mp::bpm, 1.0, 999.0, 120.0)
-            .int_param(mp::rows_per_beat, 1, 64, 4)
-            .song_name_param(mp::song)
-            .bool_param("loop", true)
-            .bool_param(mp::autostart, true)
-            .float_param(mp::swing, 0.0, 1.0, 0.5)
-            .enum_param(mp::sync, SyncMode::Auto)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MasterSequencer",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("start"),
+                PortTemplate::mono("stop"),
+                PortTemplate::mono("pause"),
+                PortTemplate::mono("resume"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[(AxisId::CHANNELS, PortTemplate::poly("clock"))],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: mp::bpm.as_str(),
+                    kind: ParameterKind::Float { min: 1.0, max: 999.0, default: 120.0 },
+                },
+                ParameterTemplate {
+                    name: mp::rows_per_beat.as_str(),
+                    kind: ParameterKind::Int { min: 1, max: 64, default: 4 },
+                },
+                ParameterTemplate {
+                    name: mp::song.as_str(),
+                    kind: ParameterKind::SongName,
+                },
+                ParameterTemplate {
+                    name: "loop",
+                    kind: ParameterKind::Bool { default: true },
+                },
+                ParameterTemplate {
+                    name: mp::autostart.as_str(),
+                    kind: ParameterKind::Bool { default: true },
+                },
+                ParameterTemplate {
+                    name: mp::swing.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: mp::sync.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: SyncMode::VARIANTS,
+                        default: "auto",
+                    },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     OutputPort, ParameterMap, StructuralParams,
 };
 use patches_core::param_frame::ParamView;
@@ -27,13 +27,6 @@ impl TimingShim {
 }
 
 impl Module for TimingShim {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor
-    where
-        Self: Sized,
-    {
-        unimplemented!("TimingShim is a wrapper; construct via TimingShim::new")
-    }
-
     fn prepare(
         _audio_environment: &AudioEnvironment,
         _descriptor: ModuleDescriptor,

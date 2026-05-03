@@ -202,30 +202,25 @@ pub struct PluginInstance<M: patches_core::Module> {
     pub output_buf: Vec<patches_core::OutputPort>,
 }
 
-/// Emit the eight ABI symbols the new `FfiPluginVTable` expects plus
+/// Emit the eight ABI symbols the `FfiPluginVTable` expects plus
 /// `patches_plugin_init` and `patches_plugin_descriptor_hash_<name>`.
 ///
 /// ```ignore
-/// patches_ffi_common::export_plugin!(MyModule, describe_fn, "my_module");
+/// patches_ffi_common::export_plugin!(MyModule, "my_module");
 /// ```
 ///
-/// `$module`: a [`patches_core::Module`]-implementing type.
-/// `$descriptor_fn`: `fn(&ModuleShape) -> ModuleDescriptor` — identical to
-/// the module's own `Module::describe`, surfaced as a free function so the
-/// host's per-module descriptor-hash symbol can call it at load time.
+/// `$module`: a [`patches_core::Module`]-implementing type that declares a
+/// non-empty `Module::template()` (ADR 0066).
 /// `$name`: bare module name (string literal) used to build the
 /// `patches_plugin_descriptor_hash_<name>` symbol read by the host loader.
 #[macro_export]
 macro_rules! export_plugin {
-    ($module:ty, $descriptor_fn:path, $name:literal) => {
+    ($module:ty, $name:literal) => {
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_describe(
-            shape: $crate::types::FfiModuleShape,
-        ) -> $crate::types::FfiBytes {
-            let core_shape: ::patches_core::ModuleShape = shape.into();
-            let desc = $descriptor_fn(&core_shape);
+        pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
+            let template = <$module as ::patches_core::Module>::template();
             $crate::types::FfiBytes::from_vec(
-                $crate::json::serialize_module_descriptor(&desc),
+                $crate::json::serialize_module_descriptor_template(&template),
             )
         }
 
@@ -390,7 +385,7 @@ macro_rules! export_plugin {
                 // prevent the host from *ever* calling `periodic_update`, which
                 // silently freezes LFOs and any other periodic state.
                 supports_periodic: 1,
-                describe: __patches_describe,
+                module_template: __patches_module_template,
                 prepare: __patches_prepare,
                 update_validated_parameters: __patches_update_validated_parameters,
                 process: __patches_process,
@@ -414,8 +409,8 @@ macro_rules! export_plugin {
 
         #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
         pub extern "C" fn __patches_plugin_descriptor_hash() -> u64 {
-            let shape = ::patches_core::ModuleShape::default();
-            let desc = $descriptor_fn(&shape);
+            let template = <$module as ::patches_core::Module>::template();
+            let desc = template.build_channels(::patches_core::ModuleShape::default().channels as u32);
             $crate::descriptor_hash(&desc)
         }
     };
@@ -427,15 +422,12 @@ macro_rules! export_plugin {
 /// (E107 ticket 0622).
 #[macro_export]
 macro_rules! export_plugin_with_hash_override {
-    ($module:ty, $descriptor_fn:path, $name:literal, $hash:expr) => {
+    ($module:ty, $name:literal, $hash:expr) => {
         #[unsafe(no_mangle)]
-        pub extern "C" fn __patches_describe(
-            shape: $crate::types::FfiModuleShape,
-        ) -> $crate::types::FfiBytes {
-            let core_shape: ::patches_core::ModuleShape = shape.into();
-            let desc = $descriptor_fn(&core_shape);
+        pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
+            let template = <$module as ::patches_core::Module>::template();
             $crate::types::FfiBytes::from_vec(
-                $crate::json::serialize_module_descriptor(&desc),
+                $crate::json::serialize_module_descriptor_template(&template),
             )
         }
 
@@ -511,7 +503,7 @@ macro_rules! export_plugin_with_hash_override {
                 abi_version: $crate::types::ABI_VERSION,
                 module_version: 0,
                 supports_periodic: 0,
-                describe: __patches_describe,
+                module_template: __patches_module_template,
                 prepare: __patches_prepare,
                 update_validated_parameters: __patches_update_validated_parameters,
                 process: __patches_process,
@@ -576,13 +568,10 @@ macro_rules! export_modules {
                 #[allow(unused_imports)]
                 use super::*;
 
-                pub extern "C" fn describe(
-                    shape: $crate::types::FfiModuleShape,
-                ) -> $crate::types::FfiBytes {
-                    let core_shape: ::patches_core::ModuleShape = shape.into();
-                    let desc = <$module as ::patches_core::Module>::describe(&core_shape);
+                pub extern "C" fn module_template() -> $crate::types::FfiBytes {
+                    let template = <$module as ::patches_core::Module>::template();
                     $crate::types::FfiBytes::from_vec(
-                        $crate::json::serialize_module_descriptor(&desc),
+                        $crate::json::serialize_module_descriptor_template(&template),
                     )
                 }
 
@@ -737,7 +726,7 @@ macro_rules! export_modules {
                         // calling `periodic_update` on any module in the
                         // bundle — silently freezes LFOs, e.g. VBbd/VReverb.
                         supports_periodic: 1,
-                        describe,
+                        module_template,
                         prepare,
                         update_validated_parameters,
                         process,
@@ -749,8 +738,8 @@ macro_rules! export_modules {
 
                 #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
                 pub extern "C" fn descriptor_hash() -> u64 {
-                    let shape = ::patches_core::ModuleShape::default();
-                    let desc = <$module as ::patches_core::Module>::describe(&shape);
+                    let template = <$module as ::patches_core::Module>::template();
+                    let desc = template.build_channels(::patches_core::ModuleShape::default().channels as u32);
                     $crate::descriptor_hash(&desc)
                 }
             }
@@ -879,13 +868,29 @@ mod tests {
         }
     }
 
-    fn smoke_descriptor(_shape: &ModuleShape) -> ModuleDescriptor {
-        test_descriptor()
-    }
-
     impl Module for SmokeModule {
-        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            smoke_descriptor(shape)
+        fn template() -> patches_core::ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{
+                CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+            };
+            use patches_core::ParameterKind;
+            const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+                name: "decode_smoke",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[PortTemplate::mono("in")],
+                per_axis_inputs: &[],
+                global_outputs: &[PortTemplate::mono("out")],
+                per_axis_outputs: &[],
+                realtime_params: &[
+                    ParameterTemplate { name: "gain",   kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 } },
+                    ParameterTemplate { name: "mode",   kind: ParameterKind::Int   { min: -10, max: 10, default: 2 } },
+                    ParameterTemplate { name: "bypass", kind: ParameterKind::Bool  { default: false } },
+                ],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
+            };
+            T
         }
         fn prepare(
             _env: &AudioEnvironment,
@@ -920,7 +925,7 @@ mod tests {
     }
 
     // One invocation per crate — `#[no_mangle]` fns would collide otherwise.
-    crate::export_plugin!(SmokeModule, smoke_descriptor, "decode_smoke");
+    crate::export_plugin!(SmokeModule, "decode_smoke");
 
     extern "C" fn noop_release(_: u64) {}
 
@@ -934,13 +939,14 @@ mod tests {
     fn macro_smoke_round_trip() {
         use crate::types::{FfiAudioEnvironment, FfiModuleShape, FfiPluginManifest};
 
-        // describe → ModuleDescriptor
-        let shape = FfiModuleShape::from(&ModuleShape::default());
-        let bytes = __patches_describe(shape);
-        let desc = crate::json::deserialize_module_descriptor(unsafe {
+        // module_template → ModuleDescriptorTemplate; build descriptor host-side.
+        let _ = FfiModuleShape::from(&ModuleShape::default());
+        let bytes = __patches_module_template();
+        let template = crate::json::deserialize_module_descriptor_template(unsafe {
             bytes.as_slice()
         })
         .unwrap();
+        let desc = template.build_channels(::patches_core::ModuleShape::default().channels as u32);
         assert_eq!(desc.module_name, "decode_smoke");
         __patches_free_bytes(bytes);
 

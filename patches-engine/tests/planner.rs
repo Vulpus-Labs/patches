@@ -6,8 +6,8 @@
 //! `patches-engine`.
 
 use patches_core::{
-    AudioEnvironment, CableKind, CableValue, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PortRef,
+    AudioEnvironment, CableValue, InstanceId, Module, ModuleDescriptor, ModuleGraph,
+    ModuleShape, NodeId, PortRef,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
@@ -25,8 +25,8 @@ fn hz_to_voct(hz: f32) -> f32 {
 
 fn simple_graph(freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    let osc_desc = Oscillator::describe(&ModuleShape::default());
-    let out_desc = AudioOut::describe(&ModuleShape::default());
+    let osc_desc = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+    let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
     let mut pm = ParameterMap::new();
     pm.insert("frequency".to_string(), ParameterValue::Float(freq));
     graph.add_module("osc", osc_desc, &pm).unwrap();
@@ -42,15 +42,23 @@ struct Counter {
 }
 
 impl Module for Counter {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "Counter",
-            shape: shape.clone(),
-            inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Counter",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -77,8 +85,8 @@ impl Module for Counter {
 }
 
 fn counter_graph() -> ModuleGraph {
-    let counter_desc = Counter::describe(&ModuleShape::default());
-    let out_desc = AudioOut::describe(&ModuleShape::default());
+    let counter_desc = patches_core::describe_for::<Counter>(&ModuleShape::default());
+    let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
     let mut g = ModuleGraph::new();
     g.add_module("counter", counter_desc, &ParameterMap::new()).unwrap();
     g.add_module("out", out_desc, &ParameterMap::new()).unwrap();

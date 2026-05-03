@@ -11,8 +11,9 @@
 //! *defined* by the asymmetry of their two halves.
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, PortTemplate, StereoInput,
+    StereoOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -40,11 +41,23 @@ pub struct StereoSplitter {
 }
 
 impl Module for StereoSplitter {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("StereoSplitter", shape.clone())
-            .stereo_in("in")
-            .mono_out("out_left")
-            .mono_out("out_right")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "StereoSplitter",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::stereo("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("out_left"),
+                PortTemplate::mono("out_right"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -99,11 +112,23 @@ pub struct StereoJoiner {
 }
 
 impl Module for StereoJoiner {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("StereoJoiner", shape.clone())
-            .mono_in("in_left")
-            .mono_in("in_right")
-            .stereo_out("out")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "StereoJoiner",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in_left"),
+                PortTemplate::mono("in_right"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

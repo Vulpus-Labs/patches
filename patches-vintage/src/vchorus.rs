@@ -39,8 +39,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, StereoInput, StereoOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -73,16 +74,41 @@ pub struct VChorus {
 }
 
 impl Module for VChorus {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VChorus", shape.clone())
-            .stereo_in("in")
-            .mono_in("rate_cv")
-            .mono_in("depth_cv")
-            .stereo_out("out")
-            .enum_param(params::variant, Variant::Bright)
-            .enum_param(params::mode, Mode::One)
-            .float_param(params::hiss, 0.0, 1.0, 1.0)
-            .float_param(params::jitter, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VChorus",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::stereo("in"),
+                PortTemplate::mono("rate_cv"),
+                PortTemplate::mono("depth_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::variant.as_str(),
+                    kind: ParameterKind::Enum { variants: Variant::VARIANTS, default: "bright" },
+                },
+                ParameterTemplate {
+                    name: params::mode.as_str(),
+                    kind: ParameterKind::Enum { variants: Mode::VARIANTS, default: "one" },
+                },
+                ParameterTemplate {
+                    name: params::hiss.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::jitter.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

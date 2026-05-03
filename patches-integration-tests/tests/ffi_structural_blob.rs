@@ -48,14 +48,14 @@ fn structural_string_round_trip() {
     assert_eq!(builders.len(), 1);
     let vtable = *builders[0].vtable();
 
-    // Read descriptor through the vtable and pack a blob with our path.
-    let shape = ModuleShape::default();
+    // Read template through the vtable and build a descriptor.
+    let _shape = ModuleShape::default();
     let descriptor = unsafe {
-        let bytes = (vtable.describe)((&shape).into());
+        let bytes = (vtable.module_template)();
         let slice = bytes.as_slice();
-        let desc = json::deserialize_module_descriptor(slice).unwrap();
+        let template = json::deserialize_module_descriptor_template(slice).unwrap();
         (vtable.free_bytes)(bytes);
-        desc
+        template.build_channels(0)
     };
     assert_eq!(descriptor.module_name, "StructuralStringGain");
     assert_eq!(descriptor.structural_params.len(), 1);
@@ -117,12 +117,12 @@ fn structural_default_when_blob_uses_descriptor_default() {
     let builders = load_plugin(&path).expect("load_plugin");
     let vtable = *builders[0].vtable();
 
-    let shape = ModuleShape::default();
+    let _shape = ModuleShape::default();
     let descriptor = unsafe {
-        let bytes = (vtable.describe)((&shape).into());
-        let desc = json::deserialize_module_descriptor(bytes.as_slice()).unwrap();
+        let bytes = (vtable.module_template)();
+        let template = json::deserialize_module_descriptor_template(bytes.as_slice()).unwrap();
         (vtable.free_bytes)(bytes);
-        desc
+        template.build_channels(0)
     };
 
     // No override → descriptor default for File is empty string.

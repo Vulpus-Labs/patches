@@ -1,4 +1,4 @@
-use patches_core::{AUDIO_OUT_L, CablePool, CableValue, Module, ModuleGraph, ModuleShape, NodeId};
+use patches_core::{AUDIO_OUT_L, CablePool, CableValue, ModuleGraph, ModuleShape, NodeId};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_planner::PlannerState;
 use patches_engine::{build_patch, ExecutionPlan, ReadyState, StaleState, ModulePool};
@@ -10,8 +10,8 @@ fn sine_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(freq));
-    graph.add_module(osc_id, Oscillator::describe(&ModuleShape::default()), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module(osc_id, patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -23,10 +23,10 @@ fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
     pa.insert("frequency".to_string(), ParameterValue::Float(freq_a));
     let mut pb = ParameterMap::new();
     pb.insert("frequency".to_string(), ParameterValue::Float(freq_b));
-    graph.add_module("osc_a", Oscillator::describe(&ModuleShape::default()), &pa).unwrap();
-    graph.add_module("osc_b", Oscillator::describe(&ModuleShape::default()), &pb).unwrap();
-    graph.add_module("mix", Sum::describe(&ModuleShape { channels: 2 }), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc_a", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &pa).unwrap();
+    graph.add_module("osc_b", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &pb).unwrap();
+    graph.add_module("mix", patches_core::describe_for::<Sum>(&ModuleShape { channels: 2 }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from("osc_a"), p("sine"), &NodeId::from("mix"), pi("in", 0), 1.0).unwrap();
     graph.connect(&NodeId::from("osc_b"), p("sine"), &NodeId::from("mix"), pi("in", 1), 1.0).unwrap();
     graph.connect(&NodeId::from("mix"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -36,8 +36,8 @@ fn two_osc_graph(freq_a: f32, freq_b: f32) -> ModuleGraph {
 /// Sum(1-channel) → AudioOut. Used as a different module type in type-change tests.
 fn sum_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    graph.add_module("osc", Sum::describe(&ModuleShape { channels: 1 }), &ParameterMap::new()).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", patches_core::describe_for::<Sum>(&ModuleShape { channels: 1 }), &ParameterMap::new()).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -431,12 +431,12 @@ fn shape_change_forces_re_instantiation() {
     let mut graph_a = patches_core::ModuleGraph::new();
     graph_a.add_module(
         "mix",
-        Mixer::describe(&ModuleShape { channels: 2 }),
+        patches_core::describe_for::<Mixer>(&ModuleShape { channels: 2 }),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.add_module(
         "out",
-        AudioOut::describe(&ModuleShape::default()),
+        patches_core::describe_for::<AudioOut>(&ModuleShape::default()),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.connect(
@@ -458,12 +458,12 @@ fn shape_change_forces_re_instantiation() {
     let mut graph_b = patches_core::ModuleGraph::new();
     graph_b.add_module(
         "mix",
-        Mixer::describe(&ModuleShape { channels: 4 }),
+        patches_core::describe_for::<Mixer>(&ModuleShape { channels: 4 }),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.add_module(
         "out",
-        AudioOut::describe(&ModuleShape::default()),
+        patches_core::describe_for::<AudioOut>(&ModuleShape::default()),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.connect(

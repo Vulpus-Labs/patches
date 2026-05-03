@@ -1,11 +1,16 @@
 use std::marker::PhantomData;
+use patches_core::modules::ModuleDescriptorTemplate;
 use patches_core::{
-    AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
+    AudioEnvironment, BuildError, InstanceId, Module, ModuleShape, ParameterMap,
     StructuralParams,
 };
 
 pub trait ModuleBuilder: Send + Sync {
-    fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor;
+    /// Static descriptor template for this module type (ADR 0066).
+    /// Built-in builders return the module's `Module::template()`;
+    /// FFI-loaded plugins return the deserialized template fetched
+    /// from the plugin's `module_template` vtable entry at load time.
+    fn template(&self) -> ModuleDescriptorTemplate;
 
     fn build(
         &self,
@@ -23,8 +28,8 @@ impl<T> ModuleBuilder for Builder<T>
 where
     T: Module + 'static,
 {
-    fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor {
-        T::describe(shape)
+    fn template(&self) -> ModuleDescriptorTemplate {
+        T::template()
     }
 
     fn build(
@@ -42,7 +47,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::InstanceId;
+    use patches_core::{InstanceId, ModuleDescriptor};
 
     struct TestModule {
         instance_id: InstanceId,
@@ -50,14 +55,19 @@ mod tests {
     }
 
     impl Module for TestModule {
-        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "TestModule",
-                shape: shape.clone(),
-                inputs: vec![],
-                outputs: vec![],
-                realtime_params: vec![],
-                structural_params: vec![],
+        fn template() -> ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            ModuleDescriptorTemplate {
+                name: "TestModule",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
             }
         }
 

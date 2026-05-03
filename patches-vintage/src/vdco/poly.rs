@@ -35,8 +35,9 @@ use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -76,23 +77,35 @@ pub struct VPolyDco {
 }
 
 impl Module for VPolyDco {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VPolyDco", shape.clone())
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("pwm")
-            .poly_trigger_in("sync")
-            .poly_out("out")
-            .poly_trigger_out("reset_out")
-            .float_param(params::frequency, -4.0, 12.0, 0.0)
-            .enum_param(params::fm_type, VDcoFmType::Linear)
-            .float_param(params::saw_gain, 0.0, 1.0, 1.0)
-            .float_param(params::pulse_gain, 0.0, 1.0, 0.0)
-            .float_param(params::triangle_gain, 0.0, 1.0, 0.0)
-            .float_param(params::sub_gain, 0.0, 1.0, 0.0)
-            .float_param(params::noise_gain, 0.0, 1.0, 0.0)
-            .float_param(params::curve, 0.0, 1.0, 0.1)
-            .float_param(params::sync_softness, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VPolyDco",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("pwm"),
+                PortTemplate::poly_trigger("sync"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out"), PortTemplate::poly_trigger("reset_out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::frequency.as_str(),     kind: ParameterKind::Float { min: -4.0, max: 12.0, default: 0.0 } },
+                ParameterTemplate { name: params::fm_type.as_str(),       kind: ParameterKind::Enum { variants: VDcoFmType::VARIANTS, default: "linear" } },
+                ParameterTemplate { name: params::saw_gain.as_str(),      kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 } },
+                ParameterTemplate { name: params::pulse_gain.as_str(),    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::triangle_gain.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::sub_gain.as_str(),      kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::noise_gain.as_str(),    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::curve.as_str(),         kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.1 } },
+                ParameterTemplate { name: params::sync_softness.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

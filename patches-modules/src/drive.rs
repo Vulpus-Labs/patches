@@ -31,7 +31,9 @@
 use patches_core::{
     params_enum,
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, };
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
+};
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
@@ -76,16 +78,44 @@ pub struct Drive {
 }
 
 impl Module for Drive {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Drive", shape.clone())
-            .mono_in("in")
-            .mono_in("drive_cv")
-            .mono_out("out")
-            .enum_param(params::mode, DriveMode::Saturate)
-            .float_param(params::drive, 0.1, 50.0, 1.0)
-            .float_param(params::tone, 0.0, 1.0, 0.5)
-            .float_param(params::bias, -1.0, 1.0, 0.0)
-            .float_param(params::mix, 0.0, 1.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Drive",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("drive_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::mode.as_str(),
+                    kind: ParameterKind::Enum { variants: DriveMode::VARIANTS, default: "saturate" },
+                },
+                ParameterTemplate {
+                    name: params::drive.as_str(),
+                    kind: ParameterKind::Float { min: 0.1, max: 50.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::bias.as_str(),
+                    kind: ParameterKind::Float { min: -1.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::mix.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

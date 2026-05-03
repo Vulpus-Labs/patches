@@ -86,8 +86,7 @@ mod ffi_bundle_tests {
     //! (ticket 0571 / Phase D).
 
     use super::*;
-    use patches_core::ModuleShape;
-    use patches_ffi_common::types::{ABI_VERSION, FfiModuleShape};
+    use patches_ffi_common::types::ABI_VERSION;
 
     const EXPECTED_NAMES: &[&str] = &[
         "VChorus",
@@ -117,15 +116,14 @@ mod ffi_bundle_tests {
 
         for (vtable, expected_name) in vtables.iter().zip(EXPECTED_NAMES) {
             assert_eq!(vtable.abi_version, ABI_VERSION, "abi drift in {expected_name}");
-            let shape = FfiModuleShape::from(&ModuleShape::default());
             // SAFETY: FFI fn ptr is an extern "C" entry point emitted by the
-            // macro; describe is safe to call on any well-formed shape.
-            let bytes = unsafe { (vtable.describe)(shape) };
-            let desc = patches_ffi_common::json::deserialize_module_descriptor(
+            // macro; module_template is safe to call.
+            let bytes = unsafe { (vtable.module_template)() };
+            let template = patches_ffi_common::json::deserialize_module_descriptor_template(
                 unsafe { bytes.as_slice() },
             )
-            .expect("describe returned invalid descriptor JSON");
-            assert_eq!(&desc.module_name, expected_name);
+            .expect("module_template returned invalid JSON");
+            assert_eq!(&template.name, expected_name);
             // SAFETY: free_bytes matches FfiBytes::from_vec that produced `bytes`.
             unsafe { (vtable.free_bytes)(bytes) };
         }

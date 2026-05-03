@@ -53,8 +53,9 @@
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
@@ -83,13 +84,33 @@ pub struct Limiter {
 }
 
 impl Module for Limiter {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Limiter", shape.clone())
-            .mono_in("in")
-            .mono_out("out")
-            .float_param(params::threshold, 0.0, 2.0, 0.9)
-            .float_param(params::attack_ms, 0.1, MAX_ATTACK_MS, 2.0)
-            .float_param(params::release_ms, 1.0, 5000.0, 100.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Limiter",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::threshold.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 2.0, default: 0.9 },
+                },
+                ParameterTemplate {
+                    name: params::attack_ms.as_str(),
+                    kind: ParameterKind::Float { min: 0.1, max: MAX_ATTACK_MS, default: 2.0 },
+                },
+                ParameterTemplate {
+                    name: params::release_ms.as_str(),
+                    kind: ParameterKind::Float { min: 1.0, max: 5000.0, default: 100.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

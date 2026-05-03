@@ -38,8 +38,9 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::params_enum;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, MidiInput, MidiMessage,
-    MidiOutput, Module, ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiEvent, MidiInput,
+    MidiMessage, MidiOutput, Module, ModuleDescriptor, ModuleDescriptorTemplate, OutputPort,
+    ParameterKind, ParameterTemplate, PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::xorshift64;
@@ -187,14 +188,39 @@ impl MidiArp {
 }
 
 impl Module for MidiArp {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiArp", shape.clone())
-            .midi_in("midi")
-            .trigger_in("clock")
-            .midi_out("midi")
-            .enum_param(params::pattern, ArpPattern::Up)
-            .int_param(params::octaves, 1, 4, 1)
-            .float_param(params::gate_length, 0.0, 1.0, 0.5)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiArp",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::midi("midi"),
+                PortTemplate::trigger("clock"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::midi("midi")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pattern.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: ArpPattern::VARIANTS,
+                        default: "up",
+                    },
+                },
+                ParameterTemplate {
+                    name: params::octaves.as_str(),
+                    kind: ParameterKind::Int { min: 1, max: 4, default: 1 },
+                },
+                ParameterTemplate {
+                    name: params::gate_length.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

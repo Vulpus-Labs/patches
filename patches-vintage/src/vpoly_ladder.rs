@@ -28,8 +28,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::{LadderCoeffs, LadderVariant, PolyLadderKernel};
@@ -78,15 +79,25 @@ impl VPolyLadder {
 }
 
 impl Module for VPolyLadder {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VPolyLadder", shape.clone())
-            .poly_in("in")
-            .poly_in("cutoff_cv")
-            .poly_out("out")
-            .enum_param(params::variant, VLadderVariant::Smooth)
-            .float_param(params::cutoff, CUTOFF_MIN, CUTOFF_MAX, 1_000.0)
-            .float_param(params::resonance, 0.0, 1.0, 0.0)
-            .float_param(params::drive, 0.0, DRIVE_MAX, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VPolyLadder",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::poly("in"), PortTemplate::poly("cutoff_cv")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::variant.as_str(),   kind: ParameterKind::Enum { variants: VLadderVariant::VARIANTS, default: "smooth" } },
+                ParameterTemplate { name: params::cutoff.as_str(),    kind: ParameterKind::Float { min: CUTOFF_MIN, max: CUTOFF_MAX, default: 1_000.0 } },
+                ParameterTemplate { name: params::resonance.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::drive.as_str(),     kind: ParameterKind::Float { min: 0.0, max: DRIVE_MAX, default: 1.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

@@ -26,13 +26,17 @@ fn indexed_params(entries: &[(&str, usize, ParameterValue)]) -> ParameterMap {
 fn mixer_descriptor_shape_n2() {
     let h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
     let desc = h.descriptor();
-    // 4 groups × 2 + return_a + return_b = 10 inputs
+    // 4 groups × 2 + return_a + return_b = 10 inputs.
+    // Template build emits globals first (return_a, return_b), then per-axis
+    // groups (in[0..n], level_cv[0..n], send_a_cv[0..n], send_b_cv[0..n]).
     assert_eq!(desc.inputs.len(), 10);
     assert_eq!(desc.outputs.len(), 3);
-    assert_eq!(desc.inputs[0].name,  "in");
-    assert_eq!(desc.inputs[0].index, 0);
-    assert_eq!(desc.inputs[1].name,  "in");
-    assert_eq!(desc.inputs[1].index, 1);
+    assert_eq!(desc.inputs[0].name,  "return_a");
+    assert_eq!(desc.inputs[1].name,  "return_b");
+    assert_eq!(desc.inputs[2].name,  "in");
+    assert_eq!(desc.inputs[2].index, 0);
+    assert_eq!(desc.inputs[3].name,  "in");
+    assert_eq!(desc.inputs[3].index, 1);
     assert_eq!(desc.outputs[0].name, "out");
     assert_eq!(desc.outputs[1].name, "send_a");
     assert_eq!(desc.outputs[2].name, "send_b");

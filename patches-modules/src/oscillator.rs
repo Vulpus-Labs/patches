@@ -1,7 +1,8 @@
 use patches_core::{
     params_enum,
-    AudioEnvironment, BoundedRandomWalk, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
+    AudioEnvironment, BoundedRandomWalk, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    ParameterKind, ParameterTemplate, PortTemplate, GLOBAL_DRIFT, HALF_SEMITONE_VOCT,
     OSCILLATOR_DRIFT_STEP,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -98,21 +99,48 @@ pub struct Oscillator {
 }
 
 impl Module for Oscillator {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Osc", shape.clone())
-            .mono_in("voct")
-            .mono_in("fm")
-            .mono_in("pulse_width_cv")
-            .mono_in("phase_mod")
-            .trigger_in("sync")
-            .mono_out("sine")
-            .mono_out("triangle")
-            .mono_out("sawtooth")
-            .mono_out("square")
-            .trigger_out("reset_out")
-            .float_param(params::frequency, -4.0, 12.0, 0.0)
-            .enum_param(params::fm_type, OscFmType::Linear)
-            .float_param(params::drift, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Osc",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("voct"),
+                PortTemplate::mono("fm"),
+                PortTemplate::mono("pulse_width_cv"),
+                PortTemplate::mono("phase_mod"),
+                PortTemplate::trigger("sync"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("sine"),
+                PortTemplate::mono("triangle"),
+                PortTemplate::mono("sawtooth"),
+                PortTemplate::mono("square"),
+                PortTemplate::trigger("reset_out"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::frequency.as_str(),
+                    kind: ParameterKind::Float { min: -4.0, max: 12.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::fm_type.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: OscFmType::VARIANTS,
+                        default: "linear",
+                    },
+                },
+                ParameterTemplate {
+                    name: params::drift.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

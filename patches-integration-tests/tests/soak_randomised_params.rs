@@ -98,7 +98,7 @@ fn soak_ten_thousand_cycles_randomised_params() {
     let mut registry = default_registry();
     let shape = ModuleShape::default();
     for b in dylib_builders {
-        let name = b.describe(&shape).module_name.to_string();
+        let name = b.template().build_channels(shape.channels as u32).module_name.to_string();
         registry.register_builder(name, Box::new(b));
     }
 

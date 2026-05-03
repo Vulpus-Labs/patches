@@ -35,9 +35,10 @@ use patches_core::module_params;
 use patches_core::cable_pool::CablePool;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput,
-    OutputPort,
+    AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, MonoInput, MonoOutput,
+    OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 
 module_params! {
@@ -173,18 +174,50 @@ impl Drop for PitchShift {
 }
 
 impl patches_core::Module for PitchShift {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PitchShift", ModuleShape { channels: 0 })
-            .mono_in("in")
-            .mono_in("pitch")
-            .mono_in("mix")
-            .mono_out("out")
-            .float_param(params::semitones, -24.0, 24.0, 0.0)
-            .float_param(params::mix, 0.0, 1.0, 1.0)
-            .bool_param(params::formants, false)
-            .bool_param(params::mono, false)
-            .structural_bool_param("high_quality", false)
-            .structural_int_param("length", 0, 4096, 0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PitchShift",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("pitch"),
+                PortTemplate::mono("mix"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::semitones.as_str(),
+                    kind: ParameterKind::Float { min: -24.0, max: 24.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::mix.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::formants.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+                ParameterTemplate {
+                    name: params::mono.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[
+                ParameterTemplate {
+                    name: "high_quality",
+                    kind: ParameterKind::Bool { default: false },
+                },
+                ParameterTemplate {
+                    name: "length",
+                    kind: ParameterKind::Int { min: 0, max: 4096, default: 0 },
+                },
+            ],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

@@ -20,8 +20,8 @@
 //! | `gate` | mono | High (1.0) for first half of interval, low (0.0) for second |
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
@@ -41,12 +41,26 @@ pub struct MsTicker {
 }
 
 impl Module for MsTicker {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MsTicker", shape.clone())
-            .mono_in("ms")
-            .trigger_in("reset")
-            .trigger_out("trigger")
-            .mono_out("gate")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MsTicker",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("ms"),
+                PortTemplate::trigger("reset"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("gate"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

@@ -24,6 +24,7 @@ use std::sync::Arc;
 const EXPECTED_MODULES: &[&str] = &[
     "VChorus",
     "VBbd",
+    "VStereoBbd",
     "VDco",
     "VPolyDco",
     "VFlanger",

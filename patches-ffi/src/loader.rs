@@ -15,7 +15,10 @@ use std::sync::{Arc, OnceLock};
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, ParameterMap, StructuralParams};
+use patches_core::modules::{
+    InstanceId, ModuleDescriptor, ModuleDescriptorTemplate, ModuleShape, ParameterMap,
+    StructuralParams,
+};
 use patches_core::param_frame::{ParamView, ParamViewIndex};
 use patches_core::param_layout::{compute_layout, ParamLayout};
 use patches_core::{AudioEnvironment, Module};
@@ -25,7 +28,7 @@ use patches_registry::ModuleBuilder;
 
 use crate::json;
 use crate::types::{
-    ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiModuleShape, FfiPluginManifest,
+    ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiPluginManifest,
     FfiPluginVTable, PREPARE_OK,
 };
 use patches_ffi_common::structural_frame::pack_structural;
@@ -70,13 +73,6 @@ impl Drop for DylibModule {
 }
 
 impl Module for DylibModule {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor
-    where
-        Self: Sized,
-    {
-        unreachable!("DylibModule::describe is not callable directly; use DylibModuleBuilder")
-    }
-
     fn prepare(
         _audio_environment: &AudioEnvironment,
         _descriptor: ModuleDescriptor,
@@ -149,6 +145,11 @@ impl Module for DylibModule {
 /// A `ModuleBuilder` backed by a loaded plugin library.
 pub struct DylibModuleBuilder {
     vtable: FfiPluginVTable,
+    /// Cached template fetched from the plugin's `module_template` vtable
+    /// entry once at load time (ADR 0066, ticket 0795). Per-instance
+    /// descriptors are built locally via [`ModuleDescriptorTemplate::build_channels`]
+    /// without re-entering the plugin.
+    template: ModuleDescriptorTemplate,
     lib: Arc<libloading::Library>,
 }
 
@@ -176,14 +177,8 @@ impl DylibModuleBuilder {
 }
 
 impl ModuleBuilder for DylibModuleBuilder {
-    fn describe(&self, shape: &ModuleShape) -> ModuleDescriptor {
-        let ffi_shape = FfiModuleShape::from(shape);
-        let bytes = unsafe { (self.vtable.describe)(ffi_shape) };
-        let slice = unsafe { bytes.as_slice() };
-        let desc = json::deserialize_module_descriptor(slice)
-            .expect("plugin describe returned invalid JSON");
-        unsafe { (self.vtable.free_bytes)(bytes) };
-        desc
+    fn template(&self) -> ModuleDescriptorTemplate {
+        self.template
     }
 
     fn build(
@@ -194,7 +189,7 @@ impl ModuleBuilder for DylibModuleBuilder {
         structural: &StructuralParams,
         instance_id: InstanceId,
     ) -> Result<Box<dyn Module>, BuildError> {
-        let descriptor = self.describe(shape);
+        let descriptor = self.template.build_channels(shape.channels as u32);
 
         let desc_json = json::serialize_module_descriptor(&descriptor);
         let ffi_env = FfiAudioEnvironment::from(audio_environment);
@@ -317,11 +312,24 @@ pub fn load_plugin(path: &Path) -> Result<Vec<DylibModuleBuilder>, String> {
                 ABI_VERSION,
             ));
         }
+        // Pull the static template across the FFI exactly once.
+        let bytes = unsafe { (vt.module_template)() };
+        let slice = unsafe { bytes.as_slice() };
+        let template = patches_ffi_common::json::deserialize_module_descriptor_template(slice)
+            .map_err(|e| {
+                format!(
+                    "module_template JSON in {}: {e}",
+                    path.display(),
+                )
+            })?;
+        unsafe { (vt.free_bytes)(bytes) };
+
         let builder = DylibModuleBuilder {
             vtable: *vt,
+            template,
             lib: Arc::clone(&lib_arc),
         };
-        let descriptor = builder.describe(&default_shape);
+        let descriptor = builder.template().build_channels(default_shape.channels as u32);
         let name = descriptor.module_name.to_string();
 
         let host_hash = patches_ffi_common::descriptor_hash(&descriptor);

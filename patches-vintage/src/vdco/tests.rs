@@ -38,7 +38,7 @@ fn env(sample_rate: f32) -> AudioEnvironment {
 #[test]
 fn vdco_ports_are_mono() {
     let shape = ModuleShape::default();
-    let d = VDco::describe(&shape);
+    let d = patches_core::describe_for::<VDco>(&shape);
     for name in ["voct", "pwm"] {
         let p = d.inputs.iter().find(|p| p.name == name).unwrap();
         assert_eq!(p.kind, CableKind::Mono, "VDco input '{name}' must be mono");
@@ -50,7 +50,7 @@ fn vdco_ports_are_mono() {
 #[test]
 fn vpolydco_ports_are_poly() {
     let shape = ModuleShape::default();
-    let d = VPolyDco::describe(&shape);
+    let d = patches_core::describe_for::<VPolyDco>(&shape);
     for name in ["voct", "pwm"] {
         let p = d.inputs.iter().find(|p| p.name == name).unwrap();
         assert_eq!(p.kind, CableKind::Poly, "VPolyDco input '{name}' must be poly");
@@ -482,7 +482,7 @@ fn curvature_changes_spectrum_but_no_aliasing_spike() {
 #[test]
 fn reset_out_port_kinds() {
     let shape = ModuleShape::default();
-    let d_mono = VDco::describe(&shape);
+    let d_mono = patches_core::describe_for::<VDco>(&shape);
     let sync_mono = d_mono.inputs.iter().find(|p| p.name == "sync").unwrap();
     assert_eq!(sync_mono.kind, CableKind::Mono);
     assert_eq!(sync_mono.mono_layout, MonoLayout::Trigger);
@@ -490,7 +490,7 @@ fn reset_out_port_kinds() {
     assert_eq!(reset_mono.kind, CableKind::Mono);
     assert_eq!(reset_mono.mono_layout, MonoLayout::Trigger);
 
-    let d_poly = VPolyDco::describe(&shape);
+    let d_poly = patches_core::describe_for::<VPolyDco>(&shape);
     let sync_poly = d_poly.inputs.iter().find(|p| p.name == "sync").unwrap();
     assert_eq!(sync_poly.kind, CableKind::Poly);
     assert_eq!(sync_poly.poly_layout, PolyLayout::Trigger);

@@ -6,7 +6,7 @@
 //! oversampling loop produces output without asserting anything about alias
 //! rejection (which is verified by the `decimator` unit tests).
 
-use patches_core::{AudioEnvironment, Module, ModuleGraph, ModuleShape, NodeId, PortRef};
+use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
 use patches_integration_tests::{HeadlessEngine, POOL_CAP, MODULE_CAP};
@@ -21,12 +21,12 @@ fn sine_out_graph(sample_rate: f32) -> (patches_core::ModuleGraph, AudioEnvironm
     // 440 Hz (A4): log2(440 / 16.3516) ≈ 4.75 V/oct
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
-        .add_module("osc", Oscillator::describe(&ModuleShape::default()), &params)
+        .add_module("osc", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &params)
         .unwrap();
     graph
         .add_module(
             "out",
-            AudioOut::describe(&ModuleShape::default()),
+            patches_core::describe_for::<AudioOut>(&ModuleShape::default()),
             &ParameterMap::new(),
         )
         .unwrap();

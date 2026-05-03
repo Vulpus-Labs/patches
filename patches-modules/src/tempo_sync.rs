@@ -29,8 +29,9 @@
 
 use patches_core::{
     module_params, params_enum,
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -87,11 +88,26 @@ pub struct TempoSync {
 }
 
 impl Module for TempoSync {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("TempoSync", shape.clone())
-            .mono_in("bpm")
-            .mono_out("ms")
-            .enum_param(params::subdivision, Subdivision::Quarter)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "TempoSync",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("bpm")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("ms")],
+            per_axis_outputs: &[],
+            realtime_params: &[ParameterTemplate {
+                name: params::subdivision.as_str(),
+                kind: ParameterKind::Enum {
+                    variants: Subdivision::VARIANTS,
+                    default: "1/4",
+                },
+            }],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

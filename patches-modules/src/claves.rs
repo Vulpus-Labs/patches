@@ -25,8 +25,9 @@
 /// | `reson` | float | 0.3–1.0      | 0.85    | Bandpass resonance / ring |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
@@ -59,14 +60,36 @@ pub struct Claves {
 }
 
 impl Module for Claves {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Claves", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 200.0, 5000.0, 2500.0)
-            .float_param(params::decay, 0.01, 0.5, 0.06)
-            .float_param(params::reson, 0.3, 1.0, 0.85)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Claves",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 200.0, max: 5000.0, default: 2500.0 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.01, max: 0.5, default: 0.06 },
+                },
+                ParameterTemplate {
+                    name: params::reson.as_str(),
+                    kind: ParameterKind::Float { min: 0.3, max: 1.0, default: 0.85 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

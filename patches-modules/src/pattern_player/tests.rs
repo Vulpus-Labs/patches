@@ -55,7 +55,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     });
 
     let s = shape(1);
-    let desc = PatternPlayer::describe(&s);
+    let desc = patches_core::describe_for::<PatternPlayer>(&s);
     let mut player = PatternPlayer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     {
         use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};

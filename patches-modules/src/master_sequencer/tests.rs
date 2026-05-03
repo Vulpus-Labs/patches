@@ -58,7 +58,7 @@ fn sync_auto_selects_host_when_hosted() {
         hosted: true,
     };
     let s = shape(1);
-    let desc = MasterSequencer::describe(&s);
+    let desc = patches_core::describe_for::<MasterSequencer>(&s);
     let seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     assert!(seq.use_host_transport, "auto mode should use host transport when hosted");
 }
@@ -66,7 +66,7 @@ fn sync_auto_selects_host_when_hosted() {
 #[test]
 fn sync_auto_selects_free_when_standalone() {
     let s = shape(1);
-    let desc = MasterSequencer::describe(&s);
+    let desc = patches_core::describe_for::<MasterSequencer>(&s);
     let seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     assert!(!seq.use_host_transport, "auto mode should not use host transport when standalone");
 }
@@ -80,7 +80,7 @@ fn sync_free_overrides_hosted() {
         hosted: true,
     };
     let s = shape(1);
-    let desc = MasterSequencer::describe(&s);
+    let desc = patches_core::describe_for::<MasterSequencer>(&s);
     let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Free as u32));
@@ -91,7 +91,7 @@ fn sync_free_overrides_hosted() {
 #[test]
 fn sync_host_overrides_standalone() {
     let s = shape(1);
-    let desc = MasterSequencer::describe(&s);
+    let desc = patches_core::describe_for::<MasterSequencer>(&s);
     let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
     let mut params = ParameterMap::new();
     params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Host as u32));

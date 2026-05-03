@@ -1,6 +1,6 @@
 use super::*;
 use patches_core::test_support::{ModuleHarness, params};
-use patches_core::Module;
+use patches_core::ModuleShape;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -12,7 +12,7 @@ fn env() -> AudioEnvironment {
 
 #[test]
 fn descriptor_ports_and_params_mono() {
-    let desc = ConvolutionReverb::describe(&ModuleShape::default());
+    let desc = patches_core::describe_for::<ConvolutionReverb>(&ModuleShape::default());
     assert_eq!(desc.module_name, "ConvReverb");
     assert_eq!(desc.inputs.len(), 2);
     assert_eq!(desc.outputs.len(), 1);

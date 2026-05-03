@@ -238,6 +238,23 @@ pub(crate) fn instantiate_descriptors(
 
         let shape = build_module_shape(&module.shape_args);
         let channel_aliases = extract_channel_aliases(&module.shape_args);
+        if let Err(reason) = shape.validate() {
+            diagnostics.push(Diagnostic {
+                span: module.type_name_span,
+                message: format!("invalid shape for '{}': {}", module.type_name, reason),
+                kind: crate::ast_builder::DiagnosticKind::InvalidShape,
+                replacements: Vec::new(),
+            });
+            // Fall back to default shape so downstream analysis still gets a
+            // descriptor for port/parameter resolution.
+            if let Ok(desc) = registry.describe(&module.type_name, &ModuleShape::default()) {
+                descriptors.insert(
+                    key,
+                    ResolvedDescriptor::Module { desc, channel_aliases },
+                );
+            }
+            continue;
+        }
         match registry.describe(&module.type_name, &shape) {
             Ok(desc) => {
                 descriptors.insert(

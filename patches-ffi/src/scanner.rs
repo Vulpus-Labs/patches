@@ -171,7 +171,7 @@ fn load_one(path: &Path, registry: &mut Registry, report: &mut ScanReport) {
     let mut seen: Vec<String> = Vec::with_capacity(builders.len());
     for builder in builders {
         let version = builder.module_version();
-        let name = builder.describe(&default_shape).module_name.to_string();
+        let name = builder.template().build_channels(default_shape.channels as u32).module_name.to_string();
         if seen.iter().any(|n| n == &name) {
             report.skipped.push(SkipReason::DuplicateInBundle {
                 name,
@@ -237,7 +237,7 @@ pub fn scan_plugins(dir: &Path) -> Vec<Result<(String, DylibModuleBuilder), Stri
             Ok(builders) => {
                 let shape = ModuleShape::default();
                 for builder in builders {
-                    let name = builder.describe(&shape).module_name.to_string();
+                    let name = builder.template().build_channels(shape.channels as u32).module_name.to_string();
                     out.push(Ok((name, builder)));
                 }
             }

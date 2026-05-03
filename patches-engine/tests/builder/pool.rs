@@ -8,9 +8,9 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
 
     let build_two = |state: &PlannerState| {
         let mut g = ModuleGraph::new();
-        let s1 = Oscillator::describe(&ModuleShape::default());
-        let s2 = Oscillator::describe(&ModuleShape::default());
-        let out = AudioOut::describe(&ModuleShape::default());
+        let s1 = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let s2 = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut p1 = ParameterMap::new();
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         let mut p2 = ParameterMap::new();
@@ -27,8 +27,8 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
 
     let build_one = |state: &PlannerState| {
         let mut g = ModuleGraph::new();
-        let s = Oscillator::describe(&ModuleShape::default());
-        let out = AudioOut::describe(&ModuleShape::default());
+        let s = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut pm = ParameterMap::new();
         pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         g.add_module("s1", s, &pm).unwrap();
@@ -57,8 +57,8 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
 #[test]
 fn pool_exhausted_error_when_capacity_exceeded() {
     let mut graph = ModuleGraph::new();
-    let sine_desc = Oscillator::describe(&ModuleShape::default());
-    let out_desc = AudioOut::describe(&ModuleShape::default());
+    let sine_desc = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+    let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
     let mut pm = ParameterMap::new();
     pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
     graph.add_module("sine", sine_desc, &pm).unwrap();

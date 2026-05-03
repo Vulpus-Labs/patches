@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use patches_core::{
-    AudioEnvironment, CableKind, CablePool, GraphError, InstanceId, Module, ModuleDescriptor,
-    ModuleGraph, ModuleShape, NodeId, MonoLayout, PolyLayout, PortDescriptor, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, GraphError, InstanceId, Module, ModuleDescriptor,
+    ModuleGraph, ModuleShape, NodeId, PolyInput, PolyOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
@@ -37,15 +37,23 @@ struct PolyProbe {
 }
 
 impl Module for PolyProbe {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "PolyProbe",
-            shape: ModuleShape::default(),
-            inputs: vec![PortDescriptor { name: "poly_in", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyProbe",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::poly("poly_in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("poly_out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -117,15 +125,23 @@ const POLY_PATTERN: [f32; 16] = {
 };
 
 impl Module for PolySource {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "PolySource",
-            shape: ModuleShape::default(),
-            inputs: vec![],
-            outputs: vec![PortDescriptor { name: "poly_out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolySource",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("poly_out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -181,10 +197,10 @@ fn connected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("src", PolySource::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("src", patches_core::describe_for::<PolySource>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", patches_core::describe_for::<PolyProbe>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("poly_out"), &NodeId::from("probe"), p("poly_in"), 1.0).unwrap();
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -198,9 +214,9 @@ fn disconnected_graph() -> ModuleGraph {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
-    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("probe", patches_core::describe_for::<PolyProbe>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
@@ -291,8 +307,8 @@ fn kind_mismatch_at_connect() {
     let mut osc_params = ParameterMap::new();
     osc_params.insert("frequency".to_string(), ParameterValue::Float(4.75));
 
-    graph.add_module("osc", Oscillator::describe(&ModuleShape::default()), &osc_params).unwrap();
-    graph.add_module("probe", PolyProbe::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &osc_params).unwrap();
+    graph.add_module("probe", patches_core::describe_for::<PolyProbe>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
 
     let result = graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("poly_in"), 1.0);
     assert!(

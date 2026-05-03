@@ -3,8 +3,9 @@ use crate::common::frequency::C0_FREQ;
 use crate::filter::{compute_biquad_bandpass, compute_biquad_highpass, compute_biquad_lowpass};
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -91,16 +92,38 @@ impl PolyResonantLowpass {
 }
 
 impl Module for PolyResonantLowpass {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyLowpass", shape.clone())
-            .poly_in("in")
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("resonance_cv")
-            .poly_out("out")
-            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
-            .float_param(params::resonance, 0.0,  1.0,  0.0)
-            .bool_param(params::saturate, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyLowpass",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("in"),
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("resonance_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cutoff.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: params::resonance.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::saturate.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -255,16 +278,38 @@ impl PolyResonantHighpass {
 }
 
 impl Module for PolyResonantHighpass {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyHighpass", shape.clone())
-            .poly_in("in")
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("resonance_cv")
-            .poly_out("out")
-            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
-            .float_param(params::resonance, 0.0,  1.0,  0.0)
-            .bool_param(params::saturate, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyHighpass",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("in"),
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("resonance_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cutoff.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: params::resonance.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::saturate.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -419,16 +464,38 @@ impl PolyResonantBandpass {
 }
 
 impl Module for PolyResonantBandpass {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyBandpass", shape.clone())
-            .poly_in("in")
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("resonance_cv")
-            .poly_out("out")
-            .float_param(bp_params::center,      -2.0, 12.0, 6.0)
-            .float_param(bp_params::bandwidth_q, 0.1,  20.0, 1.0)
-            .bool_param(bp_params::saturate, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyBandpass",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("in"),
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("resonance_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: bp_params::center.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: bp_params::bandwidth_q.as_str(),
+                    kind: ParameterKind::Float { min: 0.1, max: 20.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: bp_params::saturate.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

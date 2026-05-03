@@ -1,6 +1,6 @@
 //! Builder-side `PlanMeta` production tests (ADR 0065 / ticket 0778).
 
-use patches_core::{Module, ModuleGraph, ModuleShape, NodeId};
+use patches_core::{ModuleGraph, ModuleShape, NodeId};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_planner::{PatchBuilder, PlannerState};
 use patches_modules::{AudioOut, Oscillator};
@@ -10,8 +10,8 @@ fn osc_out_graph(osc_id: &str, freq: f32) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(freq));
-    graph.add_module(osc_id, Oscillator::describe(&ModuleShape::default()), &params).unwrap();
-    graph.add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new()).unwrap();
+    graph.add_module(osc_id, patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
     graph.connect(&NodeId::from(osc_id), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     graph
 }
@@ -92,7 +92,7 @@ fn meta_tracks_renames_removals_and_additions_across_reloads() {
     let mut graph_c = osc_out_graph("osc_b", 2.0);
     let mut p_c = ParameterMap::new();
     p_c.insert("frequency".to_string(), ParameterValue::Float(3.0));
-    graph_c.add_module("osc_c", Oscillator::describe(&ModuleShape::default()), &p_c).unwrap();
+    graph_c.add_module("osc_c", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &p_c).unwrap();
     graph_c
         .connect(&NodeId::from("osc_c"), p("sine"), &NodeId::from("out"), p("in"), 0.0)
         .unwrap_err(); // input already connected; ignore — only need the node added

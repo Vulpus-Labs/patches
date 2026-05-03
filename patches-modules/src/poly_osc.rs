@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, BoundedRandomWalk, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, BoundedRandomWalk, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PolyInput, PolyOutput, PortTemplate,
     GLOBAL_DRIFT, HALF_SEMITONE_VOCT, OSCILLATOR_DRIFT_STEP,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -88,21 +89,48 @@ pub struct PolyOsc {
 }
 
 impl Module for PolyOsc {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyOsc", shape.clone())
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("pulse_width_cv")
-            .poly_in("phase_mod")
-            .poly_trigger_in("sync")
-            .poly_out("sine")
-            .poly_out("triangle")
-            .poly_out("sawtooth")
-            .poly_out("square")
-            .poly_trigger_out("reset_out")
-            .float_param(params::frequency, -4.0, 12.0, 0.0)
-            .enum_param(params::fm_type, OscFmType::Linear)
-            .float_param(params::drift, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyOsc",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("pulse_width_cv"),
+                PortTemplate::poly("phase_mod"),
+                PortTemplate::poly_trigger("sync"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::poly("sine"),
+                PortTemplate::poly("triangle"),
+                PortTemplate::poly("sawtooth"),
+                PortTemplate::poly("square"),
+                PortTemplate::poly_trigger("reset_out"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::frequency.as_str(),
+                    kind: ParameterKind::Float { min: -4.0, max: 12.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::fm_type.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: OscFmType::VARIANTS,
+                        default: "linear",
+                    },
+                },
+                ParameterTemplate {
+                    name: params::drift.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

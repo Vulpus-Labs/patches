@@ -13,6 +13,7 @@ pub(crate) enum DiagnosticKind {
     UndefinedPattern,
     UndefinedSong,
     ChannelCountMismatch,
+    InvalidShape,
 }
 
 /// Severity of a diagnostic, independent of any particular protocol.
@@ -30,7 +31,8 @@ impl DiagnosticKind {
             | DiagnosticKind::UnknownModuleType
             | DiagnosticKind::DependencyCycle
             | DiagnosticKind::UndefinedPattern
-            | DiagnosticKind::UndefinedSong => Severity::Error,
+            | DiagnosticKind::UndefinedSong
+            | DiagnosticKind::InvalidShape => Severity::Error,
             DiagnosticKind::UnknownPort
             | DiagnosticKind::UnknownParameter
             | DiagnosticKind::InvalidValue

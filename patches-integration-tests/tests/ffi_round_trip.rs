@@ -30,13 +30,13 @@ fn all_scalar_tags_round_trip() {
     assert_eq!(builders.len(), 1);
     let vtable = *builders[0].vtable();
 
-    let shape = ModuleShape::default();
+    let _shape = ModuleShape::default();
     let descriptor_json = unsafe {
-        let bytes = (vtable.describe)((&shape).into());
+        let bytes = (vtable.module_template)();
         let slice = bytes.as_slice();
-        let desc = json::deserialize_module_descriptor(slice).unwrap();
+        let template = json::deserialize_module_descriptor_template(slice).unwrap();
         (vtable.free_bytes)(bytes);
-        desc
+        template.build_channels(0)
     };
     assert_eq!(descriptor_json.module_name, "AllTags");
 

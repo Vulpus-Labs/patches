@@ -37,8 +37,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiEvent, MidiInput, MidiMessage,
-    MidiOutput, Module, ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiEvent, MidiInput,
+    MidiMessage, MidiOutput, Module, ModuleDescriptor, ModuleDescriptorTemplate, OutputPort,
+    ParameterKind, ParameterTemplate, PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -221,11 +222,25 @@ impl MidiDelay {
 }
 
 impl Module for MidiDelay {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiDelay", shape.clone())
-            .midi_in("midi")
-            .midi_out("midi")
-            .int_param(params::delay_samples, 0, MAX_DELAY as i64, 4800)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiDelay",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::midi("midi")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::delay_samples.as_str(),
+                    kind: ParameterKind::Int { min: 0, max: MAX_DELAY as i64, default: 4800 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

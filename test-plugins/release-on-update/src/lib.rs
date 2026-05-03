@@ -6,14 +6,18 @@
 use std::ffi::c_void;
 
 use patches_core::cables::CableValue;
-use patches_core::modules::{ModuleDescriptor, ModuleShape};
+use patches_core::modules::descriptor_template::{
+    CountAxis, ModuleDescriptorTemplate, ParameterTemplate,
+};
+use patches_core::modules::{ModuleDescriptor};
 use patches_core::param_frame::ParamViewIndex;
 use patches_core::param_layout::compute_layout;
+use patches_core::ParameterKind;
 use patches_ffi_common::abi::{Handle, HostEnv};
 use patches_ffi_common::port_frame::PortLayout;
 use patches_ffi_common::sdk::{decode_param_frame, PluginInstance};
 use patches_ffi_common::types::{
-    FfiAudioEnvironment, FfiBytes, FfiModuleShape, FfiPluginManifest, FfiPluginVTable,
+    FfiAudioEnvironment, FfiBytes, FfiPluginManifest, FfiPluginVTable,
     ABI_VERSION,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -21,16 +25,24 @@ use patches_ffi_common::{descriptor_hash, json};
 
 pub struct Stub;
 
-fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-    ModuleDescriptor::new("ReleaseOnUpdate", shape.clone())
-        .structural_string_param("s", &["wav"])
-}
+const TEMPLATE: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+    name: "ReleaseOnUpdate",
+    axes: &[CountAxis::CHANNELS],
+    global_inputs: &[],
+    per_axis_inputs: &[],
+    global_outputs: &[],
+    per_axis_outputs: &[],
+    realtime_params: &[],
+    structural_params: &[ParameterTemplate {
+        name: "s",
+        kind: ParameterKind::File { extensions: &["wav"] },
+    }],
+    per_axis_realtime_params: &[],
+    per_axis_structural_params: &[],
+};
 
-// Bare-bones Module impl; we only need prepare/drop + param_index layout.
 impl patches_core::Module for Stub {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        describe(shape)
-    }
+    fn template() -> ModuleDescriptorTemplate { TEMPLATE }
     fn prepare(
         _env: &patches_core::AudioEnvironment,
         _d: ModuleDescriptor,
@@ -53,9 +65,8 @@ impl patches_core::Module for Stub {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn __rop_describe(shape: FfiModuleShape) -> FfiBytes {
-    let core_shape: ModuleShape = shape.into();
-    FfiBytes::from_vec(json::serialize_module_descriptor(&describe(&core_shape)))
+pub extern "C" fn __rop_module_template() -> FfiBytes {
+    FfiBytes::from_vec(json::serialize_module_descriptor_template(&TEMPLATE))
 }
 
 /// # Safety
@@ -167,7 +178,7 @@ const VTABLE: FfiPluginVTable = FfiPluginVTable {
     abi_version: ABI_VERSION,
     module_version: 0,
     supports_periodic: 0,
-    describe: __rop_describe,
+    module_template: __rop_module_template,
     prepare: __rop_prepare,
     update_validated_parameters: __rop_update,
     process: __rop_process,
@@ -190,5 +201,5 @@ pub extern "C" fn patches_plugin_init() -> FfiPluginManifest {
 
 #[unsafe(export_name = "patches_plugin_descriptor_hash_ReleaseOnUpdate")]
 pub extern "C" fn __hash() -> u64 {
-    descriptor_hash(&describe(&ModuleShape::default()))
+    descriptor_hash(&TEMPLATE.build_channels(patches_core::ModuleShape::default().channels as u32))
 }

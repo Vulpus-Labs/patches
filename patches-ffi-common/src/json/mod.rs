@@ -7,9 +7,11 @@
 
 mod ser;
 mod de;
+mod template;
 
 pub use ser::serialize_module_descriptor;
 pub use de::deserialize_module_descriptor;
+pub use template::{deserialize_module_descriptor_template, serialize_module_descriptor_template};
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 

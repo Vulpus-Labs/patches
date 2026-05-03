@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoOutput, OutputPort, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoOutput, OutputPort, PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -36,12 +36,25 @@ pub struct Noise {
 }
 
 impl Module for Noise {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Noise", shape.clone())
-            .mono_out("white")
-            .mono_out("pink")
-            .mono_out("brown")
-            .mono_out("red")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Noise",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("white"),
+                PortTemplate::mono("pink"),
+                PortTemplate::mono("brown"),
+                PortTemplate::mono("red"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -139,12 +152,25 @@ pub struct PolyNoise {
 }
 
 impl Module for PolyNoise {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyNoise", shape.clone())
-            .poly_out("white")
-            .poly_out("pink")
-            .poly_out("brown")
-            .poly_out("red")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyNoise",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::poly("white"),
+                PortTemplate::poly("pink"),
+                PortTemplate::poly("brown"),
+                PortTemplate::poly("red"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

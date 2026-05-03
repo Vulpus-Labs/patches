@@ -54,8 +54,8 @@ fn tick_runs_without_panic() {
 fn input_scale_is_applied_at_tick_time() {
     let make_graph = |scale: f32| {
         let mut g = ModuleGraph::new();
-        let sine_desc = Oscillator::describe(&ModuleShape::default());
-        let out_desc = AudioOut::describe(&ModuleShape::default());
+        let sine_desc = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut p_map = ParameterMap::new();
         p_map.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         g.add_module("sine", sine_desc, &p_map).unwrap();
@@ -145,9 +145,9 @@ fn removed_node_tombstone() {
     // Graph with two sines.
     let mut graph_a = ModuleGraph::new();
     {
-        let s1 = Oscillator::describe(&ModuleShape::default());
-        let s2 = Oscillator::describe(&ModuleShape::default());
-        let out = AudioOut::describe(&ModuleShape::default());
+        let s1 = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let s2 = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut p1 = ParameterMap::new();
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         let mut p2 = ParameterMap::new();
@@ -164,8 +164,8 @@ fn removed_node_tombstone() {
     // Graph with only s1.
     let mut graph_b = ModuleGraph::new();
     {
-        let s1 = Oscillator::describe(&ModuleShape::default());
-        let out = AudioOut::describe(&ModuleShape::default());
+        let s1 = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut p1 = ParameterMap::new();
         p1.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_b.add_module("s1", s1, &p1).unwrap();
@@ -190,8 +190,8 @@ fn type_changed_node_tombstone_and_new_module() {
     // Graph A: Oscillator at "osc" (sine output).
     let mut graph_a = ModuleGraph::new();
     {
-        let sine = Oscillator::describe(&ModuleShape::default());
-        let out = AudioOut::describe(&ModuleShape::default());
+        let sine = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut pm = ParameterMap::new();
         pm.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph_a.add_module("osc", sine, &pm).unwrap();
@@ -207,8 +207,8 @@ fn type_changed_node_tombstone_and_new_module() {
     // Graph B: Sum (1-channel) at "osc" (type changed from Oscillator).
     let mut graph_b = ModuleGraph::new();
     {
-        let sum = Sum::describe(&ModuleShape { channels: 1 });
-        let out = AudioOut::describe(&ModuleShape::default());
+        let sum = patches_core::describe_for::<Sum>(&ModuleShape { channels: 1 });
+        let out = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         graph_b.add_module("osc", sum, &ParameterMap::new()).unwrap();
         graph_b.add_module("out", out, &ParameterMap::new()).unwrap();
         graph_b.connect(&NodeId::from("osc"), p("out"), &NodeId::from("out"), p("in"), 1.0).unwrap();
@@ -234,8 +234,8 @@ fn type_changed_node_tombstone_and_new_module() {
 /// Build a minimal sine→AudioOut graph with a custom [`CableMap`] on the cable.
 fn sine_to_audio_out_with_map(map: CableMap) -> ModuleGraph {
     let mut graph = ModuleGraph::new();
-    let sine_desc = Oscillator::describe(&ModuleShape::default());
-    let out_desc = AudioOut::describe(&ModuleShape::default());
+    let sine_desc = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+    let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
     let mut sine_params = ParameterMap::new();
     sine_params.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
     graph.add_module("a_sine", sine_desc, &sine_params).unwrap();

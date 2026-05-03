@@ -11,7 +11,7 @@ mod builder {
 
     use patches_core::{
         AudioEnvironment, AUDIO_OUT_L, CableMap, CablePool, CableValue, InstanceId, InputPort,
-        Module, ModuleGraph, ModuleShape, NodeId, PortRef,
+        ModuleGraph, ModuleShape, NodeId, PortRef,
     };
     use patches_core::parameter_map::{ParameterMap, ParameterValue};
     use patches_modules::{AudioOut, Oscillator, Sum};
@@ -38,8 +38,8 @@ mod builder {
 
     pub(crate) fn sine_to_audio_out_graph() -> ModuleGraph {
         let mut graph = ModuleGraph::new();
-        let sine_desc = Oscillator::describe(&ModuleShape::default());
-        let out_desc = AudioOut::describe(&ModuleShape::default());
+        let sine_desc = patches_core::describe_for::<Oscillator>(&ModuleShape::default());
+        let out_desc = patches_core::describe_for::<AudioOut>(&ModuleShape::default());
         let mut sine_params = ParameterMap::new();
         sine_params.insert("frequency".to_string(), ParameterValue::Float(hz_to_voct(440.0)));
         graph.add_module("a_sine", sine_desc, &sine_params).unwrap();

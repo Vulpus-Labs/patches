@@ -33,8 +33,10 @@ use crate::common::approximate::fast_exp2;
 use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, };
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
+};
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
@@ -79,18 +81,49 @@ pub struct Kick {
 }
 
 impl Module for Kick {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Kick", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("voct")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 20.0, 200.0, 55.0)
-            .float_param(params::sweep, 0.0, 5000.0, 2500.0)
-            .float_param(params::sweep_time, 0.001, 0.5, 0.04)
-            .float_param(params::decay, 0.01, 2.0, 0.5)
-            .float_param(params::drive, 0.0, 1.0, 0.0)
-            .float_param(params::click, 0.0, 1.0, 0.3)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Kick",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("voct"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 20.0, max: 200.0, default: 55.0 },
+                },
+                ParameterTemplate {
+                    name: params::sweep.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 5000.0, default: 2500.0 },
+                },
+                ParameterTemplate {
+                    name: params::sweep_time.as_str(),
+                    kind: ParameterKind::Float { min: 0.001, max: 0.5, default: 0.04 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.01, max: 2.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::drive.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::click.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.3 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

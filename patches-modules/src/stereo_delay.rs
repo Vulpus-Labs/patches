@@ -42,8 +42,9 @@
 //! which is cheaper but may produce audible artifacts on modulated delays.
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, ModuleShape, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, StereoInput, StereoOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -115,27 +116,64 @@ pub struct StereoDelay {
 }
 
 impl Module for StereoDelay {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("StereoDelay", shape.clone())
-            .stereo_in("in")
-            .mono_in("drywet_cv")
-            .mono_in_multi("delay_cv",  n)
-            .mono_in_multi("gain_cv",   n)
-            .mono_in_multi("fb_cv",     n)
-            .mono_in_multi("pan_cv",    n)
-            .stereo_in_multi("return",  n)
-            .stereo_out("out")
-            .stereo_out_multi("send", n)
-            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
-            .int_param_multi(params::delay_ms, n, 0, 2000, 500)
-            .float_param_multi(params::gain,     n, 0.0,  1.0,  1.0)
-            .float_param_multi(params::feedback, n, 0.0,  1.0,  0.0)
-            .float_param_multi(params::tone,     n, 0.0,  1.0,  1.0)
-            .float_param_multi(params::drive,    n, 0.1, 10.0,  1.0)
-            .float_param_multi(params::pan,      n, -1.0, 1.0,  0.0)
-            .bool_param_multi(params::pingpong,  n, false)
-            .structural_bool_param("high_quality", false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "StereoDelay",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::stereo("in"),
+                PortTemplate::mono("drywet_cv"),
+            ],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("delay_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("gain_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("fb_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("pan_cv")),
+                (AxisId::CHANNELS, PortTemplate::stereo("return")),
+            ],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[(AxisId::CHANNELS, PortTemplate::stereo("send"))],
+            realtime_params: &[ParameterTemplate {
+                name: params::dry_wet.as_str(),
+                kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+            }],
+            structural_params: &[ParameterTemplate {
+                name: "high_quality",
+                kind: ParameterKind::Bool { default: false },
+            }],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::delay_ms.as_str(),
+                    kind: ParameterKind::Int { min: 0, max: 2000, default: 500 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::gain.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::feedback.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::drive.as_str(),
+                    kind: ParameterKind::Float { min: 0.1, max: 10.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::pan.as_str(),
+                    kind: ParameterKind::Float { min: -1.0, max: 1.0, default: 0.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::pingpong.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

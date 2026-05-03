@@ -1,7 +1,7 @@
 use patches_core::{
     AUDIO_OUT_L, AUDIO_OUT_R,
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoOutput, ModuleShape, OutputPort, StereoInput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoOutput, OutputPort, PortTemplate, StereoInput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -31,9 +31,20 @@ pub struct AudioOut {
 }
 
 impl Module for AudioOut {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("AudioOut", shape.clone())
-            .stereo_in("in")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "AudioOut",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::stereo("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

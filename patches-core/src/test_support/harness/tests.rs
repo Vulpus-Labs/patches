@@ -1,6 +1,6 @@
 use super::*;
 use crate::AudioEnvironment;
-use crate::modules::{ModuleDescriptor, ModuleShape};
+use crate::modules::ModuleDescriptor;
 use crate::{StructuralParams, BuildError};
 
 // A minimal test-only module: one mono input, one mono output; output = input * 2.
@@ -12,10 +12,23 @@ struct Doubler {
 }
 
 impl Module for Doubler {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Doubler", shape.clone())
-            .mono_in("in")
-            .mono_out("out")
+    fn template() -> crate::ModuleDescriptorTemplate {
+        use crate::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Doubler",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -59,10 +72,23 @@ struct PolyPass {
 }
 
 impl Module for PolyPass {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyPass", shape.clone())
-            .poly_in("in")
-            .poly_out("out")
+    fn template() -> crate::ModuleDescriptorTemplate {
+        use crate::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyPass",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::poly("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -158,8 +184,23 @@ fn disconnect_input_delivers_false_connected() {
     }
 
     impl Module for ConnectProbe {
-        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor::new("ConnectProbe", shape.clone()).mono_in("sig")
+        fn template() -> crate::ModuleDescriptorTemplate {
+            use crate::modules::descriptor_template::{
+                CountAxis, ModuleDescriptorTemplate, PortTemplate,
+            };
+            const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+                name: "ConnectProbe",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[PortTemplate::mono("sig")],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
+            };
+            T
         }
         fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id, descriptor: d, saw_connected: false }
@@ -232,8 +273,23 @@ fn assert_steady_state_bounded_fails_for_alternating() {
     // Module that toggles output between 1.0 and -1.0 each tick: high variance.
     struct Toggle { id: InstanceId, descriptor: ModuleDescriptor, output: MonoOutput, sign: f32 }
     impl Module for Toggle {
-        fn describe(s: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor::new("Toggle", s.clone()).mono_out("out")
+        fn template() -> crate::ModuleDescriptorTemplate {
+            use crate::modules::descriptor_template::{
+                CountAxis, ModuleDescriptorTemplate, PortTemplate,
+            };
+            const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+                name: "Toggle",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[PortTemplate::mono("out")],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
+            };
+            T
         }
         fn prepare(_e: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id, descriptor: d, output: MonoOutput::default(), sign: 1.0 }

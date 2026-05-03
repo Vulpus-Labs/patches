@@ -7,8 +7,8 @@ use std::any::Any;
 use std::f32::consts::TAU;
 
 use patches_core::{
-    AudioEnvironment, CableKind, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
-    ModuleShape, NodeId, ParameterDescriptor, ParameterKind, MonoLayout, PolyLayout, PortDescriptor, PortRef,
+    AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleGraph,
+    ModuleShape, NodeId, ParameterKind, PortRef,
     PolyOutput,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -49,19 +49,26 @@ struct PolySineSource {
 }
 
 impl Module for PolySineSource {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "PolySineSource",
-            shape: ModuleShape::default(),
-            inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![ParameterDescriptor {
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolySineSource",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[ParameterTemplate {
                 name: "frequency",
-                index: 0,
-                parameter_type: ParameterKind::Float { min: 1.0, max: 22050.0, default: 440.0 },
+                kind: ParameterKind::Float { min: 1.0, max: 22050.0, default: 440.0 },
             }],
-            structural_params: vec![],
-        }
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -123,10 +130,10 @@ fn make_filter_graph(
 
     let filter_desc = registry.describe("PolyLowpass", &shape).expect("filter must be in registry");
 
-    graph.add_module("src", PolySineSource::describe(&shape), &src_params).unwrap();
+    graph.add_module("src", patches_core::describe_for::<PolySineSource>(&shape), &src_params).unwrap();
     graph.add_module("filter", filter_desc, filter_params).unwrap();
-    graph.add_module("osc", Oscillator::describe(&shape), &osc_params).unwrap();
-    graph.add_module("out", AudioOut::describe(&shape), &ParameterMap::new()).unwrap();
+    graph.add_module("osc", patches_core::describe_for::<Oscillator>(&shape), &osc_params).unwrap();
+    graph.add_module("out", patches_core::describe_for::<AudioOut>(&shape), &ParameterMap::new()).unwrap();
 
     graph.connect(&NodeId::from("src"), p("out"), &NodeId::from("filter"), p("in"), 1.0).unwrap();
     graph.connect(&NodeId::from("osc"), p("sine"), &NodeId::from("out"), p("in"), 1.0).unwrap();

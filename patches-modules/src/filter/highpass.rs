@@ -3,8 +3,10 @@ use crate::common::frequency::C0_FREQ;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort, };
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
+};
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::MonoBiquad;
 
@@ -74,16 +76,38 @@ impl ResonantHighpass {
 }
 
 impl Module for ResonantHighpass {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Highpass", shape.clone())
-            .mono_in("in")
-            .mono_in("voct")
-            .mono_in("fm")
-            .mono_in("resonance_cv")
-            .mono_out("out")
-            .float_param(params::cutoff,    -2.0, 12.0, 6.0)
-            .float_param(params::resonance, 0.0,  1.0,  0.0)
-            .bool_param(params::saturate, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Highpass",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("voct"),
+                PortTemplate::mono("fm"),
+                PortTemplate::mono("resonance_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cutoff.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: params::resonance.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::saturate.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

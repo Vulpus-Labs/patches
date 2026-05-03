@@ -43,7 +43,7 @@ fn describe_returns_correct_metadata() {
     assert_eq!(builders.len(), 1, "gain plugin should expose one module");
     let builder = builders.remove(0);
     let shape = ModuleShape { channels: 1 };
-    let desc = builder.describe(&shape);
+    let desc = builder.template().build_channels(shape.channels as u32);
 
     assert_eq!(desc.module_name, "Gain");
     assert_eq!(desc.inputs.len(), 1);

@@ -1,7 +1,8 @@
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -96,12 +97,28 @@ fn diode_block(x: f32, gain: f32) -> f32 {
 }
 
 impl Module for RingMod {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("RingMod", shape.clone())
-            .mono_in("signal")
-            .mono_in("carrier")
-            .mono_out("out")
-            .float_param(params::drive, 0.2, 20.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "RingMod",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("signal"),
+                PortTemplate::mono("carrier"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::drive.as_str(),
+                    kind: ParameterKind::Float { min: 0.2, max: 20.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

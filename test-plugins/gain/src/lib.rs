@@ -1,8 +1,12 @@
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
 use patches_core::module_params;
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
+use patches_core::modules::descriptor_template::{
+    CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+};
+use patches_core::modules::{InstanceId, ModuleDescriptor};
 use patches_core::param_frame::ParamView;
+use patches_core::ParameterKind;
 use patches_core::{AudioEnvironment, Module};
 use patches_core::{StructuralParams, BuildError};
 
@@ -20,16 +24,24 @@ pub struct Gain {
     output: MonoOutput,
 }
 
-fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-    ModuleDescriptor::new("Gain", shape.clone())
-        .mono_in("in")
-        .mono_out("out")
-        .float_param(params::gain, 0.0, 2.0, 1.0)
-}
-
 impl Module for Gain {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        describe(shape)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Gain",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[ParameterTemplate {
+                name: params::gain.as_str(),
+                kind: ParameterKind::Float { min: 0.0, max: 2.0, default: 1.0 },
+            }],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -73,4 +85,4 @@ impl Module for Gain {
     }
 }
 
-patches_ffi_common::export_plugin!(Gain, describe, "Gain");
+patches_ffi_common::export_plugin!(Gain, "Gain");

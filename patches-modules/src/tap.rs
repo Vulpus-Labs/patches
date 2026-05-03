@@ -14,8 +14,9 @@
 
 use patches_core::{
     params_enum,
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, OutputPort, StereoInput,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, StereoInput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -63,14 +64,40 @@ pub struct Tap {
 const SLOT_OFFSET: IntParamArray = IntParamArray::new("slot_offset");
 
 impl Module for Tap {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("Tap", shape.clone())
-            .mono_in_multi("mono_in", n)
-            .stereo_in_multi("stereo_in", n)
-            .trigger_in_multi("trigger_in", n)
-            .int_param_multi(SLOT_OFFSET, n, 0, (patches_core::MAX_TAPS as i64) - 1, 0)
-            .enum_param_multi(EnumParamArray::<TapKind>::new("kind"), n, TapKind::Mono)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Tap",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("mono_in")),
+                (AxisId::CHANNELS, PortTemplate::stereo("stereo_in")),
+                (AxisId::CHANNELS, PortTemplate::trigger("trigger_in")),
+            ],
+            global_outputs: &[],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: "slot_offset",
+                    kind: ParameterKind::Int {
+                        min: 0,
+                        max: (patches_core::MAX_TAPS as i64) - 1,
+                        default: 0,
+                    },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: "kind",
+                    kind: ParameterKind::Enum {
+                        variants: TapKind::VARIANTS,
+                        default: "mono",
+                    },
+                }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

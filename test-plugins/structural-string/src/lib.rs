@@ -15,8 +15,12 @@ use std::sync::Mutex;
 
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
+use patches_core::modules::descriptor_template::{
+    CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+};
+use patches_core::modules::{InstanceId, ModuleDescriptor};
 use patches_core::param_frame::ParamView;
+use patches_core::ParameterKind;
 use patches_core::{AudioEnvironment, BuildError, Module, StructuralParams};
 
 static LAST_PATH: Mutex<Option<String>> = Mutex::new(None);
@@ -28,13 +32,6 @@ pub struct StructuralStringGain {
     gain: f32,
     input: MonoInput,
     output: MonoOutput,
-}
-
-fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-    ModuleDescriptor::new("StructuralStringGain", shape.clone())
-        .mono_in("in")
-        .mono_out("out")
-        .structural_string_param("gain_path", &["json"])
 }
 
 fn read_gain_from_path(path: &str) -> f32 {
@@ -63,8 +60,23 @@ fn read_gain_from_path(path: &str) -> f32 {
 }
 
 impl Module for StructuralStringGain {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        describe(shape)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "StructuralStringGain",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[ParameterTemplate {
+                name: "gain_path",
+                kind: ParameterKind::File { extensions: &["json"] },
+            }],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -114,11 +126,7 @@ impl Module for StructuralStringGain {
     }
 }
 
-patches_ffi_common::export_plugin!(
-    StructuralStringGain,
-    describe,
-    "StructuralStringGain"
-);
+patches_ffi_common::export_plugin!(StructuralStringGain, "StructuralStringGain");
 
 // ── Debug accessors for the integration test ────────────────────────────────
 

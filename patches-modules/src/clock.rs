@@ -23,8 +23,9 @@
 //! | `quavers_per_beat` | int | 1–4 | `2` | Quavers per beat (2 = simple, 3 = compound) |
 
 use patches_core::{
-    AudioEnvironment, CablePool, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoOutput, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoOutput, OutputPort, ParameterKind, ParameterTemplate,
+    PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -59,15 +60,38 @@ pub struct Clock {
 }
 
 impl Module for Clock {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Clock", shape.clone())
-            .trigger_out("bar")
-            .trigger_out("beat")
-            .trigger_out("quaver")
-            .trigger_out("semiquaver")
-            .float_param(params::bpm, 1.0, 300.0, 120.0)
-            .int_param(params::beats_per_bar, 1, 16, 4)
-            .int_param(params::quavers_per_beat, 1, 4, 2)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Clock",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::trigger("bar"),
+                PortTemplate::trigger("beat"),
+                PortTemplate::trigger("quaver"),
+                PortTemplate::trigger("semiquaver"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::bpm.as_str(),
+                    kind: ParameterKind::Float { min: 1.0, max: 300.0, default: 120.0 },
+                },
+                ParameterTemplate {
+                    name: params::beats_per_bar.as_str(),
+                    kind: ParameterKind::Int { min: 1, max: 16, default: 4 },
+                },
+                ParameterTemplate {
+                    name: params::quavers_per_beat.as_str(),
+                    kind: ParameterKind::Int { min: 1, max: 4, default: 2 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

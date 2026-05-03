@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
-    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, GLOBAL_MIDI,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -159,17 +160,33 @@ impl MidiToCv {
 }
 
 impl Module for MidiToCv {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiToCv", shape.clone())
-            .midi_in("midi")
-            .mono_out("voct")
-            .trigger_out("trigger")
-            .mono_out("gate")
-            .mono_out("mod")
-            .mono_out("pitch")
-            .mono_out("velocity")
-            .mono_out("slur")
-            .bool_param(params::legato, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiToCv",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("voct"),
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("gate"),
+                PortTemplate::mono("mod"),
+                PortTemplate::mono("pitch"),
+                PortTemplate::mono("velocity"),
+                PortTemplate::mono("slur"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::legato.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

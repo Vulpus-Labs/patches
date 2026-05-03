@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoOutput, PolyInput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoOutput, OutputPort, PolyInput,
+    PortTemplate,
     TrackerData, ReceivesTrackerData,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -56,14 +57,25 @@ pub struct PatternPlayer {
 }
 
 impl Module for PatternPlayer {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("PatternPlayer", shape.clone())
-            .poly_in("clock")
-            .mono_out_multi("cv1", n)
-            .mono_out_multi("cv2", n)
-            .trigger_out_multi("trigger", n)
-            .mono_out_multi("gate", n)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PatternPlayer",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::poly("clock")],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("cv1")),
+                (AxisId::CHANNELS, PortTemplate::mono("cv2")),
+                (AxisId::CHANNELS, PortTemplate::trigger("trigger")),
+                (AxisId::CHANNELS, PortTemplate::mono("gate")),
+            ],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

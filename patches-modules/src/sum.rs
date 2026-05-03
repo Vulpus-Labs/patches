@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -31,10 +32,20 @@ pub struct Sum {
 }
 
 impl Module for Sum {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Sum", shape.clone())
-            .mono_in_multi("in", shape.channels)
-            .mono_out("out")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Sum",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[(AxisId::CHANNELS, PortTemplate::mono("in"))],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -82,8 +93,29 @@ impl Module for Sum {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{ModuleShape};
+    use patches_core::ModuleShape;
     use patches_core::test_support::{assert_nearly, ModuleHarness};
+
+    #[test]
+    fn descriptor_snapshot_matches_for_various_channel_counts() {
+        for &n in &[1usize, 2, 8, 16] {
+            let desc = patches_core::describe_for::<Sum>(&ModuleShape { channels: n });
+            assert_eq!(desc.module_name, "Sum");
+            assert_eq!(desc.shape.channels, n);
+            // Inputs: per-channel "in"[0..n]
+            assert_eq!(desc.inputs.len(), n);
+            for i in 0..n {
+                assert_eq!(desc.inputs[i].name, "in");
+                assert_eq!(desc.inputs[i].index, i);
+            }
+            // Outputs: global "out"
+            assert_eq!(desc.outputs.len(), 1);
+            assert_eq!(desc.outputs[0].name, "out");
+            assert_eq!(desc.outputs[0].index, 0);
+            assert!(desc.realtime_params.is_empty());
+            assert!(desc.structural_params.is_empty());
+        }
+    }
 
     #[test]
     fn descriptor_shape_size_3() {

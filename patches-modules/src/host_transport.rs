@@ -1,6 +1,6 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoOutput, ModuleShape, OutputPort, PolyInput, TransportFrame,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoOutput, OutputPort, PolyInput, PortTemplate, TransportFrame,
     GLOBAL_TRANSPORT,
 };
 use patches_core::{StructuralParams, BuildError};
@@ -45,16 +45,29 @@ pub struct HostTransport {
 }
 
 impl Module for HostTransport {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("HostTransport", shape.clone())
-            .mono_out("playing")
-            .mono_out("tempo")
-            .mono_out("beat")
-            .mono_out("bar")
-            .trigger_out("beat_trigger")
-            .trigger_out("bar_trigger")
-            .mono_out("tsig_num")
-            .mono_out("tsig_denom")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "HostTransport",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("playing"),
+                PortTemplate::mono("tempo"),
+                PortTemplate::mono("beat"),
+                PortTemplate::mono("bar"),
+                PortTemplate::trigger("beat_trigger"),
+                PortTemplate::trigger("bar_trigger"),
+                PortTemplate::mono("tsig_num"),
+                PortTemplate::mono("tsig_denom"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

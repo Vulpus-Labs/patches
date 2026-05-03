@@ -40,8 +40,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    params_enum, AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort, GLOBAL_DRIFT,
+    params_enum, AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    ParameterKind, ParameterTemplate, PortTemplate, GLOBAL_DRIFT,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles};
@@ -112,16 +113,26 @@ impl VOtaVcf {
 }
 
 impl Module for VOtaVcf {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VOtaVcf", shape.clone())
-            .mono_in("in")
-            .mono_in("cutoff_cv")
-            .mono_out("out")
-            .enum_param(params::poles, VOtaPoles::Four)
-            .float_param(params::cutoff, CUTOFF_MIN, CUTOFF_MAX, 1_000.0)
-            .float_param(params::resonance, 0.0, 1.0, 0.0)
-            .float_param(params::drive, 0.0, DRIVE_MAX, 1.0)
-            .float_param(params::drift_amount, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VOtaVcf",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in"), PortTemplate::mono("cutoff_cv")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::poles.as_str(),        kind: ParameterKind::Enum { variants: VOtaPoles::VARIANTS, default: "four" } },
+                ParameterTemplate { name: params::cutoff.as_str(),       kind: ParameterKind::Float { min: CUTOFF_MIN, max: CUTOFF_MAX, default: 1_000.0 } },
+                ParameterTemplate { name: params::resonance.as_str(),    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+                ParameterTemplate { name: params::drive.as_str(),        kind: ParameterKind::Float { min: 0.0, max: DRIVE_MAX, default: 1.0 } },
+                ParameterTemplate { name: params::drift_amount.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

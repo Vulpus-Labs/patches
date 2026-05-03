@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    ParameterKind, ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -70,23 +71,53 @@ pub struct Mixer {
 }
 
 impl Module for Mixer {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("Mixer", shape.clone())
-            .mono_in_multi("in",         n)
-            .mono_in_multi("level_cv",   n)
-            .mono_in_multi("send_a_cv",  n)
-            .mono_in_multi("send_b_cv",  n)
-            .mono_in("return_a")
-            .mono_in("return_b")
-            .mono_out("out")
-            .mono_out("send_a")
-            .mono_out("send_b")
-            .float_param_multi(params::level,  shape.channels, 0.0, 1.0, 1.0)
-            .float_param_multi(params::send_a, shape.channels, 0.0, 1.0, 0.0)
-            .float_param_multi(params::send_b, shape.channels, 0.0, 1.0, 0.0)
-            .bool_param_multi(params::mute,    shape.channels, false)
-            .bool_param_multi(params::solo,    shape.channels, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Mixer",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("return_a"),
+                PortTemplate::mono("return_b"),
+            ],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("in")),
+                (AxisId::CHANNELS, PortTemplate::mono("level_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("send_a_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("send_b_cv")),
+            ],
+            global_outputs: &[
+                PortTemplate::mono("out"),
+                PortTemplate::mono("send_a"),
+                PortTemplate::mono("send_b"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::level.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::send_a.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::send_b.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::mute.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::solo.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -130,14 +161,16 @@ impl Module for Mixer {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         let n = self.channels;
+        // Descriptor input order (template build): return_a, return_b,
+        // in[0..n], level_cv[0..n], send_a_cv[0..n], send_b_cv[0..n].
+        self.return_a = MonoInput::from_ports(inputs, 0);
+        self.return_b = MonoInput::from_ports(inputs, 1);
         for i in 0..n {
-            self.in_ports[i]       = MonoInput::from_ports(inputs, i);
-            self.level_cv_ports[i] = MonoInput::from_ports(inputs, n + i);
-            self.send_a_cv_ports[i] = MonoInput::from_ports(inputs, 2 * n + i);
-            self.send_b_cv_ports[i] = MonoInput::from_ports(inputs, 3 * n + i);
+            self.in_ports[i]        = MonoInput::from_ports(inputs, 2 + i);
+            self.level_cv_ports[i]  = MonoInput::from_ports(inputs, 2 + n + i);
+            self.send_a_cv_ports[i] = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            self.send_b_cv_ports[i] = MonoInput::from_ports(inputs, 2 + 3 * n + i);
         }
-        self.return_a  = MonoInput::from_ports(inputs, 4 * n);
-        self.return_b  = MonoInput::from_ports(inputs, 4 * n + 1);
         self.out        = MonoOutput::from_ports(outputs, 0);
         self.send_a_out = MonoOutput::from_ports(outputs, 1);
         self.send_b_out = MonoOutput::from_ports(outputs, 2);

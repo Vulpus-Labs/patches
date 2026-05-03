@@ -1,7 +1,7 @@
 use super::kernel::FdnReverbKernel;
 use super::params::Character;
 use super::*;
-use patches_core::{AudioEnvironment, Module, ModuleShape};
+use patches_core::{AudioEnvironment, ModuleShape};
 
 const SR: f32 = 44_100.0;
 
@@ -39,7 +39,7 @@ fn impulse_response(
 
 #[test]
 fn descriptor_ports_and_params() {
-    let desc = FdnReverb::describe(&ModuleShape { channels: 0 });
+    let desc = patches_core::describe_for::<FdnReverb>(&ModuleShape { channels: 0 });
     assert_eq!(desc.module_name, "FdnReverb");
     assert_eq!(desc.inputs.len(), 5);
     assert_eq!(desc.outputs.len(), 1);

@@ -30,8 +30,9 @@
 /// | `mix`     | float | 0.0--1.0     | `1.0`   | Dry/wet blend                          |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -73,14 +74,37 @@ impl TransientShaper {
 }
 
 impl Module for TransientShaper {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("TransientShaper", shape.clone())
-            .mono_in("in")
-            .mono_out("out")
-            .float_param(params::attack, -1.0, 1.0, 0.0)
-            .float_param(params::sustain, -1.0, 1.0, 0.0)
-            .float_param(params::speed, 1.0, 100.0, 20.0)
-            .float_param(params::mix, 0.0, 1.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "TransientShaper",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::attack.as_str(),
+                    kind: ParameterKind::Float { min: -1.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::sustain.as_str(),
+                    kind: ParameterKind::Float { min: -1.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::speed.as_str(),
+                    kind: ParameterKind::Float { min: 1.0, max: 100.0, default: 20.0 },
+                },
+                ParameterTemplate {
+                    name: params::mix.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

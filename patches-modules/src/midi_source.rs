@@ -1,7 +1,7 @@
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiOutput, Module,
-    ModuleDescriptor, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiOutput, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, OutputPort, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -27,8 +27,20 @@ pub struct MidiIn {
 }
 
 impl Module for MidiIn {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiIn", shape.clone()).midi_out("midi")
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiIn",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::midi("midi")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

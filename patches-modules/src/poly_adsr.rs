@@ -1,7 +1,8 @@
 use patches_core::{
     params_enum,
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyGateInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyGateInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::PolyTriggerInput;
@@ -79,16 +80,47 @@ pub struct PolyAdsr {
 }
 
 impl Module for PolyAdsr {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyAdsr", shape.clone())
-            .poly_trigger_in("trigger")
-            .poly_in("gate")
-            .poly_out("out")
-            .float_param(params::attack,  0.001, 10.0, 0.01)
-            .float_param(params::decay,   0.001, 10.0, 0.1)
-            .float_param(params::sustain, 0.0,   1.0,  0.7)
-            .float_param(params::release, 0.001, 10.0, 0.3)
-            .enum_param(params::shape, PolyAdsrShapeParam::Linear)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyAdsr",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly_trigger("trigger"),
+                PortTemplate::poly("gate"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::attack.as_str(),
+                    kind: ParameterKind::Float { min: 0.001, max: 10.0, default: 0.01 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.001, max: 10.0, default: 0.1 },
+                },
+                ParameterTemplate {
+                    name: params::sustain.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.7 },
+                },
+                ParameterTemplate {
+                    name: params::release.as_str(),
+                    kind: ParameterKind::Float { min: 0.001, max: 10.0, default: 0.3 },
+                },
+                ParameterTemplate {
+                    name: params::shape.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: PolyAdsrShapeParam::VARIANTS,
+                        default: "linear",
+                    },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

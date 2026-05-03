@@ -4,9 +4,10 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
+    MonoInput, OutputPort, ParameterKind, StereoInput, StereoOutput,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 
 use super::kernel::FdnReverbKernel;
@@ -24,19 +25,47 @@ module_params! {
 }
 
 impl Module for FdnReverb {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("FdnReverb", ModuleShape { channels: 0 })
-            .stereo_in("in")
-            .mono_in("size_cv")
-            .mono_in("brightness_cv")
-            .mono_in("pre_delay_cv")
-            .mono_in("mix_cv")
-            .stereo_out("out")
-            .float_param(params::size,       0.0, 1.0, 0.5)
-            .float_param(params::brightness, 0.0, 1.0, 0.5)
-            .float_param(params::pre_delay,  0.0, 1.0, 0.0)
-            .float_param(params::mix,        0.0, 1.0, 1.0)
-            .enum_param(params::character, Character::Hall)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "FdnReverb",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::stereo("in"),
+                PortTemplate::mono("size_cv"),
+                PortTemplate::mono("brightness_cv"),
+                PortTemplate::mono("pre_delay_cv"),
+                PortTemplate::mono("mix_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::size.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::brightness.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::pre_delay.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::mix.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::character.as_str(),
+                    kind: ParameterKind::Enum { variants: Character::VARIANTS, default: "hall" },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput,
+    OutputPort, ParameterKind, ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -65,15 +66,38 @@ pub struct Quant {
 }
 
 impl Module for Quant {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels.max(1);
-        ModuleDescriptor::new("Quant", shape.clone())
-            .mono_in("in")
-            .mono_out("out")
-            .trigger_out("trig_out")
-            .float_param_multi(params::pitch, n, -8.0, 8.0, 0.0)
-            .float_param(params::centre, -4.0, 4.0, 0.0)
-            .float_param(params::scale, -4.0, 4.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Quant",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("out"),
+                PortTemplate::trigger("trig_out"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::centre.as_str(),
+                    kind: ParameterKind::Float { min: -4.0, max: 4.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::scale.as_str(),
+                    kind: ParameterKind::Float { min: -4.0, max: 4.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[(
+                AxisId::CHANNELS,
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: -8.0, max: 8.0, default: 0.0 },
+                },
+            )],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

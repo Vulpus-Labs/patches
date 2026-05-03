@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use patches_core::modules::ModuleDescriptorTemplate;
 use patches_core::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
     StructuralParams,
@@ -8,6 +9,11 @@ use crate::module_builder::{Builder, ModuleBuilder};
 
 pub struct Registry {
     builders: HashMap<String, Box<dyn ModuleBuilder>>,
+    /// Cached static descriptor template per registered module name.
+    /// Empty for legacy FFI builders that have not migrated to the
+    /// template vtable; describe() falls back to the builder's
+    /// per-module describe in that case (ADR 0066, E132).
+    templates: HashMap<String, ModuleDescriptorTemplate>,
     /// Per-builder module version (semver-packed). Built-in (non-FFI)
     /// registrations use `0` so any FFI plugin v >= 1 can shadow them.
     versions: HashMap<String, u32>,
@@ -34,6 +40,7 @@ impl Registry {
     pub fn new() -> Self {
         Self {
             builders: HashMap::new(),
+            templates: HashMap::new(),
             versions: HashMap::new(),
         }
     }
@@ -42,10 +49,16 @@ impl Registry {
     where
         T: Module + 'static,
     {
-        let name = T::describe(&ModuleShape::default()).module_name;
-        self.versions.insert(name.to_string(), 0);
+        let template = T::template();
+        assert!(
+            !template.name.is_empty(),
+            "Registry::register::<T>: T::template() must be non-empty (declare a const TEMPLATE)",
+        );
+        let name = template.name.to_string();
+        self.versions.insert(name.clone(), 0);
+        self.templates.insert(name.clone(), template);
         self.builders
-            .insert(name.to_string(), Box::new(Builder::<T>(PhantomData)));
+            .insert(name, Box::new(Builder::<T>(PhantomData)));
     }
 
     /// Register a pre-built `ModuleBuilder` under the given name.
@@ -55,6 +68,7 @@ impl Registry {
     /// through the generic `register::<T>()` path.
     pub fn register_builder(&mut self, name: String, builder: Box<dyn ModuleBuilder>) {
         self.versions.insert(name.clone(), 0);
+        self.templates.insert(name.clone(), builder.template());
         self.builders.insert(name, builder);
     }
 
@@ -71,11 +85,13 @@ impl Registry {
         match self.versions.get(&name).copied() {
             None => {
                 self.versions.insert(name.clone(), version);
+                self.templates.insert(name.clone(), builder.template());
                 self.builders.insert(name, builder);
                 RegisterOutcome::Inserted
             }
             Some(existing) if version > existing => {
                 self.versions.insert(name.clone(), version);
+                self.templates.insert(name.clone(), builder.template());
                 self.builders.insert(name, builder);
                 RegisterOutcome::Replaced { from: existing, to: version }
             }
@@ -95,10 +111,16 @@ impl Registry {
 
     pub fn describe(&self, name: &str, shape: &ModuleShape) -> Result<ModuleDescriptor, BuildError> {
         validate_shape(name, shape)?;
-        self.builders
-            .get(name)
-            .map(|builder| builder.describe(shape))
-            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })
+        if !self.builders.contains_key(name) {
+            return Err(BuildError::UnknownModule { name: name.to_string(), origin: None });
+        }
+        let template = self.templates.get(name).expect("template recorded at register time");
+        Ok(template.build_channels(shape.channels as u32))
+    }
+
+    /// Static descriptor template for a registered module.
+    pub fn template(&self, name: &str) -> Option<&ModuleDescriptorTemplate> {
+        self.templates.get(name)
     }
 
     pub fn create(
@@ -130,10 +152,10 @@ impl Registry {
 /// the module would silently behave as if they didn't exist. Treat it as
 /// a planner-stage error.
 fn validate_shape(name: &str, shape: &ModuleShape) -> Result<(), BuildError> {
-    if shape.channels == 0 {
+    if let Err(reason) = shape.validate() {
         return Err(BuildError::InvalidShape {
             module: name.to_string(),
-            reason: "channels must be >= 1".to_string(),
+            reason: reason.to_string(),
             origin: None,
         });
     }
@@ -151,14 +173,19 @@ mod tests {
     }
 
     impl Module for TestModule {
-        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "TestModule",
-                shape: shape.clone(),
-                inputs: vec![],
-                outputs: vec![],
-                realtime_params: vec![],
-                structural_params: vec![],
+        fn template() -> ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            ModuleDescriptorTemplate {
+                name: "TestModule",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
             }
         }
 
@@ -193,8 +220,8 @@ mod tests {
 
     struct AltModule { instance_id: InstanceId, descriptor: ModuleDescriptor }
     impl Module for AltModule {
-        fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor { module_name: "TestModule", shape: shape.clone(), inputs: vec![], outputs: vec![], realtime_params: vec![], structural_params: vec![] }
+        fn template() -> ModuleDescriptorTemplate {
+            <TestModule as Module>::template()
         }
         fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok(Self { instance_id, descriptor })}
         fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}

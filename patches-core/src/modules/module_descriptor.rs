@@ -145,6 +145,23 @@ pub struct ModuleShape {
     pub channels: usize,
 }
 
+impl ModuleShape {
+    /// Validate shape invariants every module relies on. `channels` is the
+    /// count of `*_multi` port families and parameter array entries — 0 means
+    /// the descriptor would carry no entries for those families and the
+    /// module would silently behave as if they didn't exist. Treat as an
+    /// authoring error.
+    ///
+    /// Returns a static reason string on failure so callers (Registry, LSP,
+    /// manifest consumers) can wrap the error in their own type.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.channels == 0 {
+            return Err("channels must be >= 1");
+        }
+        Ok(())
+    }
+}
+
 impl Default for ModuleShape {
     /// `channels = 1`. Modules with `*_multi` port families use this as
     /// the implicit count when the DSL omits a shape arg, so a default

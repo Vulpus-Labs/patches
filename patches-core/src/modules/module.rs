@@ -3,6 +3,7 @@ use crate::build_error::BuildError;
 use crate::cable_pool::CablePool;
 use crate::cables::{InputPort, OutputPort};
 use super::instance_id::InstanceId;
+use super::descriptor_template::ModuleDescriptorTemplate;
 use super::module_descriptor::{ModuleDescriptor, ModuleShape, ParameterKind};
 use super::parameter_map::{ParameterMap, ParameterValue};
 use super::structural_params::StructuralParams;
@@ -196,10 +197,22 @@ impl PortConnectivity {
 ///
 /// `as_any` enables downcasting from `&dyn Module` to a concrete type.
 pub trait Module: Send {
-    /// Return the static descriptor for this module type, computed from the given shape.
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor
+    /// Compile-time-constant descriptor template for this module type
+    /// (ADR 0066). All modules declare their full port/parameter layout
+    /// via a `const TEMPLATE: ModuleDescriptorTemplate = ...;` returned
+    /// from this method; runtime descriptors are produced via
+    /// [`ModuleDescriptorTemplate::build_channels`].
+    ///
+    /// Modeled as a method rather than an associated `const` because
+    /// `Module` is used as `dyn Module` and associated consts make a
+    /// trait dyn-incompatible. The `where Self: Sized` clause keeps it
+    /// out of the vtable.
+    fn template() -> ModuleDescriptorTemplate
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        ModuleDescriptorTemplate::EMPTY
+    }
 
     /// Allocate and initialise a new instance, storing `audio_environment`, `descriptor`,
     /// the externally-minted `instance_id`, and absorbing any structural parameter
@@ -265,7 +278,7 @@ pub trait Module: Send {
     where
         Self: Sized,
     {
-        let descriptor = Self::describe(shape);
+        let descriptor = Self::template().build_channels(shape.channels as u32);
         let mut instance = Self::prepare(audio_environment, descriptor, instance_id, structural)?;
 
         let unpacked = ParameterMap::with_overrides(
@@ -350,6 +363,14 @@ pub trait Module: Send {
     ///
     /// **Must not allocate, block, or perform I/O.**
     fn periodic_update(&mut self, _pool: &CablePool<'_>) {}
+}
+
+/// Build a [`ModuleDescriptor`] for module type `M` at the given shape,
+/// via [`Module::template`] + [`ModuleDescriptorTemplate::build_channels`]
+/// (ADR 0066). Replaces the retired `patches_core::describe_for::<Module>(shape)` trait method
+/// (ticket 0790).
+pub fn describe_for<M: Module>(shape: &ModuleShape) -> ModuleDescriptor {
+    M::template().build_channels(shape.channels as u32)
 }
 
 #[cfg(test)]

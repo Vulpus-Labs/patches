@@ -31,7 +31,7 @@
 //!   whatever change broke the sub-sample accuracy guarantee.
 
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_core::{AudioEnvironment, Module, ModuleGraph, ModuleShape, NodeId};
+use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId};
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
 use patches_integration_tests::{p, HeadlessEngine, MODULE_CAP, POOL_CAP};
 use patches_modules::{AudioOut, Oscillator, SyncToTrigger, TriggerToSync};
@@ -72,9 +72,9 @@ fn params_freq(v: f32) -> ParameterMap {
 
 fn build_direct(f_master: f32, f_slave: f32) -> ModuleGraph {
     let mut g = ModuleGraph::new();
-    g.add_module("master", Oscillator::describe(&shape()), &params_freq(voct(f_master))).unwrap();
-    g.add_module("slave",  Oscillator::describe(&shape()), &params_freq(voct(f_slave))).unwrap();
-    g.add_module("out",    AudioOut::describe(&shape()), &ParameterMap::new()).unwrap();
+    g.add_module("master", patches_core::describe_for::<Oscillator>(&shape()), &params_freq(voct(f_master))).unwrap();
+    g.add_module("slave",  patches_core::describe_for::<Oscillator>(&shape()), &params_freq(voct(f_slave))).unwrap();
+    g.add_module("out",    patches_core::describe_for::<AudioOut>(&shape()), &ParameterMap::new()).unwrap();
     g.connect(&NodeId::from("master"), p("reset_out"), &NodeId::from("slave"), p("sync"), 1.0).unwrap();
     g.connect(&NodeId::from("slave"), p("sawtooth"), &NodeId::from("out"), p("in"), 1.0).unwrap();
     g
@@ -82,11 +82,11 @@ fn build_direct(f_master: f32, f_slave: f32) -> ModuleGraph {
 
 fn build_via_pulse(f_master: f32, f_slave: f32) -> ModuleGraph {
     let mut g = ModuleGraph::new();
-    g.add_module("master", Oscillator::describe(&shape()), &params_freq(voct(f_master))).unwrap();
-    g.add_module("slave",  Oscillator::describe(&shape()), &params_freq(voct(f_slave))).unwrap();
-    g.add_module("s2t",    SyncToTrigger::describe(&shape()), &ParameterMap::new()).unwrap();
-    g.add_module("t2s",    TriggerToSync::describe(&shape()), &ParameterMap::new()).unwrap();
-    g.add_module("out",    AudioOut::describe(&shape()), &ParameterMap::new()).unwrap();
+    g.add_module("master", patches_core::describe_for::<Oscillator>(&shape()), &params_freq(voct(f_master))).unwrap();
+    g.add_module("slave",  patches_core::describe_for::<Oscillator>(&shape()), &params_freq(voct(f_slave))).unwrap();
+    g.add_module("s2t",    patches_core::describe_for::<SyncToTrigger>(&shape()), &ParameterMap::new()).unwrap();
+    g.add_module("t2s",    patches_core::describe_for::<TriggerToSync>(&shape()), &ParameterMap::new()).unwrap();
+    g.add_module("out",    patches_core::describe_for::<AudioOut>(&shape()), &ParameterMap::new()).unwrap();
     g.connect(&NodeId::from("master"), p("reset_out"), &NodeId::from("s2t"), p("in"), 1.0).unwrap();
     g.connect(&NodeId::from("s2t"), p("out"), &NodeId::from("t2s"), p("in"), 1.0).unwrap();
     g.connect(&NodeId::from("t2s"), p("out"), &NodeId::from("slave"), p("sync"), 1.0).unwrap();

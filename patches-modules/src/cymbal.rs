@@ -28,8 +28,9 @@
 /// | `shimmer` | float | 0.0–1.0       | 0.2     | Partial frequency modulation depth |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
@@ -70,16 +71,44 @@ pub struct Cymbal {
 }
 
 impl Module for Cymbal {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Cymbal", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 200.0, 10000.0, 600.0)
-            .float_param(params::decay, 0.2, 8.0, 2.0)
-            .float_param(params::tone, 0.0, 1.0, 0.5)
-            .float_param(params::filter, 2000.0, 16000.0, 6000.0)
-            .float_param(params::shimmer, 0.0, 1.0, 0.2)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Cymbal",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 200.0, max: 10000.0, default: 600.0 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.2, max: 8.0, default: 2.0 },
+                },
+                ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::filter.as_str(),
+                    kind: ParameterKind::Float { min: 2000.0, max: 16000.0, default: 6000.0 },
+                },
+                ParameterTemplate {
+                    name: params::shimmer.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.2 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

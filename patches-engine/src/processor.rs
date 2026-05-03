@@ -689,14 +689,19 @@ mod monitor_tests {
     }
 
     impl Module for SpinModule {
-        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "Spin",
-                shape: ModuleShape { channels: 0 },
-                inputs: vec![],
-                outputs: vec![],
-                realtime_params: vec![],
-                structural_params: vec![],
+        fn template() -> patches_core::ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            ModuleDescriptorTemplate {
+                name: "Spin",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
             }
         }
         fn prepare(

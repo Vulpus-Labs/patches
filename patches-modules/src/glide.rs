@@ -25,8 +25,9 @@
 //! | `slur_amount` | float | 0.0--100.0 | `1.0` | Multiplier applied to glide time while `slur_in` gate is high |
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -73,13 +74,32 @@ impl Glide {
 }
 
 impl Module for Glide {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Glide", shape.clone())
-            .mono_in("in")
-            .mono_in("slur_in")
-            .mono_out("out")
-            .float_param(params::glide_ms, 0.0, 10_000.0, 100.0)
-            .float_param(params::slur_amount, 0.0, 100.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Glide",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("slur_in"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::glide_ms.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 10_000.0, default: 100.0 },
+                },
+                ParameterTemplate {
+                    name: params::slur_amount.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 100.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

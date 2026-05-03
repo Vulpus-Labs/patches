@@ -128,16 +128,16 @@ fn load_helper_accepts_arbitrary_host_file_source_impl() {
 const TAPS_AB: &str = r#"
 patch {
     module osc : Osc
-    osc.sine -> ~meter(alpha, window: 25)
-    osc.sine -> ~meter(bravo, window: 25)
+    osc.sine -> ~meter(alpha)
+    osc.sine -> ~meter(bravo)
 }
 "#;
 
 const TAPS_AC: &str = r#"
 patch {
     module osc : Osc
-    osc.sine -> ~meter(alpha, window: 25)
-    osc.sine -> ~meter(charlie, window: 25)
+    osc.sine -> ~meter(alpha)
+    osc.sine -> ~meter(charlie)
 }
 "#;
 

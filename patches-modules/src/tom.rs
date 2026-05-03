@@ -28,8 +28,9 @@
 /// | `noise`      | float | 0.0–1.0     | 0.15    | Noise layer amount       |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::module_params;
@@ -71,16 +72,44 @@ pub struct Tom {
 }
 
 impl Module for Tom {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Tom", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 40.0, 500.0, 120.0)
-            .float_param(params::sweep, 0.0, 2000.0, 400.0)
-            .float_param(params::sweep_time, 0.001, 0.3, 0.03)
-            .float_param(params::decay, 0.05, 2.0, 0.3)
-            .float_param(params::noise, 0.0, 1.0, 0.15)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Tom",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 40.0, max: 500.0, default: 120.0 },
+                },
+                ParameterTemplate {
+                    name: params::sweep.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 2000.0, default: 400.0 },
+                },
+                ParameterTemplate {
+                    name: params::sweep_time.as_str(),
+                    kind: ParameterKind::Float { min: 0.001, max: 0.3, default: 0.03 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.05, max: 2.0, default: 0.3 },
+                },
+                ParameterTemplate {
+                    name: params::noise.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.15 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

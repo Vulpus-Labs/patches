@@ -84,15 +84,15 @@ pub(crate) fn resolve_descriptor(registry: &Registry, module: &patches_dsl::Flat
 }
 
 fn shape_from_args(args: &[(String, patches_dsl::Scalar)]) -> ModuleShape {
-    let mut channels = 0usize;
+    let mut shape = ModuleShape::default();
     for (name, scalar) in args {
         if name.as_str() == "channels" {
             if let patches_dsl::Scalar::Int(n) = scalar {
-                channels = *n as usize;
+                shape.channels = *n as usize;
             }
         }
     }
-    ModuleShape { channels }
+    shape
 }
 
 pub(crate) fn find_port_cable_class(

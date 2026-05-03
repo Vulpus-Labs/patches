@@ -44,8 +44,9 @@
 /// |-----------|------|-------|---------|--------------------------------------------------------|
 /// | `channel` | int  | 0–16  | 0       | MIDI channel filter (1–16); 0 = respond to all channels |
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
-    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, GLOBAL_MIDI,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -91,6 +92,25 @@ const fn build_note_to_slot() -> [u8; 128] {
 
 static NOTE_TO_SLOT: [u8; 128] = build_note_to_slot();
 
+/// Static interleaved trigger/velocity output ports for all drum slots.
+/// Order matches `DRUM_MAP`: (trigger, velocity) per drum.
+const DRUM_OUTPUTS: [PortTemplate; NUM_DRUMS * 2] = [
+    PortTemplate::trigger("kick_trigger"),      PortTemplate::mono("kick_velocity"),
+    PortTemplate::trigger("snare_trigger"),     PortTemplate::mono("snare_velocity"),
+    PortTemplate::trigger("clap_trigger"),      PortTemplate::mono("clap_velocity"),
+    PortTemplate::trigger("closed_hh_trigger"), PortTemplate::mono("closed_hh_velocity"),
+    PortTemplate::trigger("pedal_hh_trigger"),  PortTemplate::mono("pedal_hh_velocity"),
+    PortTemplate::trigger("open_hh_trigger"),   PortTemplate::mono("open_hh_velocity"),
+    PortTemplate::trigger("tom_low_trigger"),   PortTemplate::mono("tom_low_velocity"),
+    PortTemplate::trigger("tom_mid_trigger"),   PortTemplate::mono("tom_mid_velocity"),
+    PortTemplate::trigger("tom_high_trigger"),  PortTemplate::mono("tom_high_velocity"),
+    PortTemplate::trigger("crash_trigger"),     PortTemplate::mono("crash_velocity"),
+    PortTemplate::trigger("ride_trigger"),      PortTemplate::mono("ride_velocity"),
+    PortTemplate::trigger("claves_trigger"),    PortTemplate::mono("claves_velocity"),
+    PortTemplate::trigger("cowbell_trigger"),   PortTemplate::mono("cowbell_velocity"),
+    PortTemplate::trigger("rimshot_trigger"),   PortTemplate::mono("rimshot_velocity"),
+];
+
 module_params! {
     MidiDrumset {
         channel: Int,
@@ -112,12 +132,25 @@ pub struct MidiDrumset {
 }
 
 impl Module for MidiDrumset {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let mut desc = ModuleDescriptor::new("MidiDrumset", shape.clone()).midi_in("midi");
-        for &(_, trig_name, vel_name) in &DRUM_MAP {
-            desc = desc.trigger_out(trig_name).mono_out(vel_name);
-        }
-        desc.int_param(params::channel, 0, 16, 0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiDrumset",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &DRUM_OUTPUTS,
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::channel.as_str(),
+                    kind: ParameterKind::Int { min: 0, max: 16, default: 0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

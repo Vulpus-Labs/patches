@@ -54,8 +54,9 @@ use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
 use patches_core::{
     AudioEnvironment, InputPort, InstanceId,
-    ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
+    ModuleDescriptor, MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams};
 
 use patches_dsp::partitioned_convolution::NonUniformConvolver;
@@ -112,14 +113,37 @@ impl ConvolutionReverb {
 }
 
 impl patches_core::Module for ConvolutionReverb {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ConvReverb", ModuleShape { channels: 0 })
-            .mono_in("in")
-            .mono_in("mix")
-            .mono_out("out")
-            .float_param(core_params::mix, 0.0, 1.0, 1.0)
-            .enum_param(core_params::ir, IrVariant::Room)
-            .structural_string_param("ir_path", IR_FILE_EXTENSIONS)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "ConvReverb",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("mix"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: core_params::mix.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: core_params::ir.as_str(),
+                    kind: ParameterKind::Enum { variants: IrVariant::VARIANTS, default: "room" },
+                },
+            ],
+            structural_params: &[
+                ParameterTemplate {
+                    name: "ir_path",
+                    kind: ParameterKind::File { extensions: IR_FILE_EXTENSIONS },
+                },
+            ],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

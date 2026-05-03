@@ -48,8 +48,9 @@
 
 use patches_core::{
     params_enum,
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
@@ -108,21 +109,48 @@ fn apply_mode(v: f32, mode: LfoMode) -> f32 {
 }
 
 impl Module for Lfo {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Lfo", shape.clone())
-            .trigger_in("sync")
-            .mono_in("rate_cv")
-            .mono_in("sync_ms")
-            .mono_out("sine")
-            .mono_out("triangle")
-            .mono_out("saw_up")
-            .mono_out("saw_down")
-            .mono_out("square")
-            .mono_out("random")
-            .trigger_out("reset_out")
-            .float_param(params::rate, 0.01, 20.0, 1.0)
-            .float_param(params::phase_offset, 0.0, 1.0, 0.0)
-            .enum_param(params::mode, LfoMode::Bipolar)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Lfo",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("sync"),
+                PortTemplate::mono("rate_cv"),
+                PortTemplate::mono("sync_ms"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("sine"),
+                PortTemplate::mono("triangle"),
+                PortTemplate::mono("saw_up"),
+                PortTemplate::mono("saw_down"),
+                PortTemplate::mono("square"),
+                PortTemplate::mono("random"),
+                PortTemplate::trigger("reset_out"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::rate.as_str(),
+                    kind: ParameterKind::Float { min: 0.01, max: 20.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::phase_offset.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+                ParameterTemplate {
+                    name: params::mode.as_str(),
+                    kind: ParameterKind::Enum {
+                        variants: LfoMode::VARIANTS,
+                        default: "bipolar",
+                    },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

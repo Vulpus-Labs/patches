@@ -1,9 +1,8 @@
 use std::any::Any;
 use patches_core::{
     BASE_PERIODIC_UPDATE_INTERVAL,
-    AudioEnvironment, CableKind, CablePool, CableValue, InstanceId, MidiEvent,
-    Module, ModuleDescriptor, ModuleGraph, ModuleShape, MonoOutput,
-    MonoLayout, PolyLayout, PortDescriptor, PortRef,
+    AudioEnvironment, CablePool, CableValue, InstanceId, MidiEvent,
+    Module, ModuleDescriptor, ModuleGraph, MonoOutput, PortRef,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_registry::Registry;
@@ -97,15 +96,23 @@ pub struct ImpulseSource {
 }
 
 impl Module for ImpulseSource {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "ImpulseSource",
-            shape: ModuleShape::default(),
-            inputs: vec![],
-            outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, PortTemplate,
+        };
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "ImpulseSource",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -140,10 +147,27 @@ pub struct ConstSource {
 const CONST_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
 
 impl Module for ConstSource {
-    fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ConstSource", ModuleShape::default())
-            .mono_out("out")
-            .float_param(CONST_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+        };
+        use patches_core::ParameterKind;
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "ConstSource",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[ParameterTemplate {
+                name: CONST_SOURCE_AMPLITUDE.as_str(),
+                kind: ParameterKind::Float { min: 0.0, max: 100.0, default: 1.0 },
+            }],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -183,11 +207,33 @@ const SINE_SOURCE_AMPLITUDE: FloatParamName = FloatParamName::new("amplitude");
 const SINE_SOURCE_FREQ_HZ:   FloatParamName = FloatParamName::new("freq_hz");
 
 impl Module for SineSource {
-    fn describe(_: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("SineSource", ModuleShape::default())
-            .mono_out("out")
-            .float_param(SINE_SOURCE_AMPLITUDE, 0.0, 100.0, 1.0)
-            .float_param(SINE_SOURCE_FREQ_HZ, 0.0, 24_000.0, 1_000.0)
+    fn template() -> patches_core::ModuleDescriptorTemplate {
+        use patches_core::modules::descriptor_template::{
+            CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+        };
+        use patches_core::ParameterKind;
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "SineSource",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: SINE_SOURCE_AMPLITUDE.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 100.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: SINE_SOURCE_FREQ_HZ.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 24_000.0, default: 1_000.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

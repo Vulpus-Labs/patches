@@ -27,7 +27,9 @@
 /// | `dry_wet` | float | 0.0--1.0   | `1.0`   | Dry/wet mix                          |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, };
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
+};
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -56,15 +58,37 @@ pub struct Bitcrusher {
 }
 
 impl Module for Bitcrusher {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Bitcrusher", shape.clone())
-            .mono_in("in")
-            .mono_in("rate_cv")
-            .mono_in("depth_cv")
-            .mono_out("out")
-            .float_param(params::rate, 0.0, 1.0, 1.0)
-            .float_param(params::depth, 1.0, 32.0, 32.0)
-            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Bitcrusher",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("rate_cv"),
+                PortTemplate::mono("depth_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::rate.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+                ParameterTemplate {
+                    name: params::depth.as_str(),
+                    kind: ParameterKind::Float { min: 1.0, max: 32.0, default: 32.0 },
+                },
+                ParameterTemplate {
+                    name: params::dry_wet.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

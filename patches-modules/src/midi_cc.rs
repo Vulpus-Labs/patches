@@ -16,8 +16,9 @@
 //! | `cc` | int | 0–127 | `1` | MIDI CC number to track |
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
-    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, GLOBAL_MIDI,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoOutput, OutputPort, ParameterKind,
+    ParameterTemplate, PortTemplate, GLOBAL_MIDI,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -40,11 +41,25 @@ pub struct MidiCc {
 }
 
 impl Module for MidiCc {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiCC", shape.clone())
-            .midi_in("midi")
-            .mono_out("out")
-            .int_param(params::cc, 0, 127, 1)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiCC",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cc.as_str(),
+                    kind: ParameterKind::Int { min: 0, max: 127, default: 1 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

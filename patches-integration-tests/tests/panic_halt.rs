@@ -38,7 +38,6 @@ impl PanicOnProcess {
     }
 }
 impl Module for PanicOnProcess {
-    fn describe(_s: &ModuleShape) -> ModuleDescriptor { unreachable!() }
     fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, desc: d }
     })}
@@ -72,7 +71,6 @@ impl PanicOnPeriodic {
     }
 }
 impl Module for PanicOnPeriodic {
-    fn describe(_s: &ModuleShape) -> ModuleDescriptor { unreachable!() }
     fn prepare(_: &AudioEnvironment, d: ModuleDescriptor, id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         Self { id, desc: d }
     })}

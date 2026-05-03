@@ -26,8 +26,9 @@
 /// | `filter` | float | 2000–16000 Hz | 8000    | Noise highpass cutoff           |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
@@ -63,15 +64,40 @@ pub struct ClosedHiHat {
 }
 
 impl Module for ClosedHiHat {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("ClosedHiHat", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 100.0, 8000.0, 400.0)
-            .float_param(params::decay, 0.005, 0.2, 0.04)
-            .float_param(params::tone, 0.0, 1.0, 0.5)
-            .float_param(params::filter, 2000.0, 16000.0, 8000.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "ClosedHiHat",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 100.0, max: 8000.0, default: 400.0 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.005, max: 0.2, default: 0.04 },
+                },
+                ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::filter.as_str(),
+                    kind: ParameterKind::Float { min: 2000.0, max: 16000.0, default: 8000.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -200,16 +226,41 @@ pub struct OpenHiHat {
 }
 
 impl Module for OpenHiHat {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("OpenHiHat", shape.clone())
-            .trigger_in("trigger")
-            .trigger_in("choke")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::pitch, 100.0, 8000.0, 400.0)
-            .float_param(params::decay, 0.05, 4.0, 0.5)
-            .float_param(params::tone, 0.0, 1.0, 0.5)
-            .float_param(params::filter, 2000.0, 16000.0, 8000.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "OpenHiHat",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::trigger("choke"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::pitch.as_str(),
+                    kind: ParameterKind::Float { min: 100.0, max: 8000.0, default: 400.0 },
+                },
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.05, max: 4.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::filter.as_str(),
+                    kind: ParameterKind::Float { min: 2000.0, max: 16000.0, default: 8000.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

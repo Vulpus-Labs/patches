@@ -30,8 +30,9 @@
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, MidiOutput, Module,
-    ModuleDescriptor, ModuleShape, OutputPort, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage,
+    MidiOutput, Module, ModuleDescriptor, ModuleDescriptorTemplate, OutputPort, ParameterKind,
+    ParameterTemplate, PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 
@@ -60,11 +61,25 @@ pub struct MidiTranspose {
 }
 
 impl Module for MidiTranspose {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("MidiTranspose", shape.clone())
-            .midi_in("midi")
-            .midi_out("midi")
-            .int_param(params::semitones, -48, 48, 0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MidiTranspose",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::midi("midi")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::semitones.as_str(),
+                    kind: ParameterKind::Int { min: -48, max: 48, default: 0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

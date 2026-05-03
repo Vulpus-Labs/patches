@@ -39,8 +39,9 @@
 //! which is cheaper but may produce audible artifacts on modulated delays.
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    ParameterKind, ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -102,25 +103,56 @@ pub struct Delay {
 }
 
 impl Module for Delay {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("Delay", shape.clone())
-            .mono_in("in")
-            .mono_in("drywet_cv")
-            .mono_in_multi("sync_ms",  n)
-            .mono_in_multi("delay_cv", n)
-            .mono_in_multi("gain_cv",  n)
-            .mono_in_multi("fb_cv",    n)
-            .mono_in_multi("return",   n)
-            .mono_out("out")
-            .mono_out_multi("send", n)
-            .float_param(params::dry_wet, 0.0, 1.0, 1.0)
-            .int_param_multi(params::delay_ms, n, 0, 2000, 500)
-            .float_param_multi(params::gain,     n, 0.0, 1.0, 1.0)
-            .float_param_multi(params::feedback, n, 0.0, 1.0, 0.0)
-            .float_param_multi(params::tone,     n, 0.0, 1.0, 1.0)
-            .float_param_multi(params::drive,    n, 0.1, 10.0, 1.0)
-            .structural_bool_param("high_quality", false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Delay",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("drywet_cv"),
+            ],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("sync_ms")),
+                (AxisId::CHANNELS, PortTemplate::mono("delay_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("gain_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("fb_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("return")),
+            ],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[(AxisId::CHANNELS, PortTemplate::mono("send"))],
+            realtime_params: &[ParameterTemplate {
+                name: params::dry_wet.as_str(),
+                kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+            }],
+            structural_params: &[ParameterTemplate {
+                name: "high_quality",
+                kind: ParameterKind::Bool { default: false },
+            }],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::delay_ms.as_str(),
+                    kind: ParameterKind::Int { min: 0, max: 2000, default: 500 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::gain.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::feedback.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::tone.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::drive.as_str(),
+                    kind: ParameterKind::Float { min: 0.1, max: 10.0, default: 1.0 },
+                }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -279,6 +311,48 @@ mod tests {
     use patches_core::{AudioEnvironment, ModuleShape};
     use patches_core::parameter_map::{ParameterMap, ParameterValue};
     use patches_core::test_support::{ModuleHarness, params};
+
+    #[test]
+    fn descriptor_snapshot_matches_for_various_channel_counts() {
+        for &n in &[1usize, 2, 8, 16] {
+            let desc = patches_core::describe_for::<Delay>(&ModuleShape { channels: n });
+            assert_eq!(desc.module_name, "Delay");
+            assert_eq!(desc.shape.channels, n);
+
+            // Inputs: in(0), drywet_cv(0), then sync_ms[0..n], delay_cv[..],
+            // gain_cv[..], fb_cv[..], return[..].
+            let mut expected_inputs: Vec<(&'static str, usize)> =
+                vec![("in", 0), ("drywet_cv", 0)];
+            for name in ["sync_ms", "delay_cv", "gain_cv", "fb_cv", "return"] {
+                for i in 0..n { expected_inputs.push((name, i)); }
+            }
+            let actual_inputs: Vec<(&'static str, usize)> =
+                desc.inputs.iter().map(|p| (p.name, p.index)).collect();
+            assert_eq!(actual_inputs, expected_inputs, "inputs mismatch for n={n}");
+
+            // Outputs: out(0), then send[0..n].
+            let mut expected_outputs: Vec<(&'static str, usize)> = vec![("out", 0)];
+            for i in 0..n { expected_outputs.push(("send", i)); }
+            let actual_outputs: Vec<(&'static str, usize)> =
+                desc.outputs.iter().map(|p| (p.name, p.index)).collect();
+            assert_eq!(actual_outputs, expected_outputs, "outputs mismatch for n={n}");
+
+            // Realtime params: dry_wet(0), then per-channel
+            // delay_ms, gain, feedback, tone, drive (in that order).
+            let mut expected_rt: Vec<(&'static str, usize)> = vec![("dry_wet", 0)];
+            for name in ["delay_ms", "gain", "feedback", "tone", "drive"] {
+                for i in 0..n { expected_rt.push((name, i)); }
+            }
+            let actual_rt: Vec<(&'static str, usize)> =
+                desc.realtime_params.iter().map(|p| (p.name, p.index)).collect();
+            assert_eq!(actual_rt, expected_rt, "realtime params mismatch for n={n}");
+
+            // Structural: high_quality(0).
+            let actual_struct: Vec<(&'static str, usize)> =
+                desc.structural_params.iter().map(|p| (p.name, p.index)).collect();
+            assert_eq!(actual_struct, vec![("high_quality", 0)]);
+        }
+    }
 
     const SR: f32 = 44_100.0;
     const ENV: AudioEnvironment = AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false };

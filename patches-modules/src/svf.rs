@@ -2,7 +2,9 @@ use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, MonoOutput, ModuleShape, OutputPort, };
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
+};
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
@@ -81,17 +83,38 @@ impl Svf {
 }
 
 impl Module for Svf {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Svf", shape.clone())
-            .mono_in("in")
-            .mono_in("voct")
-            .mono_in("fm")
-            .mono_in("q_cv")
-            .mono_out("lowpass")
-            .mono_out("highpass")
-            .mono_out("bandpass")
-            .float_param(params::cutoff, -2.0, 12.0, 6.0)
-            .float_param(params::q, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Svf",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::mono("in"),
+                PortTemplate::mono("voct"),
+                PortTemplate::mono("fm"),
+                PortTemplate::mono("q_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("lowpass"),
+                PortTemplate::mono("highpass"),
+                PortTemplate::mono("bandpass"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cutoff.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: params::q.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

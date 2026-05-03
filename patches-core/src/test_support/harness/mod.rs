@@ -99,7 +99,7 @@ impl ModuleHarness {
                 .expect("ModuleHarness::build: module creation failed")
         );
 
-        let descriptor = M::describe(&shape);
+        let descriptor = M::template().build_channels(shape.channels as u32);
         let n_inputs = descriptor.inputs.len();
         let n_outputs = descriptor.outputs.len();
 

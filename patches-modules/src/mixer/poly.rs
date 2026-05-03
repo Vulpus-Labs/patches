@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    MonoInput, ModuleShape, OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
+    ParameterTemplate, PolyInput, PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -52,15 +53,36 @@ pub struct PolyMixer {
 }
 
 impl Module for PolyMixer {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("PolyMixer", shape.clone())
-            .poly_in_multi("in",       n)
-            .mono_in_multi("level_cv", n)
-            .poly_out("out")
-            .float_param_multi(params::level, shape.channels, 0.0, 1.0, 1.0)
-            .bool_param_multi(params::mute,   shape.channels, false)
-            .bool_param_multi(params::solo,   shape.channels, false)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyMixer",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::poly("in")),
+                (AxisId::CHANNELS, PortTemplate::mono("level_cv")),
+            ],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::level.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::mute.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                }),
+                (AxisId::CHANNELS, ParameterTemplate {
+                    name: params::solo.as_str(),
+                    kind: ParameterKind::Bool { default: false },
+                }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

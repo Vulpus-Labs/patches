@@ -50,8 +50,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, OutputPort, StereoInput, StereoOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind, ParameterTemplate,
+    PortTemplate, StereoInput, StereoOutput,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::approximate::fast_tanh;
@@ -157,18 +158,31 @@ pub struct VReverb {
 }
 
 impl Module for VReverb {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("VReverb", shape.clone())
-            .stereo_in("in")
-            .mono_in("drywet_cv")
-            .mono_in("size_cv")
-            .mono_in("decay_cv")
-            .stereo_out("out")
-            .float_param(params::dry_wet, 0.0, 1.0, 0.3)
-            .float_param(params::size, 0.0, 1.0, 0.5)
-            .float_param(params::decay, 0.0, DECAY_MAX, 0.7)
-            .float_param(params::damping, 0.0, 1.0, 0.5)
-            .float_param(params::jitter, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VReverb",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::stereo("in"),
+                PortTemplate::mono("drywet_cv"),
+                PortTemplate::mono("size_cv"),
+                PortTemplate::mono("decay_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::stereo("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::dry_wet.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0,       default: 0.3 } },
+                ParameterTemplate { name: params::size.as_str(),    kind: ParameterKind::Float { min: 0.0, max: 1.0,       default: 0.5 } },
+                ParameterTemplate { name: params::decay.as_str(),   kind: ParameterKind::Float { min: 0.0, max: DECAY_MAX, default: 0.7 } },
+                ParameterTemplate { name: params::damping.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0,       default: 0.5 } },
+                ParameterTemplate { name: params::jitter.as_str(),  kind: ParameterKind::Float { min: 0.0, max: 1.0,       default: 0.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

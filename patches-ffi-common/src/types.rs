@@ -5,7 +5,7 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -274,7 +274,13 @@ pub struct FfiPluginVTable {
     pub module_version: u32,
     pub supports_periodic: i32,
 
-    pub describe: unsafe extern "C" fn(shape: FfiModuleShape) -> FfiBytes,
+    /// Returns the plugin's static [`ModuleDescriptorTemplate`] serialized
+    /// as JSON (ADR 0066, ticket 0795). The host calls this exactly once
+    /// per registered module at load time, deserializes via
+    /// [`crate::json::deserialize_module_descriptor_template`], and
+    /// reuses the resulting template to build per-instance descriptors
+    /// without re-entering the plugin.
+    pub module_template: unsafe extern "C" fn() -> FfiBytes,
 
     /// Construct a plugin instance.
     ///
@@ -480,7 +486,7 @@ mod tests {
         assert!(slice.is_empty());
     }
 
-    unsafe extern "C" fn stub_describe(_s: FfiModuleShape) -> FfiBytes { FfiBytes::empty() }
+    unsafe extern "C" fn stub_module_template() -> FfiBytes { FfiBytes::empty() }
     unsafe extern "C" fn stub_prepare(
         _p: *const u8, _l: usize, _e: FfiAudioEnvironment, _i: u64,
         _sb: *const u8, _sl: usize,
@@ -506,7 +512,7 @@ mod tests {
             abi_version: ABI_VERSION,
             module_version: 0,
             supports_periodic: 0,
-            describe: stub_describe,
+            module_template: stub_module_template,
             prepare: stub_prepare,
             update_validated_parameters: stub_uvp,
             process: stub_process,

@@ -7,7 +7,7 @@ use patches_core::{
 
 /// A minimal JSON value type sufficient for our deserialization needs.
 #[derive(Debug, Clone)]
-enum JsonValue {
+pub(super) enum JsonValue {
     Null,
     Bool(bool),
     Number(f64),
@@ -17,22 +17,22 @@ enum JsonValue {
 }
 
 impl JsonValue {
-    fn as_str(&self) -> Option<&str> {
+    pub(super) fn as_str(&self) -> Option<&str> {
         if let JsonValue::Str(s) = self { Some(s) } else { None }
     }
-    fn as_f64(&self) -> Option<f64> {
+    pub(super) fn as_f64(&self) -> Option<f64> {
         if let JsonValue::Number(n) = self { Some(*n) } else { None }
     }
-    fn as_i64(&self) -> Option<i64> {
+    pub(super) fn as_i64(&self) -> Option<i64> {
         if let JsonValue::Number(n) = self { Some(*n as i64) } else { None }
     }
-    fn as_bool(&self) -> Option<bool> {
+    pub(super) fn as_bool(&self) -> Option<bool> {
         if let JsonValue::Bool(b) = self { Some(*b) } else { None }
     }
-    fn as_array(&self) -> Option<&[JsonValue]> {
+    pub(super) fn as_array(&self) -> Option<&[JsonValue]> {
         if let JsonValue::Array(a) = self { Some(a) } else { None }
     }
-    fn get(&self, key: &str) -> Option<&JsonValue> {
+    pub(super) fn get(&self, key: &str) -> Option<&JsonValue> {
         if let JsonValue::Object(pairs) = self {
             pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v)
         } else {
@@ -41,6 +41,25 @@ impl JsonValue {
     }
     fn as_usize(&self) -> Option<usize> {
         self.as_f64().map(|n| n as usize)
+    }
+
+    pub(super) fn get_str(&self, key: &str) -> Option<&str> {
+        self.get(key).and_then(|v| v.as_str())
+    }
+    pub(super) fn get_f64(&self, key: &str) -> Option<f64> {
+        self.get(key).and_then(|v| v.as_f64())
+    }
+    pub(super) fn get_i64(&self, key: &str) -> Option<i64> {
+        self.get(key).and_then(|v| v.as_i64())
+    }
+    pub(super) fn get_bool(&self, key: &str) -> Option<bool> {
+        self.get(key).and_then(|v| v.as_bool())
+    }
+    pub(super) fn get_array(&self, key: &str) -> Option<&[JsonValue]> {
+        self.get(key).and_then(|v| v.as_array())
+    }
+    pub(super) fn get_field(&self, key: &str) -> Option<&JsonValue> {
+        self.get(key)
     }
 }
 
@@ -207,6 +226,10 @@ fn parse_json(input: &[u8]) -> Result<JsonValue, String> {
     let mut parser = JsonParser::new(input);
     let value = parser.parse_value()?;
     Ok(value)
+}
+
+pub(super) fn parse_json_value(input: &[u8]) -> Result<JsonValue, String> {
+    parse_json(input)
 }
 
 // ── Leak helper ──────────────────────────────────────────────────────────────

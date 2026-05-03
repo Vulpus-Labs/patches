@@ -2,7 +2,6 @@ use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
-use patches_core::Module;
 use patches_modules::{AudioOut, Oscillator, Tuner};
 
 const POOL_CAP: usize = 256;
@@ -29,10 +28,10 @@ fn make_registry() -> Registry {
 fn probe_to_out_graph() -> ModuleGraph {
     let mut graph = ModuleGraph::new();
     graph
-        .add_module("probe", Tuner::describe(&ModuleShape::default()), &ParameterMap::new())
+        .add_module("probe", patches_core::describe_for::<Tuner>(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new())
+        .add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("probe"), p("out"), &NodeId::from("out"), p("in"), 1.0)
@@ -47,13 +46,13 @@ fn probe_with_input_graph() -> ModuleGraph {
     let mut params = ParameterMap::new();
     params.insert("frequency".to_string(), ParameterValue::Float(4.75));
     graph
-        .add_module("osc", Oscillator::describe(&ModuleShape::default()), &params)
+        .add_module("osc", patches_core::describe_for::<Oscillator>(&ModuleShape::default()), &params)
         .unwrap();
     graph
-        .add_module("probe", Tuner::describe(&ModuleShape::default()), &ParameterMap::new())
+        .add_module("probe", patches_core::describe_for::<Tuner>(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
-        .add_module("out", AudioOut::describe(&ModuleShape::default()), &ParameterMap::new())
+        .add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new())
         .unwrap();
     graph
         .connect(&NodeId::from("osc"), p("sine"), &NodeId::from("probe"), p("in"), 1.0)

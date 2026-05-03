@@ -465,14 +465,19 @@ mod tests {
     }
 
     impl Module for Stub {
-        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "Stub",
-                shape: ModuleShape { channels: 0 },
-                inputs: vec![],
-                outputs: vec![],
-                realtime_params: vec![],
-                structural_params: vec![],
+        fn template() -> patches_core::ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            ModuleDescriptorTemplate {
+                name: "Stub",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
             }
         }
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -510,14 +515,19 @@ mod tests {
     }
 
     impl Module for CountingModule {
-        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "CountingModule",
-                shape: ModuleShape { channels: 0 },
-                inputs: vec![],
-                outputs: vec![],
-                realtime_params: vec![],
-                structural_params: vec![],
+        fn template() -> patches_core::ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            ModuleDescriptorTemplate {
+                name: "CountingModule",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
             }
         }
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
@@ -559,15 +569,23 @@ mod tests {
     }
 
     impl Module for WriterModule {
-        fn describe(_shape: &ModuleShape) -> ModuleDescriptor {
-            ModuleDescriptor {
-                module_name: "WriterModule",
-                shape: ModuleShape { channels: 0 },
-                inputs: vec![],
-                outputs: vec![PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio }],
-                realtime_params: vec![],
-                structural_params: vec![],
-            }
+        fn template() -> patches_core::ModuleDescriptorTemplate {
+            use patches_core::modules::descriptor_template::{
+                CountAxis, ModuleDescriptorTemplate, PortTemplate,
+            };
+            const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+                name: "WriterModule",
+                axes: &[CountAxis::CHANNELS],
+                global_inputs: &[],
+                per_axis_inputs: &[],
+                global_outputs: &[PortTemplate::mono("out")],
+                per_axis_outputs: &[],
+                realtime_params: &[],
+                structural_params: &[],
+                per_axis_realtime_params: &[],
+                per_axis_structural_params: &[],
+            };
+            T
         }
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
             Self { id: instance_id, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true }, value: 0.0 }

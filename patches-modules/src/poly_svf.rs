@@ -1,8 +1,9 @@
 use crate::common::frequency::C0_FREQ;
 
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -83,17 +84,38 @@ impl PolySvf {
 }
 
 impl Module for PolySvf {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolySvf", shape.clone())
-            .poly_in("in")
-            .poly_in("voct")
-            .poly_in("fm")
-            .poly_in("q_cv")
-            .poly_out("lowpass")
-            .poly_out("highpass")
-            .poly_out("bandpass")
-            .float_param(params::cutoff, -2.0, 12.0, 6.0)
-            .float_param(params::q, 0.0, 1.0, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolySvf",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::poly("in"),
+                PortTemplate::poly("voct"),
+                PortTemplate::poly("fm"),
+                PortTemplate::poly("q_cv"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::poly("lowpass"),
+                PortTemplate::poly("highpass"),
+                PortTemplate::poly("bandpass"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::cutoff.as_str(),
+                    kind: ParameterKind::Float { min: -2.0, max: 12.0, default: 6.0 },
+                },
+                ParameterTemplate {
+                    name: params::q.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(

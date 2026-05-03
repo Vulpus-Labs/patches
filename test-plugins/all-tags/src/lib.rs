@@ -6,8 +6,12 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
 use patches_core::cable_pool::CablePool;
 use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape};
+use patches_core::modules::descriptor_template::{
+    CountAxis, ModuleDescriptorTemplate, ParameterTemplate,
+};
+use patches_core::modules::{InstanceId, ModuleDescriptor};
 use patches_core::param_frame::ParamView;
+use patches_core::ParameterKind;
 use patches_core::params_enum;
 use patches_core::{AudioEnvironment, Module};
 use patches_core::{StructuralParams, BuildError};
@@ -57,18 +61,29 @@ pub struct AllTags {
     instance_id: InstanceId,
 }
 
-fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-    ModuleDescriptor::new("AllTags", shape.clone())
-        .float_param("g", 0.0, 1.0, 0.5)
-        .int_param("n", -100, 100, 0)
-        .bool_param("b", false)
-        .enum_param(patches_core::params::EnumParamName::<Mode>::new("m"), Mode::A)
-        .structural_string_param("s", &["wav"])
-}
-
 impl Module for AllTags {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        describe(shape)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "AllTags",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: "g", kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 } },
+                ParameterTemplate { name: "n", kind: ParameterKind::Int { min: -100, max: 100, default: 0 } },
+                ParameterTemplate { name: "b", kind: ParameterKind::Bool { default: false } },
+                ParameterTemplate { name: "m", kind: ParameterKind::Enum { variants: Mode::VARIANTS, default: "a" } },
+            ],
+            structural_params: &[ParameterTemplate {
+                name: "s",
+                kind: ParameterKind::File { extensions: &["wav"] },
+            }],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
@@ -107,4 +122,4 @@ impl Module for AllTags {
     }
 }
 
-patches_ffi_common::export_plugin!(AllTags, describe, "AllTags");
+patches_ffi_common::export_plugin!(AllTags, "AllTags");

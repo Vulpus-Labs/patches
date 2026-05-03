@@ -1,10 +1,9 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, MidiInput, MidiMessage, Module,
-    ModuleDescriptor, ModuleShape, MonoOutput, OutputPort, PolyOutput, PortDescriptor,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoOutput, OutputPort, PolyOutput, PortTemplate,
     GLOBAL_MIDI,
 };
 use patches_core::{StructuralParams, BuildError};
-use patches_core::{CableKind, MonoLayout, PolyLayout};
 use patches_core::param_frame::ParamView;
 
 const VOCT_SCALING: f32 = 1.0 / 12.0;
@@ -113,24 +112,27 @@ impl PolyMidiToCv {
 }
 
 impl Module for PolyMidiToCv {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor {
-            module_name: "PolyMidiToCv",
-            shape: shape.clone(),
-            inputs: vec![
-                PortDescriptor { name: "midi", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Midi },
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyMidiToCv",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::midi("midi")],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::poly("voct"),
+                PortTemplate::poly_trigger("trigger"),
+                PortTemplate::poly("gate"),
+                PortTemplate::poly("velocity"),
+                PortTemplate::mono("mod"),
+                PortTemplate::mono("pitch"),
             ],
-            outputs: vec![
-                PortDescriptor { name: "voct",    index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "trigger", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Trigger },
-                PortDescriptor { name: "gate",    index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "velocity", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "mod",     index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
-                PortDescriptor { name: "pitch",   index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
-            ],
-            realtime_params: vec![],
-            structural_params: vec![],
-        }
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

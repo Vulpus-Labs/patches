@@ -28,8 +28,9 @@
 /// | `bursts` | int   | 1–8         | 4       | Number of noise bursts    |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, MonoInput, MonoOutput, OutputPort,
+    MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
+use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
@@ -70,16 +71,44 @@ pub struct ClapDrum {
 }
 
 impl Module for ClapDrum {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Clap", shape.clone())
-            .trigger_in("trigger")
-            .mono_in("velocity")
-            .mono_out("out")
-            .float_param(params::decay, 0.05, 2.0, 0.3)
-            .float_param(params::filter, 500.0, 8000.0, 1200.0)
-            .float_param(params::q, 0.0, 1.0, 0.4)
-            .float_param(params::spread, 0.0, 1.0, 0.5)
-            .int_param(params::bursts, 1, 8, 4)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "Clap",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[
+                PortTemplate::trigger("trigger"),
+                PortTemplate::mono("velocity"),
+            ],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::decay.as_str(),
+                    kind: ParameterKind::Float { min: 0.05, max: 2.0, default: 0.3 },
+                },
+                ParameterTemplate {
+                    name: params::filter.as_str(),
+                    kind: ParameterKind::Float { min: 500.0, max: 8000.0, default: 1200.0 },
+                },
+                ParameterTemplate {
+                    name: params::q.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.4 },
+                },
+                ParameterTemplate {
+                    name: params::spread.as_str(),
+                    kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+                },
+                ParameterTemplate {
+                    name: params::bursts.as_str(),
+                    kind: ParameterKind::Int { min: 1, max: 8, default: 4 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(audio_environment: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

@@ -1,6 +1,7 @@
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
-    ModuleShape, OutputPort, PolyInput, PolyOutput,
+    AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
+    ModuleDescriptorTemplate, OutputPort, ParameterKind, ParameterTemplate, PolyInput,
+    PolyOutput, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
@@ -58,13 +59,33 @@ impl PolyTuner {
 }
 
 impl Module for PolyTuner {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("PolyTuner", shape.clone())
-            .poly_in("in")
-            .poly_out("out")
-            .int_param(params::octave, -8,   8,   0)
-            .int_param(params::semi,   -12,  12,  0)
-            .int_param(params::cent,   -100, 100, 0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "PolyTuner",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::poly("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::poly("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate {
+                    name: params::octave.as_str(),
+                    kind: ParameterKind::Int { min: -8, max: 8, default: 0 },
+                },
+                ParameterTemplate {
+                    name: params::semi.as_str(),
+                    kind: ParameterKind::Int { min: -12, max: 12, default: 0 },
+                },
+                ParameterTemplate {
+                    name: params::cent.as_str(),
+                    kind: ParameterKind::Int { min: -100, max: 100, default: 0 },
+                },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({

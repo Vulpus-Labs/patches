@@ -41,8 +41,9 @@
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor, ModuleShape,
-    MonoInput, MonoOutput, OutputPort,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
+    ParameterKind, ParameterTemplate, PortTemplate,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_dsp::approximate::fast_tanh;
@@ -139,20 +140,31 @@ pub struct VBbd {
 }
 
 impl Module for VBbd {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        let n = shape.channels;
-        ModuleDescriptor::new("VBbd", shape.clone())
-            .mono_in("in")
-            .mono_in("drywet_cv")
-            .mono_in_multi("delay_cv", n)
-            .mono_in_multi("gain_cv", n)
-            .mono_in_multi("fb_cv", n)
-            .mono_out("out")
-            .float_param(params::dry_wet, 0.0, 1.0, 0.5)
-            .float_param(params::jitter, 0.0, 1.0, 0.0)
-            .float_param_multi(params::delay_ms, n, DELAY_MS_MIN, DELAY_MS_MAX, 40.0)
-            .float_param_multi(params::gain, n, 0.0, 1.0, 1.0)
-            .float_param_multi(params::feedback, n, 0.0, FEEDBACK_MAX, 0.0)
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "VBbd",
+            axes: &[CountAxis::CHANNELS],
+            global_inputs: &[PortTemplate::mono("in"), PortTemplate::mono("drywet_cv")],
+            per_axis_inputs: &[
+                (AxisId::CHANNELS, PortTemplate::mono("delay_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("gain_cv")),
+                (AxisId::CHANNELS, PortTemplate::mono("fb_cv")),
+            ],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[
+                ParameterTemplate { name: params::dry_wet.as_str(), kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 } },
+                ParameterTemplate { name: params::jitter.as_str(),  kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.0 } },
+            ],
+            structural_params: &[],
+            per_axis_realtime_params: &[
+                (AxisId::CHANNELS, ParameterTemplate { name: params::delay_ms.as_str(), kind: ParameterKind::Float { min: DELAY_MS_MIN, max: DELAY_MS_MAX, default: 40.0 } }),
+                (AxisId::CHANNELS, ParameterTemplate { name: params::gain.as_str(),     kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 1.0 } }),
+                (AxisId::CHANNELS, ParameterTemplate { name: params::feedback.as_str(), kind: ParameterKind::Float { min: 0.0, max: FEEDBACK_MAX, default: 0.0 } }),
+            ],
+            per_axis_structural_params: &[],
+        };
+        T
     }
 
     fn prepare(
