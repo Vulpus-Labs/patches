@@ -46,6 +46,21 @@ cargo clippy              # lint (fix all warnings before considering work done)
 cargo test -p patches-core    # test a single crate
 ```
 
+### Tiered validation profiles (ADR 0067)
+
+Four Justfile recipes; each tier is a strict superset of the one above.
+
+| Tier     | When                             | Recipe                           |
+| -------- | -------------------------------- | -------------------------------- |
+| `inner`  | every agent iteration            | `just inner [-p touched-crate]`  |
+| `commit` | before a commit closing a ticket | `just commit [-p touched-crate]` |
+| `push`   | before `git push` (and CI)       | `just push`                      |
+| `smoke`  | manual / epic close / scheduled  | `just smoke`                     |
+
+Agent runs `inner` per iteration, `commit` before closing a ticket,
+`push` before pushing. CI runs `just push` on PRs and pushes to main.
+`smoke` is manual dispatch.
+
 ## Ticket workflow
 
 Work is tracked in `tickets/` using markdown files organised by status:

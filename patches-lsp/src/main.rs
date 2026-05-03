@@ -6,6 +6,7 @@ mod expansion;
 mod hover;
 mod inlay;
 mod lsp_util;
+mod manifest_source;
 mod peek;
 mod navigation;
 mod parser;

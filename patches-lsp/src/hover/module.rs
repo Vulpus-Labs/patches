@@ -284,7 +284,7 @@ fn param_name_matches(provided: &str, family: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_modules::default_registry;
+    use crate::manifest_source::manifest_registry as default_registry;
 
     #[test]
     fn type_hover_shows_array_param_families() {

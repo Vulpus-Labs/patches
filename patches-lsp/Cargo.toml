@@ -13,7 +13,7 @@ patches-registry = { path = "../patches-registry" }
 patches-dsl = { path = "../patches-dsl" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-interpreter = { path = "../patches-interpreter" }
-patches-modules = { path = "../patches-modules" }
+patches-manifest = { path = "../patches-manifest" }
 patches-ffi = { path = "../patches-ffi" }
 patches-svg = { path = "../patches-svg" }
 tower-lsp = "0.20"

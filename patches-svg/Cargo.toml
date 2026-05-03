@@ -9,15 +9,10 @@ publish = false
 name = "patches_svg"
 path = "src/lib.rs"
 
-[[bin]]
-name = "patches-svg"
-path = "src/bin/patches-svg.rs"
-
 [dependencies]
 patches-core = { path = "../patches-core" }
-patches-registry = { path = "../patches-registry" }
 patches-dsl = { path = "../patches-dsl" }
-patches-modules = { path = "../patches-modules" }
+patches-manifest = { path = "../patches-manifest" }
 rust-sugiyama = "0.4"
 
 [dev-dependencies]

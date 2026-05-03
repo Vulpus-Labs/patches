@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+name = "patches_tools"
+path = "src/lib.rs"
+
 [[bin]]
 name = "patches-check"
 path = "src/bin/patches-check.rs"
@@ -12,6 +16,10 @@ path = "src/bin/patches-check.rs"
 name = "patches-manifest"
 path = "src/bin/patches-manifest.rs"
 
+[[bin]]
+name = "forbidden-edges"
+path = "src/bin/forbidden-edges.rs"
+
 [dependencies]
 patches-core        = { path = "../patches-core" }
 patches-host        = { path = "../patches-host" }
@@ -19,3 +27,5 @@ patches-modules     = { path = "../patches-modules" }
 patches-registry    = { path = "../patches-registry" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-ffi         = { path = "../patches-ffi" }
+patches-manifest    = { path = "../patches-manifest" }
+serde_json          = "1"

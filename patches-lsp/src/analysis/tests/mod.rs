@@ -12,7 +12,7 @@ pub(super) use super::scan::shallow_scan;
 pub(super) use crate::ast_builder::build_ast;
 pub(super) use crate::navigation::SymbolKind;
 pub(super) use crate::parser::language;
-pub(super) use patches_modules::default_registry;
+pub(super) use crate::manifest_source::manifest_registry as default_registry;
 
 pub(super) fn parse(source: &str) -> ast::File {
     let mut parser = tree_sitter::Parser::new();

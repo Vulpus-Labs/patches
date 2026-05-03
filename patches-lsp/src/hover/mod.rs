@@ -226,7 +226,7 @@ mod tests {
     use crate::ast_builder;
     use crate::lsp_util::build_line_index;
     use crate::parser::language;
-    use patches_modules::default_registry;
+    use crate::manifest_source::manifest_registry as default_registry;
     use tree_sitter::Parser;
 
     fn setup(source: &str) -> (Tree, SemanticModel, Registry, Vec<usize>) {

@@ -429,7 +429,9 @@ pub(crate) fn render_svg_pipeline(
         }
     };
 
-    let registry = patches_modules::default_registry();
+    let registry = crate::manifest_source::registry_from_manifest(
+        crate::manifest_source::bundled_manifest(),
+    );
     let svg = patches_svg::render_svg(
         &expanded.patch,
         &load_result.source_map,
@@ -456,7 +458,7 @@ mod tests {
     use crate::ast_builder;
     use crate::lsp_util;
     use crate::parser::language;
-    use patches_modules::default_registry;
+    use crate::manifest_source::manifest_registry as default_registry;
     use tree_sitter::Parser;
 
     #[test]

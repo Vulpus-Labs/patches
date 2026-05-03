@@ -177,11 +177,64 @@ fn descriptors_equivalent(a: &ModuleDescriptor, b: &ModuleDescriptor) -> bool {
 }
 
 fn print_usage() {
-    eprintln!("usage: patches-manifest [--module-path DIR|FILE]...");
+    eprintln!(
+        "usage: patches-manifest [--module-path DIR|FILE]... \
+         [--json] [--output PATH] [--deterministic]"
+    );
+}
+
+fn current_timestamp_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("unix:{secs}")
+}
+
+fn current_git_rev() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn emit_json(registry: &patches_registry::Registry, deterministic: bool, output: Option<PathBuf>) {
+    let generator = if deterministic {
+        patches_tools::deterministic_generator()
+    } else {
+        patches_manifest::GeneratorInfo {
+            tool: "patches-manifest".to_string(),
+            git_rev: current_git_rev(),
+            timestamp: current_timestamp_iso(),
+        }
+    };
+    let manifest = patches_tools::build_manifest(registry, generator);
+    let text = patches_tools::manifest_to_json(&manifest);
+    match output {
+        Some(path) => {
+            if let Err(e) = std::fs::write(&path, &text) {
+                eprintln!("error: writing {}: {e}", path.display());
+                process::exit(1);
+            }
+        }
+        None => print!("{text}"),
+    }
 }
 
 fn main() {
     let mut module_paths: Vec<PathBuf> = Vec::new();
+    let mut json = false;
+    let mut deterministic = false;
+    let mut output: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -189,6 +242,15 @@ fn main() {
                 Some(p) => module_paths.push(PathBuf::from(p)),
                 None => {
                     eprintln!("error: --module-path requires an argument");
+                    process::exit(2);
+                }
+            },
+            "--json" => json = true,
+            "--deterministic" => deterministic = true,
+            "--output" => match args.next() {
+                Some(p) => output = Some(PathBuf::from(p)),
+                None => {
+                    eprintln!("error: --output requires an argument");
                     process::exit(2);
                 }
             },
@@ -211,6 +273,11 @@ fn main() {
         for (p, e) in &report.errors {
             eprintln!("plugin scan error: {}: {e}", p.display());
         }
+    }
+
+    if json {
+        emit_json(&registry, deterministic, output);
+        return;
     }
 
     let mut names: Vec<String> = registry.module_names().map(str::to_string).collect();

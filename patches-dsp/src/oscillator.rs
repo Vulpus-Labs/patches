@@ -121,12 +121,12 @@ impl PolyPhaseAccumulator {
     /// (ADR 0047 `Trigger` encoding; `0.0` = no wrap).
     pub fn advance_all_wrap_frac(&mut self) -> [f32; 16] {
         let mut out = [0.0_f32; 16];
-        for i in 0..16 {
+        for (i, slot) in out.iter_mut().enumerate() {
             let dt = self.phase_increments[i];
             let next = self.phases[i] + dt;
             if next >= 1.0 {
                 self.phases[i] = next - 1.0;
-                out[i] = if dt > 0.0 {
+                *slot = if dt > 0.0 {
                     (1.0 - self.phases[i] / dt).clamp(f32::MIN_POSITIVE, 1.0)
                 } else {
                     1.0

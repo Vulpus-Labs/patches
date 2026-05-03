@@ -46,12 +46,12 @@ patch {
     module kbd       : PolyMidiToCv
     #module vibrato   : Lfo        { rate: 5.0 }
     module pm_spread : MonoToPoly
-    module osc       : PolyOsc
+    module osc       : PolyOsc { fm_type: logarithmic }
     module mix       : PolySum(2)
-    module amp_env   : PolyAdsr   { attack: 0.005, decay: 0.12,  sustain: 0.65, release: 0.4 }
+    module amp_env   : PolyAdsr   { attack: 1.0, decay: 0.12,  sustain: 0.65, release: 0.4 }
     module vca       : PolyVca
-    module filt_env  : PolyAdsr   { attack: 0.2,   decay: 0.25,  sustain: 0.3,  release: 0.4 }
-    module filt      : PolyLowpass { cutoff: 600.0Hz, resonance: 0.7, saturate: true }
+    module filt_env  : PolyAdsr   { attack: 0.5,   decay: 0.25,  sustain: 0.3,  release: 0.4 }
+    module filt      : PolyLowpass { cutoff: 1000.0Hz, resonance: 0.9, saturate: true }
     module collapse  : PolyToMono
     module out       : AudioOut
 
@@ -63,9 +63,12 @@ patch {
     kbd.voct               -> osc.voct
 
     # Oscillator mix: sawtooth (body) + square (edge)
-    osc.sine       -[0.6]-> mix.in[0]
-    osc.square     -[0.4]-> mix.in[1]
+    osc.sawtooth       -[0.6]-> mix.in[0]
+    osc.triangle     -[0.4]-> mix.in[1]
 
+    module lfo: PolyLfo { rate: 1.0 }
+    kbd.trigger -> lfo.sync
+    lfo.triangle -[0.05s]-> osc.fm 
     # Amplitude envelope: triggered and gated per voice
     kbd.trigger            -> amp_env.trigger
     kbd.gate               -> amp_env.gate
@@ -86,6 +89,7 @@ patch {
 
     # Collapse all voices to mono
     filt.out               -> collapse.in
+    collapse.out -> ~spectrum(synth)
     
     module chorus : VChorus {
         mode: both
@@ -98,15 +102,20 @@ patch {
     collapse.out -[0.12]-> limit.in
 
     module reverb : VReverb {
-        dry_wet: 0.5
+        dry_wet: 0.6
         size: 1.0
-        decay: 0.8
+        decay: 0.4
         damping: 0.8
     }
 
+    module delay : StereoDelay(1) {
+        delay_ms: 350
+        feedback: 0.4
+    }
     
     limit.out -> chorus.in
-    chorus.out  -> reverb.in
+    chorus.out -> delay.in[0]
+    delay.out[0]  -> reverb.in
 
-    reverb.out  -> out.in
+    reverb.out  -> out.in, ~stereo_meter(master)
 }

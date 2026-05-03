@@ -17,7 +17,7 @@ use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use patches_ffi::{PluginScanner, ScanReport};
 use patches_registry::Registry;
-use patches_modules::default_registry;
+use crate::manifest_source::{bundled_manifest, registry_from_manifest};
 use tower_lsp::lsp_types::*;
 use tree_sitter::Parser;
 
@@ -90,7 +90,7 @@ impl DocumentWorkspace {
             .set_language(&language())
             .expect("loading patches grammar");
         Self {
-            registry: RwLock::new(default_registry()),
+            registry: RwLock::new(registry_from_manifest(bundled_manifest())),
             module_paths: Mutex::new(Vec::new()),
             parser: Mutex::new(parser),
             state: Mutex::new(WorkspaceState {
@@ -132,7 +132,7 @@ impl DocumentWorkspace {
     /// the configured module paths. Returns the [`ScanReport`].
     pub fn rescan_modules(&self) -> ScanReport {
         let paths = self.module_paths();
-        let mut fresh = default_registry();
+        let mut fresh = registry_from_manifest(bundled_manifest());
         let report = PluginScanner::new(paths).scan(&mut fresh);
         *self.registry.write().expect("registry lock poisoned") = fresh;
         report

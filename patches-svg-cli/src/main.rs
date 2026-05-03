@@ -12,7 +12,8 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use patches_modules::default_registry;
+use patches_manifest::bundled_manifest;
+use patches_manifest::static_registry::registry_from_manifest;
 use patches_svg::{render_svg, SvgOptions, Theme};
 
 struct Args {
@@ -134,7 +135,7 @@ fn run() -> Result<(), String> {
         theme: args.theme,
         ..SvgOptions::default()
     };
-    let registry = default_registry();
+    let registry = registry_from_manifest(bundled_manifest());
     let svg = render_svg(&expanded.patch, &load_result.source_map, &registry, &opts);
 
     match args.output {

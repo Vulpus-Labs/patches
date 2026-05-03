@@ -27,7 +27,7 @@ mod hints;
 mod render;
 
 use patches_core::source_map::SourceMap;
-use patches_registry::Registry;
+use patches_manifest::Registry;
 use patches_dsl::FlatPatch;
 
 use crate::layout::LayoutConfig;
@@ -107,7 +107,11 @@ mod tests {
     use patches_core::cables::{CableKind, PolyLayout};
     use patches_core::ModuleShape;
     use patches_dsl::{FlatConnection, FlatModule, FlatPatch, Provenance};
-    use patches_modules::default_registry;
+    use patches_manifest::{bundled_manifest, static_registry::registry_from_manifest, Registry};
+
+    fn default_registry() -> Registry {
+        registry_from_manifest(bundled_manifest())
+    }
 
     fn synthetic_span() -> patches_dsl::ast::Span {
         patches_dsl::ast::Span::synthetic()

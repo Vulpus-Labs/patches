@@ -182,6 +182,18 @@ ABI version bumps to 8.
   could be consumed by a newer LSP. Schema version + generator info
   catches incompatibility loudly; a CI step regenerates the bundled
   manifest when modules change.
+
+  **Schema version bump policy.** `patches_manifest::SCHEMA_VERSION`
+  starts at `1`. Bump on any change that breaks deserialization of
+  older manifests by a newer consumer, or vice versa: adding a
+  required field, removing a field, renaming a field/variant, or
+  changing the encoding of a variant. Adding a new optional field
+  (with a serde default) does not require a bump. Adding a new
+  `OwnedParamKind` variant requires a bump iff older consumers must
+  reject manifests using it; if forward-compatibility via
+  `#[serde(other)]` is acceptable, treat as additive. Consumers
+  compare on equality and refuse mismatched manifests with a clear
+  error pointing at the regeneration command.
 - ABI bump (7 → 8). All existing FFI plugins rebuild. Acceptable —
   this lands alongside ADR 0060's bump and should be combined into a
   single break.

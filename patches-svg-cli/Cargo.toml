@@ -1,0 +1,15 @@
+[package]
+name = "patches-svg-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for rendering Patches DSL files to SVG"
+publish = false
+
+[[bin]]
+name = "patches-svg"
+path = "src/main.rs"
+
+[dependencies]
+patches-dsl = { path = "../patches-dsl" }
+patches-manifest = { path = "../patches-manifest" }
+patches-svg = { path = "../patches-svg" }

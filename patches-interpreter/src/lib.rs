@@ -13,8 +13,9 @@
 //!   modules.
 //! - Propagates source spans from the AST into error messages.
 //!
-//! This crate knows about concrete module types (via `patches-modules`) but
-//! has no audio-backend or engine dependencies.
+//! This crate has no concrete module-type, audio-backend, or engine
+//! dependencies; callers pass in a `&Registry` populated however they
+//! like (in-tree modules, manifest-backed, plugin scan, …).
 
 mod binding;
 pub mod descriptor_bind;

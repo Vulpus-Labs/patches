@@ -12,4 +12,6 @@ doctest = false
 patches-core = { path = "../patches-core" }
 patches-registry = { path = "../patches-registry" }
 patches-dsl  = { path = "../patches-dsl" }
+
+[dev-dependencies]
 patches-modules = { path = "../patches-modules" }
