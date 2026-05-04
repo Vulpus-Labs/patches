@@ -14,11 +14,19 @@ backplane region the audio side reads from.
 
 ## Acceptance criteria
 
-- [ ] `HostControl` module in `patches-modules` with descriptor
-      `out[i]`, `i ∈ 0..channels`, `MonoLayout::Audio`. No inputs.
-- [ ] Per-channel params: `name: String`, `slot_offset: usize`.
-- [ ] Per-tick action: `out[i] = backplane[slot_offset + i]`. No
-      allocation, no branching on kind.
+- [ ] Single `HostControl` module in `patches-modules` with two
+      output ports, alias-indexed:
+      `audio_out[name]` (Mono+Audio) for knob / slider / toggle and
+      `trigger_out[name]` (Mono+Trigger) for trigger. No inputs.
+      Mirrors the Tap-module split (ADR 0059 §4) — one synth
+      instance, kind-suffixed ports.
+- [ ] Per-channel params: `slot_offset: usize`, `kind: enum
+      { knob, slider, toggle, trigger }`. Kind drives which output
+      port the channel publishes on; slot is global / alphabetical
+      (ADR 0057 §3).
+- [ ] Per-tick action per channel: copy `backplane[slot_offset]` to
+      the output port matching the channel's kind. No allocation,
+      no branching beyond the kind dispatch.
 - [ ] Backplane region for host control distinct from the tap
       region (ADR 0053 plumbing already accommodates this).
 - [ ] Audio side reads with `Acquire`; control side writes with

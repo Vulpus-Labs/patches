@@ -77,26 +77,36 @@ signal between 0.0 and 1.0, where it stays until the next click.
 A patch author wanting an edge from a latched toggle wires the
 toggle into a derivative module.
 
-### 2. Desugaring — implicit host-control modules
+### 2. Desugaring — implicit host-control module
 
-The expander collects all host control sources, groups them by output
-cable type, and synthesises one module instance per group:
+The expander collects all host control sources and synthesises a single
+`~host_control` module instance with kind-suffixed output ports —
+`audio_out[name]` for knob / slider / toggle (Mono+Audio) and
+`trigger_out[name]` for trigger (Mono+Trigger). One module, two output
+ports; mirrors the Tap-module split (ADR 0059 §4):
 
 ```text
 # input
-~knob(cutoff, range: 20..20000) -> filter.voct
-~slider(attack, range: 0..2)    -> vca.attack_cv
-~toggle(bypass, default: false) -> reverb.bypass
+knob   cutoff { low: 20Hz, high: 20kHz }
+slider attack { low: 0s, high: 2s }
+toggle bypass { default: false }
+trigger fire  {}
+cutoff -> filter.voct
+attack -> vca.attack_cv
+bypass -> reverb.bypass
+fire   -> env.gate
 
-# desugared
-module ~host_control : HostControl(channels: 3) {
-  @cutoff { slot_offset: 0 }
-  @attack { slot_offset: 1 }
-  @bypass { slot_offset: 2 }
+# desugared (alphabetical: attack, bypass, cutoff, fire)
+module ~host_control : HostControl(channels: [attack, bypass, cutoff, fire]) {
+  @attack { slot_offset: 0, kind: "slider"  }
+  @bypass { slot_offset: 1, kind: "toggle"  }
+  @cutoff { slot_offset: 2, kind: "knob"    }
+  @fire   { slot_offset: 3, kind: "trigger" }
 }
-~host_control.out[cutoff] -> filter.voct
-~host_control.out[attack] -> vca.attack_cv
-~host_control.out[bypass] -> reverb.bypass
+~host_control.audio_out[cutoff]  -> filter.voct
+~host_control.audio_out[attack]  -> vca.attack_cv
+~host_control.audio_out[bypass]  -> reverb.bypass
+~host_control.trigger_out[fire]  -> env.gate
 ```
 
 The synthesised module is a first-class module with the `~` reserved

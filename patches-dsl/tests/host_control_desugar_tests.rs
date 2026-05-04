@@ -10,7 +10,7 @@ use patches_dsl::ast::{
     Value,
 };
 use patches_dsl::host_control_desugar::{
-    desugar_host_controls, SYNTH_HOST_CONTROL, SYNTH_HOST_CONTROL_TRIGGER,
+    desugar_host_controls, AUDIO_OUT, SYNTH_HOST_CONTROL, TRIGGER_OUT,
 };
 use patches_dsl::parse;
 use patches_dsl::StructuralCode;
@@ -62,7 +62,6 @@ fn empty_case_no_synth_module() {
     let src = "patch { module osc : Osc() osc.out -> osc.in }";
     let r = rewritten(src);
     assert!(find_module(&r, SYNTH_HOST_CONTROL).is_none());
-    assert!(find_module(&r, SYNTH_HOST_CONTROL_TRIGGER).is_none());
 }
 
 #[test]
@@ -73,7 +72,7 @@ fn alphabetical_slot_ordering() {
         knob mu { low: 1Hz, high: 2Hz }
     }"#;
     let r = rewritten(src);
-    let m = find_module(&r, SYNTH_HOST_CONTROL).expect("synth audio module");
+    let m = find_module(&r, SYNTH_HOST_CONTROL).expect("synth module");
     assert_eq!(aliases(m), vec!["alpha", "mu", "zeta"]);
     // slot_offset matches alphabetical position.
     for (i, a) in ["alpha", "mu", "zeta"].iter().enumerate() {
@@ -105,7 +104,7 @@ fn bare_name_reference_rewrites_to_synth_port() {
         panic!("expected port lhs after rewrite, got {:?}", conn.lhs);
     };
     assert_eq!(p.module, SYNTH_HOST_CONTROL);
-    assert!(matches!(&p.port, PortLabel::Literal(s) if s == "out"));
+    assert!(matches!(&p.port, PortLabel::Literal(s) if s == AUDIO_OUT));
     assert!(matches!(
         &p.index,
         Some(PortIndex::Name { name, arity_marker: false }) if name == "cutoff"
@@ -113,7 +112,7 @@ fn bare_name_reference_rewrites_to_synth_port() {
 }
 
 #[test]
-fn audio_and_trigger_groups_get_separate_modules() {
+fn audio_and_trigger_share_one_synth_module_with_split_ports() {
     let src = r#"patch {
         knob k { low: 1Hz, high: 2Hz }
         trigger fire { }
@@ -123,26 +122,39 @@ fn audio_and_trigger_groups_get_separate_modules() {
         fire -> env.gate
     }"#;
     let r = rewritten(src);
-    let audio = find_module(&r, SYNTH_HOST_CONTROL).expect("audio module");
-    let trig = find_module(&r, SYNTH_HOST_CONTROL_TRIGGER).expect("trigger module");
-    assert_eq!(aliases(audio), vec!["k"]);
-    assert_eq!(aliases(trig), vec!["fire"]);
+    let m = find_module(&r, SYNTH_HOST_CONTROL).expect("synth module");
+    // Single instance, one alias list across both kinds (alphabetical:
+    // `fire` then `k`).
+    assert_eq!(aliases(m), vec!["fire", "k"]);
 
-    // The `fire` cable must land on the trigger synth module, not audio.
-    let fire_conn = r
+    // Locate each rewritten cable by its index name and check the port.
+    let connections: Vec<_> = r
         .patch
         .body
         .iter()
-        .find_map(|s| match s {
-            Statement::Connection(c) => match &c.lhs {
-                CableEndpoint::Port(p) if p.index_name() == Some("fire") => Some(c),
-                _ => None,
-            },
+        .filter_map(|s| match s {
+            Statement::Connection(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    let fire_lhs = connections
+        .iter()
+        .find_map(|c| match &c.lhs {
+            CableEndpoint::Port(p) if p.index_name() == Some("fire") => Some(p),
             _ => None,
         })
         .expect("fire connection");
-    let CableEndpoint::Port(p) = &fire_conn.lhs else { unreachable!() };
-    assert_eq!(p.module, SYNTH_HOST_CONTROL_TRIGGER);
+    let k_lhs = connections
+        .iter()
+        .find_map(|c| match &c.lhs {
+            CableEndpoint::Port(p) if p.index_name() == Some("k") => Some(p),
+            _ => None,
+        })
+        .expect("k connection");
+    assert_eq!(fire_lhs.module, SYNTH_HOST_CONTROL);
+    assert!(matches!(&fire_lhs.port, PortLabel::Literal(s) if s == TRIGGER_OUT));
+    assert_eq!(k_lhs.module, SYNTH_HOST_CONTROL);
+    assert!(matches!(&k_lhs.port, PortLabel::Literal(s) if s == AUDIO_OUT));
 }
 
 #[test]

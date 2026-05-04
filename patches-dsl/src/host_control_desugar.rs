@@ -1,23 +1,26 @@
 //! Host-control desugaring (ADR 0057 §2, ticket 0808).
 //!
 //! Walks a parsed [`File`] (already tap-desugared), collects every top-
-//! level `knob` / `slider` / `toggle` / `trigger` declaration, sorts each
-//! cable-kind group alphabetically by control name, and synthesises one
-//! module instance per non-empty group:
+//! level `knob` / `slider` / `toggle` / `trigger` declaration, sorts them
+//! alphabetically by control name (ADR 0057 §3), and synthesises one
+//! `~host_control : HostControl(channels: [...])` module instance.
 //!
-//! - knob / slider / toggle → `~host_control : HostControl(channels: [...])`
-//!   carrying `Mono+Audio` outputs.
-//! - trigger → `~host_control_trigger : HostControlTrigger(channels: [...])`
-//!   carrying `Mono+Trigger` outputs.
+//! Mirrors the Tap-module approach (ADR 0059 §4): a single synth
+//! instance with kind-suffixed output ports — `audio_out[name]` for
+//! knob / slider / toggle (Mono+Audio) and `trigger_out[name]` for
+//! trigger (Mono+Trigger). Slot offsets are alphabetical across the
+//! whole declared set, regardless of kind, so the audio / control
+//! sides recompute the same mapping independently from the same input
+//! list.
 //!
 //! Bare-name [`CableEndpoint::HostControlRef`]s are rewritten into
-//! `PortRef`s on the matching synthesised instance, indexed by control
-//! name. Declaration statements are consumed (not re-emitted).
+//! `PortRef`s on the synth instance, dispatching to `audio_out` or
+//! `trigger_out` by the declared kind. Declaration statements are
+//! consumed (not re-emitted).
 //!
 //! The `~` reserved-prefix rule (ADR 0054 §2) is what guarantees the
-//! synthetic instance names cannot collide with user modules — pest
-//! rejects `~` inside identifiers, so a user `module ~host_control ...`
-//! cannot exist.
+//! synthetic instance name cannot collide with user modules — pest
+//! rejects `~` inside identifiers.
 
 use std::collections::HashMap;
 
@@ -25,93 +28,62 @@ use crate::ast::*;
 use crate::expand::ExpandError;
 use crate::structural::StructuralCode as Code;
 
-/// Synthesised audio host-control module instance name.
+/// Synthesised host-control module instance name.
 pub const SYNTH_HOST_CONTROL: &str = "~host_control";
-/// Synthesised trigger host-control module instance name.
-pub const SYNTH_HOST_CONTROL_TRIGGER: &str = "~host_control_trigger";
-
 const TYPE_HOST_CONTROL: &str = "HostControl";
-const TYPE_HOST_CONTROL_TRIGGER: &str = "HostControlTrigger";
 
-/// Cable-kind grouping for host controls. Audio covers knob, slider, and
-/// toggle (Mono+Audio); Trigger covers the one-shot trigger kind
-/// (Mono+Trigger).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Group {
-    Audio,
-    Trigger,
-}
+/// Output-port name for audio-shaped host controls (knob / slider /
+/// toggle).
+pub const AUDIO_OUT: &str = "audio_out";
+/// Output-port name for trigger-shaped host controls.
+pub const TRIGGER_OUT: &str = "trigger_out";
 
-fn group_of(kind: HostControlKind) -> Group {
+fn out_port(kind: HostControlKind) -> &'static str {
     match kind {
-        HostControlKind::Knob | HostControlKind::Slider | HostControlKind::Toggle => Group::Audio,
-        HostControlKind::Trigger => Group::Trigger,
-    }
-}
-
-fn synth_name(g: Group) -> &'static str {
-    match g {
-        Group::Audio => SYNTH_HOST_CONTROL,
-        Group::Trigger => SYNTH_HOST_CONTROL_TRIGGER,
-    }
-}
-
-fn type_name(g: Group) -> &'static str {
-    match g {
-        Group::Audio => TYPE_HOST_CONTROL,
-        Group::Trigger => TYPE_HOST_CONTROL_TRIGGER,
+        HostControlKind::Knob | HostControlKind::Slider | HostControlKind::Toggle => AUDIO_OUT,
+        HostControlKind::Trigger => TRIGGER_OUT,
     }
 }
 
 /// Rewrite `file.patch.body` so every host-control declaration lowers
 /// into a synthesised instance and every bare-name reference is rewritten
-/// to a `PortRef` on the matching instance. Returns the new file.
+/// to a `PortRef` on the synth instance. Returns the new file.
 ///
 /// If the patch contains no host-control declarations, returns the file
-/// unchanged.
+/// unchanged (and rejects any stray bare-name reference).
 pub fn desugar_host_controls(file: &File) -> Result<File, ExpandError> {
     // 1. Collect declarations from the patch body.
-    let mut decls_audio: Vec<&HostControlBlock> = Vec::new();
-    let mut decls_trigger: Vec<&HostControlBlock> = Vec::new();
-    for stmt in &file.patch.body {
-        if let Statement::HostControl(hc) = stmt {
-            match group_of(hc.kind) {
-                Group::Audio => decls_audio.push(hc),
-                Group::Trigger => decls_trigger.push(hc),
-            }
-        }
-    }
-    // Even with no declarations, a stray bare-name ref must be rejected.
-    if decls_audio.is_empty() && decls_trigger.is_empty() {
+    let mut decls: Vec<&HostControlBlock> = file
+        .patch
+        .body
+        .iter()
+        .filter_map(|s| match s {
+            Statement::HostControl(hc) => Some(hc),
+            _ => None,
+        })
+        .collect();
+
+    if decls.is_empty() {
         reject_unresolved_refs(file, &HashMap::new())?;
         return Ok(file.clone());
     }
 
-    // 2. Sort each group alphabetically by control name (ADR 0057 §3).
-    decls_audio.sort_by(|a, b| a.name.name.cmp(&b.name.name));
-    decls_trigger.sort_by(|a, b| a.name.name.cmp(&b.name.name));
+    // 2. Sort alphabetically by control name (ADR 0057 §3). Slot offset
+    //    is the post-sort index; kind dictates the output port.
+    decls.sort_by(|a, b| a.name.name.cmp(&b.name.name));
 
-    // 3. Build per-name lookup: name → (group, slot index within group).
-    let mut lookup: HashMap<String, (Group, usize)> = HashMap::new();
-    for (i, hc) in decls_audio.iter().enumerate() {
-        lookup.insert(hc.name.name.clone(), (Group::Audio, i));
-    }
-    for (i, hc) in decls_trigger.iter().enumerate() {
-        lookup.insert(hc.name.name.clone(), (Group::Trigger, i));
-    }
+    // 3. Build name → kind lookup for endpoint rewriting.
+    let lookup: HashMap<String, HostControlKind> = decls
+        .iter()
+        .map(|hc| (hc.name.name.clone(), hc.kind))
+        .collect();
 
     reject_unresolved_refs(file, &lookup)?;
 
-    // 4. Build new body: one synthesised module per non-empty group,
-    //    then the original body minus the consumed declarations and with
-    //    bare-name refs rewritten.
+    // 4. Build new body: synth module first, then the original body
+    //    minus consumed declarations and with bare-name refs rewritten.
     let mut new_body: Vec<Statement> = Vec::new();
-    if !decls_audio.is_empty() {
-        new_body.push(Statement::Module(synth_module(Group::Audio, &decls_audio)));
-    }
-    if !decls_trigger.is_empty() {
-        new_body.push(Statement::Module(synth_module(Group::Trigger, &decls_trigger)));
-    }
+    new_body.push(Statement::Module(synth_module(&decls)));
     for stmt in &file.patch.body {
         match stmt {
             Statement::HostControl(_) => continue,
@@ -133,11 +105,9 @@ pub fn desugar_host_controls(file: &File) -> Result<File, ExpandError> {
     })
 }
 
-/// Walk the patch body's connections and report the first
-/// `HostControlRef` whose name is not in `lookup`.
 fn reject_unresolved_refs(
     file: &File,
-    lookup: &HashMap<String, (Group, usize)>,
+    lookup: &HashMap<String, HostControlKind>,
 ) -> Result<(), ExpandError> {
     for stmt in &file.patch.body {
         let Statement::Connection(c) = stmt else { continue };
@@ -161,7 +131,7 @@ fn reject_unresolved_refs(
     Ok(())
 }
 
-fn synth_module(group: Group, decls: &[&HostControlBlock]) -> ModuleDecl {
+fn synth_module(decls: &[&HostControlBlock]) -> ModuleDecl {
     let span = synth_span();
     let aliases: Vec<Ident> = decls
         .iter()
@@ -196,8 +166,8 @@ fn synth_module(group: Group, decls: &[&HostControlBlock]) -> ModuleDecl {
         .collect();
 
     ModuleDecl {
-        name: Ident { name: synth_name(group).to_owned(), span },
-        type_name: Ident { name: type_name(group).to_owned(), span },
+        name: Ident { name: SYNTH_HOST_CONTROL.to_owned(), span },
+        type_name: Ident { name: TYPE_HOST_CONTROL.to_owned(), span },
         call_block,
         params,
         span,
@@ -206,7 +176,7 @@ fn synth_module(group: Group, decls: &[&HostControlBlock]) -> ModuleDecl {
 
 fn rewrite_connection(
     c: &Connection,
-    lookup: &HashMap<String, (Group, usize)>,
+    lookup: &HashMap<String, HostControlKind>,
 ) -> Connection {
     Connection {
         lhs: rewrite_endpoint(&c.lhs, lookup),
@@ -218,16 +188,16 @@ fn rewrite_connection(
 
 fn rewrite_endpoint(
     ep: &CableEndpoint,
-    lookup: &HashMap<String, (Group, usize)>,
+    lookup: &HashMap<String, HostControlKind>,
 ) -> CableEndpoint {
     match ep {
         CableEndpoint::Port(_) | CableEndpoint::Tap(_) => ep.clone(),
         CableEndpoint::HostControlRef(id) => {
             // Unresolved refs were rejected up-front; lookup is total.
-            let (group, _) = lookup.get(&id.name).expect("ref already validated");
+            let kind = *lookup.get(&id.name).expect("ref already validated");
             CableEndpoint::Port(PortRef {
-                module: synth_name(*group).to_owned(),
-                port: PortLabel::Literal("out".to_owned()),
+                module: SYNTH_HOST_CONTROL.to_owned(),
+                port: PortLabel::Literal(out_port(kind).to_owned()),
                 index: Some(PortIndex::Name {
                     name: id.name.clone(),
                     arity_marker: false,
