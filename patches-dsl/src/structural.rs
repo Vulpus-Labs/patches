@@ -93,6 +93,7 @@ structural_codes! {
     HostControlNameCollision=> ("ST0034", "host-control name collides with module instance"),
     HostControlDuplicateName=> ("ST0035", "duplicate host-control name"),
     HostControlDuplicateField=> ("ST0036", "duplicate field in host-control block"),
+    HostControlUnknownRef   => ("ST0037", "bare reference to undeclared host control"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

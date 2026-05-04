@@ -75,6 +75,12 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     // `~trigger_tap` module instance, and capture the observer manifest.
     // The expander runs against the rewritten file from here on.
     let (rewritten, manifest) = crate::desugar::desugar_taps(file);
+
+    // Host-control desugaring (ADR 0057 §2): collect knob / slider /
+    // toggle / trigger declarations, synthesise one `~host_control`
+    // and / or `~host_control_trigger` instance, and rewrite bare-name
+    // references onto them.
+    let rewritten = crate::host_control_desugar::desugar_host_controls(&rewritten)?;
     let file = &rewritten;
 
     let templates: HashMap<&str, &Template> =

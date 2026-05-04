@@ -14,13 +14,18 @@ synthesised module instance, mirroring ADR 0054 §2 for taps.
 
 ## Acceptance criteria
 
-- [ ] Expander collects all `HostControlDecl`s, sorts by name
-      (alphabetical, ADR 0057 §3), assigns slot indices 0..N−1.
-- [ ] Synthesises one `~host_control : HostControl(channels: N)`
-      module instance with per-channel `name` and `slot_offset`
-      params.
+- [ ] Expander collects all host control blocks, groups by output
+      cable type (knob/slider/toggle → Mono+Audio; trigger →
+      Mono+Trigger; ADR 0057 §2), sorts each group alphabetically,
+      assigns slot indices 0..N−1 within the group.
+- [ ] Synthesises up to two module instances:
+      `~host_control : HostControl(channels: N)` for audio-shaped
+      controls and `~host_control_trigger : HostControlTrigger(channels: M)`
+      for trigger-shaped controls. Empty groups emit no instance.
 - [ ] Bare-name references in cables rewrite to
-      `~host_control.out[<name>]`.
+      `~host_control.out[<name>]` (audio kinds) or
+      `~host_control_trigger.out[<name>]` (trigger kind), based on
+      the declared kind of the referenced block.
 - [ ] `~` reserved-prefix rule enforced: user modules may not start
       with `~` (existing rule from ADR 0054 §2 — extend tests if
       needed).

@@ -24,6 +24,7 @@ pub mod flat;
 mod parser;
 pub mod structural;
 pub mod desugar;
+pub mod host_control_desugar;
 pub mod manifest;
 pub mod tap_schema;
 pub mod validate;
