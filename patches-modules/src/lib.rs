@@ -67,6 +67,7 @@ pub mod tempo_sync;
 pub mod ms_ticker;
 pub mod trigger_sync_conv;
 pub mod tap;
+pub mod host_control;
 
 pub use adsr::Adsr;
 pub use mixer::{Mixer, StereoMixer, PolyMixer, StereoPolyMixer};
@@ -135,6 +136,7 @@ pub use tempo_sync::TempoSync;
 pub use ms_ticker::MsTicker;
 pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
 pub use tap::{Tap, TapKind};
+pub use host_control::{HostControl, HostControlKind};
 
 pub fn default_registry() -> patches_registry::Registry {
     let mut r = patches_registry::Registry::new();
@@ -213,6 +215,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<TriggerToSync>();
     r.register::<SyncToTrigger>();
     r.register::<Tap>();
+    r.register::<HostControl>();
     // `patches-vintage` is no longer in the default registry (ADR 0045 Spike 8
     // Phase C / ticket 0570). Load its cdylib via `PluginScanner`.
     r

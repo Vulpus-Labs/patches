@@ -342,6 +342,24 @@ impl ModuleHarness {
         self
     }
 
+    /// Current write index (0 or 1). Mirrors the engine's ping-pong
+    /// state. Reads from the pool target `1 - write_index()`.
+    pub fn write_index(&self) -> usize {
+        self.wi
+    }
+
+    /// Read a raw `CableValue` from `(slot, ping)` of the pool. Used
+    /// by tests that need to stage backplane slots before ticking.
+    pub fn pool_value(&self, slot: usize, ping: usize) -> CableValue {
+        self.pool[slot][ping]
+    }
+
+    /// Write a raw `CableValue` into `(slot, ping)` of the pool. Used
+    /// by tests that need to stage backplane slots before ticking.
+    pub fn set_pool_value(&mut self, slot: usize, ping: usize, value: CableValue) {
+        self.pool[slot][ping] = value;
+    }
+
     /// Snapshot the four `TAP_BASE` poly slots from the cable pool's
     /// read side after the most recent tick, packed into a flat
     /// `[f32; MAX_TAPS]`. Replaces the legacy parallel `backplane()`
