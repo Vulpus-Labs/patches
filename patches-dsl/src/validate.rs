@@ -10,7 +10,7 @@
 //! them with no plumbing change.
 
 
-use crate::ast::{CableEndpoint, File, Statement, TapTarget};
+use crate::ast::{CableEndpoint, File, HostControlBlock, HostControlKind, Statement, TapTarget};
 use crate::expand::ExpandError;
 use crate::manifest::TapType;
 use crate::structural::StructuralCode as Code;
@@ -21,6 +21,8 @@ use crate::tap_schema::{cable_kind, CableKind, TAP_SCHEMA};
 pub fn validate(file: &File) -> Result<(), ExpandError> {
     reject_taps_in_templates(file)?;
     validate_top_level_taps(file)?;
+    reject_host_controls_in_templates(file)?;
+    validate_host_controls(file)?;
     Ok(())
 }
 
@@ -121,6 +123,102 @@ fn validate_tap_components(tap: &TapTarget) -> Result<(), ExpandError> {
                 tap.name.name,
             ),
         ));
+    }
+    Ok(())
+}
+
+// ─── Host control validation (ADR 0057) ──────────────────────────────────────
+
+/// Host control declarations are valid only at top-level patch scope.
+fn reject_host_controls_in_templates(file: &File) -> Result<(), ExpandError> {
+    for tmpl in &file.templates {
+        for stmt in &tmpl.body {
+            if let Statement::HostControl(hc) = stmt {
+                return Err(ExpandError::new(
+                    Code::HostControlInTemplate,
+                    hc.span,
+                    "host controls (knob / slider / toggle) may only be declared at patch top level",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate per-kind required fields, duplicate names, duplicate fields,
+/// and collisions with module instance names.
+fn validate_host_controls(file: &File) -> Result<(), ExpandError> {
+    let mut by_name: std::collections::HashMap<&str, &HostControlBlock> =
+        std::collections::HashMap::new();
+    for stmt in &file.patch.body {
+        let Statement::HostControl(hc) = stmt else { continue };
+        if let Some(prev) = by_name.get(hc.name.name.as_str()) {
+            return Err(ExpandError::new(
+                Code::HostControlDuplicateName,
+                hc.name.span,
+                format!(
+                    "host control {:?} already declared at {:?}",
+                    hc.name.name, prev.name.span
+                ),
+            ));
+        }
+        validate_host_control_fields(hc)?;
+        by_name.insert(hc.name.name.as_str(), hc);
+    }
+
+    // Cross-namespace collision with top-level module instance names.
+    for stmt in &file.patch.body {
+        let Statement::Module(m) = stmt else { continue };
+        if let Some(hc) = by_name.get(m.name.name.as_str()) {
+            return Err(ExpandError::new(
+                Code::HostControlNameCollision,
+                m.name.span,
+                format!(
+                    "module instance {:?} collides with host control declared at {:?}",
+                    m.name.name, hc.name.span
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_host_control_fields(hc: &HostControlBlock) -> Result<(), ExpandError> {
+    let mut seen: std::collections::HashMap<&str, crate::ast::Span> =
+        std::collections::HashMap::new();
+    for f in &hc.fields {
+        if let Some(prev) = seen.get(f.name.name.as_str()) {
+            return Err(ExpandError::new(
+                Code::HostControlDuplicateField,
+                f.name.span,
+                format!(
+                    "field {:?} declared twice in host control {:?} (previous at {:?})",
+                    f.name.name, hc.name.name, prev
+                ),
+            ));
+        }
+        seen.insert(f.name.name.as_str(), f.name.span);
+    }
+
+    let required: &[&str] = match hc.kind {
+        HostControlKind::Knob | HostControlKind::Slider => &["low", "high"],
+        HostControlKind::Toggle => &["default"],
+        // `trigger` is a one-shot button: no host-side state to default.
+        HostControlKind::Trigger => &[],
+    };
+    for req in required {
+        if !seen.contains_key(*req) {
+            return Err(ExpandError::new(
+                Code::HostControlMissingField,
+                hc.span,
+                format!(
+                    "host control {:?} ({}) requires field `{}`",
+                    hc.name.name,
+                    hc.kind.as_str(),
+                    req,
+                ),
+            ));
+        }
     }
     Ok(())
 }

@@ -5,9 +5,10 @@
 use pest::iterators::Pair;
 
 use crate::ast::{
-    Arrow, AtBlockIndex, CableEndpoint, CallArg, CallBlock, Connection, Direction, Ident,
-    ParamEntry, ParamIndex, PortIndex, PortLabel, PortRef, RangeEndpoint, RangeKind, ScaleSpec,
-    Scalar, ShapeValue, Statement, TapTarget, UnitFamily, Value,
+    Arrow, AtBlockIndex, CableEndpoint, CallArg, CallBlock, Connection, Direction,
+    HostControlBlock, HostControlField, HostControlKind, Ident, ParamEntry, ParamIndex,
+    PortIndex, PortLabel, PortRef, RangeEndpoint, RangeKind, ScaleSpec, Scalar, ShapeValue,
+    Statement, TapTarget, UnitFamily, Value,
 };
 
 use super::decls::build_module_decl;
@@ -395,8 +396,47 @@ fn build_cable_endpoint(pair: Pair<'_, Rule>) -> Result<CableEndpoint, ParseErro
     match inner.as_rule() {
         Rule::tap_target => Ok(CableEndpoint::Tap(build_tap_target(inner)?)),
         Rule::port_ref => Ok(CableEndpoint::Port(build_port_ref(inner)?)),
+        Rule::host_control_ref => {
+            // host_control_ref = ${ ident ~ !"." } — single ident child.
+            let id_pair = inner.into_inner().next().unwrap();
+            Ok(CableEndpoint::HostControlRef(build_ident(id_pair)))
+        }
         _ => unreachable!("unexpected rule in cable_endpoint: {:?}", inner.as_rule()),
     }
+}
+
+/// Build a `host_control_block` pair into an AST [`HostControlBlock`]
+/// (ADR 0057 Amendment §Surface syntax).
+pub(super) fn build_host_control_block(
+    pair: Pair<'_, Rule>,
+) -> Result<HostControlBlock, ParseError> {
+    // host_control_block = { host_control_kind ~ ident ~ "{" ~ (host_control_field ~ ","?)* ~ "}" }
+    let span = span_of(&pair);
+    let mut it = pair.into_inner();
+
+    let kind_pair = it.next().unwrap();
+    let kind_span = span_of(&kind_pair);
+    let kind = match kind_pair.as_str() {
+        "knob" => HostControlKind::Knob,
+        "slider" => HostControlKind::Slider,
+        "toggle" => HostControlKind::Toggle,
+        "trigger" => HostControlKind::Trigger,
+        other => unreachable!("unexpected host_control_kind: {other:?}"),
+    };
+
+    let name = build_ident(it.next().unwrap());
+
+    let mut fields = Vec::new();
+    for field_pair in it {
+        debug_assert_eq!(field_pair.as_rule(), Rule::host_control_field);
+        let f_span = span_of(&field_pair);
+        let mut fi = field_pair.into_inner();
+        let f_name = build_ident(fi.next().unwrap());
+        let f_value = build_value(fi.next().unwrap())?;
+        fields.push(HostControlField { name: f_name, value: f_value, span: f_span });
+    }
+
+    Ok(HostControlBlock { kind, kind_span, name, fields, span })
 }
 
 pub(super) fn build_connection(pair: Pair<'_, Rule>) -> Result<Vec<Connection>, ParseError> {
@@ -491,6 +531,7 @@ pub(super) fn build_statements(pair: Pair<'_, Rule>) -> Result<Vec<Statement>, P
         Rule::module_decl => Ok(vec![Statement::Module(build_module_decl(inner)?)]),
         Rule::song_block => Ok(vec![Statement::Song(build_song_block(inner)?)]),
         Rule::pattern_block => Ok(vec![Statement::Pattern(build_pattern_block(inner)?)]),
+        Rule::host_control_block => Ok(vec![Statement::HostControl(build_host_control_block(inner)?)]),
         Rule::connection => Ok(build_connection(inner)?
             .into_iter()
             .map(Statement::Connection)

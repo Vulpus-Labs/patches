@@ -88,6 +88,11 @@ structural_codes! {
     TapMixedCableKinds      => ("ST0029", "mixed cable kinds in compound tap"),
     TapUnknownComponent     => ("ST0030", "unknown tap component"),
     TapInvalidName          => ("ST0031", "invalid tap name"),
+    HostControlInTemplate   => ("ST0032", "host control inside template"),
+    HostControlMissingField => ("ST0033", "missing required host-control field"),
+    HostControlNameCollision=> ("ST0034", "host-control name collides with module instance"),
+    HostControlDuplicateName=> ("ST0035", "duplicate host-control name"),
+    HostControlDuplicateField=> ("ST0036", "duplicate field in host-control block"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

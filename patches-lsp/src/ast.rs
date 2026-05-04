@@ -401,6 +401,8 @@ mod drift {
                 "LSP: not mirrored — nested song defs surface via File::songs",
             dsl::Statement::Pattern(_) =>
                 "LSP: not mirrored — nested pattern defs surface via File::patterns",
+            dsl::Statement::HostControl(_) =>
+                "LSP: not mirrored yet — host control blocks (ADR 0057)",
         }
     }
 

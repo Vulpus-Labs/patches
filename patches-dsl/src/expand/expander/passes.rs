@@ -58,7 +58,10 @@ pub(in crate::expand) fn translate_modules(
     for stmt in stmts {
         let decl = match stmt {
             Statement::Module(d) => d,
-            Statement::Connection(_) | Statement::Song(_) | Statement::Pattern(_) => continue,
+            Statement::Connection(_)
+            | Statement::Song(_)
+            | Statement::Pattern(_)
+            | Statement::HostControl(_) => continue,
         };
 
         let type_name = &decl.type_name.name;
@@ -188,7 +191,10 @@ pub(in crate::expand) fn translate_connections(
     for stmt in stmts {
         let conn = match stmt {
             Statement::Connection(c) => c,
-            Statement::Module(_) | Statement::Song(_) | Statement::Pattern(_) => continue,
+            Statement::Module(_)
+            | Statement::Song(_)
+            | Statement::Pattern(_)
+            | Statement::HostControl(_) => continue,
         };
         expander.expand_connection(conn, frame)?;
     }

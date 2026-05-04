@@ -10,3 +10,4 @@ mod pattern_song;
 mod positive;
 mod spans;
 mod tap_targets;
+mod host_controls;

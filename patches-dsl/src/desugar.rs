@@ -306,6 +306,9 @@ fn rewrite_endpoint(
 ) -> CableEndpoint {
     match ep {
         CableEndpoint::Port(p) => CableEndpoint::Port(p.clone()),
+        // Host-control references survive tap desugaring untouched; the
+        // host-control desugarer (ticket 0808) handles them next.
+        CableEndpoint::HostControlRef(i) => CableEndpoint::HostControlRef(i.clone()),
         CableEndpoint::Tap(t) => {
             let key = (classify(t).as_enum_str(), t.name.name.clone());
             let (port_name, alias) = target_for

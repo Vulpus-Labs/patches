@@ -69,11 +69,13 @@ inverse direction of taps:
   top-down concern decided by the patch author, not the template
   author.
 
-The cable type is `Mono` + `Audio` (CV-shaped) for `knob` / `slider`
-and `Mono` + `Trigger` is **not** used — `toggle` produces a
-sample-and-hold audio signal at 0.0 or 1.0, not a sub-sample trigger.
-A patch author wanting an edge-triggered host control wires a `toggle`
-into a derivative module.
+The cable type is `Mono` + `Audio` (CV-shaped) for `knob` / `slider`.
+`toggle` is a **latching gate**: each click flips the audio-side
+signal between 0.0 and 1.0, where it stays until the next click.
+`trigger` is a **one-shot button**: clicking fires a single
+`Mono` + `Trigger` event (one tick) and then returns to silence.
+A patch author wanting an edge from a latched toggle wires the
+toggle into a derivative module.
 
 ### 2. Desugaring — implicit host-control modules
 
@@ -357,8 +359,11 @@ toggle reverb_bypass {
 
 Rules:
 
-- Block keywords: `knob | slider | toggle`. The keyword fixes the kind;
-  it is no longer a field. New kinds (e.g. `xy_pad`) add new keywords.
+- Block keywords: `knob | slider | toggle | trigger`. The keyword fixes
+  the kind; it is no longer a field. New kinds (e.g. `xy_pad`) add new
+  keywords. `toggle` latches a gate (Mono+Audio, flips 0.0↔1.0 per
+  click); `trigger` is a one-shot button (Mono+Trigger, single-tick
+  event per click).
 - Block name (`frequency_knob`, `vca_attack`, `reverb_bypass`) is the
   host control's identifier. Names are unique across all host controls
   in the patch. Same namespace constraint as before; separate from tap
@@ -367,8 +372,10 @@ Rules:
   (same reasoning as §1: exposure is a top-down decision).
 - Fields are optional except where required for the kind: `low` /
   `high` are mandatory for `knob` / `slider`; `default` is mandatory
-  for `toggle`. `default` falls back to `midpoint` falls back to `low`
-  for `knob` / `slider` if omitted; `midpoint` is a UI hint, not a
+  for `toggle`. `trigger` has no required fields (the audio-side
+  signal is always a single-tick pulse on click). `default` falls
+  back to `midpoint` falls back to `low` for `knob` / `slider` if
+  omitted; `midpoint` is a UI hint, not a
   value. `colour`, `taper`, `unit`, `displayName` are pure UI hints
   forwarded verbatim to the host via the manifest.
 - Field literals follow existing DSL conventions: unit-suffixed

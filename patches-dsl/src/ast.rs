@@ -296,23 +296,28 @@ pub struct TapTarget {
     pub span: Span,
 }
 
-/// One end of a cable: either a port reference or a tap target.
+/// One end of a cable: a port reference, a tap target, or a bare
+/// host-control reference (ADR 0057 Amendment §Reference syntax).
 ///
 /// Tap endpoints carry their `TapTarget` payload through to the desugarer
-/// (0697); existing consumers that expect a port ref pattern-match the
-/// `Port` variant and either skip or error on `Tap` at this stage.
+/// (0697). Host-control references are resolved by the expander against
+/// the declared host-control set; an undeclared name is a structural
+/// error at expand time.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CableEndpoint {
     Port(PortRef),
     Tap(TapTarget),
+    /// Bare-name reference to a host control declared with a top-level
+    /// `knob` / `slider` / `toggle` block.
+    HostControlRef(Ident),
 }
 
 impl CableEndpoint {
-    /// Returns the contained `PortRef`, or `None` if this endpoint is a tap.
+    /// Returns the contained `PortRef`, or `None` for non-port endpoints.
     pub fn as_port(&self) -> Option<&PortRef> {
         match self {
             CableEndpoint::Port(p) => Some(p),
-            CableEndpoint::Tap(_) => None,
+            CableEndpoint::Tap(_) | CableEndpoint::HostControlRef(_) => None,
         }
     }
 
@@ -321,6 +326,7 @@ impl CableEndpoint {
         match self {
             CableEndpoint::Port(p) => p.span,
             CableEndpoint::Tap(t) => t.span,
+            CableEndpoint::HostControlRef(i) => i.span,
         }
     }
 }
@@ -343,6 +349,58 @@ pub enum Statement {
     Connection(Connection),
     Song(SongDef),
     Pattern(PatternDef),
+    /// `knob | slider | toggle <name> { field: value, ... }` — a host
+    /// control declaration (ADR 0057). Valid only at top-level patch
+    /// scope; rejected inside templates by `validate`.
+    HostControl(HostControlBlock),
+}
+
+// ─── Host control declarations (ADR 0057) ─────────────────────────────────────
+
+/// Kind of a host control: knob, slider, or toggle. The keyword fixes the
+/// kind; new kinds (e.g. `xy_pad`) add new variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostControlKind {
+    Knob,
+    Slider,
+    /// Latching gate: each click flips the output 0.0 ↔ 1.0
+    /// (Mono+Audio, sample-and-hold).
+    Toggle,
+    /// One-shot button: each click fires a single Mono+Trigger event.
+    Trigger,
+}
+
+impl HostControlKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HostControlKind::Knob => "knob",
+            HostControlKind::Slider => "slider",
+            HostControlKind::Toggle => "toggle",
+            HostControlKind::Trigger => "trigger",
+        }
+    }
+}
+
+/// One `field: value` entry inside a host-control block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostControlField {
+    pub name: Ident,
+    pub value: Value,
+    pub span: Span,
+}
+
+/// A `kind name { field: value, ... }` host-control declaration.
+///
+/// Field interpretation is deferred: the expander emits the fields
+/// verbatim into the `HostControlParamMap` of the manifest; the CLAP
+/// plugin validates them at parameter-publication time (ADR 0057 §5).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostControlBlock {
+    pub kind: HostControlKind,
+    pub kind_span: Span,
+    pub name: Ident,
+    pub fields: Vec<HostControlField>,
+    pub span: Span,
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
