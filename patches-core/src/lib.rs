@@ -20,7 +20,7 @@ pub const COEFF_UPDATE_INTERVAL: u32 = BASE_PERIODIC_UPDATE_INTERVAL;
 /// `[f32; MAX_TAPS]` frame each tick; the same value bounds the
 /// audio→observer ring frame layout and the observer-side per-slot
 /// pipeline state.
-pub const MAX_TAPS: usize = 64;
+pub const MAX_TAPS: usize = cables::TAP_SLOTS * 16;
 
 /// Per-tick observation frame: one `f32` per backplane slot (ADR 0053 §4).
 ///
@@ -145,4 +145,5 @@ pub use diagnostics::{format_provenance, format_span};
 pub use cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
+    HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_HOST_CONTROLS, TAP_BASE, TAP_SLOTS,
 };

@@ -19,8 +19,24 @@ use patches_core::{
     TransportFrame,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
-    MAX_STASH, MAX_TAPS,
+    MAX_STASH, MAX_TAPS, TAP_BASE, TAP_SLOTS,
 };
+
+/// Read the four `TAP_BASE` poly slots from `buffer_pool` at index
+/// `idx` (0 or 1) and pack them into a flat `[f32; MAX_TAPS]` frame.
+/// The four slots are zero-initialised by `init_buffer_pool` and held
+/// `Poly` for the lifetime of the engine; the match arms degrade
+/// gracefully if a malformed plan ever leaves a slot non-`Poly`.
+#[inline]
+fn snapshot_tap_lanes(buffer_pool: &[[CableValue; 2]], idx: usize) -> TapFrame {
+    let mut out = [0.0_f32; MAX_TAPS];
+    for i in 0..TAP_SLOTS {
+        if let CableValue::Poly(lanes) = buffer_pool[TAP_BASE + i][idx] {
+            out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
+        }
+    }
+    out
+}
 
 use patches_planner::{ExecutionPlan, PlanMeta};
 use crate::cleanup::CleanupAction;
@@ -74,18 +90,18 @@ pub struct PatchProcessor {
     /// audio thread.
     cleanup_overflow_count: AtomicU32,
     halt: Arc<HaltState>,
-    /// ADR 0053 §4 observation backplane. Tap modules write here per
-    /// channel; the observer ring (ticket 0700) drains a snapshot per tick.
-    tap_backplane: TapFrame,
+    // Tap data lives in the cable pool's reserved-slot region
+    // (`TAP_BASE..TAP_BASE+TAP_SLOTS`); per-tick snapshots are
+    // gathered directly from the pool — see `snapshot_tap_lanes`.
     /// Audio-thread end of the observer ring (ADR 0053 §5, ADR 0056).
     /// When set, every `TAP_BLOCK` ticks the accumulated `tap_block` is
     /// pushed; on full ring the block frame is dropped and per-slot
     /// counters advance.
     tap_tx: Option<patches_io_ring::TapRingProducer>,
-    /// Block-accumulator for the observer ring. Each tick: copy the live
-    /// `tap_backplane` into `tap_block.samples[tap_block_idx]` (a
-    /// 128 B / 2-cache-line memcpy). On `idx == TAP_BLOCK` push the
-    /// frame and reset.
+    /// Block-accumulator for the observer ring. Each tick: read the
+    /// four `TAP_BASE` poly slots from the cable pool and pack them
+    /// into `tap_block.samples[tap_block_idx]`. On `idx == TAP_BLOCK`
+    /// push the frame and reset.
     tap_block: TapBlockFrame,
     /// Index of the next per-sample row to fill in `tap_block.samples`.
     /// Wraps at `TAP_BLOCK`.
@@ -158,7 +174,6 @@ impl PatchProcessor {
             periodic_update_interval: interval,
             cleanup_overflow_count: AtomicU32::new(0),
             halt,
-            tap_backplane: [0.0; MAX_TAPS],
             tap_tx: None,
             tap_block: TapBlockFrame::zeroed(),
             tap_block_idx: 0,
@@ -478,10 +493,9 @@ impl PatchProcessor {
         // mid-tick state is never observed again.
         let state = &mut self.state;
         let buffer_pool = &mut self.buffer_pool;
-        let backplane = &mut self.tap_backplane[..];
         let monitor = self.monitor.as_mut();
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut cable_pool = CablePool::with_backplane(buffer_pool, wi, backplane);
+            let mut cable_pool = CablePool::new(buffer_pool, wi);
             // Off path is byte-identical to today's dispatch (ADR 0065): the
             // outer match here is per-sample, not per-module, and the `None`
             // arm calls the unchanged `tick`.
@@ -506,7 +520,7 @@ impl PatchProcessor {
             self.tap_block.sample_time = self.tap_sample_counter;
             self.tap_block.manifest_generation = self.tap_manifest_generation;
         }
-        self.tap_block.samples[self.tap_block_idx] = self.tap_backplane;
+        self.tap_block.samples[self.tap_block_idx] = snapshot_tap_lanes(&self.buffer_pool, wi);
         self.tap_block_idx += 1;
         self.tap_sample_counter = self.tap_sample_counter.wrapping_add(1);
         if self.tap_block_idx == patches_core::TAP_BLOCK {
@@ -558,10 +572,14 @@ impl PatchProcessor {
         self.buffer_pool[idx]
     }
 
-    /// Snapshot of the observation backplane after the most recent tick.
-    /// Intended for tests and the (yet-to-land) frame ring producer.
-    pub fn tap_backplane(&self) -> &TapFrame {
-        &self.tap_backplane
+    /// Snapshot of the observation backplane after the most recent
+    /// tick, reconstructed from the four `TAP_BASE` poly slots in the
+    /// cable pool. Intended for tests and the frame ring producer.
+    pub fn tap_backplane(&self) -> TapFrame {
+        // After a tick, the read slot is `1 - wi` from the *next* tick's
+        // perspective (which is `self.wi` at this point — `wi` was
+        // already toggled). The freshly-written value is at `1 - wi`.
+        snapshot_tap_lanes(&self.buffer_pool, 1 - self.wi)
     }
 
     /// Return the current periodic update interval (inner ticks).

@@ -125,6 +125,13 @@ impl Default for PolyOutput {
 }
 
 impl PolyOutput {
+    /// Create a `PolyOutput` connected to a reserved backplane slot
+    /// (e.g. one of the `TAP_BASE` poly slots). The slot must be a
+    /// `Poly` cable in the buffer pool's reserved-slot region.
+    pub fn backplane(cable_idx: usize) -> Self {
+        Self { cable_idx, connected: true }
+    }
+
     /// Extract the `PolyOutput` at position `idx` from a port slice.
     ///
     /// # Panics

@@ -14,9 +14,9 @@
 
 use patches_core::{
     params_enum,
-    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
+    AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, MAX_TAPS, Module,
     ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
-    ParameterTemplate, PortTemplate, StereoInput,
+    ParameterTemplate, PolyOutput, PortTemplate, StereoInput, TAP_BASE, TAP_SLOTS,
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
@@ -140,26 +140,45 @@ impl Module for Tap {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Branchless on width: stereo channels always write two slots
-        // (`L` at slot_offset, `R` at slot_offset + 1). The planner
-        // allocator (ADR 0059 §5) guarantees the second slot is reserved
-        // for this channel, so the unconditional second write never
-        // collides with another tap's data.
+        // Accumulate per-channel reads into a flat `[f32; MAX_TAPS]`
+        // lane buffer, then write the four `Poly` slots
+        // `TAP_BASE..TAP_BASE+TAP_SLOTS` in one go. Stereo channels
+        // claim two consecutive lanes (ADR 0059 §5); the planner
+        // allocator guarantees the second lane is reserved for this
+        // channel.
+        //
+        // Out-of-range slot offsets are silently ignored: the planner
+        // keeps slots in range, but a stale plan crossing a region
+        // shrink must not corrupt other backplane state.
+        let mut lanes = [0.0_f32; MAX_TAPS];
         for i in 0..self.channels {
             let slot = self.slot_offsets[i];
             match self.kinds[i] {
                 TapKind::Mono => {
-                    pool.write_backplane(slot, pool.read_mono(&self.mono_ports[i]));
+                    if slot < MAX_TAPS {
+                        lanes[slot] = pool.read_mono(&self.mono_ports[i]);
+                    }
                 }
                 TapKind::Trigger => {
-                    pool.write_backplane(slot, pool.read_mono(&self.trigger_ports[i]));
+                    if slot < MAX_TAPS {
+                        lanes[slot] = pool.read_mono(&self.trigger_ports[i]);
+                    }
                 }
                 TapKind::Stereo => {
                     let (l, r) = pool.read_stereo(&self.stereo_ports[i]);
-                    pool.write_backplane(slot,     l);
-                    pool.write_backplane(slot + 1, r);
+                    if slot < MAX_TAPS {
+                        lanes[slot] = l;
+                    }
+                    if slot + 1 < MAX_TAPS {
+                        lanes[slot + 1] = r;
+                    }
                 }
             }
+        }
+        for i in 0..TAP_SLOTS {
+            let mut frame = [0.0_f32; 16];
+            frame.copy_from_slice(&lanes[i * 16..(i + 1) * 16]);
+            pool.write_poly(&PolyOutput::backplane(TAP_BASE + i), frame);
         }
     }
 
@@ -207,30 +226,27 @@ mod tests {
     fn mono_channel_writes_mono_input_to_slot() {
         let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(1));
         h.update_params_map(&slots_and_kinds(&[3], &["mono"]));
-        h.enable_backplane();
         h.set_mono_at("mono_in", 0, 0.42);
         h.tick();
-        assert_eq!(h.backplane()[3], 0.42);
+        assert_eq!(h.tap_backplane()[3], 0.42);
     }
 
     #[test]
     fn trigger_channel_writes_trigger_input_to_slot() {
         let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(1));
         h.update_params_map(&slots_and_kinds(&[5], &["trigger"]));
-        h.enable_backplane();
         h.set_mono_at("trigger_in", 0, 0.71);
         h.tick();
-        assert_eq!(h.backplane()[5], 0.71);
+        assert_eq!(h.tap_backplane()[5], 0.71);
     }
 
     #[test]
     fn stereo_channel_writes_both_lanes_to_consecutive_slots() {
         let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(1));
         h.update_params_map(&slots_and_kinds(&[2], &["stereo"]));
-        h.enable_backplane();
         h.set_stereo_at("stereo_in", 0, 0.6, -0.3);
         h.tick();
-        let bp = h.backplane();
+        let bp = h.tap_backplane();
         assert_eq!(bp[2], 0.6);
         assert_eq!(bp[3], -0.3);
     }
@@ -239,12 +255,11 @@ mod tests {
     fn mixed_kinds_each_channel_writes_only_its_port() {
         let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(3));
         h.update_params_map(&slots_and_kinds(&[0, 1, 2], &["mono", "trigger", "mono"]));
-        h.enable_backplane();
         h.set_mono_at("mono_in", 0, 0.1);
         h.set_mono_at("trigger_in", 1, 0.9);
         h.set_mono_at("mono_in", 2, -0.4);
         h.tick();
-        let bp = h.backplane();
+        let bp = h.tap_backplane();
         assert_eq!(bp[0], 0.1);
         assert_eq!(bp[1], 0.9);
         assert_eq!(bp[2], -0.4);

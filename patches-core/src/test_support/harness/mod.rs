@@ -43,7 +43,6 @@ pub struct ModuleHarness {
     output_kinds: Vec<CableKind>,
     pub(crate) wi: usize,
     sample_counter: u32,
-    backplane: Option<Vec<f32>>,
 }
 
 impl ModuleHarness {
@@ -136,6 +135,12 @@ impl ModuleHarness {
         pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
         pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]); 2];
         pool[crate::cables::GLOBAL_MIDI] = [CableValue::Poly([0.0; 16]); 2];
+        for i in 0..crate::cables::TAP_SLOTS {
+            pool[crate::cables::TAP_BASE + i] = [CableValue::Poly([0.0; 16]); 2];
+        }
+        for i in 0..crate::cables::HOST_CONTROL_SLOTS {
+            pool[crate::cables::HOST_CONTROL_BASE + i] = [CableValue::Poly([0.0; 16]); 2];
+        }
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
@@ -161,7 +166,6 @@ impl ModuleHarness {
             output_kinds,
             wi: 0,
             sample_counter: 0,
-            backplane: None,
         };
 
         harness.rebuild_ports();
@@ -332,31 +336,25 @@ impl ModuleHarness {
         if self.sample_counter >= COEFF_UPDATE_INTERVAL {
             self.sample_counter = 0;
         }
-        let mut pool = match self.backplane.as_deref_mut() {
-            Some(bp) => CablePool::with_backplane(&mut self.pool, self.wi, bp),
-            None => CablePool::new(&mut self.pool, self.wi),
-        };
+        let mut pool = CablePool::new(&mut self.pool, self.wi);
         self.module.process(&mut pool);
         self.wi = 1 - self.wi;
         self
     }
 
-    /// Attach a tap backplane for this module's `process()` calls. Sized to
-    /// [`crate::MAX_TAPS`] and zeroed. Subsequent ticks will pass it via
-    /// [`CablePool::with_backplane`].
-    pub fn enable_backplane(&mut self) -> &mut Self {
-        self.backplane = Some(vec![0.0; crate::MAX_TAPS]);
-        self
-    }
-
-    /// Read-only view of the attached tap backplane.
-    ///
-    /// # Panics
-    /// Panics if [`enable_backplane`](Self::enable_backplane) was not called.
-    pub fn backplane(&self) -> &[f32] {
-        self.backplane
-            .as_deref()
-            .expect("ModuleHarness::backplane requires enable_backplane()")
+    /// Snapshot the four `TAP_BASE` poly slots from the cable pool's
+    /// read side after the most recent tick, packed into a flat
+    /// `[f32; MAX_TAPS]`. Replaces the legacy parallel `backplane()`
+    /// view; tap-module tests read tap-region values via this method.
+    pub fn tap_backplane(&self) -> [f32; crate::MAX_TAPS] {
+        let ri = 1 - self.wi;
+        let mut out = [0.0_f32; crate::MAX_TAPS];
+        for i in 0..crate::cables::TAP_SLOTS {
+            if let CableValue::Poly(lanes) = self.pool[crate::cables::TAP_BASE + i][ri] {
+                out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
+            }
+        }
+        out
     }
 
     // ── Mono outputs ─────────────────────────────────────────────────────────

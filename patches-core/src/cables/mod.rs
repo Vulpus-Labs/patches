@@ -135,13 +135,47 @@ pub const GLOBAL_DRIFT: usize = 9;
 /// each tick before writing.
 pub const GLOBAL_MIDI: usize = 10;
 
-// Slots 11–15 are reserved for future backplane use.
-
-/// Number of buffer pool slots reserved for infrastructure.
+/// Buffer pool index of the first tap backplane slot (ADR 0053 §4,
+/// ticket 0814). Four consecutive `Poly` slots starting here pack
+/// `TAP_SLOTS * 16` = 64 f32 lanes that `Tap` modules write into and
+/// the engine snapshots into a `TapBlockFrame` for the observer ring.
 ///
-/// The allocator starts its high-water mark here so no dynamically allocated
-/// cable ever aliases a reserved slot.
-pub const RESERVED_SLOTS: usize = 16;
+/// Lane layout: lane `slot_offset % 16` of slot
+/// `TAP_BASE + slot_offset / 16`. Stereo tap channels claim two
+/// consecutive lanes (`L` at `slot_offset`, `R` at `slot_offset + 1`).
+pub const TAP_BASE: usize = 11;
+
+/// Number of `Poly` slots reserved for tap values. Each slot holds 16
+/// f32 lanes; four slots gives [`crate::MAX_TAPS`] = 64.
+pub const TAP_SLOTS: usize = 4;
+
+/// Buffer pool index of the first host-control backplane slot
+/// (ADR 0057 §4, ticket 0814). Two consecutive `Poly` slots starting
+/// here carry up to [`MAX_HOST_CONTROLS`] f32 lanes between the
+/// control thread (which writes the latest published parameter values
+/// once per block) and the audio thread's `HostControl` module (which
+/// reads them via plain `PolyInput::backplane`).
+///
+/// Value layout: lane `slot_offset % 16` of slot
+/// `HOST_CONTROL_BASE + slot_offset / 16`.
+pub const HOST_CONTROL_BASE: usize = TAP_BASE + TAP_SLOTS;
+
+/// Number of `Poly` slots reserved for host-control values. Each slot
+/// holds 16 f32 lanes; two slots gives [`MAX_HOST_CONTROLS`] = 32.
+pub const HOST_CONTROL_SLOTS: usize = 2;
+
+/// Maximum number of host-control signals (ADR 0057). One per declared
+/// `knob` / `slider` / `toggle` / `trigger` block.
+pub const MAX_HOST_CONTROLS: usize = HOST_CONTROL_SLOTS * 16;
+
+/// Number of buffer pool slots reserved for infrastructure
+/// (sinks + global I/O + tap + host-control + spare). 32 is a
+/// power-of-two ceiling that leaves room for future backplanes
+/// without disturbing the dynamic-cable base index.
+///
+/// The allocator starts its high-water mark here so no dynamically
+/// allocated cable ever aliases a reserved slot.
+pub const RESERVED_SLOTS: usize = 32;
 
 /// Threshold used by gate input types (and legacy producers that still emit
 /// level signals on mono cables). Triggers now use sub-sample encoding
