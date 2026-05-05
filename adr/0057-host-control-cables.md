@@ -159,11 +159,13 @@ Tearing on individual `f32` is acceptable for control signals at
 audio-block boundaries; a brief mid-ramp readback during a parameter
 update produces no audible artefact at typical knob rates.
 
-Sub-block automation accuracy is a future concern (sample-accurate
-host automation requires per-sample backplane updates). The current
-design publishes one value per block per host control, which matches
-the resolution most hosts deliver and which the existing parameter
-ramp primitive (ADR 0050) can smooth where needed.
+Sub-block automation accuracy is implemented by the per-block scratch
+pipeline in [ADR 0068 §2](0068-untagged-cable-pool-and-host-control-scratch.md)
+(ticket 0816): host events feed an SoA scratch, are smoothed in place
+with a fixed-τ one-pole, transposed to an AoS frame, and the audio
+thread per-sample writes the frame row into the four contiguous
+host-control backplane slots. The earlier "one value per block per
+control" placeholder this section described is retired.
 
 ### 5. Manifest construction
 

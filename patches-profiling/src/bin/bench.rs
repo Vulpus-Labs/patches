@@ -74,11 +74,11 @@ fn main() {
 
     // Initialise buffer pool, mirroring SoundEngine / HeadlessEngine setup.
     let mut buffer_pool: Box<[[CableValue; 2]]> = (0..POOL_CAPACITY)
-        .map(|_| [CableValue::Mono(0.0), CableValue::Mono(0.0)])
+        .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    buffer_pool[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
-    buffer_pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+    buffer_pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+    buffer_pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
 
     let mut module_pool = ModulePool::new(MODULE_POOL_CAPACITY);
     let module_state_iter = plan.new_module_param_state.drain(..);

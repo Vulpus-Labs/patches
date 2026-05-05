@@ -498,8 +498,8 @@ impl ConjPairPoleBankSoa {
             let psi_im = mr * ipi + mi * ipr;
             let xr = self.x_re[i];
             let xi = self.x_im[i];
-            self.x_re[i] = pr * xr - pi * xi + psi_re * u;
-            self.x_im[i] = pr * xi + pi * xr + psi_im * u;
+            self.x_re[i] = patches_dsp::flush_denormal(pr * xr - pi * xi + psi_re * u);
+            self.x_im[i] = patches_dsp::flush_denormal(pr * xi + pi * xr + psi_im * u);
         }
     }
 
@@ -522,8 +522,8 @@ impl ConjPairPoleBankSoa {
             let psi_im = mr * ipi + mi * ipr;
             let xr = self.x_re[i];
             let xi = self.x_im[i];
-            self.x_re[i] = pr * xr - pi * xi + psi_re * u;
-            self.x_im[i] = pr * xi + pi * xr + psi_im * u;
+            self.x_re[i] = patches_dsp::flush_denormal(pr * xr - pi * xi + psi_re * u);
+            self.x_im[i] = patches_dsp::flush_denormal(pr * xi + pi * xr + psi_im * u);
         }
     }
 
@@ -534,8 +534,8 @@ impl ConjPairPoleBankSoa {
             let pci = self.pole_corr_im[i];
             let xr = self.x_re[i];
             let xi = self.x_im[i];
-            self.x_re[i] = pcr * xr - pci * xi + self.psi1_re[i] * u;
-            self.x_im[i] = pcr * xi + pci * xr + self.psi1_im[i] * u;
+            self.x_re[i] = patches_dsp::flush_denormal(pcr * xr - pci * xi + self.psi1_re[i] * u);
+            self.x_im[i] = patches_dsp::flush_denormal(pcr * xi + pci * xr + self.psi1_im[i] * u);
         }
     }
 

@@ -276,9 +276,9 @@ impl Module for VReverb {
             // at audible long-delay clock rates) and recirculation HF
             // damping (since y feeds y_prev next sample).
             let raw = self.bbds[k].process(drive);
-            let s1 = self.damp_z1[k] + a * (raw - self.damp_z1[k]);
+            let s1 = patches_dsp::flush_denormal(self.damp_z1[k] + a * (raw - self.damp_z1[k]));
             self.damp_z1[k] = s1;
-            let s2 = self.damp_z2[k] + a * (s1 - self.damp_z2[k]);
+            let s2 = patches_dsp::flush_denormal(self.damp_z2[k] + a * (s1 - self.damp_z2[k]));
             self.damp_z2[k] = s2;
             y[k] = s2;
         }

@@ -103,17 +103,17 @@ fn main() {
     let pool_indices: Vec<usize> = raw_modules.iter().map(|&(idx, _)| idx).collect();
 
     let mut buffer_pool: Box<[[CableValue; 2]]> = (0..POOL_CAPACITY)
-        .map(|_| [CableValue::Mono(0.0), CableValue::Mono(0.0)])
+        .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    buffer_pool[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
-    buffer_pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+    buffer_pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+    buffer_pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     // Apply the plan's cable zeroing lists (mirrors the receive_plan sequence in callback.rs).
     for &i in &plan.to_zero {
-        buffer_pool[i] = [CableValue::Mono(0.0), CableValue::Mono(0.0)];
+        buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
     }
     for &i in &plan.to_zero_poly {
-        buffer_pool[i] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+        buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
 
     let mut module_pool = ModulePool::new(MODULE_POOL_CAPACITY);

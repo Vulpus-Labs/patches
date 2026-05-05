@@ -313,12 +313,9 @@ fn assert_steady_state_bounded_fails_for_alternating() {
 #[test]
 fn init_pool_sets_all_slots() {
     let mut h = ModuleHarness::build::<Doubler>(&[]);
-    h.init_pool(CableValue::Mono(99.0));
+    h.init_pool(CableValue::mono(99.0));
     // All pool slots should now be 99.0; read before any tick returns 99.0
     // (ri = 1 - wi = 1 when wi = 0).
     let cable = h.n_inputs; // first output cable
-    match h.pool[cable][1] {
-        CableValue::Mono(v) => assert_eq!(v, 99.0),
-        _ => panic!("expected Mono(99.0)"),
-    }
+    assert_eq!(h.pool[cable][1].as_mono(), 99.0);
 }

@@ -14,18 +14,18 @@ use crate::cleanup::CleanupAction;
 /// `GLOBAL_TRANSPORT` which are `Poly([0.0; 16])` so that poly reads never
 /// see a kind mismatch.
 pub fn init_buffer_pool(capacity: usize) -> Box<[[CableValue; 2]]> {
-    let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(0.0)]; capacity]
+    let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; capacity]
         .into_boxed_slice();
-    pool[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
-    pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
-    pool[GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
-    pool[GLOBAL_MIDI] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+    pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+    pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+    pool[GLOBAL_TRANSPORT] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+    pool[GLOBAL_MIDI] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     // Host-control backplane (ADR 0057 §4): two `Poly` slots holding
     // 32 lanes total. Control thread writes these once per block before
     // `tick`; the `HostControl` module reads via `PolyInput::backplane`.
     for i in 0..HOST_CONTROL_SLOTS {
         pool[HOST_CONTROL_BASE + i] =
-            [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+            [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
     pool
 }
@@ -113,10 +113,10 @@ fn apply_plan(
         pool.set_ports(*idx, inputs, outputs);
     }
     for &i in &plan.to_zero {
-        buffer_pool[i] = [CableValue::Mono(0.0), CableValue::Mono(0.0)];
+        buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
     }
     for &i in &plan.to_zero_poly {
-        buffer_pool[i] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+        buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
     let ready = stale.rebuild(&plan, periodic_update_interval);
     let old_plan = previous_plan.replace(plan);
@@ -241,30 +241,25 @@ mod tests {
     }
 
     #[test]
-    fn buffer_pool_general_slots_are_mono_zero() {
+    fn buffer_pool_general_slots_are_zero() {
         let pool = init_buffer_pool(RESERVED_SLOTS + 4);
         for i in [0, 2, 4, RESERVED_SLOTS, RESERVED_SLOTS + 1] {
             for frame in 0..2 {
-                assert!(
-                    matches!(pool[i][frame], CableValue::Mono(v) if v == 0.0),
-                    "slot {i} frame {frame} should be Mono(0.0)"
+                assert_eq!(
+                    pool[i][frame].as_mono(),
+                    0.0,
+                    "slot {i} frame {frame} lane 0 should be 0.0"
                 );
             }
         }
     }
 
     #[test]
-    fn buffer_pool_poly_sink_slots_are_poly() {
+    fn buffer_pool_poly_sink_slots_are_zero() {
         let pool = init_buffer_pool(RESERVED_SLOTS + 4);
         for frame in 0..2 {
-            assert!(
-                matches!(pool[POLY_READ_SINK][frame], CableValue::Poly(_)),
-                "POLY_READ_SINK frame {frame} should be Poly"
-            );
-            assert!(
-                matches!(pool[POLY_WRITE_SINK][frame], CableValue::Poly(_)),
-                "POLY_WRITE_SINK frame {frame} should be Poly"
-            );
+            assert_eq!(pool[POLY_READ_SINK][frame].as_poly(), [0.0; 16]);
+            assert_eq!(pool[POLY_WRITE_SINK][frame].as_poly(), [0.0; 16]);
         }
     }
 
@@ -347,7 +342,7 @@ mod tests {
     fn apply_plan_zeros_mono_slots() {
         let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS + 4, 4);
         let slot = RESERVED_SLOTS + 2;
-        buf[slot] = [CableValue::Mono(99.0), CableValue::Mono(99.0)];
+        buf[slot] = [CableValue::mono(99.0), CableValue::mono(99.0)];
 
         let mut plan = ExecutionPlan::empty();
         plan.to_zero.push(slot);
@@ -355,19 +350,20 @@ mod tests {
         let _ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         for frame in 0..2 {
-            assert!(
-                matches!(buf[slot][frame], CableValue::Mono(v) if v == 0.0),
-                "to_zero slot should be Mono(0.0) in frame {frame}"
+            assert_eq!(
+                buf[slot][frame].as_mono(),
+                0.0,
+                "to_zero slot lane 0 should be 0.0 in frame {frame}"
             );
         }
     }
 
-    /// `to_zero_poly` slots are cleared to `Poly([0.0; 16])` in both ping-pong frames.
+    /// `to_zero_poly` slots are cleared to all-zero lanes in both ping-pong frames.
     #[test]
     fn apply_plan_zeros_poly_slots() {
         let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS + 4, 4);
         let slot = RESERVED_SLOTS + 3;
-        buf[slot] = [CableValue::Mono(1.0), CableValue::Mono(1.0)];
+        buf[slot] = [CableValue::mono(1.0), CableValue::mono(1.0)];
 
         let mut plan = ExecutionPlan::empty();
         plan.to_zero_poly.push(slot);
@@ -375,9 +371,10 @@ mod tests {
         let _ready = apply_plan(plan, state, &mut buf, &mut prev, &mut tx, 32);
 
         for frame in 0..2 {
-            assert!(
-                matches!(buf[slot][frame], CableValue::Poly(_)),
-                "to_zero_poly slot should be Poly in frame {frame}"
+            assert_eq!(
+                buf[slot][frame].as_poly(),
+                [0.0; 16],
+                "to_zero_poly slot should be all zeros in frame {frame}"
             );
         }
     }
@@ -413,8 +410,11 @@ mod tests {
             Ok(CleanupAction::DropParamFrame(_)) => {
                 panic!("expected DropPlan, got DropParamFrame")
             }
-            Ok(CleanupAction::DropPlanMeta(_)) => {
-                panic!("expected DropPlan, got DropPlanMeta")
+            Ok(CleanupAction::DropMonitorMeta(_)) => {
+                panic!("expected DropPlan, got DropMonitorMeta")
+            }
+            Ok(CleanupAction::DropHostControlPlanMeta(_)) => {
+                panic!("expected DropPlan, got DropHostControlPlanMeta")
             }
             Err(_) => panic!("expected a DropPlan action on the cleanup ring buffer"),
         }

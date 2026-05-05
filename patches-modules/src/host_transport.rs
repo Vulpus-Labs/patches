@@ -147,7 +147,7 @@ mod tests {
         TransportFrame::set_bar_trigger(&mut lanes, 0.0);
         TransportFrame::set_tsig_num(&mut lanes, 4.0);
         TransportFrame::set_tsig_denom(&mut lanes, 4.0);
-        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+        h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::poly(lanes));
         h.tick();
 
         assert!((h.read_mono("playing") - 1.0).abs() < 1e-6);

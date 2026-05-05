@@ -23,8 +23,8 @@ fn run(label: &str, input: MonoInput, pool: &[CableValue]) {
 }
 
 fn main() {
-    let mut pool = vec![CableValue::Mono(0.0); POOL_LEN];
-    pool[3] = CableValue::Mono(0.5);
+    let mut pool = vec![CableValue::mono(0.0); POOL_LEN];
+    pool[3] = CableValue::mono(0.5);
 
     let scalar = MonoInput::scalar(3, 0.75);
     let affine = MonoInput {

@@ -109,10 +109,14 @@ impl Tap {
 
     #[inline]
     pub(crate) fn filter_feedback(&mut self, x: f32) -> f32 {
-        let hp = x - self.fb_hp_x_prev + self.fb_hp_r * self.fb_hp_y_prev;
+        let hp = patches_dsp::flush_denormal(
+            x - self.fb_hp_x_prev + self.fb_hp_r * self.fb_hp_y_prev,
+        );
         self.fb_hp_x_prev = x;
         self.fb_hp_y_prev = hp;
-        let lp = self.fb_lp_y_prev + self.fb_lp_alpha * (hp - self.fb_lp_y_prev);
+        let lp = patches_dsp::flush_denormal(
+            self.fb_lp_y_prev + self.fb_lp_alpha * (hp - self.fb_lp_y_prev),
+        );
         self.fb_lp_y_prev = lp;
         lp
     }
@@ -254,7 +258,7 @@ impl Module for VBbd {
             let eff_fb =
                 (self.feedbacks[i] + pool.read_mono(&self.fb_cv[i])).clamp(0.0, FEEDBACK_MAX);
             let fb_filtered = self.tap_state[i].filter_feedback(bbd_out);
-            self.tap_state[i].fb_state = fb_filtered * eff_fb;
+            self.tap_state[i].fb_state = patches_dsp::flush_denormal(fb_filtered * eff_fb);
         }
 
         let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);

@@ -10,6 +10,14 @@ pub const BASE_PERIODIC_UPDATE_INTERVAL: u32 = 32;
 /// Alias for [`BASE_PERIODIC_UPDATE_INTERVAL`] retained for backwards compatibility.
 pub const COEFF_UPDATE_INTERVAL: u32 = BASE_PERIODIC_UPDATE_INTERVAL;
 
+/// Per-sample MIDI event capacity for the block-rate scratch frame
+/// (ADR 0069). Equal to [`frames::MidiFrame::MAX_EVENTS`] — that is the
+/// hard cap on events that can be packed into a single sample's
+/// `GLOBAL_MIDI` poly slot. The scratch's spill-into-next-row policy
+/// pushes deeper bursts onto subsequent samples rather than dropping
+/// them.
+pub const MAX_EVENTS_PER_SAMPLE: usize = frames::MidiFrame::MAX_EVENTS;
+
 /// Maximum number of observation backplane slots (ADR 0053 §4, raised
 /// from 32 to 64 by ADR 0059 §5).
 ///
@@ -102,6 +110,7 @@ pub mod diagnostics;
 pub mod cables;
 pub mod frames;
 pub mod graphs;
+pub mod host_control;
 pub mod midi;
 pub mod midi_io;
 pub mod modules;
@@ -125,6 +134,9 @@ pub use cables::{CableKind, CableMap, CableValue, InputPort, MonoInput, MonoLayo
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};
 pub use frames::{TransportFrame, MidiFrame};
 pub use graphs::{GraphError, ModuleGraph, Node, NodeId};
+pub use host_control::{
+    HostControlEvent, HostControlForAudio, HostControlLaneKind, HostControlPlanMeta,
+};
 pub use midi::{MidiEvent, MidiMessage};
 pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::QName;
@@ -145,5 +157,6 @@ pub use diagnostics::{format_provenance, format_span};
 pub use cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
-    HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_HOST_CONTROLS, TAP_BASE, TAP_SLOTS,
+    HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_HOST_CONTROL_BLOCK,
+    MAX_HOST_CONTROLS, TAP_BASE, TAP_SLOTS,
 };

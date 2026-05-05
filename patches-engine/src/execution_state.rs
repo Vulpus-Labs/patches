@@ -600,7 +600,7 @@ mod tests {
     }
 
     fn make_buf_pool(size: usize) -> Vec<[CableValue; 2]> {
-        vec![[CableValue::Mono(0.0); 2]; size]
+        vec![[CableValue::mono(0.0); 2]; size]
     }
 
     // ── Tests ────────────────────────────────────────────────────────────────
@@ -688,7 +688,7 @@ mod tests {
         }
 
         assert!(
-            matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 0.5).abs() < 1e-12),
+            (bufs[RESERVED_SLOTS][0].as_mono() - 0.5).abs() < 1e-12,
             "module should have written 0.5 to the cable slot"
         );
     }
@@ -719,7 +719,7 @@ mod tests {
         }
 
         assert!(
-            matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 2.0).abs() < 1e-12),
+            (bufs[RESERVED_SLOTS][0].as_mono() - 2.0).abs() < 1e-12,
             "new module should have written 2.0"
         );
     }

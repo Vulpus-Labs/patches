@@ -61,7 +61,7 @@ fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
 }
 
 fn make_buffer_pool() -> Vec<[CableValue; 2]> {
-    (0..POOL_CAP).map(|_| [CableValue::Mono(0.0), CableValue::Mono(0.0)]).collect()
+    (0..POOL_CAP).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
 }
 
 /// Resolve pool index from planner state: `module_alloc.pool_map[instance_id]`.
@@ -352,10 +352,7 @@ fn oscillator_phase_continuous_across_parameter_replan() {
         state.tick(&mut cable_pool);
     }
     let last_wi = (TICKS - 1) % 2;
-    let pre_replan = match bufs[AUDIO_OUT_L][last_wi] {
-        CableValue::Mono(v) => v,
-        _ => panic!("AUDIO_OUT_L must be Mono"),
-    };
+    let pre_replan = bufs[AUDIO_OUT_L][last_wi].as_mono();
     assert!(
         pre_replan.abs() > 0.1,
         "test premise: pre-replan sample should be well above zero, got {pre_replan}"
@@ -376,10 +373,7 @@ fn oscillator_phase_continuous_across_parameter_replan() {
         let mut cable_pool = CablePool::new(&mut bufs, next_wi);
         state.tick(&mut cable_pool);
     }
-    let post_replan = match bufs[AUDIO_OUT_L][next_wi] {
-        CableValue::Mono(v) => v,
-        _ => panic!("AUDIO_OUT_L must be Mono"),
-    };
+    let post_replan = bufs[AUDIO_OUT_L][next_wi].as_mono();
     // Phase continuity: the jump must be small relative to the pre-replan
     // magnitude. A reset would land near 0, producing a large jump.
     let jump = (post_replan - pre_replan).abs();
@@ -415,7 +409,7 @@ fn initial_plan_uses_provided_sample_rate() {
     }
 
     // Last tick was i=2, wi = 2 % 2 = 0. AudioOut wrote to AUDIO_OUT_L[0].
-    let out_val = match bufs[AUDIO_OUT_L][0] { CableValue::Mono(v) => v, _ => 0.0 };
+    let out_val = bufs[AUDIO_OUT_L][0].as_mono();
     assert!(out_val.is_finite(), "audio output must be finite");
     assert!(out_val.abs() <= 1.0, "audio output must be bounded");
 }

@@ -59,28 +59,16 @@ impl<'a> CablePool<'a> {
     }
 
     #[inline(always)]
-    /// Read a mono value from `input`, applying `input.scale`. Reads the **read slot** (`1 - wi`).
-    ///
-    /// # Panics
-    /// Panics (via `unreachable!`) if the pool slot holds a `Poly` value —
-    /// a well-formed graph never produces this.
+    /// Read a mono value from `input`, applying `input.scale`. Reads the
+    /// **read slot** (`1 - wi`). Lanes outside lane 0 are unspecified
+    /// for a Mono cable per ADR 0068.
     pub fn read_mono(&self, input: &MonoInput) -> f32 {
         let ri = 1 - self.wi;
-        match self.pool[input.cable_idx][ri] {
-            CableValue::Mono(v) => {
-                let y = v * input.scale + input.offset;
-                match input.clip {
-                    Some((lo, hi)) => y.clamp(lo, hi),
-                    None => y,
-                }
-            }
-            CableValue::Poly(_) => {
-                debug_assert!(
-                    false,
-                    "CablePool::read_mono encountered a Poly cable — graph validation should prevent this"
-                );
-                0.0
-            }
+        let v = self.pool[input.cable_idx][ri].as_mono();
+        let y = v * input.scale + input.offset;
+        match input.clip {
+            Some((lo, hi)) => y.clamp(lo, hi),
+            None => y,
         }
     }
 
@@ -92,30 +80,17 @@ impl<'a> CablePool<'a> {
     /// multiply in the common case.  Scale values are set from DSL-parsed literals
     /// or default constants — never accumulated arithmetic — so the value is
     /// exactly `1.0_f32` when unscaled.
-    ///
-    /// # Panics
-    /// Panics (via `unreachable!`) if the pool slot holds a `Mono` value.
     pub fn read_poly(&self, input: &PolyInput) -> [f32; 16] {
         let ri = 1 - self.wi;
-        match self.pool[input.cable_idx][ri] {
-            CableValue::Poly(channels) => {
-                if input.scale == 1.0 && input.offset == 0.0 && input.clip.is_none() {
-                    channels
-                } else {
-                    let scale = input.scale;
-                    let offset = input.offset;
-                    match input.clip {
-                        Some((lo, hi)) => channels.map(|v| (v * scale + offset).clamp(lo, hi)),
-                        None => channels.map(|v| v * scale + offset),
-                    }
-                }
-            }
-            CableValue::Mono(_) => {
-                debug_assert!(
-                    false,
-                    "CablePool::read_poly encountered a Mono cable — graph validation should prevent this"
-                );
-                [0.0; 16]
+        let channels = self.pool[input.cable_idx][ri].as_poly();
+        if input.scale == 1.0 && input.offset == 0.0 && input.clip.is_none() {
+            channels
+        } else {
+            let scale = input.scale;
+            let offset = input.offset;
+            match input.clip {
+                Some((lo, hi)) => channels.map(|v: f32| (v * scale + offset).clamp(lo, hi)),
+                None => channels.map(|v: f32| v * scale + offset),
             }
         }
     }
@@ -123,23 +98,23 @@ impl<'a> CablePool<'a> {
     #[inline(always)]
     /// Write a mono `value` to `output`. Writes to the **write slot** (`wi`).
     pub fn write_mono(&mut self, output: &MonoOutput, value: f32) {
-        self.pool[output.cable_idx][self.wi] = CableValue::Mono(value);
+        self.pool[output.cable_idx][self.wi] = CableValue::mono(value);
     }
 
     #[inline(always)]
     /// Write a 16-channel poly `value` to `output`. Writes to the **write slot** (`wi`).
     pub fn write_poly(&mut self, output: &PolyOutput, value: [f32; 16]) {
-        self.pool[output.cable_idx][self.wi] = CableValue::Poly(value);
+        self.pool[output.cable_idx][self.wi] = CableValue::poly(value);
     }
 
     #[inline(always)]
     /// Read a stereo `(L, R)` pair from `input`, applying `input.scale`.
     /// Reads the **read slot** (`1 - wi`).
     ///
-    /// When `input.broadcast_from_mono` is set the underlying slot may be
-    /// `CableValue::Mono` (produced by a mono source feeding a stereo input,
-    /// ADR 0059 §2); the sample is replicated as `(s, s)`. Otherwise the slot
-    /// is `CableValue::Poly` and lanes 0/1 are returned.
+    /// When `input.broadcast_from_mono` is set the underlying slot is
+    /// produced by a mono source feeding a stereo input (ADR 0059 §2);
+    /// lane 0 is replicated as `(s, s)`. Otherwise lanes 0 and 1 are
+    /// returned as `(L, R)`.
     pub fn read_stereo(&self, input: &StereoInput) -> StereoSample {
         let ri = 1 - self.wi;
         let apply = |v: f32| {
@@ -149,27 +124,13 @@ impl<'a> CablePool<'a> {
                 None => y,
             }
         };
-        match self.pool[input.cable_idx][ri] {
-            CableValue::Poly(channels) => {
-                if input.broadcast_from_mono {
-                    let s = apply(channels[0]);
-                    (s, s)
-                } else {
-                    (apply(channels[0]), apply(channels[1]))
-                }
-            }
-            CableValue::Mono(v) => {
-                if input.broadcast_from_mono {
-                    let s = apply(v);
-                    (s, s)
-                } else {
-                    debug_assert!(
-                        false,
-                        "CablePool::read_stereo encountered a Mono cable without broadcast — graph validation should prevent this"
-                    );
-                    (0.0, 0.0)
-                }
-            }
+        let slot = self.pool[input.cable_idx][ri];
+        if input.broadcast_from_mono {
+            let s = apply(slot.as_mono());
+            (s, s)
+        } else {
+            let (l, r) = slot.as_stereo();
+            (apply(l), apply(r))
         }
     }
 
@@ -180,7 +141,7 @@ impl<'a> CablePool<'a> {
         let mut frame = [0.0_f32; 16];
         frame[0] = left;
         frame[1] = right;
-        self.pool[output.cable_idx][self.wi] = CableValue::Poly(frame);
+        self.pool[output.cable_idx][self.wi] = CableValue::poly(frame);
     }
 }
 
@@ -194,7 +155,7 @@ mod tests {
 
     #[test]
     fn read_mono_applies_scale() {
-        let mut pool = make_pool(&[CableValue::Mono(4.0)]);
+        let mut pool = make_pool(&[CableValue::mono(4.0)]);
         // wi = 0, so ri = 1; both slots seeded with same value
         let cp = CablePool::new(&mut pool, 0);
         let input = MonoInput::scalar(0, 0.5);
@@ -204,7 +165,7 @@ mod tests {
     #[test]
     fn read_poly_applies_scale_to_all_channels() {
         let channels: [f32; 16] = std::array::from_fn(|i| i as f32);
-        let mut pool = make_pool(&[CableValue::Poly(channels)]);
+        let mut pool = make_pool(&[CableValue::poly(channels)]);
         let cp = CablePool::new(&mut pool, 0);
         let input = PolyInput::scalar(0, 2.0);
         let result = cp.read_poly(&input);
@@ -213,53 +174,27 @@ mod tests {
         }
     }
 
-    #[cfg(not(debug_assertions))]
-    #[test]
-    fn read_mono_kind_mismatch_returns_zero() {
-        // Slot holds Poly but MonoInput tries to read it — should return 0.0, not panic
-        let mut pool = vec![[CableValue::Poly([1.0; 16]); 2]];
-        let cp = CablePool::new(&mut pool, 0);
-        let input = MonoInput::scalar(0, 1.0);
-        assert_eq!(cp.read_mono(&input), 0.0);
-    }
-
-    #[cfg(not(debug_assertions))]
-    #[test]
-    fn read_poly_kind_mismatch_returns_zero() {
-        // Slot holds Mono but PolyInput tries to read it — should return [0.0;16], not panic
-        let mut pool = vec![[CableValue::Mono(1.0); 2]];
-        let cp = CablePool::new(&mut pool, 0);
-        let input = PolyInput::scalar(0, 1.0);
-        assert_eq!(cp.read_poly(&input), [0.0f32; 16]);
-    }
-
     #[test]
     fn write_mono_stores_at_write_index() {
-        let mut pool = vec![[CableValue::Mono(0.0); 2]];
+        let mut pool = vec![[CableValue::mono(0.0); 2]];
         {
             let mut cp = CablePool::new(&mut pool, 1);
             let output = MonoOutput { cable_idx: 0, connected: true };
             cp.write_mono(&output, 2.5);
         }
-        match pool[0][1] {
-            CableValue::Mono(v) => assert_eq!(v, 2.5),
-            _ => panic!("expected CableValue::Mono at write index"),
-        }
+        assert_eq!(pool[0][1].as_mono(), 2.5);
     }
 
     #[test]
     fn write_poly_stores_at_write_index() {
-        let mut pool = vec![[CableValue::Poly([0.0; 16]); 2]];
+        let mut pool = vec![[CableValue::poly([0.0; 16]); 2]];
         let data: [f32; 16] = std::array::from_fn(|i| i as f32 * 0.1);
         {
             let mut cp = CablePool::new(&mut pool, 0);
             let output = PolyOutput { cable_idx: 0, connected: true };
             cp.write_poly(&output, data);
         }
-        match pool[0][0] {
-            CableValue::Poly(channels) => assert_eq!(channels, data),
-            _ => panic!("expected CableValue::Poly at write index"),
-        }
+        assert_eq!(pool[0][0].as_poly(), data);
     }
 
     // ── T-0241: Ping-pong 1-sample-delay invariant ──────────────────────────
@@ -268,7 +203,7 @@ mod tests {
     /// read at tick N+1 returns the written value.
     #[test]
     fn ping_pong_one_sample_delay_mono() {
-        let mut pool = vec![[CableValue::Mono(0.0); 2]];
+        let mut pool = vec![[CableValue::mono(0.0); 2]];
         let output = MonoOutput { cable_idx: 0, connected: true };
         let input = MonoInput::scalar(0, 1.0);
 
@@ -295,7 +230,7 @@ mod tests {
     #[test]
     fn ping_pong_within_tick_isolation() {
         // Seed read slot (index 1) with 10.0.
-        let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(10.0)]];
+        let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(10.0)]];
         let output = MonoOutput { cable_idx: 0, connected: true };
         let input = MonoInput::scalar(0, 1.0);
 
@@ -313,7 +248,7 @@ mod tests {
     /// Scale is applied at read time, not write time.
     #[test]
     fn scale_applied_at_read_time() {
-        let mut pool = vec![[CableValue::Mono(0.0), CableValue::Mono(8.0)]];
+        let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(8.0)]];
         let input_scaled = MonoInput::scalar(0, 0.25);
 
         let cp = CablePool::new(&mut pool, 0);
@@ -326,7 +261,7 @@ mod tests {
     #[test]
     fn poly_scale_one_fast_path_matches_general() {
         let channels: [f32; 16] = std::array::from_fn(|i| (i as f32 + 1.0) * 3.0);
-        let mut pool = vec![[CableValue::Poly([0.0; 16]), CableValue::Poly(channels)]];
+        let mut pool = vec![[CableValue::poly([0.0; 16]), CableValue::poly(channels)]];
 
         let input_unit = PolyInput::scalar(0, 1.0);
         let input_general = PolyInput::scalar(0, 1.0000001);
@@ -351,7 +286,7 @@ mod tests {
     #[test]
     fn ping_pong_one_sample_delay_poly() {
         let data: [f32; 16] = std::array::from_fn(|i| i as f32);
-        let mut pool = vec![[CableValue::Poly([0.0; 16]); 2]];
+        let mut pool = vec![[CableValue::poly([0.0; 16]); 2]];
         let output = PolyOutput { cable_idx: 0, connected: true };
         let input = PolyInput::scalar(0, 0.5);
 

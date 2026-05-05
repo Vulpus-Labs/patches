@@ -7,10 +7,10 @@
 //! exception is the mono→stereo broadcast coercion (ADR 0059 §2). When the
 //! planner observes a mono Audio source feeding a stereo input it sets
 //! [`StereoInput::broadcast_from_mono`], leaves `cable_idx` pointing at the
-//! producer's mono slot, and the consumer's `read()` returns `(s, s)` from
-//! the underlying [`CableValue::Mono`] sample. No synthetic broadcaster
-//! module, no extra audio-thread work, and `CableValue` keeps its two
-//! variants — only the consuming port reinterprets.
+//! producer's mono slot, and the consumer's `read()` returns `(s, s)` by
+//! replicating lane 0. No synthetic broadcaster module, no extra audio-
+//! thread work; `CableValue` is a fixed `[f32; 16]` (ADR 0068) and the
+//! consuming port reinterprets the prefix it cares about.
 
 mod gate;
 mod mono;
@@ -66,13 +66,13 @@ impl Default for CableMap {
 /// Buffer pool index of the permanent mono read-null slot.
 ///
 /// Disconnected [`MonoInput`] ports resolve to this slot. Always
-/// `CableValue::Mono(0.0)`; never written by any module or the planner.
+/// `CableValue::mono(0.0)`; never written by any module or the planner.
 pub const MONO_READ_SINK: usize = 0;
 
 /// Buffer pool index of the permanent poly read-null slot.
 ///
 /// Disconnected [`PolyInput`] ports resolve to this slot. Always
-/// `CableValue::Poly([0.0; 16])`; never written by any module or the planner.
+/// `CableValue::poly([0.0; 16])`; never written by any module or the planner.
 pub const POLY_READ_SINK: usize = 1;
 
 /// Buffer pool index of the mono write-sink slot.
@@ -161,12 +161,19 @@ pub const TAP_SLOTS: usize = 4;
 pub const HOST_CONTROL_BASE: usize = TAP_BASE + TAP_SLOTS;
 
 /// Number of `Poly` slots reserved for host-control values. Each slot
-/// holds 16 f32 lanes; two slots gives [`MAX_HOST_CONTROLS`] = 32.
-pub const HOST_CONTROL_SLOTS: usize = 2;
+/// holds 16 f32 lanes; four slots gives [`MAX_HOST_CONTROLS`] = 64
+/// (ADR 0068).
+pub const HOST_CONTROL_SLOTS: usize = 4;
 
 /// Maximum number of host-control signals (ADR 0057). One per declared
 /// `knob` / `slider` / `toggle` / `trigger` block.
 pub const MAX_HOST_CONTROLS: usize = HOST_CONTROL_SLOTS * 16;
+
+/// Hard upper bound on host audio block size used when sizing the
+/// per-block host-control scratch + frame buffers (ADR 0068 §2 /
+/// ticket 0816). Hosts that submit larger blocks must split internally;
+/// 2048 is well above typical CLAP host buffer sizes (commonly 64–512).
+pub const MAX_HOST_CONTROL_BLOCK: usize = 2048;
 
 /// Number of buffer pool slots reserved for infrastructure
 /// (sinks + global I/O + tap + host-control + spare). 32 is a
@@ -216,13 +223,84 @@ impl CableKind {
     }
 }
 
-/// A value carried by a cable. `Poly` holds exactly 16 channels; no heap
-/// allocation is required.
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub enum CableValue {
-    Mono(f32),
-    Poly([f32; 16]),
+/// A value carried by a cable. Always 16 lanes wide; the cable's
+/// declared kind (`Mono` / `Stereo` / `Poly`) tells reader and writer
+/// which prefix is meaningful (lane 0, lanes 0..2, all 16). Bytes
+/// outside the meaningful prefix are unspecified — modules must not
+/// read them.
+///
+/// The kind is statically known to every reader and writer from the
+/// connection descriptor, so we do not store a runtime tag (ADR 0068).
+/// Keeping all slots fixed at 16 lanes lets a slot used for Mono in
+/// one plan be repurposed as Poly in a later plan without
+/// reallocating the cable pool.
+///
+/// Constructors `mono` / `poly` / `stereo` zero-initialise the lanes
+/// outside the meaningful prefix; accessors `as_mono` / `as_stereo` /
+/// `as_poly` read only the prefix the caller's kind expects.
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(transparent)]
+pub struct CableValue(pub [f32; 16]);
+
+impl CableValue {
+    /// All-zero slot. Equivalent to `Self::mono(0.0)` /
+    /// `Self::poly([0.0; 16])`.
+    pub const ZERO: Self = Self([0.0; 16]);
+
+    /// Construct a Mono-shaped value: lane 0 is `v`, the rest are 0.
+    #[inline(always)]
+    pub const fn mono(v: f32) -> Self {
+        let mut a = [0.0; 16];
+        a[0] = v;
+        Self(a)
+    }
+
+    /// Construct a Poly-shaped value over all 16 lanes.
+    #[inline(always)]
+    pub const fn poly(arr: [f32; 16]) -> Self {
+        Self(arr)
+    }
+
+    /// Construct a Stereo-shaped value: lane 0 = `left`, lane 1 =
+    /// `right`, the rest are 0.
+    #[inline(always)]
+    pub const fn stereo(left: f32, right: f32) -> Self {
+        let mut a = [0.0; 16];
+        a[0] = left;
+        a[1] = right;
+        Self(a)
+    }
+
+    /// Read the slot as a Mono value (lane 0).
+    #[inline(always)]
+    pub fn as_mono(self) -> f32 {
+        self.0[0]
+    }
+
+    /// Read the slot as a Poly value (all 16 lanes).
+    #[inline(always)]
+    pub fn as_poly(self) -> [f32; 16] {
+        self.0
+    }
+
+    /// Read the slot as a Stereo `(L, R)` pair (lanes 0 and 1).
+    #[inline(always)]
+    pub fn as_stereo(self) -> (f32, f32) {
+        (self.0[0], self.0[1])
+    }
+
+    /// Borrow the underlying lanes for batched reads/writes (e.g. the
+    /// host-control scratch-buffer `memcpy` path).
+    #[inline(always)]
+    pub fn as_array(&self) -> &[f32; 16] {
+        &self.0
+    }
+
+    /// Mutably borrow the underlying lanes.
+    #[inline(always)]
+    pub fn as_array_mut(&mut self) -> &mut [f32; 16] {
+        &mut self.0
+    }
 }
 
 #[cfg(test)]

@@ -26,6 +26,11 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::expand::ExpandError;
+use crate::host_control_manifest::{
+    HostControlDescriptor, HostControlKind as ManifestKind, HostControlManifest,
+    HostControlParamMap, HostControlParamValue,
+};
+use crate::provenance::Provenance;
 use crate::structural::StructuralCode as Code;
 
 /// Synthesised host-control module instance name.
@@ -51,7 +56,9 @@ fn out_port(kind: HostControlKind) -> &'static str {
 ///
 /// If the patch contains no host-control declarations, returns the file
 /// unchanged (and rejects any stray bare-name reference).
-pub fn desugar_host_controls(file: &File) -> Result<File, ExpandError> {
+pub fn desugar_host_controls(
+    file: &File,
+) -> Result<(File, HostControlManifest), ExpandError> {
     // 1. Collect declarations from the patch body.
     let mut decls: Vec<&HostControlBlock> = file
         .patch
@@ -65,7 +72,7 @@ pub fn desugar_host_controls(file: &File) -> Result<File, ExpandError> {
 
     if decls.is_empty() {
         reject_unresolved_refs(file, &HashMap::new())?;
-        return Ok(file.clone());
+        return Ok((file.clone(), Vec::new()));
     }
 
     // 2. Sort alphabetically by control name (ADR 0057 §3). Slot offset
@@ -94,15 +101,42 @@ pub fn desugar_host_controls(file: &File) -> Result<File, ExpandError> {
         }
     }
 
-    Ok(File {
-        includes: file.includes.clone(),
-        templates: file.templates.clone(),
-        patterns: file.patterns.clone(),
-        songs: file.songs.clone(),
-        sections: file.sections.clone(),
-        patch: Patch { body: new_body, span: file.patch.span },
-        span: file.span,
-    })
+    let manifest = build_manifest(&decls);
+
+    Ok((
+        File {
+            includes: file.includes.clone(),
+            templates: file.templates.clone(),
+            patterns: file.patterns.clone(),
+            songs: file.songs.clone(),
+            sections: file.sections.clone(),
+            patch: Patch { body: new_body, span: file.patch.span },
+            span: file.span,
+        },
+        manifest,
+    ))
+}
+
+/// Build a [`HostControlManifest`] from the (already alphabetically
+/// sorted) declarations. Slot equals the index in the sorted list.
+fn build_manifest(decls: &[&HostControlBlock]) -> HostControlManifest {
+    decls
+        .iter()
+        .enumerate()
+        .map(|(slot, hc)| {
+            let mut params: HostControlParamMap = HostControlParamMap::new();
+            for f in &hc.fields {
+                params.insert(f.name.name.clone(), HostControlParamValue::from_value(&f.value));
+            }
+            HostControlDescriptor {
+                slot,
+                name: hc.name.name.clone(),
+                kind: ManifestKind::from_ast(hc.kind),
+                params,
+                source: Provenance::root(hc.span),
+            }
+        })
+        .collect()
 }
 
 fn reject_unresolved_refs(

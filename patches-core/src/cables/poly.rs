@@ -89,24 +89,14 @@ impl PolyInput {
     ///
     /// # Panics
     /// Panics (via `unreachable!`) in debug builds if the pool slot holds a
-    /// `CableValue::Mono` value — a well-formed graph never produces this.
+    /// (No kind tag — `CableValue` is `[f32; 16]` per ADR 0068.)
     pub fn read(&self, pool: &[CableValue]) -> [f32; 16] {
-        match pool[self.cable_idx] {
-            CableValue::Poly(channels) => {
-                let scale = self.scale;
-                let offset = self.offset;
-                match self.clip {
-                    Some((lo, hi)) => channels.map(|v| (v * scale + offset).clamp(lo, hi)),
-                    None => channels.map(|v| v * scale + offset),
-                }
-            }
-            CableValue::Mono(_) => {
-                debug_assert!(
-                    false,
-                    "PolyInput::read encountered a Mono cable — graph validation should prevent this"
-                );
-                [0.0; 16]
-            }
+        let channels = pool[self.cable_idx].as_poly();
+        let scale = self.scale;
+        let offset = self.offset;
+        match self.clip {
+            Some((lo, hi)) => channels.map(|v: f32| (v * scale + offset).clamp(lo, hi)),
+            None => channels.map(|v: f32| v * scale + offset),
         }
     }
 }
@@ -147,6 +137,6 @@ impl PolyOutput {
 
     /// Write a 16-channel `value` into `pool` at `self.cable_idx`.
     pub fn write(&self, pool: &mut [CableValue], value: [f32; 16]) {
-        pool[self.cable_idx] = CableValue::Poly(value);
+        pool[self.cable_idx] = CableValue::poly(value);
     }
 }

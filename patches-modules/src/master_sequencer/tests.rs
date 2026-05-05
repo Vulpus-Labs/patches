@@ -155,7 +155,7 @@ fn host_sync_poly_bus_encoding_on_first_tick() {
     lanes[TransportFrame::BEAT] = 0.0;
     lanes[TransportFrame::TSIG_NUM] = 4.0;
     lanes[TransportFrame::TSIG_DENOM] = 4.0;
-    h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+    h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::poly(lanes));
     h.tick();
 
     let bus = h.read_poly("clock");
@@ -222,7 +222,7 @@ fn stop_sentinel_poly_encoding() {
     lanes[TransportFrame::BEAT] = 8.0;
     lanes[TransportFrame::TSIG_NUM] = 4.0;
     lanes[TransportFrame::TSIG_DENOM] = 4.0;
-    h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::Poly(lanes));
+    h.set_pool_slot(GLOBAL_TRANSPORT, CableValue::poly(lanes));
     h.tick();
 
     let bus = h.read_poly("clock");

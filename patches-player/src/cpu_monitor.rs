@@ -1,7 +1,7 @@
 //! CPU-monitor observer thread for `patches-player` (ADR 0065 / ticket 0780).
 //!
 //! Drains [`MonitorMessage`]s off the audio-thread SPSC, rebuilds slot →
-//! (name, type) tables on `PlanMeta`, and aggregates per-slot rolling
+//! (name, type) tables on `MonitorMeta`, and aggregates per-slot rolling
 //! estimates of CPU cost as a fraction of block budget. The TUI reads a
 //! [`CpuSnapshot`] under a short mutex hold per draw.
 
@@ -204,7 +204,7 @@ pub fn spawn_cpu_monitor(
             let mut drained = 0;
             while let Ok(msg) = rx.pop() {
                 match msg {
-                    MonitorMessage::PlanMeta(meta) => {
+                    MonitorMessage::MonitorMeta(meta) => {
                         let m = *meta;
                         state.ingest_meta(m.names, m.types);
                     }

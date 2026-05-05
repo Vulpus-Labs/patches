@@ -340,7 +340,7 @@ mod tests {
     fn disconnected_outputs_not_written() {
         let mut h = ModuleHarness::build_with_env::<Noise>(&[], env());
         h.disconnect_all_outputs();
-        h.init_pool(CableValue::Mono(99.0));
+        h.init_pool(CableValue::mono(99.0));
         h.tick();
         for name in &["white", "pink", "brown", "red"] {
             assert_eq!(
@@ -373,7 +373,7 @@ mod tests {
     fn poly_disconnected_outputs_not_written() {
         let mut h = ModuleHarness::build_with_env::<PolyNoise>(&[], env());
         h.disconnect_all_outputs();
-        h.init_pool(CableValue::Poly([99.0; 16]));
+        h.init_pool(CableValue::poly([99.0; 16]));
         h.tick();
         for name in &["white", "pink", "brown", "red"] {
             let out = h.read_poly(name);

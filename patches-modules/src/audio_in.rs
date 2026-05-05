@@ -96,8 +96,8 @@ mod tests {
     #[test]
     fn process_reads_from_backplane_slots() {
         let mut h = ModuleHarness::build::<AudioIn>(&[]);
-        h.set_pool_slot(AUDIO_IN_L, CableValue::Mono(0.42));
-        h.set_pool_slot(AUDIO_IN_R, CableValue::Mono(-0.7));
+        h.set_pool_slot(AUDIO_IN_L, CableValue::mono(0.42));
+        h.set_pool_slot(AUDIO_IN_R, CableValue::mono(-0.7));
         h.tick();
 
         let (l, r) = h.read_stereo("out");

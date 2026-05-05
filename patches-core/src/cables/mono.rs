@@ -78,25 +78,14 @@ impl MonoInput {
 
     /// Read the current value from `pool`, applying `self.scale`.
     ///
-    /// # Panics
-    /// Panics (via `unreachable!`) in debug builds if the pool slot holds a
-    /// `CableValue::Poly` value — a well-formed graph never produces this.
+    /// Reads lane 0 of the slot. Bytes outside lane 0 are unspecified
+    /// for a Mono cable and must not be inspected.
     pub fn read(&self, pool: &[CableValue]) -> f32 {
-        match pool[self.cable_idx] {
-            CableValue::Mono(v) => {
-                let y = v * self.scale + self.offset;
-                match self.clip {
-                    Some((lo, hi)) => y.clamp(lo, hi),
-                    None => y,
-                }
-            }
-            CableValue::Poly(_) => {
-                debug_assert!(
-                    false,
-                    "MonoInput::read encountered a Poly cable — graph validation should prevent this"
-                );
-                0.0
-            }
+        let v = pool[self.cable_idx].as_mono();
+        let y = v * self.scale + self.offset;
+        match self.clip {
+            Some((lo, hi)) => y.clamp(lo, hi),
+            None => y,
         }
     }
 }
@@ -130,6 +119,6 @@ impl MonoOutput {
 
     /// Write `value` into `pool` at `self.cable_idx`.
     pub fn write(&self, pool: &mut [CableValue], value: f32) {
-        pool[self.cable_idx] = CableValue::Mono(value);
+        pool[self.cable_idx] = CableValue::mono(value);
     }
 }

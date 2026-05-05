@@ -64,7 +64,7 @@ impl Chain {
         let bbd_out = self.bbd.process(compressed);
         let expanded = self.exp.process(bbd_out);
         let wet = self.recon.process(expanded);
-        self.fb_state = wet;
+        self.fb_state = patches_dsp::flush_denormal(wet);
         let dry_lf = if lf_bypass { lf } else { 0.0 };
         dry_lf + (1.0 - mix) * hf + mix * wet
     }

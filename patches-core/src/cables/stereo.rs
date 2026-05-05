@@ -4,7 +4,7 @@ use super::{CableValue, POLY_READ_SINK, POLY_WRITE_SINK};
 /// A pair of `f32` samples carried by a stereo cable: `(left, right)`.
 pub type StereoSample = (f32, f32);
 
-/// A stereo input port. Backed by [`CableValue::Poly`] storage; only lanes
+/// A stereo input port. Backed by a `[f32; 16]` cable slot; only lanes
 /// 0 (`L`) and 1 (`R`) are read.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StereoInput {
@@ -74,32 +74,18 @@ impl StereoInput {
                 None => y,
             }
         };
-        match pool[self.cable_idx] {
-            CableValue::Poly(channels) => {
-                if self.broadcast_from_mono {
-                    let s = apply(channels[0]);
-                    (s, s)
-                } else {
-                    (apply(channels[0]), apply(channels[1]))
-                }
-            }
-            CableValue::Mono(v) => {
-                if self.broadcast_from_mono {
-                    let s = apply(v);
-                    (s, s)
-                } else {
-                    debug_assert!(
-                        false,
-                        "StereoInput::read encountered a Mono cable without broadcast — graph validation should prevent this"
-                    );
-                    (0.0, 0.0)
-                }
-            }
+        let slot = pool[self.cable_idx];
+        if self.broadcast_from_mono {
+            let s = apply(slot.as_mono());
+            (s, s)
+        } else {
+            let (l, r) = slot.as_stereo();
+            (apply(l), apply(r))
         }
     }
 }
 
-/// A stereo output port. Writes to a [`CableValue::Poly`] slot, populating
+/// A stereo output port. Writes to a `[f32; 16]` cable slot, populating
 /// lanes 0 (`L`) and 1 (`R`); other lanes are zeroed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StereoOutput {
@@ -133,6 +119,6 @@ impl StereoOutput {
         let mut frame = [0.0_f32; 16];
         frame[0] = left;
         frame[1] = right;
-        pool[self.cable_idx] = CableValue::Poly(frame);
+        pool[self.cable_idx] = CableValue::poly(frame);
     }
 }

@@ -76,6 +76,10 @@ pub struct ExpandResult {
     pub patch: FlatPatch,
     pub warnings: Vec<Warning>,
     pub manifest: crate::manifest::Manifest,
+    /// Host-control manifest emitted by the host-control desugarer
+    /// (ADR 0057 §5, ticket 0810). Empty when the patch declares no
+    /// host controls.
+    pub host_control_manifest: crate::host_control_manifest::HostControlManifest,
 }
 
 pub(super) fn param_type_name(ty: &ParamType) -> &'static str {

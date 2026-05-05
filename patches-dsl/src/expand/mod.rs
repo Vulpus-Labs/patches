@@ -80,7 +80,8 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     // toggle / trigger declarations, synthesise one `~host_control`
     // and / or `~host_control_trigger` instance, and rewrite bare-name
     // references onto them.
-    let rewritten = crate::host_control_desugar::desugar_host_controls(&rewritten)?;
+    let (rewritten, host_control_manifest) =
+        crate::host_control_desugar::desugar_host_controls(&rewritten)?;
     let file = &rewritten;
 
     let templates: HashMap<&str, &Template> =
@@ -137,6 +138,7 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
         },
         warnings: vec![],
         manifest,
+        host_control_manifest,
     })
 }
 

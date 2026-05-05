@@ -4,7 +4,7 @@ use std::sync::Arc;
 use patches_core::{AudioEnvironment, InstanceId, ModuleGraph, NodeId};
 use patches_registry::Registry;
 
-use crate::builder::{BuildError, ExecutionPlan, PatchBuilder, PlanMeta};
+use crate::builder::{BuildError, ExecutionPlan, PatchBuilder, MonitorMeta};
 use crate::state::PlannerState;
 
 /// Default module pool capacity.
@@ -106,7 +106,7 @@ impl Planner {
     }
 
     /// Like [`build_with_tracker_data`](Self::build_with_tracker_data) but also
-    /// returns [`PlanMeta`] when monitoring is enabled via
+    /// returns [`MonitorMeta`] when monitoring is enabled via
     /// [`set_monitor`](Self::set_monitor). When disabled, meta is `None`.
     pub fn build_with_tracker_data_and_meta(
         &mut self,
@@ -114,11 +114,11 @@ impl Planner {
         registry: &Registry,
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
-    ) -> Result<(ExecutionPlan, Option<PlanMeta>), BuildError> {
+    ) -> Result<(ExecutionPlan, Option<MonitorMeta>), BuildError> {
         self.build_full(graph, registry, env, tracker_data)
     }
 
-    /// Toggle production of [`PlanMeta`] alongside each plan.
+    /// Toggle production of [`MonitorMeta`] alongside each plan.
     pub fn set_monitor(&mut self, enabled: bool) {
         self.builder.monitor_enabled = enabled;
     }
@@ -129,7 +129,7 @@ impl Planner {
         registry: &Registry,
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
-    ) -> Result<(ExecutionPlan, Option<PlanMeta>), BuildError> {
+    ) -> Result<(ExecutionPlan, Option<MonitorMeta>), BuildError> {
         let (mut plan, meta, new_state) = self.builder.build_patch_with_meta(
             graph,
             registry,

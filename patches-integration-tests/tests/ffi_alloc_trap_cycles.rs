@@ -56,8 +56,8 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
     }
 
     let mut pool = vec![
-        [CableValue::Mono(0.25); 2],
-        [CableValue::Mono(0.0); 2],
+        [CableValue::mono(0.25); 2],
+        [CableValue::mono(0.0); 2],
     ];
 
     // Warm-up outside the guard.

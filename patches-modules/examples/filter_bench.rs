@@ -33,9 +33,9 @@ const OUT3_SLOT: usize = 19;
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn make_pool() -> Vec<[CableValue; 2]> {
-    let mono_zero = CableValue::Mono(0.0);
-    let poly_zero = CableValue::Poly([0.0f32; 16]);
-    let signal    = CableValue::Poly([0.3f32; 16]);
+    let mono_zero = CableValue::mono(0.0);
+    let poly_zero = CableValue::poly([0.0f32; 16]);
+    let signal    = CableValue::poly([0.3f32; 16]);
 
     let mut pool = vec![[mono_zero; 2]; POOL_SIZE];
     // Reserved poly slots (MONO_READ_SINK=0 and MONO_WRITE_SINK=2 stay Mono(0.0))

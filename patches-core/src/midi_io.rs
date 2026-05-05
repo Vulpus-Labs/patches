@@ -215,12 +215,12 @@ mod tests {
     /// Write a MIDI frame to the GLOBAL_MIDI backplane slot at the given
     /// write index.
     fn set_midi_frame(pool: &mut [[CableValue; 2]], wi: usize, frame: [f32; 16]) {
-        pool[GLOBAL_MIDI][wi] = CableValue::Poly(frame);
+        pool[GLOBAL_MIDI][wi] = CableValue::poly(frame);
     }
 
     /// Minimal buffer pool for testing (just enough for backplane slots).
     fn test_pool() -> Box<[[CableValue; 2]]> {
-        vec![[CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])]; 16]
+        vec![[CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])]; 16]
             .into_boxed_slice()
     }
 

@@ -381,7 +381,7 @@ mod tests {
         let mut h = make_poly_osc(44100.0, 4);
         h.disconnect_all_outputs();
         // Seed pool with sentinel; any write by the oscillator will overwrite it.
-        h.init_pool(CableValue::Poly([99.0; 16]));
+        h.init_pool(CableValue::poly([99.0; 16]));
         h.tick();
         for name in &["sine", "triangle", "sawtooth", "square"] {
             let out = h.read_poly(name);

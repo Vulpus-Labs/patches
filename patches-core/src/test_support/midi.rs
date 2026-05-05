@@ -32,7 +32,7 @@ pub fn send_midi(h: &mut ModuleHarness, events: &[MidiEvent]) {
     for (i, &event) in events.iter().enumerate() {
         MidiFrame::write_event(&mut frame, i, event);
     }
-    h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
+    h.set_pool_slot(GLOBAL_MIDI, CableValue::poly(frame));
 }
 
 /// Simulate multi-sample MIDI delivery for a batch of events.
@@ -52,7 +52,7 @@ pub fn send_midi_batch(h: &mut ModuleHarness, events: &[MidiEvent]) {
         for (i, &event) in remaining.iter().enumerate().take(packed) {
             MidiFrame::write_event(&mut frame, i, event);
         }
-        h.set_pool_slot(GLOBAL_MIDI, CableValue::Poly(frame));
+        h.set_pool_slot(GLOBAL_MIDI, CableValue::poly(frame));
         h.tick();
         remaining = &remaining[packed..];
     }

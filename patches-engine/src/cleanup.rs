@@ -5,10 +5,10 @@
 //! for deallocation off the real-time path. The concrete cleanup-thread
 //! spawn lives in [`crate::kernel`].
 
-use patches_core::Module;
+use patches_core::{HostControlPlanMeta, Module};
 
 use patches_ffi_common::param_frame::ParamFrame;
-use patches_planner::{ExecutionPlan, ParamState, PlanMeta};
+use patches_planner::{ExecutionPlan, MonitorMeta, ParamState};
 
 /// Default module pool capacity: number of `Option<Box<dyn Module>>` slots
 /// pre-allocated on the audio thread.
@@ -39,9 +39,13 @@ pub enum CleanupAction {
     /// parameter update installs a newer frame. The old frame's `Vec<u64>`
     /// storage drops off-thread to keep the update path allocation-free.
     DropParamFrame(Box<ParamFrame>),
-    /// Slot-indexed monitor metadata (ADR 0065) routed off the audio thread
-    /// when the monitor channel is full or absent. The vectors inside hold
-    /// owned heap allocations (`Arc<str>`, `Vec<...>`) that must drop
-    /// off-thread.
-    DropPlanMeta(Box<PlanMeta>),
+    /// Slot-indexed monitor metadata (ADR 0065) routed off the audio
+    /// thread when the monitor channel is full or absent. The vectors
+    /// inside hold owned heap allocations (`Arc<str>`, `Vec<...>`) that
+    /// must drop off-thread.
+    DropMonitorMeta(Box<MonitorMeta>),
+    /// Audio-thread-bound host-control plan-side state (ticket 0817)
+    /// routed off-thread once the processor has consumed it. Holds an
+    /// owned `Vec<(u32, u8)>` and a fixed-size kinds array.
+    DropHostControlPlanMeta(Box<HostControlPlanMeta>),
 }

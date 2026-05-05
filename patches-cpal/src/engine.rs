@@ -6,9 +6,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 
 use patches_core::AudioEnvironment;
-use patches_planner::{ExecutionPlan, PlanMeta};
-
-type AdoptionMessage = (ExecutionPlan, Option<Box<PlanMeta>>);
+use patches_host::AdoptionMessage;
 use patches_engine::execution_state::SUB_BLOCK_SIZE;
 use patches_engine::midi::{AudioClock, EventQueueConsumer};
 use patches_engine::oversampling::OversamplingFactor;

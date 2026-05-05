@@ -73,7 +73,13 @@ impl<'a> Env for RatatuiEnv<'a> {
                     .iter()
                     .map(|w| format!("dsl warning: {w}"))
                     .collect();
-                Ok(CompileSuccess { taps, warnings })
+                Ok(CompileSuccess {
+                    taps,
+                    warnings,
+                    host_control_manifest: std::sync::Arc::new(
+                        loaded.host_control_manifest.clone(),
+                    ),
+                })
             }
             Err(e) => {
                 let view = DiagnosticView {

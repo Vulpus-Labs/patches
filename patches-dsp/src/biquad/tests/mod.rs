@@ -96,5 +96,6 @@ pub(super) fn nyquist_gain(b0: f32, b1: f32, b2: f32, a1: f32, a2: f32) -> f64 {
 }
 
 mod analog_prototypes;
+mod denormal_flush;
 mod frequency_response;
 mod poly;

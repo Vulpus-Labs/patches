@@ -442,7 +442,7 @@ mod tests {
         h.disconnect_all_outputs();
         // Seed the pool with a sentinel; if the oscillator writes despite
         // connected=false the sentinel will change.
-        h.init_pool(CableValue::Mono(99.0));
+        h.init_pool(CableValue::mono(99.0));
         h.tick();
         for name in &["sine", "triangle", "sawtooth", "square"] {
             assert_eq!(

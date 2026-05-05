@@ -2,11 +2,11 @@ use super::*;
 use crate::cable_pool::CablePool;
 
 fn mono_pool(value: f32) -> Vec<CableValue> {
-    vec![CableValue::Mono(value)]
+    vec![CableValue::mono(value)]
 }
 
 fn poly_pool(channels: [f32; 16]) -> Vec<CableValue> {
-    vec![CableValue::Poly(channels)]
+    vec![CableValue::poly(channels)]
 }
 
 // MonoInput::read --------------------------------------------------------
@@ -43,7 +43,7 @@ fn poly_input_read_applies_scale_to_all_channels() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn mono_input_kind_mismatch_returns_zero() {
-    let pool = vec![CableValue::Poly([1.0; 16])];
+    let pool = vec![CableValue::poly([1.0; 16])];
     let port = MonoInput::scalar(0, 1.0);
     assert_eq!(port.read(&pool), 0.0);
 }
@@ -51,7 +51,7 @@ fn mono_input_kind_mismatch_returns_zero() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn poly_input_kind_mismatch_returns_zero() {
-    let pool = vec![CableValue::Mono(1.0)];
+    let pool = vec![CableValue::mono(1.0)];
     let port = PolyInput::scalar(0, 1.0);
     assert_eq!(port.read(&pool), [0.0; 16]);
 }
@@ -76,25 +76,19 @@ fn is_connected_defaults_false_for_all_port_types() {
 
 #[test]
 fn mono_output_write_round_trip() {
-    let mut pool = vec![CableValue::Mono(0.0)];
+    let mut pool = vec![CableValue::mono(0.0)];
     let port = MonoOutput { cable_idx: 0, connected: true };
     port.write(&mut pool, 2.5);
-    match pool[0] {
-        CableValue::Mono(v) => assert_eq!(v, 2.5),
-        _ => panic!("expected CableValue::Mono"),
-    }
+    assert_eq!(pool[0].as_mono(), 2.5);
 }
 
 #[test]
 fn poly_output_write_round_trip() {
-    let mut pool = vec![CableValue::Poly([0.0; 16])];
+    let mut pool = vec![CableValue::poly([0.0; 16])];
     let port = PolyOutput { cable_idx: 0, connected: true };
     let data: [f32; 16] = std::array::from_fn(|i| i as f32 * 0.1);
     port.write(&mut pool, data);
-    match pool[0] {
-        CableValue::Poly(channels) => assert_eq!(channels, data),
-        _ => panic!("expected CableValue::Poly"),
-    }
+    assert_eq!(pool[0].as_poly(), data);
 }
 
 fn make_cable_pool(values: &[CableValue]) -> Vec<[CableValue; 2]> {
@@ -105,7 +99,7 @@ fn make_cable_pool(values: &[CableValue]) -> Vec<[CableValue; 2]> {
 
 #[test]
 fn gate_rising_and_falling_edges() {
-    let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+    let mut pool = make_cable_pool(&[CableValue::mono(0.0)]);
     let mut g = GateInput {
         inner: MonoInput::scalar(0, 1.0),
         ..Default::default()
@@ -121,7 +115,7 @@ fn gate_rising_and_falling_edges() {
     }
 
     // Go high → rising edge
-    pool[0] = [CableValue::Mono(1.0); 2];
+    pool[0] = [CableValue::mono(1.0); 2];
     {
         let cp = CablePool::new(&mut pool, 0);
         let e = g.tick(&cp);
@@ -140,7 +134,7 @@ fn gate_rising_and_falling_edges() {
     }
 
     // Go low → falling edge
-    pool[0] = [CableValue::Mono(0.0); 2];
+    pool[0] = [CableValue::mono(0.0); 2];
     {
         let cp = CablePool::new(&mut pool, 0);
         let e = g.tick(&cp);
@@ -154,7 +148,7 @@ fn gate_rising_and_falling_edges() {
 
 #[test]
 fn sub_trigger_zero_is_no_event() {
-    let mut pool = make_cable_pool(&[CableValue::Mono(0.0)]);
+    let mut pool = make_cable_pool(&[CableValue::mono(0.0)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(0, 1.0),
@@ -164,7 +158,7 @@ fn sub_trigger_zero_is_no_event() {
 
 #[test]
 fn sub_trigger_positive_is_event_with_frac() {
-    let mut pool = make_cable_pool(&[CableValue::Mono(0.37)]);
+    let mut pool = make_cable_pool(&[CableValue::mono(0.37)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(0, 1.0),
@@ -174,7 +168,7 @@ fn sub_trigger_positive_is_event_with_frac() {
 
 #[test]
 fn sub_trigger_one_is_boundary_event() {
-    let mut pool = make_cable_pool(&[CableValue::Mono(1.0)]);
+    let mut pool = make_cable_pool(&[CableValue::mono(1.0)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(0, 1.0),
@@ -187,7 +181,7 @@ fn poly_sub_trigger_per_voice() {
     let mut channels = [0.0f32; 16];
     channels[0] = 0.25;
     channels[5] = 0.9;
-    let mut pool = make_cable_pool(&[CableValue::Poly(channels)]);
+    let mut pool = make_cable_pool(&[CableValue::poly(channels)]);
     let cp = CablePool::new(&mut pool, 0);
     let t = PolyTriggerInput {
         inner: PolyInput::scalar(0, 1.0),
@@ -215,17 +209,13 @@ fn cable_kind_helpers() {
 
 #[test]
 fn stereo_output_writes_lr_to_poly_slot() {
-    let mut pool = vec![CableValue::Poly([0.0; 16])];
+    let mut pool = vec![CableValue::poly([0.0; 16])];
     let port = StereoOutput { cable_idx: 0, connected: true };
     port.write(&mut pool, 0.25, -0.5);
-    match pool[0] {
-        CableValue::Poly(channels) => {
-            assert_eq!(channels[0], 0.25);
-            assert_eq!(channels[1], -0.5);
-            assert_eq!(channels[2], 0.0);
-        }
-        _ => panic!("expected poly slot"),
-    }
+    let channels = pool[0].as_poly();
+    assert_eq!(channels[0], 0.25);
+    assert_eq!(channels[1], -0.5);
+    assert_eq!(channels[2], 0.0);
 }
 
 #[test]
@@ -233,14 +223,14 @@ fn stereo_input_reads_lr_with_scale() {
     let mut frame = [0.0f32; 16];
     frame[0] = 1.0;
     frame[1] = 2.0;
-    let pool = vec![CableValue::Poly(frame)];
+    let pool = vec![CableValue::poly(frame)];
     let port = StereoInput::scalar(0, 0.5);
     assert_eq!(port.read(&pool), (0.5, 1.0));
 }
 
 #[test]
 fn stereo_input_round_trip_through_output() {
-    let mut pool = vec![CableValue::Poly([0.0; 16])];
+    let mut pool = vec![CableValue::poly([0.0; 16])];
     let out = StereoOutput { cable_idx: 0, connected: true };
     out.write(&mut pool, 0.7, -0.3);
     let inp = StereoInput::scalar(0, 1.0);
@@ -251,7 +241,7 @@ fn stereo_input_round_trip_through_output() {
 
 #[test]
 fn poly_gate_per_voice_edges() {
-    let mut pool = make_cable_pool(&[CableValue::Poly([0.0; 16])]);
+    let mut pool = make_cable_pool(&[CableValue::poly([0.0; 16])]);
     let mut g = PolyGateInput {
         inner: PolyInput::scalar(0, 1.0),
         ..Default::default()
@@ -266,7 +256,7 @@ fn poly_gate_per_voice_edges() {
     // Voice 2 goes high
     let mut channels = [0.0f32; 16];
     channels[2] = 1.0;
-    pool[0] = [CableValue::Poly(channels); 2];
+    pool[0] = [CableValue::poly(channels); 2];
     {
         let cp = CablePool::new(&mut pool, 0);
         let result = g.tick(&cp);

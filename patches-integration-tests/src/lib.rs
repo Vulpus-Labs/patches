@@ -330,7 +330,8 @@ impl HeadlessEngine {
 
     /// Write a MIDI event to the GLOBAL_MIDI backplane slot.
     pub fn send_midi(&mut self, event: MidiEvent) {
-        self.processor.write_midi(&[event]);
+        self.processor.prepare_midi_block(1);
+        self.processor.write_midi_event(0, event);
     }
 
     /// Advance the plan by one sample.

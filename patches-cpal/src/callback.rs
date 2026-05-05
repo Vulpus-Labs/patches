@@ -5,9 +5,7 @@ use std::time::Instant;
 use cpal::traits::DeviceTrait;
 use cpal::{Stream, StreamConfig};
 
-use patches_planner::{ExecutionPlan, PlanMeta};
-
-type AdoptionMessage = (ExecutionPlan, Option<Box<PlanMeta>>);
+use patches_host::AdoptionMessage;
 use patches_engine::decimator::Decimator;
 use patches_engine::execution_state::SUB_BLOCK_SIZE;
 use patches_engine::midi::{AudioClock, EventQueueConsumer};
@@ -171,8 +169,10 @@ impl AudioCallback {
 
     /// Adopt a new plan if one has been published — wait-free, no allocation.
     fn receive_plan(&mut self) {
-        if let Ok((new_plan, meta)) = self.plan_rx.pop() {
-            self.processor.adopt_plan_with_meta(new_plan, meta.map(|b| *b));
+        if let Ok(msg) = self.plan_rx.pop() {
+            let AdoptionMessage { common, host_control } = msg;
+            self.processor
+                .adopt_plan_with_meta(common.plan, common.monitor, host_control);
         }
     }
 
@@ -187,6 +187,10 @@ impl AudioCallback {
         // call that happens on this thread. Idempotent; no-op when the
         // `audio-thread-allocator-trap` feature is off.
         patches_alloc_trap::mark_audio_thread();
+
+        // Flush denormals on the hardware. Set per-callback because some
+        // hosts reset MXCSR between calls. See E134.
+        patches_engine::enable_flush_to_zero();
 
         let playback_time = Instant::now();
 
@@ -204,11 +208,18 @@ impl AudioCallback {
 
         while remaining > 0 {
             if self.samples_until_next_midi == SUB_BLOCK_SIZE as usize {
-                self.processor.dispatch_midi(
-                    &mut self.event_queue,
-                    self.sample_counter,
-                    self.control_period,
-                );
+                // Block-rate MIDI ingest (ADR 0069). One drain per
+                // sub-block; events stamped at their sub-block-relative
+                // inner-tick offset rather than collapsed to row 0.
+                self.processor
+                    .prepare_midi_block(self.control_period as usize);
+                if let Some(eq) = self.event_queue.as_mut() {
+                    for (offset, event) in
+                        eq.drain_window(self.sample_counter, self.control_period)
+                    {
+                        self.processor.write_midi_event(offset as u16, event);
+                    }
+                }
             }
 
             let chunk = self.samples_until_next_midi.min(remaining);

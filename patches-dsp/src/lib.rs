@@ -85,6 +85,45 @@ pub use time_utils::{ms_to_samples, compute_time_coeff};
 pub mod drum;
 pub use drum::{DecayEnvelope, PitchSweep, MetallicTone, BurstGenerator, saturate};
 
+/// Enable hardware flush-to-zero / denormals-as-zero on the calling thread.
+///
+/// Subnormal floats trigger microcode fallback paths that cost 10–100× a
+/// normal op. In an audio graph this manifests as CPU rising during silence
+/// (reverb tails, idle voices with open envelopes). Setting FTZ/DAZ at the
+/// top of the audio callback eliminates the cliff at the cost of one
+/// register write per buffer.
+///
+/// Per-thread, per-callback. Some hosts reset MXCSR between callbacks, so
+/// call this on every entry, not once at startup. No-op on architectures
+/// without a denormal-flushing mode.
+///
+/// Not IEEE-strict: subnormals (~< 1.18e-38 f32) become zero. Inaudible
+/// (~-700 dBFS) but breaks bit-exactness with hardware that doesn't have
+/// FTZ enabled. Audit determinism tests before enabling globally.
+#[inline]
+pub fn enable_flush_to_zero() {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        #[cfg(target_arch = "x86_64")]
+        use core::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+        #[cfg(target_arch = "x86")]
+        use core::arch::x86::{_mm_getcsr, _mm_setcsr};
+        // FTZ = bit 15 (0x8000), DAZ = bit 6 (0x0040).
+        unsafe { _mm_setcsr(_mm_getcsr() | 0x8040) };
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        // FPCR.FZ = bit 24. Single bit covers both input and output flushing.
+        unsafe {
+            let mut fpcr: u64;
+            core::arch::asm!("mrs {}, fpcr", out(reg) fpcr, options(nomem, nostack));
+            fpcr |= 1u64 << 24;
+            core::arch::asm!("msr fpcr, {}", in(reg) fpcr, options(nomem, nostack));
+        }
+    }
+    // Other arches: no portable denormal-flush bit; leave defaults.
+}
+
 /// Flush subnormal floats to zero.
 ///
 /// Audio filters with a feedback path can settle into subnormal values after

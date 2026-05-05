@@ -72,8 +72,8 @@ fn build_and_process_with_default_gain() {
 
     // Seed input cable with 0.5
     let mut pool = vec![
-        [CableValue::Mono(0.5), CableValue::Mono(0.5)], // cable 0: input
-        [CableValue::Mono(0.0), CableValue::Mono(0.0)], // cable 1: output
+        [CableValue::mono(0.5), CableValue::mono(0.5)], // cable 0: input
+        [CableValue::mono(0.0), CableValue::mono(0.0)], // cable 1: output
     ];
 
     // Process with wi=0 (reads from ri=1)
@@ -83,10 +83,8 @@ fn build_and_process_with_default_gain() {
     }
 
     // Default gain is 1.0, so output should be 0.5
-    match pool[1][0] {
-        CableValue::Mono(v) => assert!((v - 0.5).abs() < 1e-6, "expected 0.5, got {v}"),
-        _ => panic!("expected Mono output"),
-    }
+    let v = pool[1][0].as_mono();
+    assert!((v - 0.5).abs() < 1e-6, "expected 0.5, got {v}");
 }
 
 #[test]
@@ -117,18 +115,16 @@ fn update_parameters_changes_gain() {
 
     // Process
     let mut pool = vec![
-        [CableValue::Mono(1.0), CableValue::Mono(1.0)],
-        [CableValue::Mono(0.0), CableValue::Mono(0.0)],
+        [CableValue::mono(1.0), CableValue::mono(1.0)],
+        [CableValue::mono(0.0), CableValue::mono(0.0)],
     ];
     {
         let mut cp = CablePool::new(&mut pool, 0);
         module.process(&mut cp);
     }
 
-    match pool[1][0] {
-        CableValue::Mono(v) => assert!((v - 0.5).abs() < 1e-6, "expected 0.5, got {v}"),
-        _ => panic!("expected Mono output"),
-    }
+    let v = pool[1][0].as_mono();
+    assert!((v - 0.5).abs() < 1e-6, "expected 0.5, got {v}");
 }
 
 #[test]

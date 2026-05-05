@@ -128,29 +128,29 @@ impl ModuleHarness {
         // This mirrors the real planner's slot assignment so modules that write to
         // backplane slots (e.g. AudioOut → AUDIO_OUT_L/R) stay in-bounds.
         let pool_size = RESERVED_SLOTS + n_inputs + n_outputs;
-        let mut pool = vec![[CableValue::Mono(0.0); 2]; pool_size];
+        let mut pool = vec![[CableValue::mono(0.0); 2]; pool_size];
 
         // Poly reserved slots must hold Poly values to avoid kind-mismatch panics.
-        pool[POLY_READ_SINK]  = [CableValue::Poly([0.0; 16]); 2];
-        pool[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
-        pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::Poly([0.0; 16]); 2];
-        pool[crate::cables::GLOBAL_MIDI] = [CableValue::Poly([0.0; 16]); 2];
+        pool[POLY_READ_SINK]  = [CableValue::poly([0.0; 16]); 2];
+        pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]); 2];
+        pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::poly([0.0; 16]); 2];
+        pool[crate::cables::GLOBAL_MIDI] = [CableValue::poly([0.0; 16]); 2];
         for i in 0..crate::cables::TAP_SLOTS {
-            pool[crate::cables::TAP_BASE + i] = [CableValue::Poly([0.0; 16]); 2];
+            pool[crate::cables::TAP_BASE + i] = [CableValue::poly([0.0; 16]); 2];
         }
         for i in 0..crate::cables::HOST_CONTROL_SLOTS {
-            pool[crate::cables::HOST_CONTROL_BASE + i] = [CableValue::Poly([0.0; 16]); 2];
+            pool[crate::cables::HOST_CONTROL_BASE + i] = [CableValue::poly([0.0; 16]); 2];
         }
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
             if kind.uses_poly_storage() {
-                pool[RESERVED_SLOTS + i] = [CableValue::Poly([0.0; 16]); 2];
+                pool[RESERVED_SLOTS + i] = [CableValue::poly([0.0; 16]); 2];
             }
         }
         for (j, kind) in output_kinds.iter().enumerate() {
             if kind.uses_poly_storage() {
-                pool[RESERVED_SLOTS + n_inputs + j] = [CableValue::Poly([0.0; 16]); 2];
+                pool[RESERVED_SLOTS + n_inputs + j] = [CableValue::poly([0.0; 16]); 2];
             }
         }
 
@@ -286,7 +286,7 @@ impl ModuleHarness {
     /// until `set_mono_at` is called again.
     pub fn set_mono_at(&mut self, name: &str, index: usize, value: f32) {
         let cable = self.input_cable(name, index);
-        self.pool[cable] = [CableValue::Mono(value); 2];
+        self.pool[cable] = [CableValue::mono(value); 2];
     }
 
     // ── Poly inputs ──────────────────────────────────────────────────────────
@@ -301,7 +301,7 @@ impl ModuleHarness {
     /// Writes to both ping-pong slots so the value persists across multiple ticks.
     pub fn set_poly_at(&mut self, name: &str, index: usize, value: [f32; 16]) {
         let cable = self.input_cable(name, index);
-        self.pool[cable] = [CableValue::Poly(value); 2];
+        self.pool[cable] = [CableValue::poly(value); 2];
     }
 
     // ── Stereo inputs ────────────────────────────────────────────────────────
@@ -318,7 +318,7 @@ impl ModuleHarness {
         let mut frame = [0.0_f32; 16];
         frame[0] = left;
         frame[1] = right;
-        self.pool[cable] = [CableValue::Poly(frame); 2];
+        self.pool[cable] = [CableValue::poly(frame); 2];
     }
 
     // ── Tick ─────────────────────────────────────────────────────────────────
@@ -368,9 +368,8 @@ impl ModuleHarness {
         let ri = 1 - self.wi;
         let mut out = [0.0_f32; crate::MAX_TAPS];
         for i in 0..crate::cables::TAP_SLOTS {
-            if let CableValue::Poly(lanes) = self.pool[crate::cables::TAP_BASE + i][ri] {
-                out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
-            }
+            let lanes = self.pool[crate::cables::TAP_BASE + i][ri].as_poly();
+            out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
         }
         out
     }
@@ -380,7 +379,7 @@ impl ModuleHarness {
     /// Read the mono output `(name, 0)` from the most recently completed tick.
     ///
     /// # Panics
-    /// Panics if the cable value is not `CableValue::Mono`.
+    /// Reads lane 0 of the cable slot.
     pub fn read_mono(&self, name: &str) -> f32 {
         self.read_mono_at(name, 0)
     }
@@ -388,13 +387,7 @@ impl ModuleHarness {
     /// Read the mono output `(name, index)` from the most recently completed tick.
     pub fn read_mono_at(&self, name: &str, index: usize) -> f32 {
         let cable = self.output_cable(name, index);
-        match self.pool[cable][1 - self.wi] {
-            CableValue::Mono(v) => v,
-            CableValue::Poly(_) => panic!(
-                "ModuleHarness::read_mono: output '{}'/{}  is Poly, not Mono",
-                name, index
-            ),
-        }
+        self.pool[cable][1 - self.wi].as_mono()
     }
 
     /// Run `ticks` samples and collect the named mono output into a `Vec<f32>`.
@@ -424,20 +417,14 @@ impl ModuleHarness {
     /// completed tick. Reads lanes 0/1 of the underlying poly slot.
     ///
     /// # Panics
-    /// Panics if the cable value is not `CableValue::Poly`.
+    /// Reads all 16 lanes of the cable slot.
     pub fn read_stereo(&self, name: &str) -> (f32, f32) {
         self.read_stereo_at(name, 0)
     }
 
     pub fn read_stereo_at(&self, name: &str, index: usize) -> (f32, f32) {
         let cable = self.output_cable(name, index);
-        match self.pool[cable][1 - self.wi] {
-            CableValue::Poly(v) => (v[0], v[1]),
-            CableValue::Mono(_) => panic!(
-                "ModuleHarness::read_stereo: output '{}'/{}  is Mono, not stereo",
-                name, index
-            ),
-        }
+        self.pool[cable][1 - self.wi].as_stereo()
     }
 
     // ── Poly outputs ─────────────────────────────────────────────────────────
@@ -445,7 +432,7 @@ impl ModuleHarness {
     /// Read the poly output `(name, 0)` from the most recently completed tick.
     ///
     /// # Panics
-    /// Panics if the cable value is not `CableValue::Poly`.
+    /// Reads all 16 lanes of the cable slot.
     pub fn read_poly(&self, name: &str) -> [f32; 16] {
         self.read_poly_at(name, 0)
     }
@@ -453,13 +440,7 @@ impl ModuleHarness {
     /// Read the poly output `(name, index)` from the most recently completed tick.
     pub fn read_poly_at(&self, name: &str, index: usize) -> [f32; 16] {
         let cable = self.output_cable(name, index);
-        match self.pool[cable][1 - self.wi] {
-            CableValue::Poly(v) => v,
-            CableValue::Mono(_) => panic!(
-                "ModuleHarness::read_poly: output '{}'/{}  is Mono, not Poly",
-                name, index
-            ),
-        }
+        self.pool[cable][1 - self.wi].as_poly()
     }
 
     /// Read a single voice from the poly output `(name, 0)`.

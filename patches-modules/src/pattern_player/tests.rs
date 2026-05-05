@@ -79,10 +79,10 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     let gate_slot = RESERVED_SLOTS + 1 + 3;
     let pool_size = RESERVED_SLOTS + 1 + 4;
 
-    let mut pool_buf = vec![[CableValue::Mono(0.0); 2]; pool_size];
-    pool_buf[POLY_READ_SINK] = [CableValue::Poly([0.0; 16]); 2];
-    pool_buf[POLY_WRITE_SINK] = [CableValue::Poly([0.0; 16]); 2];
-    pool_buf[clock_slot] = [CableValue::Poly([0.0; 16]); 2];
+    let mut pool_buf = vec![[CableValue::mono(0.0); 2]; pool_size];
+    pool_buf[POLY_READ_SINK] = [CableValue::poly([0.0; 16]); 2];
+    pool_buf[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]); 2];
+    pool_buf[clock_slot] = [CableValue::poly([0.0; 16]); 2];
 
     let inputs = vec![InputPort::Poly(PolyInput::scalar(clock_slot, 1.0))];
     let outputs = vec![
@@ -103,7 +103,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     clock_bus[3] = tick_duration_secs;
 
     let mut wi = 0;
-    pool_buf[clock_slot] = [CableValue::Poly(clock_bus); 2];
+    pool_buf[clock_slot] = [CableValue::poly(clock_bus); 2];
 
     {
         let mut cp = CablePool::new(&mut pool_buf, wi);
@@ -112,10 +112,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     wi = 1 - wi;
 
     let read_mono = |buf: &Vec<[CableValue; 2]>, slot: usize, write_idx: usize| -> f32 {
-        match buf[slot][write_idx] {
-            CableValue::Mono(v) => v,
-            _ => panic!("expected Mono"),
-        }
+        buf[slot][write_idx].as_mono()
     };
 
     let t0_trigger = read_mono(&pool_buf, trigger_slot, 1 - wi);
@@ -132,7 +129,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     let mut prev_gate = t0_gate;
 
     for _sample in 1..tick_samples {
-        pool_buf[clock_slot] = [CableValue::Poly(silent_clock); 2];
+        pool_buf[clock_slot] = [CableValue::poly(silent_clock); 2];
         {
             let mut cp = CablePool::new(&mut pool_buf, wi);
             player.process(&mut cp);

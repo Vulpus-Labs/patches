@@ -135,21 +135,19 @@ pub struct ModuleSlot {
     pub output_buffers: Vec<usize>,
 }
 
-/// Slot-indexed instance metadata that travels alongside an [`ExecutionPlan`].
-///
-/// Built by the planner when CPU monitoring is enabled, consumed by the
-/// monitor observer to label per-instance cost estimates. `names[slot]` and
+/// Slot-indexed instance metadata that travels alongside an [`ExecutionPlan`]
+/// when CPU monitoring is enabled (ADR 0065). Consumed by the monitor
+/// observer to label per-instance cost estimates. `names[slot]` and
 /// `types[slot]` are indexed by module pool slot index (the same indices that
 /// appear in [`ExecutionPlan::active_indices`] / `periodic_indices`); slots
 /// outside the active set hold `None` / `""`. Routed through the audio thread
-/// via [`crate::adopt_plan_with_meta`]-equivalent surfaces in
-/// `patches-engine`; never stored on the plan itself so its lifetime is
-/// orthogonal to plan reuse / cleanup.
+/// inside the host's `AdoptionMessage`; never stored on the plan itself so
+/// its lifetime is orthogonal to plan reuse / cleanup.
 ///
 /// `Arc<str>` for instance names: cheap to clone, `Send`, and matches the
 /// underlying representation of [`patches_core::NodeId`] without forcing
 /// callers across the audio-thread boundary to handle non-`Send` `Rc`.
-pub struct PlanMeta {
+pub struct MonitorMeta {
     /// Per-slot instance display name (slash-joined `QName`), or `None` if
     /// the slot is unused.
     pub names: Vec<Option<Arc<str>>>,
@@ -158,10 +156,13 @@ pub struct PlanMeta {
     pub types: Vec<&'static str>,
 }
 
-impl PlanMeta {
+impl MonitorMeta {
     /// Empty meta — no slots populated.
     pub fn empty() -> Self {
-        Self { names: Vec::new(), types: Vec::new() }
+        Self {
+            names: Vec::new(),
+            types: Vec::new(),
+        }
     }
 }
 
@@ -326,7 +327,7 @@ pub struct PatchBuilder {
     /// [`BuildErrorKind::ModulePoolExhausted`] is detected at plan-build time.
     pub module_pool_capacity: usize,
     /// When true, [`build_patch_with_meta`](Self::build_patch_with_meta)
-    /// produces a [`PlanMeta`] alongside the plan. Default: false (zero
+    /// produces a [`MonitorMeta`] alongside the plan. Default: false (zero
     /// allocation, zero traversal on the disabled path).
     pub monitor_enabled: bool,
 }
@@ -336,7 +337,7 @@ impl PatchBuilder {
         Self { pool_capacity, module_pool_capacity, monitor_enabled: false }
     }
 
-    /// Enable per-instance CPU monitor metadata production. See [`PlanMeta`].
+    /// Enable per-instance CPU monitor metadata production. See [`MonitorMeta`].
     pub fn with_monitor(mut self, enabled: bool) -> Self {
         self.monitor_enabled = enabled;
         self
@@ -358,7 +359,7 @@ impl PatchBuilder {
     }
 
     /// Like [`build_patch`](Self::build_patch) but additionally returns
-    /// [`PlanMeta`] when [`monitor_enabled`](Self::monitor_enabled) is set.
+    /// [`MonitorMeta`] when [`monitor_enabled`](Self::monitor_enabled) is set.
     /// When disabled, returns `None` for the meta (no allocation).
     pub fn build_patch_with_meta(
         &self,
@@ -366,7 +367,7 @@ impl PatchBuilder {
         registry: &Registry,
         env: &AudioEnvironment,
         prev_state: &PlannerState,
-    ) -> Result<(ExecutionPlan, Option<PlanMeta>, PlannerState), BuildError> {
+    ) -> Result<(ExecutionPlan, Option<MonitorMeta>, PlannerState), BuildError> {
         // ── Decision phase ───────────────────────────────────────────────────
         // Structural parameters are read directly from each `graph::Node`
         // (ADR 0060). The interpreter populates them via
@@ -445,8 +446,8 @@ impl PatchBuilder {
         let mut to_zero_poly: Vec<usize> = Vec::new();
         let mut periodic_indices: Vec<usize> = Vec::new();
         // Slot-indexed monitor metadata, only when enabled (ADR 0065).
-        let mut meta: Option<PlanMeta> = if self.monitor_enabled {
-            Some(PlanMeta::empty())
+        let mut meta: Option<MonitorMeta> = if self.monitor_enabled {
+            Some(MonitorMeta::empty())
         } else {
             None
         };

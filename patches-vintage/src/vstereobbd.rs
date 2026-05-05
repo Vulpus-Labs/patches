@@ -225,13 +225,13 @@ impl Module for VStereoBbd {
                 (self.feedbacks[i] + pool.read_mono(&self.fb_cv[i])).clamp(0.0, FEEDBACK_MAX);
             let fb_l_filt = self.taps_l[i].filter_feedback(bbd_l);
             let fb_r_filt = self.taps_r[i].filter_feedback(bbd_r);
-            if self.pingpong[i] {
-                self.taps_l[i].fb_state = fb_r_filt * eff_fb;
-                self.taps_r[i].fb_state = fb_l_filt * eff_fb;
+            let (l, r) = if self.pingpong[i] {
+                (fb_r_filt * eff_fb, fb_l_filt * eff_fb)
             } else {
-                self.taps_l[i].fb_state = fb_l_filt * eff_fb;
-                self.taps_r[i].fb_state = fb_r_filt * eff_fb;
-            }
+                (fb_l_filt * eff_fb, fb_r_filt * eff_fb)
+            };
+            self.taps_l[i].fb_state = patches_dsp::flush_denormal(l);
+            self.taps_r[i].fb_state = patches_dsp::flush_denormal(r);
         }
 
         let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);

@@ -2,13 +2,13 @@
 //! monitor observer (ADR 0065 / tickets 0778, 0779).
 //!
 //! The audio thread owns the [`rtrb::Producer`] end and pushes
-//! [`MonitorMessage`]s as plans are adopted ([`PlanMeta`]) and as audio
+//! [`MonitorMessage`]s as plans are adopted ([`MonitorMeta`]) and as audio
 //! blocks complete ([`MonitorBlock`]). The observer thread owns the
 //! [`rtrb::Consumer`] end and drains messages off-thread.
 
 use std::time::{Duration, Instant};
 
-use patches_planner::PlanMeta;
+use patches_planner::MonitorMeta;
 
 /// Default decimation rate K (ADR 0065): time only every Kth sample of the
 /// selected module within a block.
@@ -51,7 +51,7 @@ pub struct MonitorBlock {
 pub enum MonitorMessage {
     /// Slot-indexed instance metadata for a newly adopted plan. The observer
     /// rebuilds its slot → name / type table on receipt.
-    PlanMeta(Box<PlanMeta>),
+    MonitorMeta(Box<MonitorMeta>),
     /// Per-block raw timing record (ADR 0065).
     Block(MonitorBlock),
 }
@@ -142,7 +142,7 @@ impl MonitorState {
         self.periodic_accum = Duration::ZERO;
     }
 
-    /// Producer mut-borrow for the [`PlanMeta`] drop ladder in
+    /// Producer mut-borrow for the [`MonitorMeta`] drop ladder in
     /// [`PatchProcessor::adopt_plan_with_meta`].
     pub(crate) fn tx_mut(&mut self) -> &mut rtrb::Producer<MonitorMessage> {
         &mut self.tx

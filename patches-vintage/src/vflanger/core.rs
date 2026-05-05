@@ -165,7 +165,7 @@ impl VFlangerCore {
         let expanded = self.exp.process(bbd_out);
         let wet = self.recon_lpf.process(expanded);
 
-        self.fb_state = wet;
+        self.fb_state = patches_dsp::flush_denormal(wet);
 
         let dry_lf = if self.lf_bypass { lf } else { 0.0 };
         dry_lf + (1.0 - self.mix) * hf + self.mix * wet

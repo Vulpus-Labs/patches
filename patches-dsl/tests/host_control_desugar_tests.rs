@@ -17,7 +17,7 @@ use patches_dsl::StructuralCode;
 
 fn rewritten(src: &str) -> patches_dsl::ast::File {
     let file = parse(src).expect("parse ok");
-    desugar_host_controls(&file).expect("desugar ok")
+    desugar_host_controls(&file).expect("desugar ok").0
 }
 
 fn find_module<'a>(
@@ -164,7 +164,7 @@ fn undeclared_bare_name_rejected() {
         not_declared -> flt.voct
     }"#;
     let file = parse(src).expect("parse ok");
-    let err = desugar_host_controls(&file).expect_err("desugar rejects");
+    let err = desugar_host_controls(&file).map(|_| ()).expect_err("desugar rejects");
     assert_eq!(err.code, StructuralCode::HostControlUnknownRef);
 }
 
@@ -193,6 +193,70 @@ fn rename_only_preserves_alias_count() {
     let bm = find_module(&before, SYNTH_HOST_CONTROL).unwrap();
     let am = find_module(&after, SYNTH_HOST_CONTROL).unwrap();
     assert_eq!(aliases(bm).len(), aliases(am).len());
+}
+
+// ─── Manifest (ticket 0810) ─────────────────────────────────────────────────
+
+fn manifest(src: &str) -> patches_dsl::host_control_manifest::HostControlManifest {
+    let file = parse(src).expect("parse ok");
+    desugar_host_controls(&file).expect("desugar ok").1
+}
+
+#[test]
+fn manifest_is_empty_when_no_declarations() {
+    let m = manifest("patch { module osc : Osc() osc.out -> osc.in }");
+    assert!(m.is_empty());
+}
+
+#[test]
+fn manifest_alphabetical_slot_ordering_matches_expander() {
+    use patches_dsl::host_control_manifest::HostControlKind as K;
+    let src = r#"patch {
+        knob zeta { low: 1, high: 2 }
+        trigger fire { }
+        toggle alpha { default: true }
+        slider mu { low: 0, high: 1 }
+    }"#;
+    let m = manifest(src);
+    let names: Vec<&str> = m.iter().map(|d| d.name.as_str()).collect();
+    let slots: Vec<usize> = m.iter().map(|d| d.slot).collect();
+    let kinds: Vec<K> = m.iter().map(|d| d.kind).collect();
+    assert_eq!(names, vec!["alpha", "fire", "mu", "zeta"]);
+    assert_eq!(slots, vec![0, 1, 2, 3]);
+    assert_eq!(kinds, vec![K::Toggle, K::Trigger, K::Slider, K::Knob]);
+}
+
+#[test]
+fn manifest_carries_fields_verbatim() {
+    use patches_dsl::host_control_manifest::HostControlParamValue as V;
+    let src = r#"patch {
+        knob cutoff { low: 20, high: 2000, default: 440 }
+    }"#;
+    let m = manifest(src);
+    assert_eq!(m.len(), 1);
+    let d = &m[0];
+    assert_eq!(d.name, "cutoff");
+    assert_eq!(d.params.get("low"), Some(&V::Int(20)));
+    assert_eq!(d.params.get("high"), Some(&V::Int(2000)));
+    assert_eq!(d.params.get("default"), Some(&V::Int(440)));
+}
+
+#[test]
+fn manifest_kind_smoothing_flag_matches_kind() {
+    use patches_dsl::host_control_manifest::HostControlKind as K;
+    assert!(K::Knob.smoothed());
+    assert!(K::Slider.smoothed());
+    assert!(!K::Toggle.smoothed());
+    assert!(!K::Trigger.smoothed());
+}
+
+#[test]
+fn manifest_provenance_points_at_declaration_site() {
+    let src = "patch { knob k { low: 1, high: 2 } }";
+    let m = manifest(src);
+    let d = &m[0];
+    let decl_start = src.find("knob").unwrap();
+    assert_eq!(d.source.site.start, decl_start);
 }
 
 // ─── Helper trait: surface the index name from a PortRef ────────────────────

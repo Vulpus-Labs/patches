@@ -495,7 +495,6 @@ unsafe extern "C" fn plugin_process(
         (None, None)
     };
     let event_count = event_size_fn.map_or(0, |f| f(in_events));
-    let mut event_idx: u32 = 0;
 
     // Pre-pass: ingest CLAP_EVENT_PARAM_VALUE events into the
     // host-control scratch (ticket 0817). Do this before the sample
@@ -508,32 +507,36 @@ unsafe extern "C" fn plugin_process(
             if header.is_null() {
                 continue;
             }
-            if (*header).space_id != CLAP_CORE_EVENT_SPACE_ID
-                || (*header).type_ != CLAP_EVENT_PARAM_VALUE
-            {
+            if (*header).space_id != CLAP_CORE_EVENT_SPACE_ID {
                 continue;
             }
-            let pv = &*(header as *const clap_event_param_value);
-            let Some(channel) = proc.host_control_channel_of(pv.param_id) else {
-                continue;
-            };
-            // Mirror the value back into the registry so `params_get_value`
-            // returns the latest commanded value to the host. Linear
-            // scan over ≤64 entries is fine on the audio thread; this
-            // is the same complexity the registry uses internally.
-            // Note: registry lives main-side; we only update the
-            // audio-side snapshot here. Main thread re-records via the
-            // `params_flush` / GUI paths.
             let frame_offset = (*header).time.min(u16::MAX as u32) as u16;
-            let event = HostControlEvent {
-                channel,
-                sample_offset: frame_offset,
-                value: pv.value as f32,
-            };
-            proc.write_host_control_event(event);
+            match (*header).type_ {
+                CLAP_EVENT_PARAM_VALUE => {
+                    let pv = &*(header as *const clap_event_param_value);
+                    let Some(channel) = proc.host_control_channel_of(pv.param_id) else {
+                        continue;
+                    };
+                    let event = HostControlEvent {
+                        channel,
+                        sample_offset: frame_offset,
+                        value: pv.value as f32,
+                    };
+                    proc.write_host_control_event(event);
+                }
+                CLAP_EVENT_MIDI => {
+                    let midi = &*(header as *const clap_event_midi);
+                    proc.write_midi_event(
+                        frame_offset,
+                        MidiEvent { bytes: midi.data },
+                    );
+                }
+                _ => {}
+            }
         }
     }
     proc.prepare_host_control_block(frames);
+    proc.prepare_midi_block(frames);
 
     // Read host transport and write it to the processor's GLOBAL_TRANSPORT slot.
     if !pr.transport.is_null() {
@@ -588,29 +591,10 @@ unsafe extern "C" fn plugin_process(
     let mut meter_sq_l = 0.0f32;
     let mut meter_sq_r = 0.0f32;
 
-    // Sample-accurate processing loop.
+    // Sample-accurate processing loop. MIDI and host-control events
+    // were ingested in the pre-pass above (ADR 0069); the per-sample
+    // loop is pure DSP.
     for f in 0..frames {
-        // Deliver MIDI events at this sample offset.
-        if let Some(get_fn) = event_get_fn {
-            while event_idx < event_count {
-                let header = get_fn(in_events, event_idx);
-                if header.is_null() {
-                    event_idx += 1;
-                    continue;
-                }
-                if (*header).time > f as u32 {
-                    break;
-                }
-                if (*header).space_id == CLAP_CORE_EVENT_SPACE_ID
-                    && (*header).type_ == CLAP_EVENT_MIDI
-                {
-                    let midi = &*(header as *const clap_event_midi);
-                    proc.write_midi(&[MidiEvent { bytes: midi.data }]);
-                }
-                event_idx += 1;
-            }
-        }
-
         // Feed input.
         let il = if in_l.is_null() { 0.0 } else { *in_l.add(f) };
         let ir = if in_r.is_null() { 0.0 } else { *in_r.add(f) };

@@ -34,7 +34,7 @@ fn tick_runs_without_panic() {
         let mut cp = CablePool::new(&mut buffer_pool, wi);
         // SAFETY: state rebuilt from consistent plan+pool; no tombstoning since.
         state.tick(&mut cp);
-        let left = match buffer_pool[AUDIO_OUT_L][wi] { CableValue::Mono(v) => v, _ => 0.0 };
+        let left = buffer_pool[AUDIO_OUT_L][wi].as_mono();
         collected.push(left);
     }
     // Oscillator output must stay bounded and cover a non-trivial range.
@@ -86,8 +86,8 @@ fn input_scale_is_applied_at_tick_time() {
     }
 
     let last_wi = 99 % 2;
-    let half = match buf_half[AUDIO_OUT_L][last_wi] { CableValue::Mono(v) => v, _ => 0.0 };
-    let full = match buf_full[AUDIO_OUT_L][last_wi] { CableValue::Mono(v) => v, _ => 0.0 };
+    let half = buf_half[AUDIO_OUT_L][last_wi].as_mono();
+    let full = buf_full[AUDIO_OUT_L][last_wi].as_mono();
     assert!(
         full.abs() > 1e-4,
         "full-scale path produced no audible signal: full={full}"
@@ -299,7 +299,7 @@ fn uni_range_clips_and_offsets_at_tick_time() {
         let wi = i % 2;
         let mut cp = CablePool::new(&mut buffer_pool, wi);
         state.tick(&mut cp);
-        let v = match buffer_pool[AUDIO_OUT_L][wi] { CableValue::Mono(v) => v, _ => 0.0 };
+        let v = buffer_pool[AUDIO_OUT_L][wi].as_mono();
         min_v = min_v.min(v);
         max_v = max_v.max(v);
     }

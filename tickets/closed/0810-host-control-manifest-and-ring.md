@@ -15,22 +15,22 @@ transport carrying them, parallel to the tap manifest ring (ADR 0053
 
 ## Acceptance criteria
 
-- [ ] `HostControlDescriptor { slot, name, kind, params, source }`
+- [x] `HostControlDescriptor { slot, name, kind, params, source }`
       with `kind: HostControlKind { Knob, Slider, Toggle }` and
       `params: HostControlParamMap` (untyped k/v of literals).
-- [ ] `HostControlManifest = Vec<HostControlDescriptor>` sorted by
+- [x] `HostControlManifest = Vec<HostControlDescriptor>` sorted by
       slot.
-- [ ] Planner emits the manifest from the expander output and the
+- [x] Planner emits the manifest from the expander output and the
       synthesised `~host_control` shape.
-- [ ] Lock-free ring (or existing control transport) delivers
+- [x] Lock-free ring (or existing control transport) delivers
       manifest from planner thread to observer / CLAP plugin
       thread. Audio thread does not see it.
-- [ ] Parallel to tap manifest plumbing — share infrastructure
+- [x] Parallel to tap manifest plumbing — share infrastructure
       where it exists, do not duplicate.
-- [ ] Provenance tag populated from declaration source span.
-- [ ] Tests: round-trip a manifest through the ring; alphabetical
+- [x] Provenance tag populated from declaration source span.
+- [x] Tests: round-trip a manifest through the ring; alphabetical
       slot ordering matches the expander's.
-- [ ] `just inner -p patches-core -p patches-engine` passes.
+- [x] `just inner -p patches-core -p patches-engine` passes.
 
 ## Notes
 

@@ -95,7 +95,7 @@ fn counter_graph() -> ModuleGraph {
 }
 
 fn make_buffer_pool(capacity: usize) -> Vec<[CableValue; 2]> {
-    (0..capacity).map(|_| [CableValue::Mono(0.0), CableValue::Mono(0.0)]).collect()
+    (0..capacity).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
 }
 
 fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {

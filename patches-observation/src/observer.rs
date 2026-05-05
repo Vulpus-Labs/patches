@@ -11,6 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use patches_core::{TapBlockFrame, MAX_TAPS, TAP_BLOCK};
+use patches_dsl::host_control_manifest::HostControlManifest;
 use patches_dsl::manifest::Manifest;
 
 use crate::processor::{
@@ -29,6 +30,11 @@ use patches_io_ring::TapRingConsumer;
 #[derive(Clone)]
 pub struct ManifestPublication {
     pub manifest: Arc<Manifest>,
+    /// Host-control manifest paired with this publication (ADR 0057,
+    /// ticket 0810). Empty when the patch declares no host controls.
+    /// Travels alongside the tap manifest so both surfaces refresh
+    /// atomically on each replan.
+    pub host_control_manifest: Arc<HostControlManifest>,
     pub sample_rate: f32,
     /// Generation number paired with this manifest (ticket 0707). The
     /// host runtime increments on every plan push; the same value is
@@ -298,9 +304,56 @@ mod tests {
         }]
     }
 
+    use patches_dsl::host_control_manifest::{
+        HostControlDescriptor, HostControlKind, HostControlManifest, HostControlParamMap,
+    };
+
+    fn host_control_manifest_sample() -> HostControlManifest {
+        vec![
+            HostControlDescriptor {
+                slot: 0,
+                name: "cutoff".into(),
+                kind: HostControlKind::Knob,
+                params: HostControlParamMap::new(),
+                source: Provenance::root(Span::synthetic()),
+            },
+            HostControlDescriptor {
+                slot: 1,
+                name: "fire".into(),
+                kind: HostControlKind::Trigger,
+                params: HostControlParamMap::new(),
+                source: Provenance::root(Span::synthetic()),
+            },
+        ]
+    }
+
+    #[test]
+    fn host_control_manifest_round_trips_through_replan_ring() {
+        let (mut tx, mut rx) = replan_channel(2);
+        let hcm = host_control_manifest_sample();
+        let publication = ManifestPublication {
+            manifest: Arc::new(meter_manifest("t", 0)),
+            host_control_manifest: Arc::new(hcm.clone()),
+            sample_rate: 48_000.0,
+            generation: 3,
+        };
+        assert!(tx.submit(publication));
+        let got = rx.drain_latest().expect("publication");
+        assert_eq!(got.host_control_manifest.len(), hcm.len());
+        for (a, b) in got.host_control_manifest.iter().zip(hcm.iter()) {
+            assert_eq!(a.slot, b.slot);
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+        }
+        // Slots match sorted-by-name order (alphabetical: cutoff < fire).
+        let slots: Vec<usize> = got.host_control_manifest.iter().map(|d| d.slot).collect();
+        assert_eq!(slots, vec![0, 1]);
+    }
+
     fn pubof(manifest: Manifest, sample_rate: f32) -> ManifestPublication {
         ManifestPublication {
             manifest: Arc::new(manifest),
+            host_control_manifest: Arc::new(Vec::new()),
             sample_rate,
             generation: 1,
         }
@@ -369,6 +422,7 @@ mod tests {
         }];
         assert!(handle.replans.as_mut().unwrap().submit(ManifestPublication {
             manifest: Arc::new(m),
+            host_control_manifest: Arc::new(Vec::new()),
             sample_rate: 48_000.0,
             generation: 1,
         }));
@@ -438,6 +492,7 @@ mod tests {
         let m = meter_manifest("t", 0);
         assert!(handle.replans.as_mut().unwrap().submit(ManifestPublication {
             manifest: Arc::new(m),
+            host_control_manifest: Arc::new(Vec::new()),
             sample_rate: 48_000.0,
             generation: 2,
         }));
@@ -464,6 +519,7 @@ mod tests {
         let (mut handle, _diag) = spawn_observer(rx, Duration::from_millis(1));
         assert!(handle.replans.as_mut().unwrap().submit(ManifestPublication {
             manifest: Arc::new(meter_manifest("t", 0)),
+            host_control_manifest: Arc::new(Vec::new()),
             sample_rate: 48_000.0,
             generation: 7,
         }));

@@ -1035,7 +1035,7 @@ mod tests {
 
         // process: trivial no-op, prove the entry point doesn't panic.
         let mut pool_mem: Vec<[CableValue; 2]> =
-            vec![[CableValue::Mono(0.0); 2]; 4];
+            vec![[CableValue::mono(0.0); 2]; 4];
         unsafe { __patches_process(handle, pool_mem.as_mut_ptr(), pool_mem.len(), 0) };
 
         // destroy

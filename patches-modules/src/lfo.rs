@@ -394,7 +394,7 @@ mod tests {
     fn disconnected_outputs_are_not_written() {
         let mut h = make_lfo(1.0, 44100.0);
         h.disconnect_all_outputs();
-        h.init_pool(CableValue::Mono(99.0));
+        h.init_pool(CableValue::mono(99.0));
         h.tick();
         for name in &["sine", "triangle", "saw_up", "saw_down", "square", "random"] {
             assert_eq!(

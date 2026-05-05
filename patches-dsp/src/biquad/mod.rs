@@ -79,8 +79,11 @@ impl MonoBiquad {
         let c = &self.coefs.active;
         let y = c[B0] * x + self.s1;
         let fb = if saturate { fast_tanh(y) } else { y };
-        self.s1 = c[B1] * x - c[A1] * fb + self.s2;
-        self.s2 = c[B2] * x - c[A2] * fb;
+        // Flush state to zero at the subnormal range — without saturation
+        // the linear feedback path can settle into denormals on long
+        // decays. tanh path scrubs them on its own.
+        self.s1 = crate::flush_denormal(c[B1] * x - c[A1] * fb + self.s2);
+        self.s2 = crate::flush_denormal(c[B2] * x - c[A2] * fb);
 
         self.coefs.advance();
 
@@ -214,11 +217,12 @@ impl PolyBiquad {
             // Linear path: separate loops so LLVM can vectorise each step.
             // Step 2: new_s1 = b1*x - a1*y + s2  — reads s2 (old), writes s1
             for i in 0..16 {
-                self.s1[i] = b1[i] * x[i] - a1[i] * y[i] + self.s2[i];
+                self.s1[i] =
+                    crate::flush_denormal(b1[i] * x[i] - a1[i] * y[i] + self.s2[i]);
             }
             // Step 3: new_s2 = b2*x - a2*y  — reads x, y; writes s2
             for i in 0..16 {
-                self.s2[i] = b2[i] * x[i] - a2[i] * y[i];
+                self.s2[i] = crate::flush_denormal(b2[i] * x[i] - a2[i] * y[i]);
             }
         }
 

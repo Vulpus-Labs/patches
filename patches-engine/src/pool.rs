@@ -219,7 +219,7 @@ mod tests {
     }
 
     fn make_buf_pool(size: usize) -> Vec<[CableValue; 2]> {
-        vec![[CableValue::Mono(0.0); 2]; size]
+        vec![[CableValue::mono(0.0); 2]; size]
     }
 
     fn empty_param_state() -> ParamState {
@@ -245,7 +245,7 @@ mod tests {
             let mut cp = CablePool::new(&mut bufs, 0);
             pool.process(2, &mut cp);
         }
-        assert!(matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 0.75).abs() < 1e-12));
+        assert!((bufs[RESERVED_SLOTS][0].as_mono() - 0.75).abs() < 1e-12);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
             let mut cp = CablePool::new(&mut bufs, 0);
             pool.process(0, &mut cp);
         }
-        assert!(matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if (v - 2.0).abs() < 1e-12),
+        assert!((bufs[RESERVED_SLOTS][0].as_mono() - 2.0).abs() < 1e-12,
             "slot should hold the most recently installed module");
     }
 
@@ -290,6 +290,6 @@ mod tests {
         let mut cp = CablePool::new(&mut bufs, 0);
         pool.process(0, &mut cp);
         drop(cp);
-        assert!(matches!(bufs[RESERVED_SLOTS][0], CableValue::Mono(v) if v == 0.0));
+        assert_eq!(bufs[RESERVED_SLOTS][0].as_mono(), 0.0);
     }
 }

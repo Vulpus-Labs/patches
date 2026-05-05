@@ -87,7 +87,7 @@ impl Module for AudioOut {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableValue, AUDIO_OUT_L, AUDIO_OUT_R};
+    use patches_core::{AUDIO_OUT_L, AUDIO_OUT_R};
     use patches_core::test_support::ModuleHarness;
 
     /// After a tick, `AUDIO_OUT_L` and `AUDIO_OUT_R` backplane slots hold
@@ -98,14 +98,8 @@ mod tests {
         h.set_stereo("in", 0.5, -0.3);
         h.tick();
 
-        let left = match h.pool_slot(AUDIO_OUT_L) {
-            CableValue::Mono(v) => v,
-            _ => panic!("expected Mono at AUDIO_OUT_L"),
-        };
-        let right = match h.pool_slot(AUDIO_OUT_R) {
-            CableValue::Mono(v) => v,
-            _ => panic!("expected Mono at AUDIO_OUT_R"),
-        };
+        let left = h.pool_slot(AUDIO_OUT_L).as_mono();
+        let right = h.pool_slot(AUDIO_OUT_R).as_mono();
         assert!((left  -  0.5).abs() < 1e-6, "left: {left}");
         assert!((right - -0.3).abs() < 1e-6, "right: {right}");
     }

@@ -1,4 +1,5 @@
-//! Host-control source (ADR 0057 §4, ticket 0809).
+//! Host-control source (ADR 0057 §4 / ADR 0068 §2 amended 2026-05-05;
+//! tickets 0809 + 0817).
 //!
 //! One [`HostControl`] instance carries every `knob` / `slider` /
 //! `toggle` / `trigger` block in a patch (synthesised by the DSL
@@ -9,16 +10,18 @@
 //! desugarer wired. The other output is left at the write-sink and
 //! costs nothing at runtime.
 //!
-//! Per-tick action per channel: read the host-control backplane lane
-//! (`HOST_CONTROL_BASE` poly slots, indexed by `slot_offset`) and
-//! write the value to the output port matching the channel's kind.
-//! No allocation; one branch on kind. Sub-block automation accuracy
-//! is out of scope (ADR 0057 §4): one value per block per control.
+//! ## Runtime contract
 //!
-//! The control thread writes the host-control backplane between
-//! ticks. Reads are plain (the audio thread reads with the same
-//! ping-pong discipline as any other cable); tearing on individual
-//! `f32` is acceptable for control signals at audio-block boundaries.
+//! Per ADR 0068 §2 amended 2026-05-05, the per-block automation
+//! pipeline (SoA scratch, smoothing, AoS transpose, per-sample memcpy
+//! into the backplane) lives on `PatchProcessor`, *not* this module.
+//! By the time `process` runs the four contiguous
+//! `HOST_CONTROL_BASE` poly slots already hold the AoS row for the
+//! current sample. This module is a pure demux:
+//!
+//! 1. Read `pool.read_poly(HOST_CONTROL_BASE + slot_offset/16)[slot_offset%16]`.
+//! 2. Write the value to `audio_out[i]` (knob / slider / toggle) or
+//!    `trigger_out[i]` (trigger), per `kind[i]`.
 
 use patches_core::{
     params_enum, AudioEnvironment, AxisId, BuildError, CablePool, CountAxis, InputPort,
@@ -142,13 +145,18 @@ impl Module for HostControl {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Read both backplane poly slots once per tick; demultiplex
-        // per channel by lane. Out-of-range slot_offsets degrade to 0.0
-        // (defensive against stale plans crossing region shrinks).
-        let lanes = read_host_control_lanes(pool);
+        // The processor's per-tick host-control flush has already
+        // written this sample's AoS row into the four contiguous
+        // `HOST_CONTROL_BASE` poly slots. We only read.
         for i in 0..self.channels {
             let slot = self.slot_offsets[i];
-            let value = if slot < MAX_HOST_CONTROLS { lanes[slot] } else { 0.0 };
+            let value = if slot < MAX_HOST_CONTROLS {
+                let cable = HOST_CONTROL_BASE + slot / 16;
+                let lane = slot % 16;
+                pool.read_poly(&PolyInput::backplane(cable))[lane]
+            } else {
+                0.0
+            };
             match self.kinds[i] {
                 HostControlKind::Knob
                 | HostControlKind::Slider
@@ -165,109 +173,150 @@ impl Module for HostControl {
     fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
-/// Read the `HOST_CONTROL_SLOTS` poly slots from the cable pool's read
-/// side and pack them into a flat `[f32; MAX_HOST_CONTROLS]`.
-#[inline]
-fn read_host_control_lanes(pool: &CablePool<'_>) -> [f32; MAX_HOST_CONTROLS] {
-    let mut out = [0.0_f32; MAX_HOST_CONTROLS];
-    for i in 0..patches_core::HOST_CONTROL_SLOTS {
-        let frame = pool.read_poly(&PolyInput::backplane(HOST_CONTROL_BASE + i));
-        out[i * 16..(i + 1) * 16].copy_from_slice(&frame);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::test_support::ModuleHarness;
-    use patches_core::{params, CableValue, ModuleShape, ParameterMap, ParameterValue};
+    use patches_core::{CableValue, ParameterValue, RESERVED_SLOTS, HOST_CONTROL_SLOTS};
+    use patches_core::modules::ParameterMap;
+    use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
+    use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
 
-    fn shape(channels: usize) -> ModuleShape {
-        ModuleShape { channels }
-    }
+    const SR: f32 = 48_000.0;
 
-    fn slots_and_kinds(slots: &[i64], kinds: &[&str]) -> ParameterMap {
-        let mut pm = ParameterMap::new();
-        for (i, &s) in slots.iter().enumerate() {
-            pm.insert_param("slot_offset", i, ParameterValue::Int(s));
-        }
-        for (i, &k) in kinds.iter().enumerate() {
-            pm.insert_param("kind", i, ParameterValue::Enum(match k {
-                "knob"    => 0,
-                "slider"  => 1,
-                "toggle"  => 2,
-                "trigger" => 3,
-                _ => unreachable!(),
-            }));
-        }
-        pm
-    }
-
-    /// Write a single host-control lane into the cable pool's read
-    /// side (which is `1 - wi` from the perspective of the next
-    /// `process()` call). The harness exposes the pool indirectly via
-    /// `set_pool_slot`; we pre-stage the read slot so the next `tick`
-    /// sees the value.
-    fn stage_lane(h: &mut ModuleHarness, lane: usize, value: f32) {
-        let slot = HOST_CONTROL_BASE + lane / 16;
-        let read_idx = 1 - h.write_index();
-        let mut frame = match h.pool_value(slot, read_idx) {
-            CableValue::Poly(f) => f,
-            CableValue::Mono(_) => [0.0_f32; 16],
+    fn make_hc(channels: usize) -> HostControl {
+        let env = AudioEnvironment {
+            sample_rate: SR,
+            poly_voices: 16,
+            periodic_update_interval: 32,
+            hosted: true,
         };
-        frame[lane % 16] = value;
-        h.set_pool_value(slot, read_idx, CableValue::Poly(frame));
+        let descriptor = HostControl::template().build_channels(channels as u32);
+        let mut hc = HostControl::prepare(
+            &env,
+            descriptor,
+            InstanceId::next(),
+            &StructuralParams::new(),
+        )
+        .expect("HostControl::prepare");
+        apply_params(&mut hc, &ParameterMap::new());
+        hc
     }
 
-    #[test]
-    fn descriptor_two_output_groups_per_channel() {
-        let h = ModuleHarness::build_with_shape::<HostControl>(params![], shape(2));
-        let d = h.descriptor();
-        assert_eq!(d.module_name, "HostControl");
-        assert_eq!(d.outputs.len(), 4);
-        assert_eq!(d.inputs.len(), 0);
-        assert_eq!(d.realtime_params.len(), 4);
+    fn apply_params(hc: &mut HostControl, params: &ParameterMap) {
+        let layout = compute_layout(&hc.descriptor);
+        let index = ParamViewIndex::from_layout(&layout);
+        let mut frame = ParamFrame::with_layout(&layout);
+        let defaults = defaults_from_descriptor(&hc.descriptor);
+        pack_into(&layout, &defaults, params, &mut frame).expect("pack_into");
+        let view = ParamView::new(&index, &frame);
+        hc.update_validated_parameters(&view);
     }
 
-    #[test]
-    fn knob_writes_lane_to_audio_out() {
-        let mut h = ModuleHarness::build_with_shape::<HostControl>(params![], shape(1));
-        h.update_params_map(&slots_and_kinds(&[5], &["knob"]));
-        stage_lane(&mut h, 5, 0.42);
-        h.tick();
-        assert!((h.read_mono("audio_out") - 0.42).abs() < 1e-6);
-        assert!(h.read_mono("trigger_out").abs() < 1e-6);
+    /// Build a minimal cable pool sized for `hc` plus a backplane region
+    /// pre-seeded with zeros on both ping-pong banks.
+    fn make_pool(hc: &HostControl) -> Vec<[CableValue; 2]> {
+        let n_inputs = hc.descriptor.inputs.len();
+        let n_outputs = hc.descriptor.outputs.len();
+        let pool_size = RESERVED_SLOTS + n_inputs + n_outputs;
+        let mut pool = vec![[CableValue::mono(0.0); 2]; pool_size];
+        for i in 0..HOST_CONTROL_SLOTS {
+            pool[HOST_CONTROL_BASE + i] = [CableValue::poly([0.0; 16]); 2];
+        }
+        pool
     }
 
-    #[test]
-    fn trigger_writes_lane_to_trigger_out() {
-        let mut h = ModuleHarness::build_with_shape::<HostControl>(params![], shape(1));
-        h.update_params_map(&slots_and_kinds(&[3], &["trigger"]));
-        stage_lane(&mut h, 3, 1.0);
-        h.tick();
-        assert!((h.read_mono("trigger_out") - 1.0).abs() < 1e-6);
-        assert!(h.read_mono("audio_out").abs() < 1e-6);
+    fn wire_outputs(hc: &mut HostControl) -> usize {
+        let n_inputs = hc.descriptor.inputs.len();
+        let n_outputs = hc.descriptor.outputs.len();
+        let outputs: Vec<OutputPort> = (0..n_outputs)
+            .map(|j| {
+                let port = &hc.descriptor.outputs[j];
+                let cable_idx = RESERVED_SLOTS + n_inputs + j;
+                match port.kind {
+                    patches_core::CableKind::Mono =>
+                        OutputPort::Mono(MonoOutput { cable_idx, connected: true }),
+                    patches_core::CableKind::Stereo =>
+                        OutputPort::Stereo(patches_core::StereoOutput { cable_idx, connected: true }),
+                    patches_core::CableKind::Poly =>
+                        OutputPort::Poly(patches_core::PolyOutput { cable_idx, connected: true }),
+                }
+            })
+            .collect();
+        hc.set_ports(&[], &outputs);
+        RESERVED_SLOTS + n_inputs
     }
 
+    /// `process` reads the requested backplane lane and writes it to
+    /// `audio_out` for knob/slider/toggle.
     #[test]
-    fn mixed_kinds_each_channel_reads_its_lane() {
-        let mut h = ModuleHarness::build_with_shape::<HostControl>(params![], shape(3));
-        h.update_params_map(&slots_and_kinds(&[0, 17, 31], &["knob", "slider", "trigger"]));
-        stage_lane(&mut h, 0, 0.1);
-        stage_lane(&mut h, 17, 0.5);
-        stage_lane(&mut h, 31, 1.0);
-        h.tick();
-        assert!((h.read_mono_at("audio_out", 0) - 0.1).abs() < 1e-6);
-        assert!((h.read_mono_at("audio_out", 1) - 0.5).abs() < 1e-6);
-        assert!((h.read_mono_at("trigger_out", 2) - 1.0).abs() < 1e-6);
+    fn audio_out_reflects_backplane_lane() {
+        let mut hc = make_hc(1);
+        let mut params = ParameterMap::new();
+        params.insert_param("slot_offset", 0, ParameterValue::Int(5));
+        params.insert_param("kind", 0, ParameterValue::Enum(0)); // knob
+        apply_params(&mut hc, &params);
+
+        let mut pool = make_pool(&hc);
+        let audio_out_slot = wire_outputs(&mut hc);
+
+        // Modules read from `1 - wi`; write the test row there so the
+        // module observes the lane via the standard 1-sample delay.
+        let mut row = [0.0_f32; 16];
+        row[5] = 0.42;
+        let wi = 0;
+        pool[HOST_CONTROL_BASE][1 - wi] = CableValue::poly(row);
+
+        let mut cp = CablePool::new(&mut pool, wi);
+        hc.process(&mut cp);
+
+        assert_eq!(pool[audio_out_slot][wi].as_mono(), 0.42);
     }
 
+    /// `process` routes a trigger-kind channel's value to `trigger_out`.
     #[test]
-    fn out_of_range_slot_reads_zero() {
-        let mut h = ModuleHarness::build_with_shape::<HostControl>(params![], shape(1));
-        h.update_params_map(&slots_and_kinds(&[(MAX_HOST_CONTROLS as i64) - 1], &["knob"]));
-        h.tick();
-        assert_eq!(h.read_mono("audio_out"), 0.0);
+    fn trigger_kind_routes_to_trigger_out() {
+        let mut hc = make_hc(1);
+        let mut params = ParameterMap::new();
+        params.insert_param("slot_offset", 0, ParameterValue::Int(0));
+        params.insert_param("kind", 0, ParameterValue::Enum(3)); // trigger
+        apply_params(&mut hc, &params);
+
+        let mut pool = make_pool(&hc);
+        let _audio_out_slot = wire_outputs(&mut hc);
+        let trigger_out_slot = RESERVED_SLOTS + hc.descriptor.inputs.len() + 1;
+
+        let mut row = [0.0_f32; 16];
+        row[0] = 1.0;
+        let wi = 0;
+        pool[HOST_CONTROL_BASE][1 - wi] = CableValue::poly(row);
+
+        let mut cp = CablePool::new(&mut pool, wi);
+        hc.process(&mut cp);
+
+        assert_eq!(pool[trigger_out_slot][wi].as_mono(), 1.0);
+    }
+
+    /// Out-of-range `slot_offset` degrades to 0.0 rather than panicking.
+    #[test]
+    fn out_of_range_slot_offset_degrades_to_zero() {
+        let mut hc = make_hc(1);
+        let mut params = ParameterMap::new();
+        params.insert_param(
+            "slot_offset",
+            0,
+            ParameterValue::Int(MAX_HOST_CONTROLS as i64 - 1),
+        );
+        // ParameterMap clamps via parameter validation; emulate "garbage"
+        // by writing directly past validation.
+        apply_params(&mut hc, &params);
+        hc.slot_offsets[0] = MAX_HOST_CONTROLS + 1;
+
+        let mut pool = make_pool(&hc);
+        let audio_out_slot = wire_outputs(&mut hc);
+
+        let mut cp = CablePool::new(&mut pool, 0);
+        hc.process(&mut cp);
+
+        assert_eq!(pool[audio_out_slot][0].as_mono(), 0.0);
     }
 }

@@ -15,12 +15,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::{
-    BoundedRandomWalk, CablePool, CableValue, MidiEvent, MidiFrame, TapBlockFrame, TapFrame,
-    TransportFrame,
+    BoundedRandomWalk, CablePool, CableValue, HostControlEvent, MidiEvent, MidiFrame,
+    TapBlockFrame, TapFrame, TransportFrame,
     AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
-    MAX_STASH, MAX_TAPS, TAP_BASE, TAP_SLOTS,
+    HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_TAPS,
+    TAP_BASE, TAP_SLOTS,
 };
+use crate::host_control_scratch::HostControlScratch;
+use crate::midi_scratch::MidiScratch;
 
 /// Read the four `TAP_BASE` poly slots from `buffer_pool` at index
 /// `idx` (0 or 1) and pack them into a flat `[f32; MAX_TAPS]` frame.
@@ -31,19 +34,18 @@ use patches_core::{
 fn snapshot_tap_lanes(buffer_pool: &[[CableValue; 2]], idx: usize) -> TapFrame {
     let mut out = [0.0_f32; MAX_TAPS];
     for i in 0..TAP_SLOTS {
-        if let CableValue::Poly(lanes) = buffer_pool[TAP_BASE + i][idx] {
-            out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
-        }
+        let lanes = buffer_pool[TAP_BASE + i][idx].as_poly();
+        out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
     }
     out
 }
 
-use patches_planner::{ExecutionPlan, PlanMeta};
+use patches_core::HostControlForAudio;
+use patches_planner::{ExecutionPlan, MonitorMeta};
 use crate::cleanup::CleanupAction;
 use crate::monitor::{MonitorAttach, MonitorMessage, MonitorState};
 use crate::execution_state::ReadyState;
 use crate::halt::{payload_summary, HaltHandle, HaltInfoSnapshot, HaltState};
-use crate::midi::EventQueueConsumer;
 use crate::pool::ModulePool;
 
 /// Mask for wrapping `sample_count`.  2^16 = 65536, well within `f32`'s
@@ -77,11 +79,6 @@ pub struct PatchProcessor {
     transport_poly: [f32; 16],
     /// Poly buffer for `GLOBAL_MIDI`, reused each tick to avoid allocation.
     midi_poly: [f32; 16],
-    /// Pre-allocated overflow buffer for MIDI events that exceed `MidiFrame::MAX_EVENTS`
-    /// per sample. Deferred events are written to the next sample's frame.
-    midi_overflow: [MidiEvent; MAX_STASH],
-    /// Number of valid events in `midi_overflow`.
-    midi_overflow_count: usize,
     global_drift_walk: BoundedRandomWalk,
     periodic_update_interval: u32,
     /// Count of `CleanupAction`s dropped inline because the cleanup ring was
@@ -125,6 +122,23 @@ pub struct PatchProcessor {
     /// block. Also carries the SPSC producer used for the [`PlanMeta`] drop
     /// ladder in [`adopt_plan_with_meta`](Self::adopt_plan_with_meta).
     monitor: Option<MonitorState>,
+    /// Per-block host-control automation pipeline (ADR 0068 §2 amended
+    /// 2026-05-05; ticket 0817). Audio thread feeds events via
+    /// [`write_host_control_event`](Self::write_host_control_event) and
+    /// runs [`prepare_host_control_block`](Self::prepare_host_control_block)
+    /// once per host audio buffer; per-sample `tick()` memcpys one row
+    /// into the four contiguous `HOST_CONTROL_BASE` poly slots.
+    host_control: HostControlScratch,
+    /// CLAP `param_id → channel` table installed atomically with each
+    /// plan via [`PlanMeta::host_control_param_to_channel`] (ticket
+    /// 0817). Linear scan in `host_control_channel_of`.
+    host_control_param_to_channel: Vec<(u32, u8)>,
+    /// Per-block MIDI scratch (ADR 0069). Audio thread feeds events
+    /// via [`write_midi_event`](Self::write_midi_event) and runs
+    /// [`prepare_midi_block`](Self::prepare_midi_block) once per host
+    /// audio buffer; per-sample `tick()` packs one row into
+    /// `midi_poly` and flushes to `GLOBAL_MIDI`.
+    midi_scratch: MidiScratch,
 }
 
 impl PatchProcessor {
@@ -168,8 +182,6 @@ impl PatchProcessor {
             sample_count: 0,
             transport_poly: [0.0; 16],
             midi_poly: [0.0; 16],
-            midi_overflow: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
-            midi_overflow_count: 0,
             global_drift_walk: BoundedRandomWalk::new(0x1234_5678, GLOBAL_DRIFT_STEP),
             periodic_update_interval: interval,
             cleanup_overflow_count: AtomicU32::new(0),
@@ -180,6 +192,12 @@ impl PatchProcessor {
             tap_sample_counter: 0,
             tap_manifest_generation: 0,
             monitor: None,
+            // Sample rate is wired in by activate via `set_sample_rate`;
+            // the default α here is benign because no events flow until
+            // a plan with host controls is adopted.
+            host_control: HostControlScratch::new(48_000.0),
+            host_control_param_to_channel: Vec::new(),
+            midi_scratch: MidiScratch::new(),
         }
     }
 
@@ -222,18 +240,30 @@ impl PatchProcessor {
     /// port diffs, zeros freed cable slots, and replaces the current plan.
     /// Evicted modules and plans are pushed to the cleanup ring buffer.
     pub fn adopt_plan(&mut self, plan: ExecutionPlan) {
-        self.adopt_plan_with_meta(plan, None)
+        self.adopt_plan_with_meta(plan, None, HostControlForAudio::None)
     }
 
-    /// Like [`adopt_plan`](Self::adopt_plan) but additionally routes
-    /// per-instance monitor metadata (ADR 0065) through a drop ladder:
-    /// monitor SPSC → cleanup ring → in-thread drop. `meta` is `None` when
-    /// the planner did not produce metadata (monitor disabled at build
-    /// time); the audio-thread cost is then exactly zero.
+    /// Adopt a new plan together with its audio-thread-bound
+    /// attachments: optional monitor metadata (ADR 0065) and the
+    /// host-control plan-side state (ticket 0817). Each `Box<...>`
+    /// has exactly one writer (set at construction by the producing
+    /// stage) and is consumed here in one of two ways:
+    ///
+    /// - `monitor`: tried on the monitor SPSC, falls back to the
+    ///   cleanup ring on a full / absent channel, in-thread drop only
+    ///   as last resort.
+    /// - `host_control`: kinds copied into the scratch, routing moved
+    ///   into the processor's local Vec, then the box itself routed
+    ///   to the cleanup ring for off-thread drop.
+    ///
+    /// `monitor = None` when monitoring is disabled (zero audio-thread
+    /// cost). `host_control = None` when the patch declared no host
+    /// controls; the routing table is then cleared.
     pub fn adopt_plan_with_meta(
         &mut self,
         mut plan: ExecutionPlan,
-        meta: Option<PlanMeta>,
+        monitor: Option<Box<MonitorMeta>>,
+        host_control: HostControlForAudio,
     ) {
         // Move the real state out, leaving a valid empty placeholder.
         let state = mem::replace(&mut self.state, ReadyState::empty());
@@ -310,10 +340,10 @@ impl PatchProcessor {
             }
         }
         for &i in &plan.to_zero {
-            self.buffer_pool[i] = [CableValue::Mono(0.0), CableValue::Mono(0.0)];
+            self.buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
         }
         for &i in &plan.to_zero_poly {
-            self.buffer_pool[i] = [CableValue::Poly([0.0; 16]), CableValue::Poly([0.0; 16])];
+            self.buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
         }
 
         self.state = stale.rebuild(&plan, self.periodic_update_interval);
@@ -334,23 +364,50 @@ impl PatchProcessor {
             }
         }
 
+        // Host-control plan-side state (ticket 0817). Kinds copied into
+        // the scratch; routing moved into the processor's local Vec.
+        // The box itself routes to the cleanup ring for off-thread
+        // drop. `None` clears the routing table so stale mappings can't
+        // leak across a plan that dropped all host controls.
+        match host_control {
+            HostControlForAudio::None => {
+                self.host_control_param_to_channel.clear();
+            }
+            HostControlForAudio::Present(mut boxed) => {
+                // Move routing out (O(1) — leaves an empty Vec in the
+                // box) and copy the small kinds array into the scratch.
+                // No audio-thread allocation.
+                let routing = std::mem::take(&mut boxed.routing);
+                self.host_control.set_lane_kinds(&boxed.kinds);
+                self.host_control_param_to_channel = routing;
+                // The (now-empty) box still routes to cleanup so the
+                // heap free for the box itself happens off-thread.
+                if let Err(rtrb::PushError::Full(a)) = self
+                    .cleanup_tx
+                    .push(CleanupAction::DropHostControlPlanMeta(boxed))
+                {
+                    self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
+                    drop(a);
+                }
+            }
+        }
+
         // Monitor metadata drop ladder (ADR 0065): try the monitor SPSC; on
         // full / unset, route through the cleanup ring so the heap drop
         // happens off-thread; in-thread drop only as last resort if cleanup
         // is also full.
-        if let Some(meta) = meta {
-            let boxed = Box::new(meta);
+        if let Some(boxed) = monitor {
             let pending = match self.monitor.as_mut() {
-                Some(m) => match m.tx_mut().push(MonitorMessage::PlanMeta(boxed)) {
+                Some(m) => match m.tx_mut().push(MonitorMessage::MonitorMeta(boxed)) {
                     Ok(()) => None,
-                    Err(rtrb::PushError::Full(MonitorMessage::PlanMeta(b))) => Some(b),
+                    Err(rtrb::PushError::Full(MonitorMessage::MonitorMeta(b))) => Some(b),
                     Err(rtrb::PushError::Full(_)) => unreachable!(),
                 },
                 None => Some(boxed),
             };
             if let Some(boxed) = pending {
                 if let Err(rtrb::PushError::Full(action)) =
-                    self.cleanup_tx.push(CleanupAction::DropPlanMeta(boxed))
+                    self.cleanup_tx.push(CleanupAction::DropMonitorMeta(boxed))
                 {
                     self.cleanup_overflow_count.fetch_add(1, Ordering::Relaxed);
                     drop(action);
@@ -373,8 +430,8 @@ impl PatchProcessor {
     /// see the input via the 1-sample cable delay.
     #[inline]
     pub fn write_input(&mut self, left: f32, right: f32) {
-        self.buffer_pool[AUDIO_IN_L][self.wi] = CableValue::Mono(left);
-        self.buffer_pool[AUDIO_IN_R][self.wi] = CableValue::Mono(right);
+        self.buffer_pool[AUDIO_IN_L][self.wi] = CableValue::mono(left);
+        self.buffer_pool[AUDIO_IN_R][self.wi] = CableValue::mono(right);
     }
 
     /// Advance the patch by one sample.
@@ -418,31 +475,63 @@ impl PatchProcessor {
         TransportFrame::set_tsig_denom(&mut self.transport_poly, tsig_denom);
     }
 
-    /// Write MIDI events into the `GLOBAL_MIDI` backplane slot.
+    /// Stamp one MIDI event into the per-block scratch frame at
+    /// `sample_offset` (ADR 0069). Out-of-range offsets clamp to the
+    /// last row in the block; within-sample overflow spills into the
+    /// next row, recursing until a row with capacity is found or the
+    /// block end is hit. Events that don't fit anywhere are dropped
+    /// to a debug counter.
     ///
-    /// Packs up to [`MidiFrame::MAX_EVENTS`] events into the current frame.
-    /// Any events beyond that limit are stored in an internal overflow buffer
-    /// and will be written at the start of the next sample's frame.
-    ///
-    /// Call this **before** [`tick`](Self::tick) each sample. The `tick` method
-    /// flushes `midi_poly` to the backplane and then clears it for the next
-    /// sample.
+    /// Call between [`prepare_midi_block`](Self::prepare_midi_block)
+    /// and the per-tick loop.
     #[inline]
-    pub fn write_midi(&mut self, events: &[MidiEvent]) {
-        // Start from current packed count (may include overflow from previous sample).
-        let mut packed = MidiFrame::packed_count(&self.midi_poly);
-        for &event in events {
-            if packed < MidiFrame::MAX_EVENTS {
-                MidiFrame::write_event(&mut self.midi_poly, packed, event);
-                packed += 1;
-            } else if self.midi_overflow_count < MAX_STASH {
-                self.midi_overflow[self.midi_overflow_count] = event;
-                self.midi_overflow_count += 1;
-            }
-            // Events beyond overflow capacity are silently dropped.
-        }
-        // Total count includes events packed in this frame + overflow pending.
-        MidiFrame::set_event_count(&mut self.midi_poly, packed + self.midi_overflow_count);
+    pub fn write_midi_event(&mut self, sample_offset: u16, event: MidiEvent) {
+        self.midi_scratch.write_midi_event(sample_offset, event);
+    }
+
+    /// Reset the MIDI scratch's per-tick cursor for a host audio
+    /// buffer of `frames` samples (ADR 0069). Clamps `frames` to
+    /// `MAX_HOST_CONTROL_BLOCK`.
+    #[inline]
+    pub fn prepare_midi_block(&mut self, frames: usize) {
+        self.midi_scratch.prepare_block(frames);
+    }
+
+    /// Push one host-control automation event onto the per-block scratch
+    /// buffer (ADR 0068 §2 amended). Out-of-range channels are dropped
+    /// silently. Call before [`prepare_host_control_block`](Self::prepare_host_control_block).
+    #[inline]
+    pub fn write_host_control_event(&mut self, event: HostControlEvent) {
+        self.host_control.push_event(event);
+    }
+
+    /// Run the per-block step-fill / transpose / smooth pipeline for a
+    /// host audio buffer of `frames` samples. Resets the per-tick
+    /// cursor; call once per host buffer after pushing all events for
+    /// the buffer.
+    #[inline]
+    pub fn prepare_host_control_block(&mut self, frames: usize) {
+        self.host_control.prepare_block(frames);
+    }
+
+    /// Resolve a CLAP `param_id` to a host-control scratch channel
+    /// using the table installed by the most recent
+    /// [`adopt_plan_with_meta`](Self::adopt_plan_with_meta) (ticket
+    /// 0817). Returns `None` for unknown IDs (stale automation, plan
+    /// dropped the control). Linear scan over ≤ `MAX_HOST_CONTROLS`
+    /// entries — fine on the audio thread.
+    #[inline]
+    pub fn host_control_channel_of(&self, param_id: u32) -> Option<u8> {
+        self.host_control_param_to_channel
+            .iter()
+            .find_map(|&(id, ch)| if id == param_id { Some(ch) } else { None })
+    }
+
+    /// Update the host-control smoothing α for a new sample rate. Call
+    /// once at activation; the engine does not change sample rate
+    /// mid-stream.
+    pub fn set_host_control_sample_rate(&mut self, sample_rate: f32) {
+        self.host_control.set_sample_rate(sample_rate);
     }
 
     /// Writes `GLOBAL_TRANSPORT` and `GLOBAL_DRIFT` to the backplane, runs all
@@ -456,8 +545,8 @@ impl PatchProcessor {
         // the write index so the ping-pong buffer stays coherent for reads.
         if self.halt.is_halted() {
             let wi = self.wi;
-            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::Mono(0.0);
-            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::Mono(0.0);
+            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
+            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -465,27 +554,45 @@ impl PatchProcessor {
         let wi = self.wi;
 
         TransportFrame::set_sample_count(&mut self.transport_poly, self.sample_count as f32);
-        self.buffer_pool[GLOBAL_TRANSPORT][wi] = CableValue::Poly(self.transport_poly);
+        self.buffer_pool[GLOBAL_TRANSPORT][wi] = CableValue::poly(self.transport_poly);
         self.sample_count = (self.sample_count + 1) & CLOCK_WRAP_MASK;
         self.buffer_pool[GLOBAL_DRIFT][wi] =
-            CableValue::Mono(self.global_drift_walk.advance());
+            CableValue::mono(self.global_drift_walk.advance());
 
-        // Flush MIDI frame to backplane, then prepare for next sample.
-        self.buffer_pool[GLOBAL_MIDI][wi] = CableValue::Poly(self.midi_poly);
+        // Flush the host-control AoS frame row into the four contiguous
+        // backplane poly slots (ADR 0068 §2 amended). When no
+        // `prepare_host_control_block` has been issued for this buffer,
+        // `next_row` returns `None` and we write zeros so downstream
+        // modules see a defined state.
+        match self.host_control.next_row() {
+            Some(row) => {
+                for i in 0..HOST_CONTROL_SLOTS {
+                    let mut chunk = [0.0_f32; 16];
+                    chunk.copy_from_slice(&row[i * 16..(i + 1) * 16]);
+                    self.buffer_pool[HOST_CONTROL_BASE + i][wi] = CableValue::poly(chunk);
+                }
+            }
+            None => {
+                for i in 0..HOST_CONTROL_SLOTS {
+                    self.buffer_pool[HOST_CONTROL_BASE + i][wi] =
+                        CableValue::poly([0.0; 16]);
+                }
+            }
+        }
+
+        // Pack the MIDI scratch row for this sample into `midi_poly`
+        // and flush to the backplane (ADR 0069). When the per-tick
+        // cursor has run past the prepared block (or no
+        // `prepare_midi_block` was issued), `take_row` returns
+        // `None` and the slot is written zero.
         MidiFrame::clear(&mut self.midi_poly);
-        // Drain overflow from previous sample into the fresh frame.
-        let overflow_n = self.midi_overflow_count;
-        let drain = overflow_n.min(MidiFrame::MAX_EVENTS);
-        for i in 0..drain {
-            MidiFrame::write_event(&mut self.midi_poly, i, self.midi_overflow[i]);
+        if let Some((row, count)) = self.midi_scratch.take_row() {
+            for (i, ev) in row.iter().enumerate() {
+                MidiFrame::write_event(&mut self.midi_poly, i, *ev);
+            }
+            MidiFrame::set_event_count(&mut self.midi_poly, count);
         }
-        // Shift remaining overflow to front.
-        if drain < overflow_n {
-            self.midi_overflow.copy_within(drain..overflow_n, 0);
-        }
-        self.midi_overflow_count = overflow_n - drain;
-        // Total count = events packed in this frame + events still in overflow.
-        MidiFrame::set_event_count(&mut self.midi_poly, drain + self.midi_overflow_count);
+        self.buffer_pool[GLOBAL_MIDI][wi] = CableValue::poly(self.midi_poly);
 
         // ADR 0051: wrap the tick in catch_unwind so a module panic becomes a
         // sticky halt rather than an unwind through FFI into the host.
@@ -508,8 +615,8 @@ impl PatchProcessor {
             let slot = self.halt.current_module_slot.load(Ordering::Relaxed);
             let name = self.state.slot_module_name(slot).unwrap_or("<unknown>");
             self.halt.record(slot, name, payload_summary(payload));
-            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::Mono(0.0);
-            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::Mono(0.0);
+            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
+            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -530,41 +637,12 @@ impl PatchProcessor {
             self.tap_block_idx = 0;
         }
 
-        let out_l = match self.buffer_pool[AUDIO_OUT_L][wi] {
-            CableValue::Mono(v) => v,
-            _ => 0.0,
-        };
-        let out_r = match self.buffer_pool[AUDIO_OUT_R][wi] {
-            CableValue::Mono(v) => v,
-            _ => 0.0,
-        };
+        let out_l = self.buffer_pool[AUDIO_OUT_L][wi].as_mono();
+        let out_r = self.buffer_pool[AUDIO_OUT_R][wi].as_mono();
 
         self.wi = 1 - self.wi;
 
         (out_l, out_r)
-    }
-
-    /// Drain the MIDI event queue for a sub-block window and write events
-    /// to the `GLOBAL_MIDI` backplane slot via [`write_midi`](Self::write_midi).
-    pub fn dispatch_midi(
-        &mut self,
-        queue: &mut Option<EventQueueConsumer>,
-        sample_counter: u64,
-        window_size: u64,
-    ) {
-        if let Some(eq) = queue {
-            let mut batch = [MidiEvent { bytes: [0; 3] }; MAX_STASH];
-            let mut count = 0;
-            for (_offset, event) in eq.drain_window(sample_counter, window_size) {
-                if count < batch.len() {
-                    batch[count] = event;
-                    count += 1;
-                }
-            }
-            if count > 0 {
-                self.write_midi(&batch[..count]);
-            }
-        }
     }
 
     /// Inspect a raw cable buffer pool slot (both ping-pong frames).
@@ -605,6 +683,87 @@ impl PatchProcessor {
         // a fresh zero-capacity ring buffer.
         let (dummy_tx, _dummy_rx) = rtrb::RingBuffer::<CleanupAction>::new(1);
         std::mem::replace(&mut self.cleanup_tx, dummy_tx)
+    }
+}
+
+#[cfg(test)]
+mod midi_scratch_tests {
+    use super::*;
+
+    fn fresh() -> PatchProcessor {
+        let (cleanup_tx, _cleanup_rx) = rtrb::RingBuffer::<CleanupAction>::new(8);
+        PatchProcessor::new(64, 8, 1, cleanup_tx)
+    }
+
+    fn ev(b: u8) -> MidiEvent {
+        MidiEvent { bytes: [b, 0, 0] }
+    }
+
+    fn read_midi_frame(p: &PatchProcessor) -> [f32; 16] {
+        // Backplane was just written at `wi`; tick has since toggled,
+        // so the freshly-written sample is at `1 - wi`.
+        p.pool_slot(GLOBAL_MIDI)[1 - p.wi].as_poly()
+    }
+
+    #[test]
+    fn write_midi_event_at_offset_n_lands_on_sample_n() {
+        let mut p = fresh();
+        p.prepare_midi_block(4);
+        p.write_midi_event(2, ev(0x90));
+        // Samples 0,1: empty; sample 2: one event; sample 3: empty.
+        for t in 0..4 {
+            p.tick();
+            let frame = read_midi_frame(&p);
+            let expected_count = if t == 2 { 1 } else { 0 };
+            assert_eq!(MidiFrame::total_count(&frame), expected_count, "t={t}");
+            if t == 2 {
+                assert_eq!(MidiFrame::read_event(&frame, 0).bytes[0], 0x90);
+            }
+        }
+    }
+
+    #[test]
+    fn within_sample_overflow_lands_on_next_row() {
+        let mut p = fresh();
+        p.prepare_midi_block(2);
+        for i in 0..(MidiFrame::MAX_EVENTS + 1) {
+            p.write_midi_event(0, ev(i as u8));
+        }
+        p.tick();
+        let f0 = read_midi_frame(&p);
+        assert_eq!(MidiFrame::total_count(&f0), MidiFrame::MAX_EVENTS);
+        for i in 0..MidiFrame::MAX_EVENTS {
+            assert_eq!(MidiFrame::read_event(&f0, i).bytes[0], i as u8);
+        }
+        p.tick();
+        let f1 = read_midi_frame(&p);
+        assert_eq!(MidiFrame::total_count(&f1), 1);
+        assert_eq!(
+            MidiFrame::read_event(&f1, 0).bytes[0],
+            MidiFrame::MAX_EVENTS as u8
+        );
+    }
+
+    #[test]
+    fn empty_block_carries_zero_events_per_sample() {
+        let mut p = fresh();
+        p.prepare_midi_block(4);
+        for _ in 0..4 {
+            p.tick();
+            let frame = read_midi_frame(&p);
+            assert_eq!(MidiFrame::total_count(&frame), 0);
+        }
+    }
+
+    #[test]
+    fn single_event_at_offset_zero() {
+        let mut p = fresh();
+        p.prepare_midi_block(1);
+        p.write_midi_event(0, ev(0x91));
+        p.tick();
+        let frame = read_midi_frame(&p);
+        assert_eq!(MidiFrame::total_count(&frame), 1);
+        assert_eq!(MidiFrame::read_event(&frame, 0).bytes[0], 0x91);
     }
 }
 
