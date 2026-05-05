@@ -90,6 +90,10 @@ unsafe extern "C" fn create_plugin(
         subscribers: None,
         diagnostics: None,
         meter: std::sync::Arc::new(patches_plugin_common::MeterTap::new()),
+        host_control_registry:
+            patches_plugin_common::host_control_registry::StandardHostControlRegistry::new(
+                crate::plugin::HOST_CONTROL_CAP,
+            ),
     });
     let data_ptr = Box::into_raw(plugin_data);
 

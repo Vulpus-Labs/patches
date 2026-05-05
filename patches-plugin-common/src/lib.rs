@@ -6,6 +6,7 @@
 
 pub mod controller;
 pub mod gui;
+pub mod host_control_registry;
 pub mod meter;
 
 pub use controller::{

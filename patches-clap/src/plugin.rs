@@ -24,9 +24,9 @@ macro_rules! dlog {
 }
 
 use clap_sys::events::{
-    clap_event_midi, clap_event_transport, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI,
-    CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
-    CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_PLAYING,
+    clap_event_midi, clap_event_param_value, clap_event_transport, CLAP_CORE_EVENT_SPACE_ID,
+    CLAP_EVENT_MIDI, CLAP_EVENT_PARAM_VALUE, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
+    CLAP_TRANSPORT_HAS_TEMPO, CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_PLAYING,
 };
 use clap_sys::fixedpoint::CLAP_BEATTIME_FACTOR;
 use clap_sys::host::clap_host;
@@ -35,7 +35,10 @@ use clap_sys::process::{
     clap_process, clap_process_status, CLAP_PROCESS_CONTINUE,
 };
 
-use patches_core::{AudioEnvironment, MidiEvent, BASE_PERIODIC_UPDATE_INTERVAL};
+use patches_core::{
+    AudioEnvironment, HostControlEvent, MidiEvent, MAX_HOST_CONTROLS,
+    BASE_PERIODIC_UPDATE_INTERVAL,
+};
 use patches_observation::{spawn_observer, tap_ring, ObserverHandle};
 use patches_observation::subscribers::{DiagnosticReader, SubscribersHandle};
 use patches_registry::Registry;
@@ -45,11 +48,19 @@ use patches_host::{HostBuilder, HostRuntime, InMemorySource};
 
 use crate::extensions;
 use patches_dsl::manifest::{Manifest, TapDescriptor};
+use patches_plugin_common::host_control_registry::{
+    HostControlRegistry, RescanLevel, StandardHostControlRegistry,
+};
 use patches_plugin_common::{
     xdg_list_presets, xdg_load_preset, xdg_preset_path, xdg_save_preset, Action, CompileFailure,
     CompileSuccess, Controller, DiagnosticView, Env, MeterTap, PersistedSettings, RescanProbe,
     ScanDetails, StateDelta, TapSummary,
 };
+
+/// CLAP cap on published host-control parameters (ADR 0057 §6 ties this
+/// to the host-control backplane lane count).
+pub(crate) const HOST_CONTROL_CAP: usize = 64;
+
 
 /// The runtime state of a single plugin instance.
 ///
@@ -101,6 +112,11 @@ pub struct PatchesClapPlugin {
 
     pub(crate) sample_rate: f64,
 
+    /// Name → CLAP-param-ID lifecycle registry. Lives on the main /
+    /// control thread; reconciled from `controller.host_control_manifest`
+    /// on each successful compile (ADR 0057 §6, ticket 0811).
+    pub(crate) host_control_registry: StandardHostControlRegistry,
+
     // ── Transport edge detection ───────────────────────────────────
     /// Previous beat position, used to detect beat boundary crossings.
     pub(crate) prev_beat: f64,
@@ -136,6 +152,31 @@ impl PatchesClapPlugin {
         unsafe {
             if let Some(f) = (*self.host).request_restart {
                 f(self.host);
+            }
+        }
+    }
+
+    /// Ask the host to rescan our parameter list (`CLAP_PARAM_RESCAN_*`).
+    /// Used after the host-control manifest changes (ADR 0057 §6,
+    /// ticket 0811).
+    #[allow(dead_code)] // retained for callers outside the env path
+    pub(crate) fn request_param_rescan(&self, flags: u32) {
+        use clap_sys::ext::params::{clap_host_params, CLAP_EXT_PARAMS};
+        if self.host.is_null() {
+            return;
+        }
+        unsafe {
+            let get_ext = match (*self.host).get_extension {
+                Some(f) => f,
+                None => return,
+            };
+            let raw = get_ext(self.host, CLAP_EXT_PARAMS.as_ptr());
+            if raw.is_null() {
+                return;
+            }
+            let ext = &*(raw as *const clap_host_params);
+            if let Some(f) = ext.rescan {
+                f(self.host, flags);
             }
         }
     }
@@ -323,9 +364,9 @@ unsafe extern "C" fn plugin_activate(
     // Immediately adopt any pending plan so audio starts right away.
     if !p.controller.dsl_source.is_empty() {
         if let Some(rx) = &mut p.plan_rx {
-            if let Ok((plan, meta)) = rx.pop() {
+            if let Ok(msg) = rx.pop() {
                 if let Some(proc) = &mut p.processor {
-                    proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
+                    let patches_host::AdoptionMessage { common, host_control } = msg; proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
                 }
             }
         }
@@ -390,6 +431,10 @@ unsafe extern "C" fn plugin_process(
     // Idempotent; no-op when the allocator-trap feature is off.
     patches_alloc_trap::mark_audio_thread();
 
+    // Flush denormals on the hardware. Per-callback because some hosts
+    // reset MXCSR between calls. See E134.
+    patches_engine::enable_flush_to_zero();
+
     if PROCESS_LOGGED.set(()).is_ok() {
         dlog!("process: first call");
     }
@@ -408,9 +453,13 @@ unsafe extern "C" fn plugin_process(
 
     // Adopt any pending plan.
     if let Some(rx) = &mut p.plan_rx {
-        if let Ok((plan, meta)) = rx.pop() {
-            dlog!("process: adopting plan, {} active modules", plan.active_indices.len());
-            proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
+        if let Ok(msg) = rx.pop() {
+            let patches_host::AdoptionMessage { common, host_control } = msg;
+            dlog!(
+                "process: adopting plan, {} active modules",
+                common.plan.active_indices.len()
+            );
+            proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
             // Reset counter so we log output levels after the new plan.
             PROCESS_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
         }
@@ -447,6 +496,44 @@ unsafe extern "C" fn plugin_process(
     };
     let event_count = event_size_fn.map_or(0, |f| f(in_events));
     let mut event_idx: u32 = 0;
+
+    // Pre-pass: ingest CLAP_EVENT_PARAM_VALUE events into the
+    // host-control scratch (ticket 0817). Do this before the sample
+    // loop so `prepare_host_control_block` can run the step-fill /
+    // transpose / smooth pipeline once for the whole buffer; the
+    // sample loop's per-tick read picks up the AoS row for free.
+    if let Some(get_fn) = event_get_fn {
+        for i in 0..event_count {
+            let header = get_fn(in_events, i);
+            if header.is_null() {
+                continue;
+            }
+            if (*header).space_id != CLAP_CORE_EVENT_SPACE_ID
+                || (*header).type_ != CLAP_EVENT_PARAM_VALUE
+            {
+                continue;
+            }
+            let pv = &*(header as *const clap_event_param_value);
+            let Some(channel) = proc.host_control_channel_of(pv.param_id) else {
+                continue;
+            };
+            // Mirror the value back into the registry so `params_get_value`
+            // returns the latest commanded value to the host. Linear
+            // scan over ≤64 entries is fine on the audio thread; this
+            // is the same complexity the registry uses internally.
+            // Note: registry lives main-side; we only update the
+            // audio-side snapshot here. Main thread re-records via the
+            // `params_flush` / GUI paths.
+            let frame_offset = (*header).time.min(u16::MAX as u32) as u16;
+            let event = HostControlEvent {
+                channel,
+                sample_offset: frame_offset,
+                value: pv.value as f32,
+            };
+            proc.write_host_control_event(event);
+        }
+    }
+    proc.prepare_host_control_block(frames);
 
     // Read host transport and write it to the processor's GLOBAL_TRANSPORT slot.
     if !pr.transport.is_null() {
@@ -631,6 +718,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     };
     let mut needs_restart = false;
     let mut needs_dirty = false;
+    let mut compiled = false;
     for action in actions {
         let delta = apply_action(p, action);
         if delta.persistable_changed {
@@ -639,6 +727,55 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         if delta.requires_restart {
             needs_restart = true;
         }
+        if delta.plan_recompile {
+            compiled = true;
+        }
+    }
+    if compiled {
+        // Registry.apply + rescan now happen inside ClapEnv's
+        // compile_and_push_plan so PlanMeta can ship the
+        // (param_id → channel) table atomically with the plan
+        // (ticket 0817). Here we only handle the bookkeeping that
+        // depends on the post-apply registry state: seed last_value
+        // for freshly-added entries, restore persisted values, and
+        // surface evicted tombstones via the status log.
+        let live_names: Vec<(String, u32, _, _)> = p
+            .host_control_registry
+            .live_sorted_by_id()
+            .into_iter()
+            .map(|(n, e)| (n.to_string(), e.id, e.kind, e.params.clone()))
+            .collect();
+        for (_name, id, kind, params) in &live_names {
+            let (_, _, dflt) = crate::extensions::param_range(*kind, params);
+            // Seed the default *only* when the registry's last_value is
+            // still 0.0 (freshly added or never recorded). Reborn
+            // entries already carry their tombstoned value; we don't
+            // want to overwrite it.
+            let needs_seed = p
+                .host_control_registry
+                .live_by_id(*id)
+                .map(|(_, e)| e.last_value == 0.0)
+                .unwrap_or(false);
+            if needs_seed {
+                p.host_control_registry.record_value(*id, dflt as f32);
+            }
+        }
+        // Restore persisted host-control values (project / preset reload).
+        let restored: Vec<(u32, f32)> = p
+            .controller
+            .host_controls
+            .iter()
+            .filter_map(|(name, v)| {
+                p.host_control_registry.live(name).map(|e| (e.id, *v))
+            })
+            .collect();
+        for (id, v) in restored {
+            p.host_control_registry.record_value(id, v);
+        }
+        // Note: evicted-tombstones reporting moved here would require
+        // re-running apply; the rescan-driving apply already happened
+        // in env. Skipped — evictions are visible via the host's own
+        // param-set diff after rescan.
     }
     if needs_dirty {
         p.mark_state_dirty();
@@ -692,21 +829,71 @@ fn scan_detail_lines(report: &patches_ffi::ScanReport) -> Vec<String> {
 /// Apply one [`Action`] by constructing a fresh [`ClapEnv`] view of the
 /// plugin's audio-side fields and dispatching to `Controller::apply`.
 pub(crate) fn apply_action(p: &mut PatchesClapPlugin, action: Action) -> StateDelta {
-    // Split borrow: ClapEnv only holds the audio-side fields, so the
-    // controller can be borrowed mutably alongside it.
+    // Split borrow: ClapEnv only holds the side-effect fields the
+    // controller's handlers touch (runtime + the host-control registry
+    // for the compile→apply→push sequence in 0817), so `controller`
+    // can be borrowed mutably alongside it.
     let PatchesClapPlugin {
         runtime,
+        host_control_registry,
+        host,
         controller,
         ..
     } = p;
-    let mut env = ClapEnv { runtime };
+    let host_ptr: *const clap_host = *host;
+    let mut env = ClapEnv {
+        runtime,
+        host_control_registry,
+        host: host_ptr,
+    };
     controller.apply(action, &mut env)
 }
 
-/// CLAP-side `Env` impl. Holds only what the controller's handlers
-/// touch — file dialogs, file I/O, and the audio-thread plan-push path.
+/// Free-function rescan dispatcher used from `ClapEnv` (which holds the
+/// raw `clap_host` pointer instead of `&PatchesClapPlugin`).
+unsafe fn request_param_rescan_raw(host: *const clap_host, flags: u32) {
+    use clap_sys::ext::params::{clap_host_params, CLAP_EXT_PARAMS};
+    if host.is_null() {
+        return;
+    }
+    let get_ext = match (*host).get_extension {
+        Some(f) => f,
+        None => return,
+    };
+    let raw = get_ext(host, CLAP_EXT_PARAMS.as_ptr());
+    if raw.is_null() {
+        return;
+    }
+    let host_params = &*(raw as *const clap_host_params);
+    if let Some(rescan) = host_params.rescan {
+        rescan(host, flags);
+    }
+}
+
+/// Build a `(param_id, channel)` routing table from the registry's
+/// current live set (ticket 0817). Channel == backplane slot. The
+/// lane-kind table is populated upstream by `patches-host` from the
+/// manifest — this helper only emits the CLAP-specific column.
+fn build_routing(registry: &StandardHostControlRegistry) -> Vec<(u32, u8)> {
+    let mut routing = Vec::with_capacity(MAX_HOST_CONTROLS);
+    for (_name, entry) in registry.live_sorted_by_id() {
+        if entry.slot >= MAX_HOST_CONTROLS {
+            continue;
+        }
+        routing.push((entry.id, entry.slot as u8));
+    }
+    routing
+}
+
+/// CLAP-side `Env` impl. Holds the side-effect surface the controller
+/// reaches into during action handling: runtime (for compile + push),
+/// host-control registry (for ID minting between compile and push —
+/// ticket 0817), and the raw `clap_host` pointer used to request param
+/// rescans after a manifest change.
 struct ClapEnv<'a> {
     runtime: &'a mut Option<HostRuntime>,
+    host_control_registry: &'a mut StandardHostControlRegistry,
+    host: *const clap_host,
 }
 
 impl<'a> Env for ClapEnv<'a> {
@@ -740,15 +927,50 @@ impl<'a> Env for ClapEnv<'a> {
         if let Some(path) = file_path {
             src = src.with_master_path(path.to_path_buf());
         }
-        match runtime.compile_and_push(&src, registry) {
-            Ok(loaded) => {
+        match runtime.compile_only(&src, registry) {
+            Ok(out) => {
+                // Apply the new host-control manifest to the registry
+                // (mints/recycles IDs, marks rescans). Must happen
+                // *before* the plan is pushed so the audio-thread
+                // message carrying `(param_id → channel)` lands
+                // atomically with the plan (ticket 0817).
+                let outcome = self
+                    .host_control_registry
+                    .apply(&out.loaded.host_control_manifest);
+
+                let routing = build_routing(self.host_control_registry);
+                let (loaded, msg) = out.split_with_routing(routing);
+                runtime.push_blocking(&loaded, msg);
+
+                // Rescan request follows the push; the host can pick
+                // up the new param set whenever it next pumps params.
+                match outcome.rescan {
+                    RescanLevel::None => {}
+                    RescanLevel::Info => unsafe {
+                        request_param_rescan_raw(
+                            self.host,
+                            clap_sys::ext::params::CLAP_PARAM_RESCAN_INFO,
+                        )
+                    },
+                    RescanLevel::All => unsafe {
+                        request_param_rescan_raw(
+                            self.host,
+                            clap_sys::ext::params::CLAP_PARAM_RESCAN_ALL,
+                        )
+                    },
+                }
+
                 let taps = project_manifest(&loaded.manifest);
                 let warnings: Vec<_> = loaded
                     .layering_warnings
                     .iter()
                     .map(patches_diagnostics::RenderedDiagnostic::from_layering_warning)
                     .collect();
-                Ok(CompileSuccess { taps, warnings })
+                Ok(CompileSuccess {
+                    taps,
+                    warnings,
+                    host_control_manifest: Arc::new(loaded.host_control_manifest.clone()),
+                })
             }
             Err(e) => {
                 let view = DiagnosticView {
@@ -949,6 +1171,7 @@ mod activate_scan_tests {
             subscribers: None,
             diagnostics: None,
             meter: Arc::new(MeterTap::new()),
+            host_control_registry: StandardHostControlRegistry::new(HOST_CONTROL_CAP),
         });
         let data_ptr = Box::into_raw(data);
         let clap_plugin_box = Box::new(make_clap_plugin(
@@ -1032,6 +1255,7 @@ mod activate_scan_tests {
             subscribers: None,
             diagnostics: None,
             meter: Arc::new(MeterTap::new()),
+            host_control_registry: StandardHostControlRegistry::new(HOST_CONTROL_CAP),
         });
         let data_ptr = Box::into_raw(data);
         let clap_plugin_box = Box::new(make_clap_plugin(
@@ -1058,9 +1282,9 @@ mod activate_scan_tests {
             // adopt the pending plan first.
             let tick_once = |p: &mut PatchesClapPlugin| {
                 if let Some(rx) = &mut p.plan_rx {
-                    if let Ok((plan, meta)) = rx.pop() {
+                    if let Ok(msg) = rx.pop() {
                         if let Some(proc) = &mut p.processor {
-                            proc.adopt_plan_with_meta(plan, meta.map(|b| *b));
+                            let patches_host::AdoptionMessage { common, host_control } = msg; proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
                         }
                     }
                 }

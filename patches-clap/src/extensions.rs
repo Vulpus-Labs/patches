@@ -17,8 +17,13 @@ use clap_sys::ext::gui::{
 use clap_sys::ext::note_ports::{
     clap_note_port_info, clap_plugin_note_ports, CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_MIDI,
 };
+use clap_sys::ext::params::{
+    clap_param_info, clap_plugin_params, CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE,
+    CLAP_PARAM_IS_STEPPED,
+};
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
-use clap_sys::id::CLAP_INVALID_ID;
+use clap_sys::events::{clap_input_events, clap_output_events};
+use clap_sys::id::{clap_id, CLAP_INVALID_ID};
 use clap_sys::plugin::clap_plugin;
 use clap_sys::stream::{clap_istream, clap_ostream};
 use clap_sys::string_sizes::CLAP_NAME_SIZE;
@@ -39,6 +44,8 @@ pub(crate) unsafe fn get_extension(id: *const c_char) -> *const c_void {
         &STATE as *const clap_plugin_state as *const c_void
     } else if id == CLAP_EXT_GUI {
         &GUI as *const clap_plugin_gui as *const c_void
+    } else if id == CLAP_EXT_PARAMS {
+        &PARAMS as *const clap_plugin_params as *const c_void
     } else {
         std::ptr::null()
     }
@@ -141,6 +148,21 @@ static STATE: clap_plugin_state = clap_plugin_state {
 /// any section boundary is treated as "section absent" and the
 /// remaining state keeps its defaults. Legacy states written before
 /// 0566 / 0753 thus load cleanly.
+/// Merge controller cache and live registry into a single name → value
+/// map for persistence. Registry wins on collisions because
+/// `record_value` runs every time the host or audio thread touches a
+/// live param, while the cache is only refreshed on plan reload.
+pub(crate) fn collect_host_controls_for_save(
+    cache: &std::collections::HashMap<String, f32>,
+    registry: &patches_plugin_common::host_control_registry::StandardHostControlRegistry,
+) -> std::collections::HashMap<String, f32> {
+    let mut hc = cache.clone();
+    for (name, entry) in registry.live_sorted_by_id() {
+        hc.insert(name.to_string(), entry.last_value);
+    }
+    hc
+}
+
 unsafe extern "C" fn state_save(
     plugin: *const clap_plugin,
     stream: *const clap_ostream,
@@ -223,6 +245,21 @@ unsafe extern "C" fn state_save(
         if !write_length_prefixed(stream, name.as_bytes()) { return false; }
         if !stream_write_all(stream, &snap.to_le_bytes()) { return false; }
         if !stream_write_all(stream, &heat.to_le_bytes()) { return false; }
+    }
+
+    // Host-control values (ticket 0811). Name-keyed so cross-session
+    // matching survives ID renumbering. The registry is authoritative
+    // for live entries; the controller cache carries values for
+    // entries that aren't currently live (e.g. tombstoned).
+    let hc = collect_host_controls_for_save(
+        &p.controller.host_controls,
+        &p.host_control_registry,
+    );
+    let hc_count = hc.len() as u32;
+    if !stream_write_all(stream, &hc_count.to_le_bytes()) { return false; }
+    for (name, value) in &hc {
+        if !write_length_prefixed(stream, name.as_bytes()) { return false; }
+        if !stream_write_all(stream, &value.to_le_bytes()) { return false; }
     }
 
     true
@@ -367,13 +404,35 @@ unsafe fn deserialize_state(
         ReadU32::Err => return None,
     }
 
+    // Optional host-control values section (ticket 0811).
+    let mut host_controls: std::collections::HashMap<String, f32> =
+        std::collections::HashMap::new();
+    match try_read_u32(stream) {
+        ReadU32::Ok(count) => {
+            for _ in 0..count {
+                let name_bytes = read_length_prefixed(stream)?;
+                let name = String::from_utf8(name_bytes).ok()?;
+                let mut buf = [0u8; 4];
+                if !stream_read_all(stream, &mut buf) {
+                    return None;
+                }
+                let value = f32::from_le_bytes(buf);
+                if !name.is_empty() {
+                    host_controls.insert(name, value);
+                }
+            }
+        }
+        ReadU32::Eof => {}
+        ReadU32::Err => return None,
+    }
+
     Some((
         patches_plugin_common::PatchIdentity {
             file_path,
             dsl_source: source,
         },
         patches_plugin_common::PersistedSettings {
-            host_controls: std::collections::HashMap::new(),
+            host_controls,
             tap_opts,
             window_size,
             module_paths,
@@ -583,6 +642,159 @@ unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
         handle.set_visible(false);
     }
     true
+}
+
+// ── Params (host controls) ──────────────────────────────────────────
+
+use patches_dsl::host_control_manifest::{HostControlKind, HostControlParamMap, HostControlParamValue};
+use patches_plugin_common::host_control_registry::HostControlRegistry;
+
+static PARAMS: clap_plugin_params = clap_plugin_params {
+    count: Some(params_count),
+    get_info: Some(params_get_info),
+    get_value: Some(params_get_value),
+    value_to_text: Some(params_value_to_text),
+    text_to_value: Some(params_text_to_value),
+    flush: Some(params_flush),
+};
+
+fn param_f64(map: &HostControlParamMap, key: &str) -> Option<f64> {
+    match map.get(key)? {
+        HostControlParamValue::Int(i) => Some(*i as f64),
+        HostControlParamValue::Float(f) => Some(*f),
+        HostControlParamValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        HostControlParamValue::Str(_) => None,
+    }
+}
+
+/// Compute (min, max, default) for a host-control entry. Falls back to
+/// kind-appropriate defaults when fields are missing or malformed.
+pub(crate) fn param_range(kind: HostControlKind, map: &HostControlParamMap) -> (f64, f64, f64) {
+    match kind {
+        HostControlKind::Knob | HostControlKind::Slider => {
+            let lo = param_f64(map, "low").unwrap_or(0.0);
+            let hi = param_f64(map, "high").unwrap_or(1.0);
+            let (lo, hi) = if hi > lo { (lo, hi) } else { (lo, lo + 1.0) };
+            let dflt = param_f64(map, "default").unwrap_or(lo).clamp(lo, hi);
+            (lo, hi, dflt)
+        }
+        HostControlKind::Toggle => {
+            let dflt = param_f64(map, "default").unwrap_or(0.0);
+            (0.0, 1.0, if dflt >= 0.5 { 1.0 } else { 0.0 })
+        }
+        HostControlKind::Trigger => (0.0, 1.0, 0.0),
+    }
+}
+
+unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
+    let p = plugin::plugin_ref_pub(plugin);
+    p.host_control_registry.live_len() as u32
+}
+
+unsafe extern "C" fn params_get_info(
+    plugin: *const clap_plugin,
+    param_index: u32,
+    info: *mut clap_param_info,
+) -> bool {
+    if info.is_null() {
+        return false;
+    }
+    let p = plugin::plugin_ref_pub(plugin);
+    let entries = p.host_control_registry.live_sorted_by_id();
+    let entry = match entries.get(param_index as usize) {
+        Some(e) => e,
+        None => return false,
+    };
+    let (name, live) = (entry.0, entry.1);
+    let (min_v, max_v, dflt) = param_range(live.kind, &live.params);
+
+    std::ptr::write_bytes(info, 0, 1);
+    let info = &mut *info;
+    info.id = live.id as clap_id;
+    let mut flags = CLAP_PARAM_IS_AUTOMATABLE;
+    if matches!(live.kind, HostControlKind::Toggle | HostControlKind::Trigger) {
+        flags |= CLAP_PARAM_IS_STEPPED;
+    }
+    info.flags = flags;
+    // cookie left null (zeroed by write_bytes above); cross-session
+    // matching is by name via the state stream, and channel/slot is
+    // plan-relative so a cached cookie would go stale on replan.
+    write_name(&mut info.name, name);
+    info.module[0] = 0;
+    info.min_value = min_v;
+    info.max_value = max_v;
+    info.default_value = dflt;
+    true
+}
+
+unsafe extern "C" fn params_get_value(
+    plugin: *const clap_plugin,
+    param_id: clap_id,
+    out_value: *mut f64,
+) -> bool {
+    if out_value.is_null() {
+        return false;
+    }
+    let p = plugin::plugin_ref_pub(plugin);
+    match p.host_control_registry.live_by_id(param_id as u32) {
+        Some((_, e)) => {
+            *out_value = e.last_value as f64;
+            true
+        }
+        None => false,
+    }
+}
+
+unsafe extern "C" fn params_value_to_text(
+    _plugin: *const clap_plugin,
+    _param_id: clap_id,
+    value: f64,
+    out_buffer: *mut c_char,
+    out_buffer_capacity: u32,
+) -> bool {
+    if out_buffer.is_null() || out_buffer_capacity == 0 {
+        return false;
+    }
+    let s = format!("{value:.4}");
+    let bytes = s.as_bytes();
+    let cap = (out_buffer_capacity as usize).saturating_sub(1);
+    let n = bytes.len().min(cap);
+    for i in 0..n {
+        *out_buffer.add(i) = bytes[i] as c_char;
+    }
+    *out_buffer.add(n) = 0;
+    true
+}
+
+unsafe extern "C" fn params_text_to_value(
+    _plugin: *const clap_plugin,
+    _param_id: clap_id,
+    param_value_text: *const c_char,
+    out_value: *mut f64,
+) -> bool {
+    if param_value_text.is_null() || out_value.is_null() {
+        return false;
+    }
+    let s = match CStr::from_ptr(param_value_text).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    match s.trim().parse::<f64>() {
+        Ok(v) => {
+            *out_value = v;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+unsafe extern "C" fn params_flush(
+    _plugin: *const clap_plugin,
+    _in_: *const clap_input_events,
+    _out: *const clap_output_events,
+) {
+    // No-op for now; ticket 0811 follow-up wires param events through
+    // the host-control scratch pipeline both during process() and flush.
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -840,6 +1052,108 @@ mod tests {
             assert_eq!((width, height), (800, 600));
             assert!(matches!(try_read_u32(&is), ReadU32::Eof));
         }
+    }
+
+    /// Ticket 0811: a serialized state with a host_controls trailing
+    /// section round-trips through `deserialize_state`, populating
+    /// `PersistedSettings::host_controls` keyed by name.
+    #[test]
+    fn host_controls_section_round_trip() {
+        let mut bytes = Vec::new();
+        // path_len + path
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // source_len + source
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // module_paths_count
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // tap_opts_count
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // window size
+        bytes.extend_from_slice(&800u32.to_le_bytes());
+        bytes.extend_from_slice(&600u32.to_le_bytes());
+        // tap_modes_count
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        // host_controls_count + entries
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for (n, v) in [("cutoff", 0.42_f32), ("res", 0.7_f32)] {
+            let nb = n.as_bytes();
+            bytes.extend_from_slice(&(nb.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(nb);
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let in_ctx = InCtx { buf: bytes, pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        let (_id, settings) = unsafe { deserialize_state(&is) }.expect("parse");
+        assert_eq!(settings.host_controls.get("cutoff").copied(), Some(0.42));
+        assert_eq!(settings.host_controls.get("res").copied(), Some(0.7));
+    }
+
+    /// Ticket 0811: legacy state (pre-host-control section) loads with
+    /// an empty `host_controls` map rather than failing.
+    #[test]
+    fn legacy_state_has_empty_host_controls() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // path_len
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // source_len
+        // EOF here — legacy state without optional sections.
+
+        let in_ctx = InCtx { buf: bytes, pos: RefCell::new(0) };
+        let is = mk_istream(&in_ctx);
+        let (_id, settings) = unsafe { deserialize_state(&is) }.expect("parse");
+        assert!(settings.host_controls.is_empty());
+    }
+
+    /// Ticket 0811: registry-authoritative live values override the
+    /// controller cache when collecting host-control values for save.
+    /// Cache values for non-live names (e.g. tombstoned across a
+    /// rename) are preserved so they survive a project reload.
+    #[test]
+    fn collect_host_controls_merges_registry_over_cache() {
+        use patches_dsl::host_control_manifest::{
+            HostControlDescriptor, HostControlKind, HostControlManifest,
+        };
+        use patches_plugin_common::host_control_registry::{
+            HostControlRegistry, StandardHostControlRegistry,
+        };
+        use std::collections::HashMap;
+
+        fn desc(slot: usize, name: &str) -> HostControlDescriptor {
+            HostControlDescriptor {
+                slot,
+                name: name.to_string(),
+                kind: HostControlKind::Knob,
+                params: Default::default(),
+                source: patches_dsl::Provenance::root(
+                    patches_core::source_span::Span::synthetic(),
+                ),
+            }
+        }
+
+        let mut registry = StandardHostControlRegistry::new(64);
+        let manifest: HostControlManifest =
+            vec![desc(0, "cutoff"), desc(1, "res")];
+        registry.apply(&manifest);
+
+        // Live values come from the registry.
+        let cutoff_id = registry.id_of("cutoff").unwrap();
+        let res_id = registry.id_of("res").unwrap();
+        registry.record_value(cutoff_id, 0.42);
+        registry.record_value(res_id, 0.7);
+
+        // Cache holds a stale value for cutoff (must be overridden) and
+        // a value for an entry that no longer exists in the registry
+        // (must survive — that's how renamed/removed controls keep
+        // their last value across a session).
+        let mut cache: HashMap<String, f32> = HashMap::new();
+        cache.insert("cutoff".into(), 0.0);
+        cache.insert("legacy_drive".into(), 0.9);
+
+        let merged = collect_host_controls_for_save(&cache, &registry);
+        assert_eq!(merged.get("cutoff").copied(), Some(0.42));
+        assert_eq!(merged.get("res").copied(), Some(0.7));
+        assert_eq!(merged.get("legacy_drive").copied(), Some(0.9));
+        assert_eq!(merged.len(), 3);
     }
 
     /// A partial u32 (1–3 bytes) is an error, not EOF.

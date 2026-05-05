@@ -3,8 +3,10 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use patches_diagnostics::RenderedDiagnostic;
+use patches_dsl::host_control_manifest::HostControlManifest;
 use patches_engine::HaltInfoSnapshot;
 use patches_registry::Registry;
 use serde::{Deserialize, Serialize};
@@ -59,6 +61,9 @@ impl RescanProbe {
 pub struct CompileSuccess {
     pub taps: Vec<TapSummary>,
     pub warnings: Vec<RenderedDiagnostic>,
+    /// Host-control manifest paired with this compile (ADR 0057,
+    /// ticket 0811). Empty when the patch declares no host controls.
+    pub host_control_manifest: Arc<HostControlManifest>,
 }
 
 /// Result of a failed compile.
@@ -347,6 +352,11 @@ pub struct Controller {
     /// Preset names available for the current patch identity. Refreshed
     /// on `LoadPath` and after `SavePreset`. Ticket 0777.
     pub preset_names: Vec<String>,
+    /// Most recent host-control manifest seen at compile time. Empty
+    /// before the first successful compile. Plugin shells diff this
+    /// against their `HostControlRegistry` after each compile to drive
+    /// CLAP parameter publication (ADR 0057 §6, ticket 0811).
+    pub host_control_manifest: Arc<HostControlManifest>,
 }
 
 impl Controller {
@@ -497,6 +507,7 @@ impl Controller {
                         self.push_status(line);
                     }
                 }
+                let mut plan_recompile = false;
                 if !self.dsl_source.is_empty() {
                     match env.compile_and_push_plan(
                         &self.dsl_source,
@@ -505,10 +516,12 @@ impl Controller {
                     ) {
                         Ok(success) => {
                             self.taps = success.taps;
+                            self.host_control_manifest = success.host_control_manifest;
                             self.diagnostic_view = DiagnosticView::default();
                             if !success.warnings.is_empty() {
                                 self.diagnostic_view.diagnostics.extend(success.warnings);
                             }
+                            plan_recompile = true;
                         }
                         Err(failure) => {
                             self.diagnostic_view = failure.view;
@@ -518,6 +531,7 @@ impl Controller {
                 }
                 StateDelta {
                     snapshot_changed: true,
+                    plan_recompile,
                     ..Default::default()
                 }
             }
@@ -531,6 +545,7 @@ impl Controller {
                 self.module_names.clear();
                 self.halt = None;
                 self.diagnostic_view = DiagnosticView::default();
+                self.host_control_manifest = Arc::new(Vec::new());
                 StateDelta {
                     snapshot_changed: true,
                     ..Default::default()
@@ -697,10 +712,12 @@ impl Controller {
         {
             Ok(success) => {
                 self.taps = success.taps;
+                self.host_control_manifest = success.host_control_manifest;
                 self.diagnostic_view = DiagnosticView::default();
                 if !success.warnings.is_empty() {
                     self.diagnostic_view.diagnostics.extend(success.warnings);
                 }
+                delta.plan_recompile = true;
                 self.push_status(success_msg);
                 // Refresh available preset list under this patch stem.
                 self.preset_names = env.list_presets(&self.patch_stem());
@@ -844,6 +861,7 @@ mod tests {
                 Ok(CompileSuccess {
                     taps: self.compile_taps.clone(),
                     warnings: Vec::new(),
+                    host_control_manifest: Arc::new(Vec::new()),
                 })
             } else {
                 Err(CompileFailure {
