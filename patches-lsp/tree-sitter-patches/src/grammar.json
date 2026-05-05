@@ -1178,6 +1178,113 @@
         }
       ]
     },
+    "host_control_kind": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "knob"
+        },
+        {
+          "type": "STRING",
+          "value": "slider"
+        },
+        {
+          "type": "STRING",
+          "value": "toggle"
+        },
+        {
+          "type": "STRING",
+          "value": "trigger"
+        }
+      ]
+    },
+    "host_control_field": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ident"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "value"
+          }
+        }
+      ]
+    },
+    "host_control_block": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "kind",
+          "content": {
+            "type": "SYMBOL",
+            "name": "host_control_kind"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "ident"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "host_control_field"
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": ","
+                  },
+                  {
+                    "type": "BLANK"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "host_control_ref": {
+      "type": "PREC",
+      "value": -1,
+      "content": {
+        "type": "SYMBOL",
+        "name": "ident"
+      }
+    },
     "_cable_endpoint": {
       "type": "CHOICE",
       "members": [
@@ -1188,6 +1295,10 @@
         {
           "type": "SYMBOL",
           "name": "port_ref"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "host_control_ref"
         }
       ]
     },
@@ -1254,6 +1365,10 @@
         {
           "type": "SYMBOL",
           "name": "pattern_block"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "host_control_block"
         },
         {
           "type": "SYMBOL",

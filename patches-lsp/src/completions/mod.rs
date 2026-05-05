@@ -85,6 +85,8 @@ pub(crate) fn compute_completions(
         CursorContext::ModuleName { .. }
         | CursorContext::TapType { .. }
         | CursorContext::TapName { .. }
+        | CursorContext::HostControlDecl { .. }
+        | CursorContext::HostControlRef { .. }
         | CursorContext::Unknown => {}
     }
 

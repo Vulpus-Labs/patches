@@ -115,6 +115,14 @@ pub(crate) enum CursorContext<'tree> {
     TapType { node: Node<'tree> },
     /// Cursor sits on the tap name (the first ident inside `~...(...)`).
     TapName { node: Node<'tree> },
+    /// Cursor sits on a host-control declaration: the kind keyword or
+    /// the name identifier of a `knob` / `slider` / `toggle` / `trigger`
+    /// block. `block` is the enclosing `host_control_block` node.
+    HostControlDecl { block: Node<'tree> },
+    /// Cursor sits on a bare-name reference to a host control on a
+    /// cable endpoint. `node` is the `host_control_ref` (or its inner
+    /// `ident`) containing the referenced name.
+    HostControlRef { node: Node<'tree> },
     /// Inside a song/section/pattern-row structure where pattern names are
     /// the relevant completion set.
     SongRow {
@@ -165,6 +173,23 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
     // tap_target sits in the same syntactic slot as a port_ref endpoint.
     if let Some(tap_ctx) = classify_tap_node(node) {
         return Some(tap_ctx);
+    }
+
+    // Host-control declaration (ADR 0057): kind keyword or name ident
+    // inside a `host_control_block`. Tested before generic ident /
+    // module-decl walks because the inner node is just an ident.
+    if let Some(block) = ancestor_or_self(node, "host_control_block") {
+        return Some(CursorContext::HostControlDecl { block });
+    }
+
+    // Host-control bare-name reference on a cable endpoint.
+    if node.kind() == "host_control_ref"
+        || node
+            .parent()
+            .map(|p| p.kind() == "host_control_ref")
+            .unwrap_or(false)
+    {
+        return Some(CursorContext::HostControlRef { node });
     }
 
     // Module type / name identifier: `module v : Type`.

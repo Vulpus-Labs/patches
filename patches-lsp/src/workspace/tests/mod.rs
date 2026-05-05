@@ -108,6 +108,7 @@ pub(super) fn offset_to_position(src: &str, needle: &str) -> Position {
 
 mod cycles;
 mod flatten;
+mod host_control;
 mod hover;
 mod includes;
 mod inlay;

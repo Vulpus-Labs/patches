@@ -3,6 +3,7 @@
 //! Provides context-sensitive hover information for module types, ports,
 //! and module instance names.
 
+mod host_control;
 mod module;
 mod param;
 mod port;
@@ -54,6 +55,12 @@ pub(crate) fn compute_hover(
         }
         crate::tree_nav::CursorContext::TapName { node } => {
             tap::hover_for_tap_name(node, source, line_index)
+        }
+        crate::tree_nav::CursorContext::HostControlDecl { block } => {
+            host_control::hover_for_decl(block, source, line_index)
+        }
+        crate::tree_nav::CursorContext::HostControlRef { node } => {
+            host_control::hover_for_ref(node, source, line_index)
         }
         _ => None,
     }

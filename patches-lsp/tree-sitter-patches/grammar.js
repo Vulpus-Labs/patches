@@ -166,12 +166,32 @@ module.exports = grammar({
     tap_target: ($) =>
       seq("~", $.tap_components, "(", $.tap_name, ")"),
 
+    // ─── Host controls (ADR 0057) ───────────────────────────────────────
+    // Top-level declarations of DAW-facing parameters. Desugared to a
+    // synthesised `~host_control` module instance by the expander.
+    host_control_kind: (_) =>
+      choice("knob", "slider", "toggle", "trigger"),
+    host_control_field: ($) =>
+      seq(field("name", $.ident), ":", field("value", $.value)),
+    host_control_block: ($) =>
+      seq(
+        field("kind", $.host_control_kind),
+        field("name", $.ident),
+        "{",
+        repeat(seq($.host_control_field, optional(","))),
+        "}"
+      ),
+
+    // Bare-name reference to a host control on a cable endpoint.
+    // Tried after `port_ref` so `module.port` is never misclassified.
+    host_control_ref: ($) => prec(-1, $.ident),
+
     // ─── Connections ────────────────────────────────────────────────────
     // _cable_endpoint is a hidden alias (leading underscore) so the
     // existing port_ref-under-connection tree shape is preserved when no
     // tap target is involved. With a tap target on either side, the
     // tap_target node appears directly under connection.
-    _cable_endpoint: ($) => choice($.tap_target, $.port_ref),
+    _cable_endpoint: ($) => choice($.tap_target, $.port_ref, $.host_control_ref),
     connection: ($) =>
       seq(
         $._cable_endpoint,
@@ -182,7 +202,8 @@ module.exports = grammar({
       ),
 
     // ─── Statements ─────────────────────────────────────────────────────
-    statement: ($) => choice($.module_decl, $.song_block, $.pattern_block, $.connection),
+    statement: ($) =>
+      choice($.module_decl, $.song_block, $.pattern_block, $.host_control_block, $.connection),
 
     // ─── Port declarations (inside templates) ───────────────────────────
     port_group_decl: ($) =>

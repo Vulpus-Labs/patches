@@ -103,6 +103,33 @@ impl DocumentWorkspace {
             lsp_util::position_to_byte_offset(&doc.source, &doc.line_index, position)
         };
 
+        // Host-control surfaces (ADR 0057, ticket 0821) win over the
+        // expansion-aware path: a bare-name reference to a knob looks
+        // like a connection endpoint after desugaring, and the
+        // expansion hover would otherwise render the synthesised
+        // `~host_control.audio_out` cable instead of the user's
+        // declaration.
+        if let Some(doc) = state.documents.get(uri) {
+            let ctx = crate::tree_nav::classify_cursor(&doc.tree, byte_offset);
+            if matches!(
+                ctx,
+                crate::tree_nav::CursorContext::HostControlDecl { .. }
+                    | crate::tree_nav::CursorContext::HostControlRef { .. }
+            ) {
+                let registry = self.registry_read();
+                if let Some(h) = hover::compute_hover(
+                    &doc.tree,
+                    &doc.source,
+                    byte_offset,
+                    &doc.model,
+                    &registry,
+                    &doc.line_index,
+                ) {
+                    return Some(h);
+                }
+            }
+        }
+
         if let Some(h) = self.with_expansion_context(&mut state, uri, |ctx| {
             let Some(bound) = ctx.bound else {
                 tracing::debug!(%uri, "hover: bound patch missing (stage 3b failed)");

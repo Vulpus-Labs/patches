@@ -338,8 +338,13 @@ pub struct Controller {
     pub module_paths: Vec<PathBuf>,
     pub tap_opts: HashMap<String, TapDisplayOpts>,
     pub window_size: Option<(u32, u32)>,
-    /// Host-control values keyed by name. Populated by ADR 0057;
-    /// empty until then. Persisted via `PersistedSettings`.
+    /// Host-control values keyed by manifest name (ADR 0057, ticket
+    /// 0813a). Persisted via `PersistedSettings` and cross-referenced
+    /// against `host_control_manifest` on every ingress: entries whose
+    /// name doesn't appear in the current manifest are dropped with a
+    /// status-log diagnostic. The filter is deferred until the first
+    /// post-`StateLoad` compile lands a manifest — until then the map
+    /// is held verbatim.
     pub host_controls: HashMap<String, f32>,
 
     // Derived / live.
@@ -517,6 +522,7 @@ impl Controller {
                         Ok(success) => {
                             self.taps = success.taps;
                             self.host_control_manifest = success.host_control_manifest;
+                            self.reconcile_host_controls_with_manifest();
                             self.diagnostic_view = DiagnosticView::default();
                             if !success.warnings.is_empty() {
                                 self.diagnostic_view.diagnostics.extend(success.warnings);
@@ -588,6 +594,7 @@ impl Controller {
                         self.tap_opts = settings.tap_opts;
                         self.window_size = settings.window_size;
                         self.host_controls = settings.host_controls;
+                        self.reconcile_host_controls_with_manifest();
                         self.push_status(format!("Loaded preset {name}"));
                         StateDelta {
                             persistable_changed: true,
@@ -612,6 +619,7 @@ impl Controller {
                 self.tap_opts = settings.tap_opts;
                 self.window_size = settings.window_size;
                 self.host_controls = settings.host_controls;
+                self.reconcile_host_controls_with_manifest();
                 StateDelta {
                     snapshot_changed: true,
                     ..Default::default()
@@ -713,6 +721,7 @@ impl Controller {
             Ok(success) => {
                 self.taps = success.taps;
                 self.host_control_manifest = success.host_control_manifest;
+                self.reconcile_host_controls_with_manifest();
                 self.diagnostic_view = DiagnosticView::default();
                 if !success.warnings.is_empty() {
                     self.diagnostic_view.diagnostics.extend(success.warnings);
@@ -732,6 +741,7 @@ impl Controller {
                                 self.tap_opts = settings.tap_opts;
                                 self.window_size = settings.window_size;
                                 self.host_controls = settings.host_controls;
+                                self.reconcile_host_controls_with_manifest();
                                 self.push_status(format!(
                                     "Loaded sidecar: {}",
                                     sidecar.display()
@@ -763,6 +773,44 @@ impl Controller {
             .as_ref()
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "_unknown".to_string())
+    }
+
+    /// Drop persisted host-control values whose name is absent from the
+    /// current manifest, logging a single status line listing them
+    /// (ADR 0057, ticket 0813a). Called after every ingress that
+    /// touches either side of the (cache, manifest) pair.
+    ///
+    /// No-op when the manifest is empty — the cache is held until the
+    /// first successful compile lands one. This avoids dropping every
+    /// entry on `StateLoad` (which arrives before any compile has
+    /// produced a manifest in this session).
+    fn reconcile_host_controls_with_manifest(&mut self) {
+        if self.host_control_manifest.is_empty() || self.host_controls.is_empty() {
+            return;
+        }
+        let known: std::collections::HashSet<&str> = self
+            .host_control_manifest
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect();
+        let mut unknown: Vec<String> = self
+            .host_controls
+            .keys()
+            .filter(|n| !known.contains(n.as_str()))
+            .cloned()
+            .collect();
+        if unknown.is_empty() {
+            return;
+        }
+        unknown.sort();
+        for name in &unknown {
+            self.host_controls.remove(name);
+        }
+        self.push_status(format!(
+            "Dropped {} host-control value(s) not in current manifest: {}",
+            unknown.len(),
+            unknown.join(", "),
+        ));
     }
 
     /// Snapshot of the current persistable settings, for shells that
@@ -1452,6 +1500,164 @@ mod tests {
         assert_eq!(snap.file_path.as_deref(), Some("/tmp/a.patches"));
         assert_eq!(snap.module_paths, vec!["/tmp/m".to_string()]);
         assert_eq!(snap.status_log, vec!["hello".to_string()]);
+    }
+
+    fn manifest_with_names(names: &[&str]) -> Arc<HostControlManifest> {
+        use patches_dsl::host_control_manifest::{
+            HostControlDescriptor, HostControlKind, HostControlParamMap,
+        };
+        use patches_dsl::provenance::Provenance;
+        use patches_dsl::Span;
+        Arc::new(
+            names
+                .iter()
+                .enumerate()
+                .map(|(slot, name)| HostControlDescriptor {
+                    slot,
+                    name: (*name).to_string(),
+                    kind: HostControlKind::Knob,
+                    params: HostControlParamMap::new(),
+                    source: Provenance::root(Span::synthetic()),
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn state_load_with_empty_manifest_keeps_unknown_values() {
+        // Until the first compile lands a manifest, the cache is held
+        // verbatim — applying a fresh project state must not strip any
+        // entries.
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        let mut hc = HashMap::new();
+        hc.insert("freq".to_string(), 0.5);
+        hc.insert("res".to_string(), 0.3);
+        let _ = c.apply(
+            Action::StateLoad {
+                identity: PatchIdentity::default(),
+                settings: PersistedSettings {
+                    host_controls: hc.clone(),
+                    ..Default::default()
+                },
+            },
+            &mut env,
+        );
+        assert_eq!(c.host_controls, hc);
+        assert!(
+            !c.status_log
+                .iter()
+                .any(|line| line.contains("not in current manifest")),
+            "must not log a drop-diagnostic without a manifest",
+        );
+    }
+
+    #[test]
+    fn state_load_filters_against_published_manifest() {
+        let mut env = ok_env();
+        let mut c = Controller::new();
+        c.host_control_manifest = manifest_with_names(&["freq"]);
+        let mut hc = HashMap::new();
+        hc.insert("freq".to_string(), 0.5);
+        hc.insert("stale".to_string(), 0.9);
+        hc.insert("ghost".to_string(), 0.1);
+        let _ = c.apply(
+            Action::StateLoad {
+                identity: PatchIdentity::default(),
+                settings: PersistedSettings {
+                    host_controls: hc,
+                    ..Default::default()
+                },
+            },
+            &mut env,
+        );
+        assert_eq!(c.host_controls.len(), 1);
+        assert_eq!(c.host_controls.get("freq").copied(), Some(0.5));
+        let line = c
+            .status_log
+            .iter()
+            .find(|l| l.contains("not in current manifest"))
+            .cloned()
+            .expect("drop-diagnostic logged");
+        assert!(line.contains("ghost"), "diagnostic lists dropped names: {line}");
+        assert!(line.contains("stale"), "diagnostic lists dropped names: {line}");
+    }
+
+    #[test]
+    fn compile_success_filters_stale_cache_against_new_manifest() {
+        // A cache populated before any manifest survives the StateLoad
+        // gate (no manifest yet). The first successful compile must
+        // then prune entries the new manifest doesn't cover.
+        let path = PathBuf::from("/tmp/p.patches");
+        let mut env = FakeEnv {
+            compile_ok: true,
+            ..Default::default()
+        };
+        env.files.insert(path.clone(), "src".into());
+        let mut c = Controller::new();
+        c.host_controls.insert("freq".to_string(), 0.5);
+        c.host_controls.insert("stale".to_string(), 0.7);
+        // Stub compile_and_push_plan returns an empty manifest; redirect
+        // through a manifest-bearing wrapper.
+        struct ManifestEnv<'a> {
+            inner: &'a mut FakeEnv,
+            manifest: Arc<HostControlManifest>,
+        }
+        impl<'a> Env for ManifestEnv<'a> {
+            fn pick_file(&mut self) -> Option<PathBuf> { self.inner.pick_file() }
+            fn pick_folder(&mut self) -> Option<PathBuf> { self.inner.pick_folder() }
+            fn read_file(&mut self, p: &Path) -> std::io::Result<String> { self.inner.read_file(p) }
+            fn compile_and_push_plan(
+                &mut self,
+                source: &str,
+                file_path: Option<&Path>,
+                registry: &Registry,
+            ) -> Result<CompileSuccess, CompileFailure> {
+                let mut s = self.inner.compile_and_push_plan(source, file_path, registry)?;
+                s.host_control_manifest = self.manifest.clone();
+                Ok(s)
+            }
+            fn probe_paths(&mut self, p: &[PathBuf], r: &Registry) -> RescanProbe {
+                self.inner.probe_paths(p, r)
+            }
+            fn scan_into(&mut self, p: &[PathBuf], r: &mut Registry) -> ScanDetails {
+                self.inner.scan_into(p, r)
+            }
+            fn reset_and_scan(&mut self, p: &[PathBuf]) -> (Registry, ScanDetails) {
+                self.inner.reset_and_scan(p)
+            }
+            fn sidecar_path(&self, p: &Path) -> Option<PathBuf> { self.inner.sidecar_path(p) }
+            fn load_sidecar(&mut self, p: &Path) -> std::io::Result<Option<PersistedSettings>> {
+                self.inner.load_sidecar(p)
+            }
+            fn save_sidecar(&mut self, p: &Path, s: &PersistedSettings) -> std::io::Result<()> {
+                self.inner.save_sidecar(p, s)
+            }
+            fn preset_path(&self, stem: &str, name: &str) -> Option<PathBuf> {
+                self.inner.preset_path(stem, name)
+            }
+            fn list_presets(&mut self, stem: &str) -> Vec<String> {
+                self.inner.list_presets(stem)
+            }
+            fn save_preset(&mut self, p: &Path, s: &PersistedSettings) -> std::io::Result<()> {
+                self.inner.save_preset(p, s)
+            }
+            fn load_preset(&mut self, p: &Path) -> std::io::Result<Option<PersistedSettings>> {
+                self.inner.load_preset(p)
+            }
+        }
+        let manifest = manifest_with_names(&["freq"]);
+        let mut env = ManifestEnv { inner: &mut env, manifest };
+        let _ = c.apply(Action::LoadPath(path), &mut env);
+        assert_eq!(c.host_controls.len(), 1);
+        assert!(c.host_controls.contains_key("freq"));
+        let line = c
+            .status_log
+            .iter()
+            .find(|l| l.contains("not in current manifest"))
+            .cloned()
+            .expect("drop-diagnostic logged after compile");
+        assert!(line.contains("stale"), "diagnostic mentions dropped name: {line}");
     }
 
     #[test]
