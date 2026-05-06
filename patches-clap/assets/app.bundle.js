@@ -866,7 +866,7 @@
     if (!target?.classList?.contains("tap-opt")) return null;
     const name = target.dataset.tapName;
     if (!name) return null;
-    const payload = { kind: "set_tap_opts", name };
+    const payload = { kind: "set_tap_opt", name };
     if (target.dataset.spectrumOpt === "fft_size") {
       payload.spectrum_fft_size = parseInt(target.value, 10);
     } else if (target.dataset.scopeOpt === "decimation") {
@@ -917,7 +917,7 @@
         const snapNext = !sbundle.scope.getSnap();
         sbundle.scope.setSnap(snapNext);
         t.classList.toggle("is-active", snapNext);
-        postIntent("set_tap_opts", { name: t.dataset.tapName, scope_snap: snapNext });
+        postIntent("set_tap_opt", { name: t.dataset.tapName, scope_snap: snapNext });
       }
       return;
     }
@@ -928,7 +928,7 @@
         const next = bundle.spectrum.getMode() === "heatmap" ? "curve" : "heatmap";
         bundle.spectrum.setMode(next);
         t.textContent = next === "heatmap" ? "curve" : "heatmap";
-        postIntent("set_tap_opts", {
+        postIntent("set_tap_opt", {
           name: t.dataset.tapName,
           spectrum_heatmap: next === "heatmap"
         });

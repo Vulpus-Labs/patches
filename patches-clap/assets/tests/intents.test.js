@@ -30,7 +30,7 @@ describe("changeIntent", () => {
       value: "16",
     });
     expect(changeIntent(t)).toEqual({
-      kind: "set_tap_opts", name: "x", scope_decimation: 16,
+      kind: "set_tap_opt", name: "x", scope_decimation: 16,
     });
   });
 
@@ -40,7 +40,7 @@ describe("changeIntent", () => {
       value: "2048",
     });
     expect(changeIntent(t)).toEqual({
-      kind: "set_tap_opts", name: "y", scope_window_samples: 2048,
+      kind: "set_tap_opt", name: "y", scope_window_samples: 2048,
     });
   });
 
@@ -50,7 +50,7 @@ describe("changeIntent", () => {
       value: "4096",
     });
     expect(changeIntent(t)).toEqual({
-      kind: "set_tap_opts", name: "z", spectrum_fft_size: 4096,
+      kind: "set_tap_opt", name: "z", spectrum_fft_size: 4096,
     });
   });
 

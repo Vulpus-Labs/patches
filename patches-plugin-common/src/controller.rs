@@ -81,6 +81,18 @@ pub struct ScanDetails {
     pub module_names: Vec<String>,
 }
 
+/// One per-tap display option. Externally tagged when deserialised so
+/// the wire form is `{spectrum_fft_size: 1024}` etc.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TapOpt {
+    SpectrumFftSize(usize),
+    ScopeDecimation(usize),
+    ScopeWindowSamples(usize),
+    ScopeSnap(bool),
+    SpectrumHeatmap(bool),
+}
+
 /// Closed set of state transitions. Webview JSON intents and host
 /// events both lower into this enum.
 #[derive(Debug, Clone)]
@@ -93,13 +105,9 @@ pub enum Action {
     AddModulePathDirect(PathBuf),
     RemoveModulePath(usize),
     Rescan,
-    SetTapOpts {
+    SetTapOpt {
         name: String,
-        spectrum_fft_size: Option<usize>,
-        scope_decimation: Option<usize>,
-        scope_window_samples: Option<usize>,
-        scope_snap: Option<bool>,
-        spectrum_heatmap: Option<bool>,
+        opt: TapOpt,
     },
     SetWindowSize(u32, u32),
 
@@ -386,21 +394,7 @@ impl Controller {
             Action::AddModulePathDirect(dir) => self.add_module_path(dir, env),
             Action::RemoveModulePath(idx) => self.apply_remove_module_path(idx),
             Action::Rescan => self.apply_rescan(env),
-            Action::SetTapOpts {
-                name,
-                spectrum_fft_size,
-                scope_decimation,
-                scope_window_samples,
-                scope_snap,
-                spectrum_heatmap,
-            } => self.apply_set_tap_opts(
-                name,
-                spectrum_fft_size,
-                scope_decimation,
-                scope_window_samples,
-                scope_snap,
-                spectrum_heatmap,
-            ),
+            Action::SetTapOpt { name, opt } => self.apply_set_tap_opt(name, opt),
             Action::SetWindowSize(w, h) => self.apply_set_window_size(w, h),
             Action::Activate => self.apply_activate(env),
             Action::Deactivate => self.apply_deactivate(),
@@ -491,15 +485,7 @@ impl Controller {
         }
     }
 
-    fn apply_set_tap_opts(
-        &mut self,
-        name: String,
-        spectrum_fft_size: Option<usize>,
-        scope_decimation: Option<usize>,
-        scope_window_samples: Option<usize>,
-        scope_snap: Option<bool>,
-        spectrum_heatmap: Option<bool>,
-    ) -> StateDelta {
+    fn apply_set_tap_opt(&mut self, name: String, opt: TapOpt) -> StateDelta {
         if name.is_empty() {
             // Unnamed taps are not addressable for opts. Drop
             // silently (ADR 0063 §5; ticket 0773).
@@ -507,20 +493,12 @@ impl Controller {
         }
         let entry = self.tap_opts.entry(name).or_default();
         let before = *entry;
-        if let Some(n) = spectrum_fft_size {
-            entry.spectrum_fft_size = n;
-        }
-        if let Some(d) = scope_decimation {
-            entry.scope_decimation = d;
-        }
-        if let Some(w) = scope_window_samples {
-            entry.scope_window_samples = w;
-        }
-        if let Some(b) = scope_snap {
-            entry.scope_snap = b;
-        }
-        if let Some(b) = spectrum_heatmap {
-            entry.spectrum_heatmap = b;
+        match opt {
+            TapOpt::SpectrumFftSize(n) => entry.spectrum_fft_size = n,
+            TapOpt::ScopeDecimation(d) => entry.scope_decimation = d,
+            TapOpt::ScopeWindowSamples(w) => entry.scope_window_samples = w,
+            TapOpt::ScopeSnap(b) => entry.scope_snap = b,
+            TapOpt::SpectrumHeatmap(b) => entry.spectrum_heatmap = b,
         }
         let changed = *entry != before;
         StateDelta {
@@ -1225,17 +1203,13 @@ mod tests {
     }
 
     #[test]
-    fn set_tap_opts_marks_persistable_when_changed() {
+    fn set_tap_opt_marks_persistable_when_changed() {
         let mut env = ok_env();
         let mut c = Controller::new();
         let d = c.apply(
-            Action::SetTapOpts {
+            Action::SetTapOpt {
                 name: "kick".into(),
-                spectrum_fft_size: Some(2048),
-                scope_decimation: None,
-                scope_window_samples: None,
-                scope_snap: None,
-                spectrum_heatmap: None,
+                opt: TapOpt::SpectrumFftSize(2048),
             },
             &mut env,
         );
@@ -1244,13 +1218,9 @@ mod tests {
 
         // Re-apply same value — no change.
         let d2 = c.apply(
-            Action::SetTapOpts {
+            Action::SetTapOpt {
                 name: "kick".into(),
-                spectrum_fft_size: Some(2048),
-                scope_decimation: None,
-                scope_window_samples: None,
-                scope_snap: None,
-                spectrum_heatmap: None,
+                opt: TapOpt::SpectrumFftSize(2048),
             },
             &mut env,
         );
@@ -1258,17 +1228,13 @@ mod tests {
     }
 
     #[test]
-    fn set_tap_opts_with_empty_name_is_dropped() {
+    fn set_tap_opt_with_empty_name_is_dropped() {
         let mut env = ok_env();
         let mut c = Controller::new();
         let d = c.apply(
-            Action::SetTapOpts {
+            Action::SetTapOpt {
                 name: String::new(),
-                spectrum_fft_size: Some(2048),
-                scope_decimation: None,
-                scope_window_samples: None,
-                scope_snap: None,
-                spectrum_heatmap: None,
+                opt: TapOpt::SpectrumFftSize(2048),
             },
             &mut env,
         );

@@ -44,7 +44,7 @@ fn intent_log_label(intent: &Intent) -> &'static str {
         Intent::Rescan => "rescan_requested",
         Intent::AddPath => "add_path_requested",
         Intent::RemovePath { .. } => "remove_path_requested",
-        Intent::SetTapOpts { .. } => "set_tap_opts",
+        Intent::SetTapOpt { .. } => "set_tap_opt",
         Intent::Ready => "webview_ready",
     }
 }

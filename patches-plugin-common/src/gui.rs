@@ -192,16 +192,14 @@ pub enum Intent {
     Rescan,
     AddPath,
     RemovePath { index: usize },
-    /// Update per-slot display options. Any field left `None` keeps
-    /// its current value. Posted by the webview when the user picks
-    /// an FFT size, decimation, or window length.
-    SetTapOpts {
+    /// Update one per-slot display option. Posted by the webview when
+    /// the user picks an FFT size, decimation, window length, etc. The
+    /// flattened `opt` field carries the externally-tagged variant, so
+    /// the wire form is `{kind:"set_tap_opt", name, <variant_name>:<value>}`.
+    SetTapOpt {
         name: String,
-        spectrum_fft_size: Option<usize>,
-        scope_decimation: Option<usize>,
-        scope_window_samples: Option<usize>,
-        scope_snap: Option<bool>,
-        spectrum_heatmap: Option<bool>,
+        #[serde(flatten)]
+        opt: crate::controller::TapOpt,
     },
     /// JS bundle finished loading and `window.__patches` is wired up.
     /// Host-side handler clears push-dedupe caches so the next snapshot
@@ -221,21 +219,7 @@ impl Intent {
             Intent::Rescan => Action::Rescan,
             Intent::AddPath => Action::AddModulePath,
             Intent::RemovePath { index } => Action::RemoveModulePath(index),
-            Intent::SetTapOpts {
-                name,
-                spectrum_fft_size,
-                scope_decimation,
-                scope_window_samples,
-                scope_snap,
-                spectrum_heatmap,
-            } => Action::SetTapOpts {
-                name,
-                spectrum_fft_size,
-                scope_decimation,
-                scope_window_samples,
-                scope_snap,
-                spectrum_heatmap,
-            },
+            Intent::SetTapOpt { name, opt } => Action::SetTapOpt { name, opt },
             Intent::Ready => return None,
         })
     }
@@ -261,6 +245,48 @@ mod tests {
             other => panic!("got {other:?}"),
         }
         assert!(parse(r#"{"kind":"ready"}"#).into_action().is_none());
+    }
+
+    #[test]
+    fn intent_set_tap_opt_wire_shapes() {
+        use crate::controller::{Action, TapOpt};
+        type Check = fn(&TapOpt) -> bool;
+        let cases: &[(&str, &str, Check)] = &[
+            (
+                r#"{"kind":"set_tap_opt","name":"a","spectrum_fft_size":1024}"#,
+                "a",
+                |o| matches!(o, TapOpt::SpectrumFftSize(1024)),
+            ),
+            (
+                r#"{"kind":"set_tap_opt","name":"b","scope_decimation":8}"#,
+                "b",
+                |o| matches!(o, TapOpt::ScopeDecimation(8)),
+            ),
+            (
+                r#"{"kind":"set_tap_opt","name":"c","scope_window_samples":2048}"#,
+                "c",
+                |o| matches!(o, TapOpt::ScopeWindowSamples(2048)),
+            ),
+            (
+                r#"{"kind":"set_tap_opt","name":"d","scope_snap":true}"#,
+                "d",
+                |o| matches!(o, TapOpt::ScopeSnap(true)),
+            ),
+            (
+                r#"{"kind":"set_tap_opt","name":"e","spectrum_heatmap":false}"#,
+                "e",
+                |o| matches!(o, TapOpt::SpectrumHeatmap(false)),
+            ),
+        ];
+        for (json, expected_name, check) in cases {
+            match parse(json).into_action() {
+                Some(Action::SetTapOpt { name, opt }) => {
+                    assert_eq!(name, *expected_name, "json: {json}");
+                    assert!(check(&opt), "wrong variant for {json}");
+                }
+                other => panic!("{json} -> {other:?}"),
+            }
+        }
     }
 
     #[test]

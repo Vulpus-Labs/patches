@@ -49,7 +49,7 @@ document.addEventListener("click", (ev) => {
       const snapNext = !sbundle.scope.getSnap();
       sbundle.scope.setSnap(snapNext);
       t.classList.toggle("is-active", snapNext);
-      postIntent("set_tap_opts", { name: t.dataset.tapName, scope_snap: snapNext });
+      postIntent("set_tap_opt", { name: t.dataset.tapName, scope_snap: snapNext });
     }
     return;
   }
@@ -60,7 +60,7 @@ document.addEventListener("click", (ev) => {
       const next = bundle.spectrum.getMode() === "heatmap" ? "curve" : "heatmap";
       bundle.spectrum.setMode(next);
       t.textContent = next === "heatmap" ? "curve" : "heatmap";
-      postIntent("set_tap_opts", {
+      postIntent("set_tap_opt", {
         name: t.dataset.tapName,
         spectrum_heatmap: next === "heatmap",
       });
