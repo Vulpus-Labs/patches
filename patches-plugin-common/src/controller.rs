@@ -379,81 +379,13 @@ impl Controller {
     /// Apply an action.
     pub fn apply(&mut self, action: Action, env: &mut dyn Env) -> StateDelta {
         match action {
-            Action::Browse => {
-                if let Some(path) = env.pick_file() {
-                    return self.load_path(path, "Loaded", env);
-                }
-                StateDelta::default()
-            }
-            Action::Reload => {
-                if let Some(path) = self.file_path.clone() {
-                    return self.load_path(path, "Reloaded", env);
-                }
-                StateDelta::default()
-            }
+            Action::Browse => self.apply_browse(env),
+            Action::Reload => self.apply_reload(env),
             Action::LoadPath(path) => self.load_path(path, "Loaded", env),
-            Action::AddModulePath => {
-                if let Some(dir) = env.pick_folder() {
-                    return self.add_module_path(dir, env);
-                }
-                StateDelta::default()
-            }
+            Action::AddModulePath => self.apply_add_module_path(env),
             Action::AddModulePathDirect(dir) => self.add_module_path(dir, env),
-            Action::RemoveModulePath(idx) => {
-                if idx >= self.module_paths.len() {
-                    return StateDelta::default();
-                }
-                let removed = self.module_paths.remove(idx);
-                self.push_status(format!(
-                    "Removed module path: {} (press Rescan to apply)",
-                    removed.display()
-                ));
-                StateDelta {
-                    persistable_changed: true,
-                    snapshot_changed: true,
-                    ..Default::default()
-                }
-            }
-            Action::Rescan => {
-                let probe = env.probe_paths(&self.module_paths, &self.registry);
-                self.push_status(format!(
-                    "Rescan: {} added, {} replaced, {} unchanged{}",
-                    probe.added.len(),
-                    probe.replaced.len(),
-                    probe.unchanged.len(),
-                    if probe.errors.is_empty() {
-                        String::new()
-                    } else {
-                        format!(", {} errors", probe.errors.len())
-                    },
-                ));
-                for line in &probe.errors {
-                    self.push_status(line.clone());
-                }
-                // Predicted post-restart names = current registry ∪ added.
-                let mut names: Vec<String> =
-                    self.registry.module_names().map(|s| s.to_string()).collect();
-                for n in &probe.added {
-                    if !names.iter().any(|x| x == n) {
-                        names.push(n.clone());
-                    }
-                }
-                names.sort();
-                self.module_names = names;
-                if probe.is_actionable() {
-                    self.diagnostic_view = DiagnosticView::default();
-                    StateDelta {
-                        requires_restart: true,
-                        snapshot_changed: true,
-                        ..Default::default()
-                    }
-                } else {
-                    StateDelta {
-                        snapshot_changed: true,
-                        ..Default::default()
-                    }
-                }
-            }
+            Action::RemoveModulePath(idx) => self.apply_remove_module_path(idx),
+            Action::Rescan => self.apply_rescan(env),
             Action::SetTapOpts {
                 name,
                 spectrum_fft_size,
@@ -461,204 +393,333 @@ impl Controller {
                 scope_window_samples,
                 scope_snap,
                 spectrum_heatmap,
-            } => {
-                if name.is_empty() {
-                    // Unnamed taps are not addressable for opts. Drop
-                    // silently (ADR 0063 §5; ticket 0773).
-                    return StateDelta::default();
-                }
-                let entry = self.tap_opts.entry(name).or_default();
-                let before = *entry;
-                if let Some(n) = spectrum_fft_size {
-                    entry.spectrum_fft_size = n;
-                }
-                if let Some(d) = scope_decimation {
-                    entry.scope_decimation = d;
-                }
-                if let Some(w) = scope_window_samples {
-                    entry.scope_window_samples = w;
-                }
-                if let Some(b) = scope_snap {
-                    entry.scope_snap = b;
-                }
-                if let Some(b) = spectrum_heatmap {
-                    entry.spectrum_heatmap = b;
-                }
-                let changed = *entry != before;
-                StateDelta {
-                    persistable_changed: changed,
-                    snapshot_changed: changed,
-                    ..Default::default()
-                }
+            } => self.apply_set_tap_opts(
+                name,
+                spectrum_fft_size,
+                scope_decimation,
+                scope_window_samples,
+                scope_snap,
+                spectrum_heatmap,
+            ),
+            Action::SetWindowSize(w, h) => self.apply_set_window_size(w, h),
+            Action::Activate => self.apply_activate(env),
+            Action::Deactivate => self.apply_deactivate(),
+            Action::SavePreset { name } => self.apply_save_preset(name, env),
+            Action::LoadPreset { name } => self.apply_load_preset(name, env),
+            Action::StateLoad { identity, settings } => self.apply_state_load(identity, settings),
+            Action::HaltObserved(observed) => self.apply_halt_observed(observed),
+            Action::DiagnosticsDrained(lines) => self.apply_diagnostics_drained(lines),
+        }
+    }
+
+    fn apply_browse(&mut self, env: &mut dyn Env) -> StateDelta {
+        match env.pick_file() {
+            Some(path) => self.load_path(path, "Loaded", env),
+            None => StateDelta::default(),
+        }
+    }
+
+    fn apply_reload(&mut self, env: &mut dyn Env) -> StateDelta {
+        match self.file_path.clone() {
+            Some(path) => self.load_path(path, "Reloaded", env),
+            None => StateDelta::default(),
+        }
+    }
+
+    fn apply_add_module_path(&mut self, env: &mut dyn Env) -> StateDelta {
+        match env.pick_folder() {
+            Some(dir) => self.add_module_path(dir, env),
+            None => StateDelta::default(),
+        }
+    }
+
+    fn apply_remove_module_path(&mut self, idx: usize) -> StateDelta {
+        if idx >= self.module_paths.len() {
+            return StateDelta::default();
+        }
+        let removed = self.module_paths.remove(idx);
+        self.push_status(format!(
+            "Removed module path: {} (press Rescan to apply)",
+            removed.display()
+        ));
+        StateDelta {
+            persistable_changed: true,
+            snapshot_changed: true,
+            ..Default::default()
+        }
+    }
+
+    fn apply_rescan(&mut self, env: &mut dyn Env) -> StateDelta {
+        let probe = env.probe_paths(&self.module_paths, &self.registry);
+        let errors_suffix = if probe.errors.is_empty() {
+            String::new()
+        } else {
+            format!(", {} errors", probe.errors.len())
+        };
+        self.push_status(format!(
+            "Rescan: {} added, {} replaced, {} unchanged{}",
+            probe.added.len(),
+            probe.replaced.len(),
+            probe.unchanged.len(),
+            errors_suffix,
+        ));
+        for line in &probe.errors {
+            self.push_status(line.clone());
+        }
+        // Predicted post-restart names = current registry ∪ added.
+        let mut names: Vec<String> =
+            self.registry.module_names().map(|s| s.to_string()).collect();
+        for n in &probe.added {
+            if !names.iter().any(|x| x == n) {
+                names.push(n.clone());
             }
-            Action::SetWindowSize(w, h) => {
-                let next = Some((w, h));
-                if self.window_size == next {
-                    return StateDelta::default();
-                }
-                self.window_size = next;
-                StateDelta {
-                    persistable_changed: true,
-                    ..Default::default()
-                }
+        }
+        names.sort();
+        self.module_names = names;
+        if probe.is_actionable() {
+            self.diagnostic_view = DiagnosticView::default();
+            StateDelta {
+                requires_restart: true,
+                snapshot_changed: true,
+                ..Default::default()
             }
-            Action::Activate => {
-                let (registry, scan) = env.reset_and_scan(&self.module_paths);
-                self.registry = registry;
-                self.module_names = scan.module_names;
-                if !self.module_paths.is_empty() {
-                    self.push_status(format!("Module scan: {}", scan.summary));
-                    for line in scan.details {
-                        self.push_status(line);
-                    }
-                }
-                let mut plan_recompile = false;
-                if !self.dsl_source.is_empty() {
-                    match env.compile_and_push_plan(
-                        &self.dsl_source,
-                        self.file_path.as_deref(),
-                        &self.registry,
-                    ) {
-                        Ok(success) => {
-                            self.taps = success.taps;
-                            self.host_control_manifest = success.host_control_manifest;
-                            self.reconcile_host_controls_with_manifest();
-                            self.diagnostic_view = DiagnosticView::default();
-                            if !success.warnings.is_empty() {
-                                self.diagnostic_view.diagnostics.extend(success.warnings);
-                            }
-                            plan_recompile = true;
-                        }
-                        Err(failure) => {
-                            self.diagnostic_view = failure.view;
-                            self.push_status(format!("Error: {}", failure.message));
-                        }
-                    }
-                }
+        } else {
+            StateDelta {
+                snapshot_changed: true,
+                ..Default::default()
+            }
+        }
+    }
+
+    fn apply_set_tap_opts(
+        &mut self,
+        name: String,
+        spectrum_fft_size: Option<usize>,
+        scope_decimation: Option<usize>,
+        scope_window_samples: Option<usize>,
+        scope_snap: Option<bool>,
+        spectrum_heatmap: Option<bool>,
+    ) -> StateDelta {
+        if name.is_empty() {
+            // Unnamed taps are not addressable for opts. Drop
+            // silently (ADR 0063 §5; ticket 0773).
+            return StateDelta::default();
+        }
+        let entry = self.tap_opts.entry(name).or_default();
+        let before = *entry;
+        if let Some(n) = spectrum_fft_size {
+            entry.spectrum_fft_size = n;
+        }
+        if let Some(d) = scope_decimation {
+            entry.scope_decimation = d;
+        }
+        if let Some(w) = scope_window_samples {
+            entry.scope_window_samples = w;
+        }
+        if let Some(b) = scope_snap {
+            entry.scope_snap = b;
+        }
+        if let Some(b) = spectrum_heatmap {
+            entry.spectrum_heatmap = b;
+        }
+        let changed = *entry != before;
+        StateDelta {
+            persistable_changed: changed,
+            snapshot_changed: changed,
+            ..Default::default()
+        }
+    }
+
+    fn apply_set_window_size(&mut self, w: u32, h: u32) -> StateDelta {
+        let next = Some((w, h));
+        if self.window_size == next {
+            return StateDelta::default();
+        }
+        self.window_size = next;
+        StateDelta {
+            persistable_changed: true,
+            ..Default::default()
+        }
+    }
+
+    fn apply_activate(&mut self, env: &mut dyn Env) -> StateDelta {
+        let (registry, scan) = env.reset_and_scan(&self.module_paths);
+        self.registry = registry;
+        self.module_names = scan.module_names;
+        if !self.module_paths.is_empty() {
+            self.push_status(format!("Module scan: {}", scan.summary));
+            for line in scan.details {
+                self.push_status(line);
+            }
+        }
+        let plan_recompile = if self.dsl_source.is_empty() {
+            false
+        } else {
+            self.compile_current_source(env)
+        };
+        StateDelta {
+            snapshot_changed: true,
+            plan_recompile,
+            ..Default::default()
+        }
+    }
+
+    /// Compile `self.dsl_source` against the current registry and absorb
+    /// the result into derived state. Returns `true` on success (caller
+    /// uses this to set `plan_recompile`). Errors land in the diagnostic
+    /// view and status log.
+    fn compile_current_source(&mut self, env: &mut dyn Env) -> bool {
+        match env.compile_and_push_plan(
+            &self.dsl_source,
+            self.file_path.as_deref(),
+            &self.registry,
+        ) {
+            Ok(success) => {
+                self.absorb_compile_success(success);
+                true
+            }
+            Err(failure) => {
+                self.diagnostic_view = failure.view;
+                self.push_status(format!("Error: {}", failure.message));
+                false
+            }
+        }
+    }
+
+    fn absorb_compile_success(&mut self, success: CompileSuccess) {
+        self.taps = success.taps;
+        self.host_control_manifest = success.host_control_manifest;
+        self.reconcile_host_controls_with_manifest();
+        self.diagnostic_view = DiagnosticView::default();
+        if !success.warnings.is_empty() {
+            self.diagnostic_view.diagnostics.extend(success.warnings);
+        }
+    }
+
+    fn apply_deactivate(&mut self) -> StateDelta {
+        // Clear derived/live fields the audio side will rebuild
+        // on next Activate. Persistable fields (file_path,
+        // dsl_source, module_paths, tap_opts, window_size)
+        // survive — they drive the next Activate.
+        self.registry = Registry::default();
+        self.taps.clear();
+        self.module_names.clear();
+        self.halt = None;
+        self.diagnostic_view = DiagnosticView::default();
+        self.host_control_manifest = Arc::new(Vec::new());
+        StateDelta {
+            snapshot_changed: true,
+            ..Default::default()
+        }
+    }
+
+    fn apply_save_preset(&mut self, name: String, env: &mut dyn Env) -> StateDelta {
+        let stem = self.patch_stem();
+        let Some(path) = env.preset_path(&stem, &name) else {
+            self.push_status("Presets unsupported on this env");
+            return StateDelta::default();
+        };
+        let settings = self.persisted_settings();
+        match env.save_preset(&path, &settings) {
+            Ok(()) => {
+                self.preset_names = env.list_presets(&stem);
+                self.push_status(format!("Saved preset {name}"));
                 StateDelta {
                     snapshot_changed: true,
-                    plan_recompile,
                     ..Default::default()
                 }
             }
-            Action::Deactivate => {
-                // Clear derived/live fields the audio side will rebuild
-                // on next Activate. Persistable fields (file_path,
-                // dsl_source, module_paths, tap_opts, window_size)
-                // survive — they drive the next Activate.
-                self.registry = Registry::default();
-                self.taps.clear();
-                self.module_names.clear();
-                self.halt = None;
-                self.diagnostic_view = DiagnosticView::default();
-                self.host_control_manifest = Arc::new(Vec::new());
-                StateDelta {
-                    snapshot_changed: true,
-                    ..Default::default()
-                }
-            }
-            Action::SavePreset { name } => {
-                let stem = self.patch_stem();
-                if let Some(path) = env.preset_path(&stem, &name) {
-                    let settings = self.persisted_settings();
-                    match env.save_preset(&path, &settings) {
-                        Ok(()) => {
-                            self.preset_names = env.list_presets(&stem);
-                            self.push_status(format!("Saved preset {name}"));
-                            return StateDelta {
-                                snapshot_changed: true,
-                                ..Default::default()
-                            };
-                        }
-                        Err(e) => {
-                            self.push_status(format!("Save preset {name} failed: {e}"));
-                        }
-                    }
-                } else {
-                    self.push_status("Presets unsupported on this env");
-                }
+            Err(e) => {
+                self.push_status(format!("Save preset {name} failed: {e}"));
                 StateDelta::default()
             }
-            Action::LoadPreset { name } => {
-                let stem = self.patch_stem();
-                let path = match env.preset_path(&stem, &name) {
-                    Some(p) => p,
-                    None => {
-                        self.push_status("Presets unsupported on this env");
-                        return StateDelta::default();
-                    }
-                };
-                match env.load_preset(&path) {
-                    Ok(Some(settings)) => {
-                        self.module_paths = settings.module_paths;
-                        self.tap_opts = settings.tap_opts;
-                        self.window_size = settings.window_size;
-                        self.host_controls = settings.host_controls;
-                        self.reconcile_host_controls_with_manifest();
-                        self.push_status(format!("Loaded preset {name}"));
-                        StateDelta {
-                            persistable_changed: true,
-                            snapshot_changed: true,
-                            ..Default::default()
-                        }
-                    }
-                    Ok(None) => {
-                        self.push_status(format!("Preset {name} not found"));
-                        StateDelta::default()
-                    }
-                    Err(e) => {
-                        self.push_status(format!("Load preset {name} failed: {e}"));
-                        StateDelta::default()
-                    }
-                }
-            }
-            Action::StateLoad { identity, settings } => {
-                self.file_path = identity.file_path;
-                self.dsl_source = identity.dsl_source;
-                self.module_paths = settings.module_paths;
-                self.tap_opts = settings.tap_opts;
-                self.window_size = settings.window_size;
-                self.host_controls = settings.host_controls;
-                self.reconcile_host_controls_with_manifest();
+        }
+    }
+
+    fn apply_load_preset(&mut self, name: String, env: &mut dyn Env) -> StateDelta {
+        let stem = self.patch_stem();
+        let Some(path) = env.preset_path(&stem, &name) else {
+            self.push_status("Presets unsupported on this env");
+            return StateDelta::default();
+        };
+        match env.load_preset(&path) {
+            Ok(Some(settings)) => {
+                self.absorb_persisted_settings(settings);
+                self.push_status(format!("Loaded preset {name}"));
                 StateDelta {
+                    persistable_changed: true,
                     snapshot_changed: true,
                     ..Default::default()
                 }
             }
-            Action::HaltObserved(observed) => {
-                let same = match (&observed, &self.halt) {
-                    (None, None) => true,
-                    (Some(a), Some(b)) => a.slot == b.slot && a.module_name == b.module_name,
-                    _ => false,
-                };
-                if same {
-                    return StateDelta::default();
-                }
-                if let Some(info) = &observed {
-                    let first = info.payload.lines().next().unwrap_or("");
-                    self.push_status(format!(
-                        "Engine halted: module {:?} (slot {}) panicked: {} — reload the patch to recover.",
-                        info.module_name, info.slot, first,
-                    ));
-                }
-                self.halt = observed;
-                StateDelta {
-                    snapshot_changed: true,
-                    ..Default::default()
-                }
+            Ok(None) => {
+                self.push_status(format!("Preset {name} not found"));
+                StateDelta::default()
             }
-            Action::DiagnosticsDrained(lines) => {
-                if lines.is_empty() {
-                    return StateDelta::default();
-                }
-                for line in lines {
-                    self.push_status(line);
-                }
-                StateDelta {
-                    snapshot_changed: true,
-                    ..Default::default()
-                }
+            Err(e) => {
+                self.push_status(format!("Load preset {name} failed: {e}"));
+                StateDelta::default()
             }
+        }
+    }
+
+    /// Apply `settings` to the persistable fields and reconcile host
+    /// controls against the current manifest.
+    fn absorb_persisted_settings(&mut self, settings: PersistedSettings) {
+        self.module_paths = settings.module_paths;
+        self.tap_opts = settings.tap_opts;
+        self.window_size = settings.window_size;
+        self.host_controls = settings.host_controls;
+        self.reconcile_host_controls_with_manifest();
+    }
+
+    fn apply_state_load(
+        &mut self,
+        identity: PatchIdentity,
+        settings: PersistedSettings,
+    ) -> StateDelta {
+        self.file_path = identity.file_path;
+        self.dsl_source = identity.dsl_source;
+        self.absorb_persisted_settings(settings);
+        StateDelta {
+            snapshot_changed: true,
+            ..Default::default()
+        }
+    }
+
+    fn apply_halt_observed(&mut self, observed: Option<HaltInfoSnapshot>) -> StateDelta {
+        let same = match (&observed, &self.halt) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.slot == b.slot && a.module_name == b.module_name,
+            _ => false,
+        };
+        if same {
+            return StateDelta::default();
+        }
+        if let Some(info) = &observed {
+            let first = info.payload.lines().next().unwrap_or("");
+            self.push_status(format!(
+                "Engine halted: module {:?} (slot {}) panicked: {} — reload the patch to recover.",
+                info.module_name, info.slot, first,
+            ));
+        }
+        self.halt = observed;
+        StateDelta {
+            snapshot_changed: true,
+            ..Default::default()
+        }
+    }
+
+    fn apply_diagnostics_drained(&mut self, lines: Vec<String>) -> StateDelta {
+        if lines.is_empty() {
+            return StateDelta::default();
+        }
+        for line in lines {
+            self.push_status(line);
+        }
+        StateDelta {
+            snapshot_changed: true,
+            ..Default::default()
         }
     }
 
