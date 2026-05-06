@@ -1,7 +1,7 @@
 ---
 id: E137
 title: Block-rate MIDI scratch buffer (ADR 0069)
-status: open
+status: closed
 created: 2026-05-05
 ---
 

@@ -220,7 +220,7 @@ impl RenderedDiagnostic {
     /// squiggle sits under the specific bad identifier rather than the
     /// whole `module.port[index]` cluster.
     pub fn from_bind_error(err: &BindError, source_map: &SourceMap) -> Self {
-        let refined = refine_bind_provenance(&err.code, &err.provenance, source_map);
+        let refined = refine_bind_provenance(&err.code, &err.provenance, &err.message, source_map);
         render_provenance_error(
             err.code.as_str(),
             err.message.clone(),
@@ -377,11 +377,15 @@ pub fn source_line_col(source_map: &SourceMap, source: SourceId, offset: usize) 
 fn refine_bind_provenance(
     code: &BindErrorCode,
     prov: &Provenance,
+    message: &str,
     source_map: &SourceMap,
 ) -> Option<Provenance> {
     let (offset_start, offset_end) = match code {
         BindErrorCode::UnknownModule | BindErrorCode::UnknownPort => {
             port_ref_token_offsets(prov.site, source_map, *code)?
+        }
+        BindErrorCode::UnknownParameter => {
+            param_name_token_offsets(prov.site, source_map, message)?
         }
         _ => return None,
     };
@@ -417,6 +421,44 @@ fn port_ref_token_offsets(
         }
         _ => None,
     }
+}
+
+/// Locate the byte offsets of the offending parameter identifier within
+/// the module-decl span. The bind error's site covers the whole
+/// `module name : Type { ... }` block; we extract the parameter name
+/// from the error message (formatted as `unknown parameter '<name>'…`)
+/// and find its first token-bounded occurrence inside that block.
+fn param_name_token_offsets(
+    site: patches_core::source_span::Span,
+    source_map: &SourceMap,
+    message: &str,
+) -> Option<(usize, usize)> {
+    let name = extract_quoted_param_name(message)?;
+    let text = source_map.source_text(site.source)?;
+    let slice = text.get(site.start..site.end)?;
+    let mut search_from = 0usize;
+    while let Some(rel) = slice[search_from..].find(name) {
+        let start = search_from + rel;
+        let end = start + name.len();
+        let before_ok = start == 0
+            || !slice.as_bytes()[start - 1].is_ascii_alphanumeric()
+                && slice.as_bytes()[start - 1] != b'_';
+        let after_ok = end == slice.len()
+            || !slice.as_bytes()[end].is_ascii_alphanumeric()
+                && slice.as_bytes()[end] != b'_';
+        if before_ok && after_ok {
+            return Some((site.start + start, site.start + end));
+        }
+        search_from = start + 1;
+    }
+    None
+}
+
+fn extract_quoted_param_name(message: &str) -> Option<&str> {
+    let prefix = message.find("unknown parameter '")?;
+    let after = &message[prefix + "unknown parameter '".len()..];
+    let end = after.find('\'')?;
+    Some(&after[..end])
 }
 
 fn provenance_to_snippets(prov: &Provenance, primary_label: &str) -> (Snippet, Vec<Snippet>) {

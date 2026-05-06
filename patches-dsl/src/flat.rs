@@ -22,6 +22,11 @@ pub struct FlatModule {
     pub shape: Vec<(String, Scalar)>,
     /// Initialisation parameters (name, value).
     pub params: Vec<(String, Value)>,
+    /// Source span covering the authored `{ ... }` parameter block, when
+    /// present. Diagnostics like `UnknownParameter` use this to widen
+    /// the search scope for the offending key beyond `provenance.site`
+    /// (which is intentionally narrow — `name : type_name`).
+    pub param_block_span: Option<patches_core::source_span::Span>,
     /// Index → alias name for indexed ports declared via shape alias lists
     /// (e.g. `(channels: [drums, bass])`). Used by downstream diagnostics so
     /// "available ports" lists can show user-visible alias labels rather than

@@ -12,6 +12,8 @@ mod navigation;
 mod parser;
 mod server;
 mod shape_render;
+#[cfg(test)]
+mod syntax_corpus;
 mod tree_nav;
 mod workspace;
 

@@ -15,6 +15,7 @@ members = [
     "patches-integration-tests",
     "patches-player",
     "patches-tools",
+    "patches-forbidden-edges",
     "patches-manifest",
     "patches-profiling",
     "patches-clap",

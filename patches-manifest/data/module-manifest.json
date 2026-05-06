@@ -1333,6 +1333,76 @@
       }
     },
     {
+      "name": "HostControl",
+      "template": {
+        "name": "HostControl",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [],
+        "per_axis_inputs": [],
+        "global_outputs": [],
+        "per_axis_outputs": [
+          [
+            "channels",
+            {
+              "name": "audio_out",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "trigger_out",
+              "kind": "Mono",
+              "mono_layout": "Trigger",
+              "poly_layout": "Audio"
+            }
+          ]
+        ],
+        "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "slot_offset",
+              "kind": {
+                "Int": {
+                  "min": 0,
+                  "max": 63,
+                  "default": 0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "kind",
+              "kind": {
+                "Enum": {
+                  "variants": [
+                    "knob",
+                    "slider",
+                    "toggle",
+                    "trigger"
+                  ],
+                  "default": "knob"
+                }
+              }
+            }
+          ]
+        ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "HostTransport",
       "template": {
         "name": "HostTransport",

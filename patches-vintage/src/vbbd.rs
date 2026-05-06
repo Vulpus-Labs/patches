@@ -277,7 +277,7 @@ impl Module for VBbd {
         // per Periodic tick per tap is enough. The BBD smooths
         // internally across its own (finer) smoothing interval.
         for i in 0..self.taps {
-            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
+            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
             let delay_s = (self.delay_ms[i] * (1.0 + cv) * 0.001)
                 .clamp(DELAY_MS_MIN * 0.001, DELAY_MS_MAX * 0.001);
             self.tap_state[i].bbd.set_delay_seconds(delay_s);

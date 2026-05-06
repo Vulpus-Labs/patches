@@ -250,7 +250,7 @@ impl Module for VStereoBbd {
 
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         for i in 0..self.taps {
-            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
+            let cv = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
             let delay_s = (self.delay_ms[i] * (1.0 + cv) * 0.001)
                 .clamp(DELAY_MS_MIN * 0.001, DELAY_MS_MAX * 0.001);
             self.taps_l[i].bbd.set_delay_seconds(delay_s);

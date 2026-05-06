@@ -1,7 +1,7 @@
 ---
 id: E135
 title: Host control cables (ADR 0057)
-status: open
+status: closed
 created: 2026-05-04
 ---
 

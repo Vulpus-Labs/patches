@@ -1,3 +1,7 @@
+// Any change here MUST also update patches-lsp/tree-sitter-patches/grammar.js
+// AND add a corpus entry in patches-lsp/tests/syntax_corpus/*.corpus.
+// The corpus driver enforces pest/tree-sitter parity.
+//
 // ─── Whitespace and comments ─────────────────────────────────────────────────
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT    = _{ "#" ~ (!"\n" ~ ANY)* }

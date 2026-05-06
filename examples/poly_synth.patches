@@ -73,23 +73,33 @@ patch {
     kbd.trigger            -> amp_env.trigger
     kbd.gate               -> amp_env.gate
 
+    module down : PolyToMono
+
+    down.out -> ~meter+osc(mix)
     # VCA: shaped audio per voice
     mix.out                -> vca.in
-    amp_env.out            -> vca.cv
+    amp_env.out            -> vca.cv, down.in
 
     # Filter envelope: triggered and gated per voice
     kbd.trigger            -> filt_env.trigger
     kbd.gate               -> filt_env.gate
 
-    # Filter cutoff CV: envelope sweeps each voice's cutoff (0–1 range → ~0–20 kHz modulation)
-    filt_env.out   -[0.7]-> filt.voct
+    # Filter cutoff CV: base knob + envelope sweep, summed per-voice
+    module filt_sum : PolySum([base, env])
+    module filt_broadcast : MonoToPoly
+    # voct offset around the filter's 1000Hz base: -1 oct (500Hz) … +1 oct (2000Hz)
+    knob filter_base { low: -1.0, high: 1.0 }
+    filter_base -> filt_broadcast.in
+    filt_broadcast.out     -> filt_sum.in[base]
+    filt_env.out   -[0.7]-> filt_sum.in[env]
+    filt_sum.out           -> filt.voct
 
-    # Filter: VCA output → lowpass → collapse
+    # Audio: VCA → filter
     vca.out                -> filt.in
 
     # Collapse all voices to mono
     filt.out               -> collapse.in
-    collapse.out -> ~spectrum(synth)
+    collapse.out -> ~spectrum+meter+osc(synth)
     
     module chorus : VChorus {
         mode: both
@@ -108,10 +118,15 @@ patch {
         damping: 0.8
     }
 
-    module delay : StereoDelay(1) {
-        delay_ms: 350
-        feedback: 0.4
+    module delay : VStereoBbd {
+        delay_ms: 100
+        feedback: 0.6
+        dry_wet: 1.0
     }
+
+    knob delay_knob { low: 50, high: 200 }
+    delay_knob -[bi(1.0, 2.0)]-> delay.delay_cv, ~osc(delay_amount)
+    delay_knob -> ~osc(delay_knob)
     
     limit.out -> chorus.in
     chorus.out -> delay.in[0]

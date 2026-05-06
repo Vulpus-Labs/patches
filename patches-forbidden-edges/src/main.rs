@@ -27,6 +27,7 @@ const LEAF_CRATES: &[&str] = &[
     "patches-lsp",
     "patches-svg-cli",
     "patches-tools",
+    "patches-forbidden-edges",
     "patches-vscode",
 ];
 

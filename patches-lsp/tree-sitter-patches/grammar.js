@@ -1,5 +1,9 @@
 /// <reference types="tree-sitter-cli/dsl" />
 
+// Any change here MUST also update patches-dsl/src/grammar.pest AND add a
+// corpus entry in patches-lsp/tests/syntax_corpus/*.corpus. The corpus
+// driver enforces pest/tree-sitter parity.
+
 module.exports = grammar({
   name: "patches",
 
@@ -138,7 +142,13 @@ module.exports = grammar({
 
     // ─── Arrows ─────────────────────────────────────────────────────────
     // float_unit before scale_num so "1s" parses as unit, not "1" + leftover.
-    scale_val: ($) => choice($.param_ref, $.float_unit, $.scale_num),
+    // note_lit before scale_num so `C4` parses as note.
+    scale_endpoint: ($) =>
+      choice($.param_ref, $.float_unit, $.note_lit, $.scale_num),
+    range_kind: (_) => choice("uni", "bi"),
+    scale_range: ($) =>
+      seq($.range_kind, "(", $.scale_endpoint, ",", $.scale_endpoint, ")"),
+    scale_val: ($) => choice($.scale_range, $.scale_endpoint),
 
     forward_arrow: ($) =>
       choice(seq("-[", $.scale_val, "]->"), "->"),

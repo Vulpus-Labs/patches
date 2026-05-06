@@ -22,7 +22,10 @@ use clap_sys::ext::params::{
     CLAP_PARAM_IS_STEPPED,
 };
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
-use clap_sys::events::{clap_input_events, clap_output_events};
+use clap_sys::events::{
+    clap_event_param_value, clap_input_events, clap_output_events,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+};
 use clap_sys::id::{clap_id, CLAP_INVALID_ID};
 use clap_sys::plugin::clap_plugin;
 use clap_sys::stream::{clap_istream, clap_ostream};
@@ -669,14 +672,17 @@ fn param_f64(map: &HostControlParamMap, key: &str) -> Option<f64> {
 
 /// Compute (min, max, default) for a host-control entry. Falls back to
 /// kind-appropriate defaults when fields are missing or malformed.
+///
+/// Knob / slider always expose a fixed `[-1, 1]` automation range to
+/// the host. The declaration's `low` / `high` are display-only metadata
+/// (kept in the manifest for UI consumers); patches remap to engineering
+/// units on the cable via `-[bi(low, high)]->`. `default` is interpreted
+/// in wire range `[-1, 1]` and clamps; missing → 0.
 pub(crate) fn param_range(kind: HostControlKind, map: &HostControlParamMap) -> (f64, f64, f64) {
     match kind {
         HostControlKind::Knob | HostControlKind::Slider => {
-            let lo = param_f64(map, "low").unwrap_or(0.0);
-            let hi = param_f64(map, "high").unwrap_or(1.0);
-            let (lo, hi) = if hi > lo { (lo, hi) } else { (lo, lo + 1.0) };
-            let dflt = param_f64(map, "default").unwrap_or(lo).clamp(lo, hi);
-            (lo, hi, dflt)
+            let dflt = param_f64(map, "default").unwrap_or(0.0).clamp(-1.0, 1.0);
+            (-1.0, 1.0, dflt)
         }
         HostControlKind::Toggle => {
             let dflt = param_f64(map, "default").unwrap_or(0.0);
@@ -789,12 +795,77 @@ unsafe extern "C" fn params_text_to_value(
 }
 
 unsafe extern "C" fn params_flush(
-    _plugin: *const clap_plugin,
-    _in_: *const clap_input_events,
+    plugin: *const clap_plugin,
+    in_: *const clap_input_events,
     _out: *const clap_output_events,
 ) {
-    // No-op for now; ticket 0811 follow-up wires param events through
-    // the host-control scratch pipeline both during process() and flush.
+    // Walk the input event list; for each CLAP_EVENT_PARAM_VALUE
+    // resolve `param_id → channel` via the audio-side table and push
+    // it onto the host-control scratch. Drives a one-frame block
+    // through the pipeline so the value lands on the backplane on
+    // the very next tick (or before the host resumes process()).
+    //
+    // Per CLAP, this is called on the audio thread when active and
+    // not processing, and on the main thread otherwise. The scratch
+    // is single-writer; CLAP forbids overlap with process(), so the
+    // mutation is safe under the host's own threading contract.
+    let p = plugin::plugin_mut_pub(plugin);
+    // Split-borrow so we can drive both the processor and mirror into
+    // the registry without aliasing.
+    //
+    // TODO(0825?): when flush is invoked on the audio thread (active &
+    // not-processing), `host_control_registry.record_value` races with
+    // main-thread mutations from `on_main_thread`. Move the registry
+    // mirror onto a SPSC drained by main-thread to remove the hazard.
+    let plugin::PatchesClapPlugin {
+        processor,
+        host_control_registry,
+        ..
+    } = p;
+    let Some(proc) = processor.as_mut() else {
+        return;
+    };
+    let mut saw_event = false;
+    let (size_fn, get_fn) = if !in_.is_null() {
+        match ((*in_).size, (*in_).get) {
+            (Some(s), Some(g)) => (Some(s), Some(g)),
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+    if let (Some(size_fn), Some(get_fn)) = (size_fn, get_fn) {
+        let count = size_fn(in_);
+        for i in 0..count {
+            let header = get_fn(in_, i);
+            if header.is_null() {
+                continue;
+            }
+            if (*header).space_id != CLAP_CORE_EVENT_SPACE_ID
+                || (*header).type_ != CLAP_EVENT_PARAM_VALUE
+            {
+                continue;
+            }
+            let pv = &*(header as *const clap_event_param_value);
+            let Some(channel) = proc.host_control_channel_of(pv.param_id) else {
+                continue;
+            };
+            let event = patches_core::HostControlEvent {
+                channel,
+                sample_offset: 0,
+                value: pv.value as f32,
+            };
+            proc.write_host_control_event(event);
+            host_control_registry.record_value(pv.param_id as u32, pv.value as f32);
+            saw_event = true;
+        }
+    }
+    // Drive a one-frame block only when we actually consumed an event;
+    // skipping the empty case avoids a spurious smoothing tick on every
+    // host poll.
+    if saw_event {
+        proc.prepare_host_control_block(1);
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -845,16 +916,27 @@ unsafe fn stream_write_all(stream: *const clap_ostream, data: &[u8]) -> bool {
         Some(f) => f,
         None => return false,
     };
+    // CLAP: write returns >0 on progress, 0 means "would block, retry",
+    // <0 is fatal. Bound retries so a misbehaving host can't hang us.
     let mut offset = 0usize;
+    let mut zero_retries = 0;
     while offset < data.len() {
         let written = write_fn(
             stream,
             data[offset..].as_ptr() as *const c_void,
             (data.len() - offset) as u64,
         );
-        if written <= 0 {
+        if written < 0 {
             return false;
         }
+        if written == 0 {
+            zero_retries += 1;
+            if zero_retries > 16 {
+                return false;
+            }
+            continue;
+        }
+        zero_retries = 0;
         offset += written as usize;
     }
     true
@@ -900,16 +982,27 @@ unsafe fn stream_read_all(stream: *const clap_istream, buf: &mut [u8]) -> bool {
         Some(f) => f,
         None => return false,
     };
+    // CLAP: read returns >0 on progress, 0 mid-payload = retry-or-EOF,
+    // <0 is fatal. Bound zero-retries so a stalled stream can't hang.
     let mut offset = 0usize;
+    let mut zero_retries = 0;
     while offset < buf.len() {
         let read = read_fn(
             stream,
             buf[offset..].as_mut_ptr() as *mut c_void,
             (buf.len() - offset) as u64,
         );
-        if read <= 0 {
+        if read < 0 {
             return false;
         }
+        if read == 0 {
+            zero_retries += 1;
+            if zero_retries > 16 {
+                return false;
+            }
+            continue;
+        }
+        zero_retries = 0;
         offset += read as usize;
     }
     true

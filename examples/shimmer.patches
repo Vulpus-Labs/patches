@@ -1,0 +1,7 @@
+patch {
+    module audio_in : AudioIn
+    module octave : PitchShift { semitones: 12 }
+    module verb : FdnReverb {
+        characeter: cathedral
+    }
+}

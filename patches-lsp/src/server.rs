@@ -336,6 +336,12 @@ impl PatchesLanguageServer {
         self.client
             .log_message(MessageType::INFO, format!("patches scan: {}", report.summary()))
             .await;
+        // Republish diagnostics for any docs already opened during init so
+        // they reflect the freshly populated registry (otherwise external
+        // modules show as unknown until the user triggers rescanModules).
+        for (u, d) in self.workspace.reanalyse_open() {
+            self.client.publish_diagnostics(u, d, None).await;
+        }
     }
 
     async fn pull_module_paths_only(&self) {

@@ -295,7 +295,7 @@ impl Module for StereoDelay {
 
         for i in 0..self.taps {
             // Effective delay
-            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
+            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
             let offset = (self.delay_ms[i] * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
 
             let (tap_raw_l, tap_raw_r) = if self.high_quality {

@@ -16,10 +16,6 @@ path = "src/bin/patches-check.rs"
 name = "patches-manifest"
 path = "src/bin/patches-manifest.rs"
 
-[[bin]]
-name = "forbidden-edges"
-path = "src/bin/forbidden-edges.rs"
-
 [dependencies]
 patches-core        = { path = "../patches-core" }
 patches-host        = { path = "../patches-host" }

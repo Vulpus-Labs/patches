@@ -161,24 +161,7 @@ impl PatchesClapPlugin {
     /// ticket 0811).
     #[allow(dead_code)] // retained for callers outside the env path
     pub(crate) fn request_param_rescan(&self, flags: u32) {
-        use clap_sys::ext::params::{clap_host_params, CLAP_EXT_PARAMS};
-        if self.host.is_null() {
-            return;
-        }
-        unsafe {
-            let get_ext = match (*self.host).get_extension {
-                Some(f) => f,
-                None => return,
-            };
-            let raw = get_ext(self.host, CLAP_EXT_PARAMS.as_ptr());
-            if raw.is_null() {
-                return;
-            }
-            let ext = &*(raw as *const clap_host_params);
-            if let Some(f) = ext.rescan {
-                f(self.host, flags);
-            }
-        }
+        unsafe { request_param_rescan_raw(self.host, flags) }
     }
 
     /// Tell the host the plugin's persistable state has changed since the
@@ -364,10 +347,8 @@ unsafe extern "C" fn plugin_activate(
     // Immediately adopt any pending plan so audio starts right away.
     if !p.controller.dsl_source.is_empty() {
         if let Some(rx) = &mut p.plan_rx {
-            if let Ok(msg) = rx.pop() {
-                if let Some(proc) = &mut p.processor {
-                    let patches_host::AdoptionMessage { common, host_control } = msg; proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
-                }
+            if let Some(proc) = p.processor.as_mut() {
+                try_adopt_pending(Some(rx), proc);
             }
         }
     }
@@ -414,15 +395,6 @@ unsafe extern "C" fn plugin_reset(_plugin: *const clap_plugin) {
     // Nothing to do here.
 }
 
-/// Logged once so we know process was reached without flooding the log.
-/// `OnceLock` makes the "first call" semantics explicit.
-static PROCESS_LOGGED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-/// Count process calls to log diagnostics after a few buffers. `Relaxed`
-/// ordering is sufficient — this is a diagnostic counter with no
-/// happens-before dependency on other state.
-static PROCESS_COUNT: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(0);
-
 unsafe extern "C" fn plugin_process(
     plugin: *const clap_plugin,
     process: *const clap_process,
@@ -430,84 +402,82 @@ unsafe extern "C" fn plugin_process(
     // Tag the host's audio thread on first entry (ADR 0045 spike 4).
     // Idempotent; no-op when the allocator-trap feature is off.
     patches_alloc_trap::mark_audio_thread();
-
     // Flush denormals on the hardware. Per-callback because some hosts
     // reset MXCSR between calls. See E134.
     patches_engine::enable_flush_to_zero();
 
-    if PROCESS_LOGGED.set(()).is_ok() {
-        dlog!("process: first call");
-    }
     if process.is_null() {
         dlog!("process: null process ptr");
         return CLAP_PROCESS_CONTINUE;
     }
     let p = plugin_mut(plugin);
-    let proc = match &mut p.processor {
-        Some(proc) => proc,
-        None => {
-            dlog!("process: no processor");
-            return CLAP_PROCESS_CONTINUE;
-        }
+    let Some(proc) = p.processor.as_mut() else {
+        dlog!("process: no processor");
+        return CLAP_PROCESS_CONTINUE;
     };
 
-    // Adopt any pending plan.
-    if let Some(rx) = &mut p.plan_rx {
-        if let Ok(msg) = rx.pop() {
-            let patches_host::AdoptionMessage { common, host_control } = msg;
-            dlog!(
-                "process: adopting plan, {} active modules",
-                common.plan.active_indices.len()
-            );
-            proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
-            // Reset counter so we log output levels after the new plan.
-            PROCESS_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
+    try_adopt_pending(p.plan_rx.as_mut(), proc);
 
     let pr = &*process;
     let frames = pr.frames_count as usize;
     if frames == 0 {
         return CLAP_PROCESS_CONTINUE;
     }
-
-    // Read input buffer pointers (may be null if not connected).
+    let Some(out_buf) = output_buffer(pr) else {
+        return CLAP_PROCESS_CONTINUE;
+    };
     let (in_l, in_r) = read_input_ptrs(pr);
 
-    // Output buffer — get the raw clap_audio_buffer and write through
-    // data32 each sample (don't cache the inner pointers).
-    if pr.audio_outputs_count == 0 || pr.audio_outputs.is_null() {
-        return CLAP_PROCESS_CONTINUE;
-    }
-    let out_buf = &mut *pr.audio_outputs;
-    if out_buf.data32.is_null() || out_buf.channel_count < 1 {
-        return CLAP_PROCESS_CONTINUE;
-    }
+    ingest_events(proc, pr.in_events, frames);
+    write_transport_state(&mut p.prev_beat, &mut p.prev_bar, proc, pr.transport);
+    run_sample_loop(proc, &p.meter, in_l, in_r, out_buf, frames);
 
-    // Event iteration — guard against missing vtable functions.
-    let in_events = pr.in_events;
-    let (event_size_fn, event_get_fn) = if !in_events.is_null() {
+    CLAP_PROCESS_CONTINUE
+}
+
+/// Resolve the primary output buffer if the host provided a usable one.
+unsafe fn output_buffer(
+    pr: &clap_process,
+) -> Option<&mut clap_sys::audio_buffer::clap_audio_buffer> {
+    if pr.audio_outputs_count == 0 || pr.audio_outputs.is_null() {
+        return None;
+    }
+    let buf = &mut *pr.audio_outputs;
+    if buf.data32.is_null() || buf.channel_count < 1 {
+        return None;
+    }
+    Some(buf)
+}
+
+/// Ingest CLAP_EVENT_PARAM_VALUE and CLAP_EVENT_MIDI events into the
+/// processor's host-control + MIDI scratches, then drive the per-block
+/// step-fill / transpose / smooth pipeline once for `frames` (ticket
+/// 0817, ADR 0069). The sample loop is pure DSP after this.
+unsafe fn ingest_events(
+    proc: &mut PatchProcessor,
+    in_events: *const clap_sys::events::clap_input_events,
+    frames: usize,
+) {
+    let (size_fn, get_fn) = if in_events.is_null() {
+        (None, None)
+    } else {
         match ((*in_events).size, (*in_events).get) {
             (Some(s), Some(g)) => (Some(s), Some(g)),
             _ => (None, None),
         }
-    } else {
-        (None, None)
     };
-    let event_count = event_size_fn.map_or(0, |f| f(in_events));
-
-    // Pre-pass: ingest CLAP_EVENT_PARAM_VALUE events into the
-    // host-control scratch (ticket 0817). Do this before the sample
-    // loop so `prepare_host_control_block` can run the step-fill /
-    // transpose / smooth pipeline once for the whole buffer; the
-    // sample loop's per-tick read picks up the AoS row for free.
-    if let Some(get_fn) = event_get_fn {
-        for i in 0..event_count {
+    // MIDI scratch must be sized + cleared before stamping rows.
+    // Host-control scratch buffers events in a Vec and drains in
+    // prepare_block, so it accepts events written before *or* after
+    // prepare. Calling prepare_midi_block first prevents the prior
+    // block's count rows from being zeroed *after* this block's
+    // events are stamped (which silently dropped every MIDI event).
+    proc.prepare_midi_block(frames);
+    if let (Some(size_fn), Some(get_fn)) = (size_fn, get_fn) {
+        let count = size_fn(in_events);
+        for i in 0..count {
             let header = get_fn(in_events, i);
-            if header.is_null() {
-                continue;
-            }
-            if (*header).space_id != CLAP_CORE_EVENT_SPACE_ID {
+            if header.is_null() || (*header).space_id != CLAP_CORE_EVENT_SPACE_ID {
                 continue;
             }
             let frame_offset = (*header).time.min(u16::MAX as u32) as u16;
@@ -517,130 +487,104 @@ unsafe extern "C" fn plugin_process(
                     let Some(channel) = proc.host_control_channel_of(pv.param_id) else {
                         continue;
                     };
-                    let event = HostControlEvent {
+                    proc.write_host_control_event(HostControlEvent {
                         channel,
                         sample_offset: frame_offset,
                         value: pv.value as f32,
-                    };
-                    proc.write_host_control_event(event);
+                    });
                 }
                 CLAP_EVENT_MIDI => {
                     let midi = &*(header as *const clap_event_midi);
-                    proc.write_midi_event(
-                        frame_offset,
-                        MidiEvent { bytes: midi.data },
-                    );
+                    proc.write_midi_event(frame_offset, MidiEvent { bytes: midi.data });
                 }
                 _ => {}
             }
         }
     }
     proc.prepare_host_control_block(frames);
-    proc.prepare_midi_block(frames);
+}
 
-    // Read host transport and write it to the processor's GLOBAL_TRANSPORT slot.
-    if !pr.transport.is_null() {
-        let t: &clap_event_transport = &*pr.transport;
-        let playing = if t.flags & CLAP_TRANSPORT_IS_PLAYING != 0 {
+/// Read the host transport (if present) and write the GLOBAL_TRANSPORT
+/// row. Resets `prev_beat`/`prev_bar` on stop or when the beats
+/// timeline drops, so the first frame after play resumes does not
+/// synthesise a spurious beat/bar trigger from stale state.
+unsafe fn write_transport_state(
+    prev_beat: &mut f64,
+    prev_bar: &mut i32,
+    proc: &mut PatchProcessor,
+    transport: *const clap_event_transport,
+) {
+    if transport.is_null() {
+        return;
+    }
+    let t: &clap_event_transport = &*transport;
+    let playing = if t.flags & CLAP_TRANSPORT_IS_PLAYING != 0 { 1.0 } else { 0.0 };
+    let tempo = if t.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 { t.tempo as f32 } else { 0.0 };
+    let has_beats = t.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0;
+    if playing == 0.0 || !has_beats {
+        *prev_beat = -1.0;
+        *prev_bar = -1;
+    }
+    let (beat, bar, beat_trigger, bar_trigger) = if has_beats {
+        let beat_f = t.song_pos_beats as f64 / CLAP_BEATTIME_FACTOR as f64;
+        let bar_num = t.bar_number;
+        let beat_trig = if beat_f.floor() != prev_beat.floor() && *prev_beat >= 0.0 {
             1.0
         } else {
             0.0
         };
-        let tempo = if t.flags & CLAP_TRANSPORT_HAS_TEMPO != 0 {
-            t.tempo as f32
-        } else {
-            0.0
-        };
-        let (beat, bar, beat_trigger, bar_trigger) =
-            if t.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE != 0 {
-                let beat_f = t.song_pos_beats as f64 / CLAP_BEATTIME_FACTOR as f64;
-                let bar_num = t.bar_number;
-                // Detect beat boundary: integer part of beat changed.
-                let beat_trig = if beat_f.floor() != p.prev_beat.floor()
-                    && p.prev_beat >= 0.0
-                {
-                    1.0
-                } else {
-                    0.0
-                };
-                // Detect bar boundary: bar number changed.
-                let bar_trig = if bar_num != p.prev_bar && p.prev_bar >= 0 {
-                    1.0
-                } else {
-                    0.0
-                };
-                p.prev_beat = beat_f;
-                p.prev_bar = bar_num;
-                (beat_f as f32, bar_num as f32, beat_trig, bar_trig)
-            } else {
-                (0.0, 0.0, 0.0, 0.0)
-            };
-        let (tsig_num, tsig_denom) =
-            if t.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0 {
-                (t.tsig_num as f32, t.tsig_denom as f32)
-            } else {
-                (0.0, 0.0)
-            };
-        proc.write_transport(
-            playing, tempo, beat, bar, beat_trigger, bar_trigger, tsig_num, tsig_denom,
-        );
-    }
+        let bar_trig = if bar_num != *prev_bar && *prev_bar >= 0 { 1.0 } else { 0.0 };
+        *prev_beat = beat_f;
+        *prev_bar = bar_num;
+        (beat_f as f32, bar_num as f32, beat_trig, bar_trig)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+    let (tsig_num, tsig_denom) = if t.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE != 0 {
+        (t.tsig_num as f32, t.tsig_denom as f32)
+    } else {
+        (0.0, 0.0)
+    };
+    proc.write_transport(
+        playing, tempo, beat, bar, beat_trigger, bar_trigger, tsig_num, tsig_denom,
+    );
+}
 
-    // Meter accumulators — seed peaks from the previous block decayed.
-    let (mut meter_pl, mut meter_pr) = p.meter.decayed_peaks();
-    let mut meter_sq_l = 0.0f32;
-    let mut meter_sq_r = 0.0f32;
-
-    // Sample-accurate processing loop. MIDI and host-control events
-    // were ingested in the pre-pass above (ADR 0069); the per-sample
-    // loop is pure DSP.
+/// Pure-DSP sample loop: feed input, tick the engine, accumulate meter
+/// peaks/squared-sums, write output. Publishes meter snapshot at the
+/// end of the block.
+unsafe fn run_sample_loop(
+    proc: &mut PatchProcessor,
+    meter: &MeterTap,
+    in_l: *const f32,
+    in_r: *const f32,
+    out_buf: &mut clap_sys::audio_buffer::clap_audio_buffer,
+    frames: usize,
+) {
+    let (mut peak_l, mut peak_r) = meter.decayed_peaks();
+    let mut sq_l = 0.0f32;
+    let mut sq_r = 0.0f32;
+    let ch0 = *out_buf.data32;
+    let ch1 = if out_buf.channel_count >= 2 { *out_buf.data32.add(1) } else { std::ptr::null_mut() };
     for f in 0..frames {
-        // Feed input.
         let il = if in_l.is_null() { 0.0 } else { *in_l.add(f) };
         let ir = if in_r.is_null() { 0.0 } else { *in_r.add(f) };
         proc.write_input(il, ir);
-
-        // Tick the engine.
         let (ol, or) = proc.tick();
-
-        // Meter accumulation.
         let ola = ol.abs();
         let ora = or.abs();
-        if ola > meter_pl { meter_pl = ola; }
-        if ora > meter_pr { meter_pr = ora; }
-        meter_sq_l += ol * ol;
-        meter_sq_r += or * or;
-
-        // Write to the output buffer.
-        if !out_buf.data32.is_null() {
-            let ch0 = *out_buf.data32;
-            if !ch0.is_null() {
-                *ch0.add(f) = ol;
-            }
-            if out_buf.channel_count >= 2 {
-                let ch1 = *out_buf.data32.add(1);
-                if !ch1.is_null() {
-                    *ch1.add(f) = or;
-                }
-            }
+        if ola > peak_l { peak_l = ola; }
+        if ora > peak_r { peak_r = ora; }
+        sq_l += ol * ol;
+        sq_r += or * or;
+        if !ch0.is_null() {
+            *ch0.add(f) = ol;
+        }
+        if !ch1.is_null() {
+            *ch1.add(f) = or;
         }
     }
-
-    p.meter.publish(meter_pl, meter_pr, meter_sq_l, meter_sq_r, frames);
-
-    // Log diagnostics on the 10th buffer so we can see output levels.
-    let count = PROCESS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if count == 10 {
-        let sample = if !out_buf.data32.is_null() {
-            let ch0 = *out_buf.data32;
-            if ch0.is_null() { 0.0 } else { *ch0 }
-        } else {
-            0.0
-        };
-        dlog!("process diag: frames={frames} out[0]={sample}");
-    }
-
-    CLAP_PROCESS_CONTINUE
+    meter.publish(peak_l, peak_r, sq_l, sq_r, frames);
 }
 
 /// Extract input f32 channel pointers, returning null for missing/invalid buffers.
@@ -697,7 +641,10 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     // actions go first so a halt is visible before the action that
     // triggered it (e.g. Reload after a panic) tries to recover.
     let actions: Vec<Action> = {
-        let mut q = p.action_queue.lock().expect("action_queue mutex poisoned");
+        let mut q = p
+            .action_queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         synthesised.into_iter().chain(q.drain(..)).collect()
     };
     let mut needs_restart = false;
@@ -831,6 +778,20 @@ pub(crate) fn apply_action(p: &mut PatchesClapPlugin, action: Action) -> StateDe
         host: host_ptr,
     };
     controller.apply(action, &mut env)
+}
+
+/// Pop one pending adoption message (if any) and apply it to the
+/// processor. Returns `true` if a plan was adopted. Shared by the
+/// activate fast-path, the process-tick adoption check, and tests.
+pub(crate) fn try_adopt_pending(
+    plan_rx: Option<&mut rtrb::Consumer<AdoptionMessage>>,
+    proc: &mut PatchProcessor,
+) -> bool {
+    let Some(rx) = plan_rx else { return false };
+    let Ok(msg) = rx.pop() else { return false };
+    let patches_host::AdoptionMessage { common, host_control } = msg;
+    proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
+    true
 }
 
 /// Free-function rescan dispatcher used from `ClapEnv` (which holds the
@@ -1265,12 +1226,8 @@ mod activate_scan_tests {
             // Confirm the engine is live by ticking the processor —
             // adopt the pending plan first.
             let tick_once = |p: &mut PatchesClapPlugin| {
-                if let Some(rx) = &mut p.plan_rx {
-                    if let Ok(msg) = rx.pop() {
-                        if let Some(proc) = &mut p.processor {
-                            let patches_host::AdoptionMessage { common, host_control } = msg; proc.adopt_plan_with_meta(common.plan, common.monitor, host_control);
-                        }
-                    }
+                if let Some(proc) = p.processor.as_mut() {
+                    try_adopt_pending(p.plan_rx.as_mut(), proc);
                 }
                 let proc = p.processor.as_mut().expect("processor");
                 proc.write_input(0.0, 0.0);

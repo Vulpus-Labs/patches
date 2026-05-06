@@ -24,7 +24,7 @@ push:
     cargo build --workspace
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
-    cargo run -q -p patches-tools --bin forbidden-edges
+    cargo run -q -p patches-forbidden-edges --bin forbidden-edges
 
 # Smoke: push + slow / integration / plugin scanner / LSP / CLAP suites.
 smoke: push

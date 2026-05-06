@@ -16,6 +16,12 @@
 
 use patches_core::{MidiEvent, MAX_EVENTS_PER_SAMPLE, MAX_HOST_CONTROL_BLOCK};
 
+/// Carry-over queue capacity. Events that can't fit in the current
+/// block (tail-of-block overflow) park here and replay at sample 0
+/// of the next block via `prepare_block`. Sized for plausible bursts
+/// without making the queue itself a silent bottleneck.
+pub const MIDI_CARRY_QUEUE_CAP: usize = MAX_EVENTS_PER_SAMPLE * 8;
+
 /// Per-sample, block-rate MIDI staging buffer.
 pub struct MidiScratch {
     /// AoS frame indexed `t * MAX_EVENTS_PER_SAMPLE + i`.
@@ -37,6 +43,12 @@ pub struct MidiScratch {
     /// capacity. Bumped from the audio thread; reset by callers via
     /// [`take_dropped`](Self::take_dropped) for telemetry / tests.
     dropped: u32,
+    /// Carry-over queue: tail-of-block overflow parks here and is
+    /// replayed at sample 0 of the next block by `prepare_block`.
+    /// Preserves arrival order; events are at most one block late.
+    pending: Box<[MidiEvent]>,
+    /// Number of valid entries in `pending` (front portion).
+    pending_len: usize,
 }
 
 impl MidiScratch {
@@ -47,28 +59,46 @@ impl MidiScratch {
             vec![MidiEvent { bytes: [0; 3] }; MAX_HOST_CONTROL_BLOCK * MAX_EVENTS_PER_SAMPLE]
                 .into_boxed_slice();
         let counts = vec![0u8; MAX_HOST_CONTROL_BLOCK].into_boxed_slice();
+        let pending =
+            vec![MidiEvent { bytes: [0; 3] }; MIDI_CARRY_QUEUE_CAP].into_boxed_slice();
         Self {
             frame,
             counts,
             block_size: 0,
             sample_idx: 0,
             dropped: 0,
+            pending,
+            pending_len: 0,
         }
     }
 
     /// Stamp one event into the row at `sample_offset`. Out-of-range
     /// offsets clamp to `block_size - 1` (late-arrival semantics).
     /// Within-sample overflow spills into the next row; if every
-    /// remaining row is full the event is dropped to a debug counter.
+    /// remaining row is full the event parks in the carry-over queue
+    /// for replay at sample 0 of the next block (≤1 block late).
+    /// Only when that queue is also full does the event drop to the
+    /// debug counter.
     ///
     /// Must be called between [`prepare_block`](Self::prepare_block)
     /// and the per-tick reads. If the block size is zero (no
-    /// `prepare_block` issued), the event is dropped.
+    /// `prepare_block` issued yet), the event parks in the carry-over
+    /// queue and replays in the first prepared block.
     #[inline]
     pub fn write_midi_event(&mut self, sample_offset: u16, event: MidiEvent) {
+        if self.block_size == 0 || !self.write_inline(sample_offset, event) {
+            self.push_pending(event);
+        }
+    }
+
+    /// Try to place `event` in the current block at or after
+    /// `sample_offset`, spilling forward on within-sample overflow.
+    /// Returns `false` if every row from `sample_offset` to the tail
+    /// is already full. Caller decides what to do (queue / drop).
+    #[inline]
+    fn write_inline(&mut self, sample_offset: u16, event: MidiEvent) -> bool {
         if self.block_size == 0 {
-            self.dropped = self.dropped.saturating_add(1);
-            return;
+            return false;
         }
         let mut t = (sample_offset as usize).min(self.block_size - 1);
         loop {
@@ -76,13 +106,24 @@ impl MidiScratch {
             if count < MAX_EVENTS_PER_SAMPLE {
                 self.frame[t * MAX_EVENTS_PER_SAMPLE + count] = event;
                 self.counts[t] = (count + 1) as u8;
-                return;
+                return true;
             }
             t += 1;
             if t >= self.block_size {
-                self.dropped = self.dropped.saturating_add(1);
-                return;
+                return false;
             }
+        }
+    }
+
+    /// Append to the carry-over queue, or bump the dropped counter if
+    /// it's already full.
+    #[inline]
+    fn push_pending(&mut self, event: MidiEvent) {
+        if self.pending_len < self.pending.len() {
+            self.pending[self.pending_len] = event;
+            self.pending_len += 1;
+        } else {
+            self.dropped = self.dropped.saturating_add(1);
         }
     }
 
@@ -100,6 +141,22 @@ impl MidiScratch {
         }
         self.block_size = frames;
         self.sample_idx = 0;
+        // Drain carry-over from the prior block into row 0 (with the
+        // usual spill-forward rule). Anything that still doesn't fit
+        // (block fully saturated) re-queues at the front of `pending`
+        // for the following block. Pathological saturation across
+        // multiple blocks eventually fills the queue and bumps
+        // `dropped` via `push_pending`.
+        if self.pending_len > 0 && self.block_size > 0 {
+            let n = self.pending_len;
+            self.pending_len = 0;
+            for i in 0..n {
+                let ev = self.pending[i];
+                if !self.write_inline(0, ev) {
+                    self.push_pending(ev);
+                }
+            }
+        }
     }
 
     /// Pop the next per-sample row. Returns `(events, count)` where
@@ -199,24 +256,56 @@ mod tests {
     }
 
     #[test]
-    fn block_end_overflow_drops_to_counter() {
+    fn block_end_overflow_carries_to_next_block() {
         let mut s = MidiScratch::new();
         s.prepare_block(2);
+        // Fill the whole 2-row block.
         for _ in 0..(MAX_EVENTS_PER_SAMPLE * 2) {
             s.write_midi_event(0, ev(1));
         }
-        // One more — every row in the 2-frame block is full; drops.
-        s.write_midi_event(0, ev(2));
+        // Two extras — block is saturated, so they park in pending.
+        s.write_midi_event(0, ev(0xA1));
+        s.write_midi_event(0, ev(0xA2));
+        assert_eq!(s.take_dropped(), 0);
+        // Drain current block.
+        while s.take_row().is_some() {}
+        // Next block: the carried events appear at row 0 in order.
+        s.prepare_block(4);
+        let (row, n) = s.take_row().unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(row[0].bytes[0], 0xA1);
+        assert_eq!(row[1].bytes[0], 0xA2);
+    }
+
+    #[test]
+    fn carry_queue_overflow_increments_dropped() {
+        let mut s = MidiScratch::new();
+        s.prepare_block(1);
+        // Fill the single row.
+        for _ in 0..MAX_EVENTS_PER_SAMPLE {
+            s.write_midi_event(0, ev(1));
+        }
+        // Fill the carry queue exactly.
+        for _ in 0..MIDI_CARRY_QUEUE_CAP {
+            s.write_midi_event(0, ev(2));
+        }
+        assert_eq!(s.take_dropped(), 0);
+        // One more — both row and queue full → dropped.
         s.write_midi_event(0, ev(3));
+        s.write_midi_event(0, ev(4));
         assert_eq!(s.take_dropped(), 2);
     }
 
     #[test]
-    fn no_prepare_block_drops_writes() {
+    fn no_prepare_block_carries_to_first_block() {
         let mut s = MidiScratch::new();
-        s.write_midi_event(0, ev(1));
-        assert_eq!(s.take_dropped(), 1);
+        s.write_midi_event(0, ev(0x55));
+        assert_eq!(s.take_dropped(), 0);
         assert!(s.take_row().is_none());
+        s.prepare_block(2);
+        let (row, n) = s.take_row().unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(row[0].bytes[0], 0x55);
     }
 
     #[test]

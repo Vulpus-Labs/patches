@@ -143,6 +143,7 @@ fn unknown_type_returns_error() {
         shape: vec![],
         params: vec![],
         port_aliases: vec![],
+            param_block_span: None,
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 0, 10)),
     }];
 
@@ -287,6 +288,7 @@ fn unknown_port_returns_error() {
             shape: vec![],
             params: vec![],
             port_aliases: vec![],
+            param_block_span: None,
             provenance: Provenance::root(zero_span()),
         },
         FlatModule {
@@ -295,6 +297,7 @@ fn unknown_port_returns_error() {
             shape: vec![],
             params: vec![],
             port_aliases: vec![],
+            param_block_span: None,
             provenance: Provenance::root(zero_span()),
         },
     ];

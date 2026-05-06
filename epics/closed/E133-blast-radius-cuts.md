@@ -1,7 +1,7 @@
 ---
 id: E133
 title: Blast-radius cuts within the monorepo
-status: open
+status: closed
 created: 2026-05-03
 ---
 

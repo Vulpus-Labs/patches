@@ -11,7 +11,8 @@ use std::collections::HashMap;
 
 use super::frame::BodyFrame;
 use super::Expander;
-use crate::ast::Statement;
+use crate::ast::{ModuleDecl, ParamEntry, Statement};
+use patches_core::source_span::Span;
 use crate::flat::FlatModule;
 use crate::provenance::Provenance;
 
@@ -109,6 +110,7 @@ pub(in crate::expand) fn translate_modules(
                 .map(|(name, idx)| (*idx, name.clone()))
                 .collect();
             let provenance = Provenance::with_chain(decl.span, frame.ctx.call_chain);
+            let param_block_span = param_block_span_of(decl);
             frame.state.flat_modules.push(FlatModule {
                 id: inst_id,
                 type_name: type_name.clone(),
@@ -116,6 +118,7 @@ pub(in crate::expand) fn translate_modules(
                 params,
                 port_aliases,
                 provenance,
+                param_block_span,
             });
             frame.state.module_names.insert(decl.name.name.clone());
         }
@@ -249,4 +252,17 @@ pub(in crate::expand) fn translate_patterns(
             frame.ctx.call_chain,
         ));
     }
+}
+
+/// Source span covering the authored param-entries of `decl`, from the
+/// first to the last entry that carries a span. `Shorthand` entries lack
+/// spans, so a decl whose params are all shorthand returns `None`.
+fn param_block_span_of(decl: &ModuleDecl) -> Option<Span> {
+    let entry_span = |e: &ParamEntry| match e {
+        ParamEntry::KeyValue { span, .. } | ParamEntry::AtBlock { span, .. } => Some(*span),
+        ParamEntry::Shorthand(_) => None,
+    };
+    let first = decl.params.iter().find_map(entry_span)?;
+    let last = decl.params.iter().rev().find_map(entry_span)?;
+    Some(Span::new(first.source, first.start, last.end))
 }

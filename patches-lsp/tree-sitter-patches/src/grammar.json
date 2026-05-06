@@ -1013,7 +1013,7 @@
         }
       ]
     },
-    "scale_val": {
+    "scale_endpoint": {
       "type": "CHOICE",
       "members": [
         {
@@ -1026,7 +1026,66 @@
         },
         {
           "type": "SYMBOL",
+          "name": "note_lit"
+        },
+        {
+          "type": "SYMBOL",
           "name": "scale_num"
+        }
+      ]
+    },
+    "range_kind": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "uni"
+        },
+        {
+          "type": "STRING",
+          "value": "bi"
+        }
+      ]
+    },
+    "scale_range": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "range_kind"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "SYMBOL",
+          "name": "scale_endpoint"
+        },
+        {
+          "type": "STRING",
+          "value": ","
+        },
+        {
+          "type": "SYMBOL",
+          "name": "scale_endpoint"
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "scale_val": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "scale_range"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "scale_endpoint"
         }
       ]
     },

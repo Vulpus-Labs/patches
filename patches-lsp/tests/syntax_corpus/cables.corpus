@@ -1,0 +1,85 @@
+# Syntax corpus — cable arrows.
+#
+# Each entry begins with `=== <tag> <description>`. Body is the patch source
+# (auto-wrapped in `patch { ... }` if no `patch {` / `template ` keyword).
+#
+# Tags:
+#   ok            — pest accepts AND tree-sitter has no ERROR/MISSING node
+#   pest_error    — pest rejects (tree-sitter behaviour unconstrained)
+#   ts_error      — tree-sitter has ERROR/MISSING (pest behaviour unconstrained)
+#   both_error    — both reject
+#   expand_error <CODE> [<CODE>...] — pest+ts ok, expand emits given diagnostic codes
+
+=== ok plain forward
+module osc : Osc
+module out : AudioOut
+osc.sine -> out.in
+
+=== ok scaled forward
+module osc : Osc
+module out : AudioOut
+osc.sine -[0.5]-> out.in
+
+=== ok scaled forward unit dB
+module osc : Osc
+module out : AudioOut
+osc.sine -[-6dB]-> out.in
+
+=== ok scaled forward param ref
+template t(level: float = 0.5) {
+    in: a
+    out: b
+    $.a -[<level>]-> $.b
+}
+patch { }
+
+=== ok backward arrow
+module osc : Osc
+module out : AudioOut
+out.in <- osc.sine
+
+=== ok backward scaled
+module osc : Osc
+module out : AudioOut
+out.in <-[0.5]- osc.sine
+
+=== ok range uni Hz
+module ctrl : Param(name: "cutoff")
+module filt : Svf
+ctrl.out -[uni(20Hz, 8kHz)]-> filt.cutoff
+
+=== ok range bi notes
+module lfo : Lfo
+module osc : Osc
+lfo.sine -[bi(C2, C5)]-> osc.voct
+
+=== ok range mixed pitch units
+module ctrl : Param(name: "p")
+module osc : Osc
+ctrl.out -[uni(440Hz, C5)]-> osc.voct
+
+=== ok fan-out
+module osc : Osc
+module a : AudioOut
+module b : AudioOut
+osc.sine -> a.in, b.in
+
+=== both_error missing arrow
+module osc : Osc
+module out : AudioOut
+osc.sine out.in
+
+=== both_error unknown range kind
+module a : Osc
+module b : Osc
+a.out -[tri(0, 1)]-> b.in
+
+=== both_error unclosed scale bracket
+module a : Osc
+module b : Osc
+a.out -[0.5-> b.in
+
+=== both_error empty scale bracket
+module a : Osc
+module b : Osc
+a.out -[]-> b.in

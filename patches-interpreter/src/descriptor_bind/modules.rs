@@ -111,7 +111,16 @@ pub(super) fn bind_module(
         Ok(p) => p,
         Err(err) => {
             let code = err.bind_code();
-            errors.push(BindError::new(code, fm.provenance.clone(), err.into_message()));
+            // For UnknownParameter, prefer the param-block span so the
+            // diagnostic squiggle covers the offending key (which the
+            // diagnostics layer narrows further to the exact token).
+            let prov = match (code, fm.param_block_span) {
+                (BindErrorCode::UnknownParameter, Some(s)) => {
+                    patches_core::Provenance::with_chain(s, &fm.provenance.expansion)
+                }
+                _ => fm.provenance.clone(),
+            };
+            errors.push(BindError::new(code, prov, err.into_message()));
             return mark_unresolved(fm, code);
         }
     };

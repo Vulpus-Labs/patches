@@ -161,11 +161,15 @@ update produces no audible artefact at typical knob rates.
 
 Sub-block automation accuracy is implemented by the per-block scratch
 pipeline in [ADR 0068 §2](0068-untagged-cable-pool-and-host-control-scratch.md)
-(ticket 0816): host events feed an SoA scratch, are smoothed in place
-with a fixed-τ one-pole, transposed to an AoS frame, and the audio
-thread per-sample writes the frame row into the four contiguous
-host-control backplane slots. The earlier "one value per block per
-control" placeholder this section described is retired.
+(ticket 0817 amendment): host events feed an SoA scratch *owned by
+`PatchProcessor`* via `processor.write_host_control_event(...)` and
+`prepare_host_control_block(frames)` — the same shape as the MIDI and
+transport flush surfaces. The scratch smooths in place with a
+fixed-τ one-pole, transposes to an AoS frame, and `tick()` per-sample
+writes the frame row into the four contiguous host-control backplane
+slots. The `HostControl` module is now a trivial backplane reader
+(no scratch state, no pipeline). The earlier "one value per block
+per control" placeholder this section described is retired.
 
 ### 5. Manifest construction
 

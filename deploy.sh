@@ -47,6 +47,11 @@ install_clap() {
 }
 install_clap "$CLAP_SRC" "$CLAP_DEST"
 
+echo "==> Regenerating bundled module manifest"
+cargo run -q -p patches-tools --bin patches-manifest -- \
+  --json --deterministic \
+  --output "$REPO_ROOT/patches-manifest/data/module-manifest.json"
+
 echo "==> Building .vsix for $VSCODE_TARGET"
 "$REPO_ROOT/scripts/package-vsix.sh" "$VSCODE_TARGET"
 

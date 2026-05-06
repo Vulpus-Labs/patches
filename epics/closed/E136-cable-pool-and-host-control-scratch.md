@@ -1,7 +1,7 @@
 ---
 id: E136
 title: Untagged cable pool and host-control scratch buffer (ADR 0068)
-status: open
+status: closed
 created: 2026-05-04
 ---
 

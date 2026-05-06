@@ -267,7 +267,7 @@ impl Module for Delay {
             } else {
                 self.delay_ms[i]
             };
-            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 1.0);
+            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
             let offset = (base_ms * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
 
             let tap_raw = if self.high_quality {

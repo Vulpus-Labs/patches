@@ -1,0 +1,30 @@
+=== ok knob declaration
+knob cutoff { low: 500Hz, high: 2000Hz }
+module filt : Svf
+cutoff -> filt.cutoff
+
+=== ok slider declaration
+slider mix { low: 0.0, high: 1.0 }
+module xfade : Mix
+mix -> xfade.amount
+
+=== ok toggle declaration
+toggle bypass { default: false }
+module sw : Switch
+bypass -> sw.cv
+
+=== ok trigger declaration
+trigger fire { }
+module env : Adsr
+fire -> env.trigger
+
+=== ok knob with range arrow
+knob filter_base { low: 0.0, high: 1.0 }
+module filt : Svf
+filter_base -[uni(500Hz, 2000Hz)]-> filt.cutoff
+
+=== both_error unknown control kind
+dial mystery { low: 0, high: 1 }
+
+=== both_error host control missing braces
+knob cutoff low: 500Hz, high: 2000Hz
