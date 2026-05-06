@@ -130,8 +130,8 @@ impl MidiToCv {
     fn handle_midi_message(&mut self, msg: MidiMessage) {
         match msg {
             MidiMessage::NoteOn { note, velocity, .. } => {
-                let other_held = !self.stack.is_empty()
-                    && !(self.stack.count == 1 && self.stack.notes[0] == note);
+                let other_held = !(self.stack.is_empty()
+                    || self.stack.count == 1 && self.stack.notes[0] == note);
                 self.stack.push(note);
                 self.current_note = note;
                 if !(self.legato && other_held) {

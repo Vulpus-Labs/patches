@@ -149,8 +149,8 @@ impl Module for PolyLfo {
         // Independent PRNG states per voice for sample-and-hold output.
         let base = instance_id.as_u64().wrapping_add(1);
         let mut prng_states = [0u64; 16];
-        for i in 0..16 {
-            prng_states[i] = base.wrapping_add((i as u64).wrapping_mul(0x9E3779B97F4A7C15)).wrapping_add(1);
+        for (i, slot) in prng_states.iter_mut().enumerate() {
+            *slot = base.wrapping_add((i as u64).wrapping_mul(0x9E3779B97F4A7C15)).wrapping_add(1);
         }
         Self {
             instance_id,

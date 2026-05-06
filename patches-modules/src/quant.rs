@@ -119,10 +119,10 @@ impl Module for Quant {
     })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
-        let channels = self.descriptor.shape.channels.max(1).min(12);
+        let channels = self.descriptor.shape.channels.clamp(1, 12);
         let mut pitches = [0.0_f32; 12];
-        for i in 0..channels {
-            pitches[i] = p.get(params::pitch.at(i as u16));
+        for (i, slot) in pitches.iter_mut().enumerate().take(channels) {
+            *slot = p.get(params::pitch.at(i as u16));
         }
         parse_pitches(&pitches[..channels], &mut self.notes_buf, &mut self.notes_len);
         self.centre = p.get(params::centre);

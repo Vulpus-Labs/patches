@@ -198,58 +198,12 @@ impl Module for PolyOsc {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let voct = if self.in_voct.is_connected() {
-            pool.read_poly(&self.in_voct)
-        } else {
-            [0.0; 16]
-        };
-        let fm = if self.in_fm.is_connected() {
-            pool.read_poly(&self.in_fm)
-        } else {
-            [0.0; 16]
-        };
-        let phase_mod = if self.in_phase_mod.is_connected() {
-            pool.read_poly(&self.in_phase_mod)
-        } else {
-            [0.0; 16]
-        };
+        let voct = read_poly_or_zero(pool, &self.in_voct);
+        let fm = read_poly_or_zero(pool, &self.in_fm);
+        let phase_mod = read_poly_or_zero(pool, &self.in_phase_mod);
 
-        // Drift: every DRIFT_PERIOD samples, advance each voice's independent walk
-        // and sample the engine-level global drift, then update per-voice offsets.
-        let force_recalc = if self.drift > 0.0 {
-            self.drift_counter = self.drift_counter.wrapping_add(1);
-            if self.drift_counter >= DRIFT_PERIOD {
-                self.drift_counter = 0;
-                let global_val = pool.read_mono(&self.in_global_drift);
-                // Each voice: global component (shared) + local component (independent).
-                // Each in [-1, 1]; scale so combined max = ±HALF_SEMITONE_VOCT.
-                let scale = HALF_SEMITONE_VOCT * 0.5 * self.drift;
-                for i in 0..16 {
-                    let local_val = self.drift_walks[i].advance();
-                    self.drift_voct_offsets[i] = (global_val + local_val) * scale;
-                }
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        // Update per-voice increments when modulating or when drift forces a recalc.
-        if self.freq_tracker.is_modulating() {
-            for i in 0..16 {
-                let freq = self.freq_tracker.compute_modulated(i, voct[i] + self.drift_voct_offsets[i], fm[i]);
-                self.phase_acc.set_increment(i, self.freq_converter.to_increment(freq));
-            }
-        } else if force_recalc {
-            // No voct/fm modulation but drift changed: recompute from base frequency per voice.
-            let base_freq = self.freq_tracker.base_frequency();
-            for i in 0..16 {
-                let freq = base_freq * self.drift_voct_offsets[i].exp2();
-                self.phase_acc.set_increment(i, self.freq_converter.to_increment(freq));
-            }
-        }
+        let force_recalc = self.update_drift(pool);
+        self.update_increments(&voct, &fm, force_recalc);
 
         let sync = if self.in_sync.is_connected() {
             self.in_sync.tick(pool)
@@ -257,36 +211,28 @@ impl Module for PolyOsc {
             [None; 16]
         };
 
-        let do_sine = self.out_sine.is_connected();
-        let do_tri  = self.out_triangle.is_connected();
-        let do_saw  = self.out_sawtooth.is_connected();
-        let do_sq   = self.out_square.is_connected();
-        let do_reset = self.out_reset.is_connected();
+        let outs = OutFlags {
+            sine:  self.out_sine.is_connected(),
+            tri:   self.out_triangle.is_connected(),
+            saw:   self.out_sawtooth.is_connected(),
+            sq:    self.out_square.is_connected(),
+            reset: self.out_reset.is_connected(),
+        };
 
         let any_sync = sync.iter().any(|s| s.is_some());
-        if !do_sine && !do_tri && !do_saw && !do_sq && !do_reset && !any_sync {
-            // Advance phases even when no outputs connected, so pitch stays coherent.
+        if !outs.any() && !any_sync {
             self.phase_acc.advance_all();
             return;
         }
 
         let pw_connected = self.in_pulse_width.is_connected();
-        let pulse_widths = if pw_connected {
-            pool.read_poly(&self.in_pulse_width)
-        } else {
-            [0.0; 16]
-        };
+        let pulse_widths = read_poly_or_zero(pool, &self.in_pulse_width);
+        let pm_connected = self.in_phase_mod.is_connected();
 
-        let phase_mod_connected = self.in_phase_mod.is_connected();
-
-        let mut sine_out = [0.0f32; 16];
-        let mut tri_out  = [0.0f32; 16];
-        let mut saw_out  = [0.0f32; 16];
-        let mut sq_out   = [0.0f32; 16];
-        let mut reset_out = [0.0f32; 16];
+        let mut buf = VoiceBuffers::default();
 
         for i in 0..16 {
-            let pm = if phase_mod_connected { phase_mod[i].clamp(-1.0, 1.0) } else { 0.0 };
+            let pm = if pm_connected { phase_mod[i].clamp(-1.0, 1.0) } else { 0.0 };
             let duty = if pw_connected {
                 (0.5 + 0.5 * pulse_widths[i]).clamp(0.01, 0.99)
             } else {
@@ -294,65 +240,132 @@ impl Module for PolyOsc {
             };
             let dt = self.phase_acc.phase_increments[i];
 
+            let ctx = VoiceCtx { dt, pm, duty };
             match sync[i] {
-                Some(frac) => {
-                    let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
-                    let mut pre_raw = self.phase_acc.phases[i] + frac * dt;
-                    if pre_raw >= 1.0 { pre_raw -= 1.0; }
-                    let pre_read = { let s = pre_raw + pm; s - s.floor() };
-
-                    self.phase_acc.sync_reset(i, frac);
-                    let post_raw = self.phase_acc.phases[i];
-                    let post_read = { let s = post_raw + pm; s - s.floor() };
-
-                    if do_sine { sine_out[i] = lookup_sine(post_read); }
-                    if do_tri  { tri_out[i]  = 1.0 - 4.0 * (post_read - 0.5).abs(); }
-                    if do_saw  {
-                        let pre = 2.0 * pre_read - 1.0;
-                        let post = 2.0 * post_read - 1.0;
-                        saw_out[i] = post + sync_blep_residual(post_raw, dt, pre - post);
-                    }
-                    if do_sq {
-                        let pre = if pre_read < duty { 1.0 } else { -1.0 };
-                        let post = if post_read < duty { 1.0 } else { -1.0 };
-                        sq_out[i] = post + sync_blep_residual(post_raw, dt, pre - post);
-                    }
-                }
-                None => {
-                    let raw_phase = self.phase_acc.phases[i];
-                    let phase = { let s = raw_phase + pm; s - s.floor() };
-
-                    if do_sine { sine_out[i] = lookup_sine(phase); }
-                    if do_tri  { tri_out[i]  = 1.0 - 4.0 * (phase - 0.5).abs(); }
-                    if do_saw  { saw_out[i]  = (2.0 * phase - 1.0) - polyblep(phase, dt); }
-                    if do_sq {
-                        let raw = if phase < duty { 1.0 } else { -1.0 };
-                        let blep = polyblep(phase, dt) - polyblep((phase - duty).rem_euclid(1.0), dt);
-                        sq_out[i] = raw + blep;
-                    }
-
-                    // Advance this voice; record wrap frac.
-                    let next = self.phase_acc.phases[i] + dt;
-                    if next >= 1.0 {
-                        self.phase_acc.phases[i] = next - 1.0;
-                        reset_out[i] = if dt > 0.0 {
-                            (1.0 - self.phase_acc.phases[i] / dt).clamp(f32::MIN_POSITIVE, 1.0)
-                        } else { 1.0 };
-                    } else {
-                        self.phase_acc.phases[i] = next;
-                    }
-                }
+                Some(frac) => self.process_voice_synced(i, frac, &ctx, &outs, &mut buf),
+                None => self.process_voice_free(i, &ctx, &outs, &mut buf),
             }
         }
 
-        if do_sine { pool.write_poly(&self.out_sine,     sine_out); }
-        if do_tri  { pool.write_poly(&self.out_triangle, tri_out);  }
-        if do_saw  { pool.write_poly(&self.out_sawtooth, saw_out);  }
-        if do_sq   { pool.write_poly(&self.out_square,   sq_out);   }
-        if do_reset { pool.write_poly(&self.out_reset,   reset_out); }
+        if outs.sine  { pool.write_poly(&self.out_sine,     buf.sine);  }
+        if outs.tri   { pool.write_poly(&self.out_triangle, buf.tri);   }
+        if outs.saw   { pool.write_poly(&self.out_sawtooth, buf.saw);   }
+        if outs.sq    { pool.write_poly(&self.out_square,   buf.sq);    }
+        if outs.reset { pool.write_poly(&self.out_reset,    buf.reset); }
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
+}
+
+#[derive(Default)]
+struct VoiceBuffers {
+    sine:  [f32; 16],
+    tri:   [f32; 16],
+    saw:   [f32; 16],
+    sq:    [f32; 16],
+    reset: [f32; 16],
+}
+
+struct OutFlags { sine: bool, tri: bool, saw: bool, sq: bool, reset: bool }
+
+struct VoiceCtx { dt: f32, pm: f32, duty: f32 }
+
+impl OutFlags {
+    fn any(&self) -> bool { self.sine || self.tri || self.saw || self.sq || self.reset }
+}
+
+fn read_poly_or_zero(pool: &mut CablePool<'_>, port: &PolyInput) -> [f32; 16] {
+    if port.is_connected() { pool.read_poly(port) } else { [0.0; 16] }
+}
+
+fn wrap_unit(x: f32) -> f32 { x - x.floor() }
+
+impl PolyOsc {
+    /// Advance drift state. Returns true when offsets changed this sample.
+    fn update_drift(&mut self, pool: &mut CablePool<'_>) -> bool {
+        if self.drift <= 0.0 { return false; }
+        self.drift_counter = self.drift_counter.wrapping_add(1);
+        if self.drift_counter < DRIFT_PERIOD { return false; }
+        self.drift_counter = 0;
+        let global_val = pool.read_mono(&self.in_global_drift);
+        let scale = HALF_SEMITONE_VOCT * 0.5 * self.drift;
+        for i in 0..16 {
+            let local_val = self.drift_walks[i].advance();
+            self.drift_voct_offsets[i] = (global_val + local_val) * scale;
+        }
+        true
+    }
+
+    fn update_increments(&mut self, voct: &[f32; 16], fm: &[f32; 16], force_recalc: bool) {
+        if self.freq_tracker.is_modulating() {
+            for i in 0..16 {
+                let freq = self.freq_tracker.compute_modulated(i, voct[i] + self.drift_voct_offsets[i], fm[i]);
+                self.phase_acc.set_increment(i, self.freq_converter.to_increment(freq));
+            }
+        } else if force_recalc {
+            let base_freq = self.freq_tracker.base_frequency();
+            for i in 0..16 {
+                let freq = base_freq * self.drift_voct_offsets[i].exp2();
+                self.phase_acc.set_increment(i, self.freq_converter.to_increment(freq));
+            }
+        }
+    }
+
+    fn process_voice_synced(
+        &mut self, i: usize, frac: f32, ctx: &VoiceCtx,
+        outs: &OutFlags, buf: &mut VoiceBuffers,
+    ) {
+        let VoiceCtx { dt, pm, duty } = *ctx;
+        let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+        let mut pre_raw = self.phase_acc.phases[i] + frac * dt;
+        if pre_raw >= 1.0 { pre_raw -= 1.0; }
+        let pre_read = wrap_unit(pre_raw + pm);
+
+        self.phase_acc.sync_reset(i, frac);
+        let post_raw = self.phase_acc.phases[i];
+        let post_read = wrap_unit(post_raw + pm);
+
+        if outs.sine { buf.sine[i] = lookup_sine(post_read); }
+        if outs.tri  { buf.tri[i]  = 1.0 - 4.0 * (post_read - 0.5).abs(); }
+        if outs.saw {
+            let pre = 2.0 * pre_read - 1.0;
+            let post = 2.0 * post_read - 1.0;
+            buf.saw[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+        }
+        if outs.sq {
+            let pre = if pre_read < duty { 1.0 } else { -1.0 };
+            let post = if post_read < duty { 1.0 } else { -1.0 };
+            buf.sq[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+        }
+    }
+
+    fn process_voice_free(
+        &mut self, i: usize, ctx: &VoiceCtx,
+        outs: &OutFlags, buf: &mut VoiceBuffers,
+    ) {
+        let VoiceCtx { dt, pm, duty } = *ctx;
+        let raw_phase = self.phase_acc.phases[i];
+        let phase = wrap_unit(raw_phase + pm);
+
+        if outs.sine { buf.sine[i] = lookup_sine(phase); }
+        if outs.tri  { buf.tri[i]  = 1.0 - 4.0 * (phase - 0.5).abs(); }
+        if outs.saw  { buf.saw[i]  = (2.0 * phase - 1.0) - polyblep(phase, dt); }
+        if outs.sq {
+            let raw = if phase < duty { 1.0 } else { -1.0 };
+            let blep = polyblep(phase, dt) - polyblep((phase - duty).rem_euclid(1.0), dt);
+            buf.sq[i] = raw + blep;
+        }
+
+        let next = self.phase_acc.phases[i] + dt;
+        if next >= 1.0 {
+            self.phase_acc.phases[i] = next - 1.0;
+            buf.reset[i] = if dt > 0.0 {
+                (1.0 - self.phase_acc.phases[i] / dt).clamp(f32::MIN_POSITIVE, 1.0)
+            } else { 1.0 };
+        } else {
+            self.phase_acc.phases[i] = next;
+        }
+    }
 }
 
 #[cfg(test)]

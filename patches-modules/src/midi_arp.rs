@@ -611,7 +611,7 @@ mod tests {
         }
         assert!(saw_off_at.is_some(), "note-off should fire within period");
         let i = saw_off_at.unwrap();
-        assert!(i <= 6 && i >= 3, "note-off at ~period*gate_length, got idx {i}");
+        assert!((3..=6).contains(&i), "note-off at ~period*gate_length, got idx {i}");
     }
 
     #[test]
