@@ -10,6 +10,7 @@ fn unknown_type_name_returns_interpret_error() {
         params: vec![],
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 10, 20)),
+        param_block_span: None,
     }];
     let err = build(&flat, &registry(), &env()).unwrap_err();
     assert!(err.message.contains("NonExistentModule"));
@@ -69,6 +70,7 @@ fn graph_error_wrapped_with_span() {
         params: vec![],
         port_aliases: vec![],
         provenance: Provenance::root(span()),
+        param_block_span: None,
     };
     let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
     let dup_conn = FlatConnection {
@@ -113,6 +115,7 @@ fn duplicate_module_id_is_error() {
             params: vec![],
             port_aliases: vec![],
             provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 30, 33)),
+            param_block_span: None,
         },
     ];
     let err = build(&flat, &registry(), &env()).unwrap_err();
@@ -190,6 +193,7 @@ fn cable_kind_mismatch_mono_to_poly_is_error() {
             params: vec![],
             port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
     ];
     let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 100, 120));
@@ -222,11 +226,13 @@ fn mono_layout_mismatch_audio_to_trigger_is_error() {
             id: "lfo".into(), type_name: "Lfo".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
     ];
     let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 200, 220));
@@ -255,11 +261,13 @@ fn mono_layout_trigger_to_trigger_is_allowed() {
             id: "lfo".into(), type_name: "Lfo".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
     ];
     flat.connections = vec![connection("lfo", "reset_out", 0, "arp", "clock", 0)];
@@ -278,6 +286,7 @@ fn unknown_param_name_returns_interpret_error() {
         ],
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 1, 5)),
+        param_block_span: None,
     }];
     let err = build(&flat, &registry(), &env()).unwrap_err();
     assert!(err.message.contains("no_such_param"));
@@ -295,6 +304,7 @@ fn unknown_type_surfaces_as_bind_error() {
         params: vec![],
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 10, 20)),
+        param_block_span: None,
     }];
     let bound = bind(&flat, &registry());
     assert_eq!(bound.errors.len(), 1);
@@ -351,6 +361,7 @@ fn connect_duplicate_surfaces_as_bind_error() {
         params: vec![],
         port_aliases: vec![],
         provenance: Provenance::root(span()),
+        param_block_span: None,
     };
     let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
     let dup_conn = FlatConnection {
@@ -457,6 +468,7 @@ fn bind_is_canonical_cable_kind_mismatch() {
             id: "poly_dst".into(), type_name: "PolyOsc".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
     ];
     flat.connections = vec![connection("mono_src", "sine", 0, "poly_dst", "voct", 0)];
@@ -472,11 +484,13 @@ fn bind_is_canonical_mono_layout_mismatch() {
             id: "lfo".into(), type_name: "Lfo".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
+            param_block_span: None,
         },
     ];
     flat.connections = vec![connection("lfo", "square", 0, "arp", "clock", 0)];

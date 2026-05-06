@@ -1,7 +1,35 @@
 patch {
     module audio_in : AudioIn
+    module splitter : StereoSplitter
     module octave : PitchShift { semitones: 12 }
     module verb : FdnReverb {
-        characeter: cathedral
+        character: cathedral
+        pre_delay: 0
+        mix: 1
     }
+    module chorus : VChorus
+    module delay : StereoDelay([short, long]) {
+        @short {
+            delay_ms: 250,
+            feedback: 0.4,
+            pan: 0.4,
+            pingpong: true
+        }
+        @long {
+            delay_ms: 1000,
+            feedback: 0.6,
+            pan: 0.6,
+            pingpong: true
+        }
+
+        dry_wet: 0.5
+    }
+    module audio_out : AudioOut
+
+    audio_in.out -> splitter.in
+    splitter.out_left -> octave.in
+    octave.out -> verb.in
+    verb.out -> chorus.in
+    chorus.out -> delay.in
+    delay.out -> audio_out.in
 }

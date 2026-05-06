@@ -251,6 +251,7 @@ mod tests {
             params: vec![],
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
+            param_block_span: None,
         }
     }
 
@@ -262,6 +263,7 @@ mod tests {
             params: vec![],
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
+            param_block_span: None,
         }
     }
 
@@ -302,6 +304,7 @@ mod tests {
             params: vec![],
             port_aliases: vec![],
             provenance: CoreProv::root(Span::new(SourceId::SYNTHETIC, 5, 10)),
+            param_block_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
@@ -341,6 +344,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: CoreProv::root(syn()),
+                param_block_span: None,
             },
             FlatModule {
                 id: "b".into(),
@@ -349,6 +353,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: CoreProv::root(syn()),
+                param_block_span: None,
             },
         ];
         let bound = bind(&flat, &registry());
@@ -365,6 +370,7 @@ mod tests {
             params: vec![("no_such_param".into(), Value::Scalar(Scalar::Float(1.0)))],
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
+            param_block_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
@@ -406,6 +412,7 @@ mod tests {
             )],
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
+            param_block_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
