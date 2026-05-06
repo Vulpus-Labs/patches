@@ -26,6 +26,19 @@ pub static PLUGIN_DESCRIPTOR: clap_plugin_descriptor = clap_plugin_descriptor {
     features: FEATURES.as_ptr(),
 };
 
+pub static PLUGIN_DESCRIPTOR_FX: clap_plugin_descriptor = clap_plugin_descriptor {
+    clap_version: clap_sys::version::CLAP_VERSION,
+    id: PLUGIN_FX_ID.as_ptr(),
+    name: PLUGIN_FX_NAME.as_ptr(),
+    vendor: PLUGIN_VENDOR.as_ptr(),
+    url: PLUGIN_URL.as_ptr(),
+    manual_url: PLUGIN_URL.as_ptr(),
+    support_url: PLUGIN_URL.as_ptr(),
+    version: PLUGIN_VERSION.as_ptr(),
+    description: PLUGIN_FX_DESCRIPTION.as_ptr(),
+    features: FEATURES_FX.as_ptr(),
+};
+
 /// # Safety
 /// `factory_id` must be a valid null-terminated C string.
 pub unsafe extern "C" fn get_factory(
@@ -46,17 +59,17 @@ static PLUGIN_FACTORY: clap_plugin_factory = clap_plugin_factory {
 };
 
 unsafe extern "C" fn get_plugin_count(_f: *const clap_plugin_factory) -> u32 {
-    1
+    2
 }
 
 unsafe extern "C" fn get_plugin_descriptor(
     _f: *const clap_plugin_factory,
     index: u32,
 ) -> *const clap_plugin_descriptor {
-    if index == 0 {
-        &PLUGIN_DESCRIPTOR
-    } else {
-        std::ptr::null()
+    match index {
+        0 => &PLUGIN_DESCRIPTOR,
+        1 => &PLUGIN_DESCRIPTOR_FX,
+        _ => std::ptr::null(),
     }
 }
 
@@ -66,9 +79,13 @@ unsafe extern "C" fn create_plugin(
     plugin_id: *const c_char,
 ) -> *const clap_plugin {
     let id = unsafe { CStr::from_ptr(plugin_id) };
-    if id != PLUGIN_ID {
+    let descriptor = if id == PLUGIN_ID {
+        &PLUGIN_DESCRIPTOR
+    } else if id == PLUGIN_FX_ID {
+        &PLUGIN_DESCRIPTOR_FX
+    } else {
         return std::ptr::null();
-    }
+    };
 
     let plugin_data = Box::new(PatchesClapPlugin {
         host,
@@ -97,6 +114,6 @@ unsafe extern "C" fn create_plugin(
     });
     let data_ptr = Box::into_raw(plugin_data);
 
-    let clap_plugin_box = Box::new(make_clap_plugin(&PLUGIN_DESCRIPTOR, host, data_ptr));
+    let clap_plugin_box = Box::new(make_clap_plugin(descriptor, host, data_ptr));
     Box::into_raw(clap_plugin_box)
 }

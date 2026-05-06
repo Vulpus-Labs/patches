@@ -30,6 +30,9 @@ jobs:
         run: cargo build --release -p patches-player
 
       - name: Build CLAP plugin
+        # Bundle ships two descriptors (Patches + Patches FX) so the
+        # plugin shows up in both instrument and effect slots. One
+        # dylib — no extra build steps.
         shell: bash
         run: cargo build --release -p patches-clap
 

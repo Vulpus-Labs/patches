@@ -4,6 +4,11 @@
 # CLAP plugin into the user's Audio Plug-Ins directory (as Patches.clap),
 # and (re)install the patches-vscode extension into VS Code.
 #
+# The bundle ships two CLAP descriptors: "Patches" (instrument-first) and
+# "Patches FX" (audio-effect-first). Hosts that bucket plugins by the
+# first feature tag pick them up in the matching slot. One dylib, one
+# .clap install — no extra steps here.
+#
 # macOS only. Run from the repo root (or anywhere — the script cd's to its
 # own dir).
 
