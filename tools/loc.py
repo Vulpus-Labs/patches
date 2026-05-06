@@ -21,6 +21,42 @@ def count_lines(path):
     except Exception:
         return []
 
+def strip_blank_and_comments(lines):
+    """Drop blank lines and comment-only lines. Handles Rust nested /* */ blocks."""
+    out = []
+    depth = 0
+    for line in lines:
+        s = line.strip()
+        # Walk char-by-char tracking block depth; mark line as having code if any non-comment, non-ws char appears outside a block comment.
+        has_code = False
+        i = 0
+        n = len(s)
+        line_starts_in_block = depth > 0
+        while i < n:
+            if depth > 0:
+                if i + 1 < n and s[i] == '*' and s[i+1] == '/':
+                    depth -= 1
+                    i += 2
+                    continue
+                if i + 1 < n and s[i] == '/' and s[i+1] == '*':
+                    depth += 1
+                    i += 2
+                    continue
+                i += 1
+            else:
+                if i + 1 < n and s[i] == '/' and s[i+1] == '/':
+                    break  # line comment to EOL
+                if i + 1 < n and s[i] == '/' and s[i+1] == '*':
+                    depth += 1
+                    i += 2
+                    continue
+                if not s[i].isspace():
+                    has_code = True
+                i += 1
+        if has_code:
+            out.append(line)
+    return out
+
 def split_inline_tests(lines):
     """Return (impl_count, test_count). Detect `#[cfg(test)]` followed by `mod ... {`
     and count the brace-balanced block as tests."""
@@ -83,7 +119,7 @@ for dirpath, dirnames, filenames in os.walk(ROOT):
                 pass
             else:
                 continue
-        lines = count_lines(full)
+        lines = strip_blank_and_comments(count_lines(full))
         total = len(lines)
         # Whole-file test detection
         is_test_file = (

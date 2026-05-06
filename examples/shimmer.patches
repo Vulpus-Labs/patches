@@ -7,7 +7,12 @@ patch {
         pre_delay: 0
         mix: 1
     }
-    module chorus : VChorus
+    
+    module chorus : VChorus {
+        hiss: 0
+        mode: one
+    }
+
     module delay : StereoDelay([short, long]) {
         @short {
             delay_ms: 250,
@@ -16,12 +21,12 @@ patch {
             pingpong: true
         }
         @long {
-            delay_ms: 1000,
-            feedback: 0.6,
+            delay_ms: 800,
+            feedback: 0.4,
             pan: 0.6,
             pingpong: true
         }
-
+        tone: 0.3
         dry_wet: 0.5
     }
     module audio_out : AudioOut
