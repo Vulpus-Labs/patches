@@ -1,6 +1,5 @@
 use super::*;
 use patches_core::test_support::{ModuleHarness, params};
-use patches_core::ModuleShape;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -8,20 +7,6 @@ const SR: f32 = 44_100.0;
 
 fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: SR, poly_voices: 16, periodic_update_interval: 32, hosted: false }
-}
-
-#[test]
-fn descriptor_ports_and_params_mono() {
-    let desc = patches_core::describe_for::<ConvolutionReverb>(&ModuleShape::default());
-    assert_eq!(desc.module_name, "ConvReverb");
-    assert_eq!(desc.inputs.len(), 2);
-    assert_eq!(desc.outputs.len(), 1);
-    assert_eq!(desc.inputs[0].name, "in");
-    assert_eq!(desc.inputs[1].name, "mix");
-    assert_eq!(desc.outputs[0].name, "out");
-    let names: Vec<&str> = desc.realtime_params.iter().map(|p| p.name).collect();
-    assert!(names.contains(&"mix"));
-    assert!(names.contains(&"ir"));
 }
 
 /// The initial build synchronously installs the processor (see

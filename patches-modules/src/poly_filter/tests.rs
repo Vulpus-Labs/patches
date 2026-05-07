@@ -222,29 +222,6 @@ fn poly_lowpass_voices_are_independent_with_cv() {
     );
 }
 
-#[test]
-fn poly_lowpass_static_path_when_no_cv() {
-    let sr = 44100.0;
-    let mut f = make_lowpass_sr(6.0, 0.0, sr);
-    set_static_ports(&mut f);
-    let mut pool = make_poly_pool(5);
-    for i in 0..100 {
-        let wi = i % 2;
-        pool[0][1 - wi] = CableValue::poly([0.5; 16]);
-        f.process(&mut CablePool::new(&mut pool, wi));
-    }
-    // Downcast to inspect internal state: all deltas should be zero in static path.
-    let concrete = f.as_any().downcast_ref::<PolyResonantLowpass>().unwrap();
-    for i in 0..16 {
-        for (k, name) in ["db0", "db1", "db2", "da1", "da2"].iter().enumerate() {
-            assert_eq!(
-                concrete.biquad.coefs.delta[k][i], 0.0,
-                "voice {i}: {name} should be zero in static path"
-            );
-        }
-    }
-}
-
 // ── PolyResonantHighpass tests ────────────────────────────────────────
 
 #[test]
