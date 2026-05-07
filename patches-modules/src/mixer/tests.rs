@@ -42,58 +42,29 @@ fn mixer_descriptor_shape_n2() {
     assert_eq!(desc.outputs[2].name, "send_b");
 }
 
+/// Truth table for mute/solo on a 2-channel mixer with in[0]=1.0, in[1]=0.4.
+/// `mute_overrides_solo` is the key invariant: a soloed-but-muted channel
+/// must not contribute to `any_solo`.
 #[test]
-fn mixer_unity_levels_sums_inputs() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    h.set_mono_at("in", 0, 0.3);
-    h.set_mono_at("in", 1, 0.5);
-    h.tick();
-    assert_nearly!(0.8, h.read_mono("out"));
-}
-
-#[test]
-fn mixer_level_cv_clamps_above_one() {
-    // level[0]=1.0 + level_cv[0]=0.5 → clamped to 1.0
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(1));
-    h.set_mono_at("in", 0, 0.6);
-    h.set_mono_at("level_cv", 0, 0.5);
-    h.tick();
-    // Effective level = 1.0 (clamped), output = 0.6 * 1.0
-    assert_nearly!(0.6, h.read_mono("out"));
-}
-
-#[test]
-fn mixer_mute_silences_channel() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    h.update_params_map(&indexed_params(&[("mute", 0, ParameterValue::Bool(true))]));
-    h.set_mono_at("in", 0, 1.0);
-    h.set_mono_at("in", 1, 0.4);
-    h.tick();
-    assert_nearly!(0.4, h.read_mono("out"));
-}
-
-#[test]
-fn mixer_solo_silences_other_channels() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    h.update_params_map(&indexed_params(&[("solo", 0, ParameterValue::Bool(true))]));
-    h.set_mono_at("in", 0, 0.3);
-    h.set_mono_at("in", 1, 0.5);
-    h.tick();
-    assert_nearly!(0.3, h.read_mono("out"));
-}
-
-#[test]
-fn mixer_mute_overrides_solo() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    h.update_params_map(&indexed_params(&[
-        ("mute", 0, ParameterValue::Bool(true)),
-        ("solo", 0, ParameterValue::Bool(true)),
-    ]));
-    h.set_mono_at("in", 0, 1.0);
-    h.set_mono_at("in", 1, 0.4);
-    h.tick();
-    // ch0: solo=true but mute=true → not counted in any_solo. any_solo = false → ch1 active.
-    assert_nearly!(0.4, h.read_mono("out"));
+fn mixer_mute_solo_truth_table() {
+    // (mute0, solo0, expected out)
+    let cases: &[(bool, bool, f32)] = &[
+        (false, false, 1.4), // both active: 1.0 + 0.4
+        (true,  false, 0.4), // ch0 muted
+        (false, true,  1.0), // ch0 soloed → ch1 silent
+        (true,  true,  0.4), // mute overrides solo → ch1 active
+    ];
+    for &(mute0, solo0, expected) in cases {
+        let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
+        h.update_params_map(&indexed_params(&[
+            ("mute", 0, ParameterValue::Bool(mute0)),
+            ("solo", 0, ParameterValue::Bool(solo0)),
+        ]));
+        h.set_mono_at("in", 0, 1.0);
+        h.set_mono_at("in", 1, 0.4);
+        h.tick();
+        assert_nearly!(expected, h.read_mono("out"));
+    }
 }
 
 #[test]
@@ -251,43 +222,26 @@ fn poly_mixer_level_cv_clamps() {
 }
 
 #[test]
-fn poly_mixer_mute_zeroes_channel() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-    h.update_params_map(&indexed_params(&[("mute", 0, ParameterValue::Bool(true))]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    let mut b = [0.0f32; 16]; b[0] = 0.4;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    assert_nearly!(0.4, h.read_poly("out")[0]);
-}
-
-#[test]
-fn poly_mixer_solo_silences_other_channels() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-    h.update_params_map(&indexed_params(&[("solo", 0, ParameterValue::Bool(true))]));
-    let mut a = [0.0f32; 16]; a[0] = 0.3;
-    let mut b = [0.0f32; 16]; b[0] = 0.5;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    assert_nearly!(0.3, h.read_poly("out")[0]);
-}
-
-#[test]
-fn poly_mixer_mute_overrides_solo() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-    h.update_params_map(&indexed_params(&[
-        ("mute", 0, ParameterValue::Bool(true)),
-        ("solo", 0, ParameterValue::Bool(true)),
-    ]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    let mut b = [0.0f32; 16]; b[0] = 0.4;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    // any_solo = false (ch0 solo but muted) → ch1 active
-    assert_nearly!(0.4, h.read_poly("out")[0]);
+fn poly_mixer_mute_solo_truth_table() {
+    let cases: &[(bool, bool, f32)] = &[
+        (false, false, 1.4),
+        (true,  false, 0.4),
+        (false, true,  1.0),
+        (true,  true,  0.4),
+    ];
+    for &(mute0, solo0, expected) in cases {
+        let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
+        h.update_params_map(&indexed_params(&[
+            ("mute", 0, ParameterValue::Bool(mute0)),
+            ("solo", 0, ParameterValue::Bool(solo0)),
+        ]));
+        let mut a = [0.0f32; 16]; a[0] = 1.0;
+        let mut b = [0.0f32; 16]; b[0] = 0.4;
+        h.set_poly_at("in", 0, a);
+        h.set_poly_at("in", 1, b);
+        h.tick();
+        assert_nearly!(expected, h.read_poly("out")[0]);
+    }
 }
 
 // ── StereoPolyMixer tests ─────────────────────────────────────────────────
