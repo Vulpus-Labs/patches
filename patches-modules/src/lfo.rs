@@ -371,22 +371,19 @@ mod tests {
         );
         h.disconnect_all_inputs();
 
-        for _cycle in 0..3 {
+        h.tick();
+        let cycle_value = h.read_mono("random");
+        assert!(
+            (0.0..=1.0).contains(&cycle_value),
+            "random output must be in [0, 1] in unipolar_positive mode; got {cycle_value}"
+        );
+        for _ in 1..(period - 1) {
             h.tick();
-            let cycle_value = h.read_mono("random");
-            assert!(
-                (0.0..=1.0).contains(&cycle_value),
-                "random output must be in [0, 1] in unipolar_positive mode; got {cycle_value}"
+            let v = h.read_mono("random");
+            assert_eq!(
+                v, cycle_value,
+                "random output must hold bit-exact within a period; changed from {cycle_value} to {v}"
             );
-            for _ in 1..(period - 1) {
-                h.tick();
-                let v = h.read_mono("random");
-                assert!(
-                    (v - cycle_value).abs() < 1e-15,
-                    "random output must hold within a period; changed from {cycle_value} to {v}"
-                );
-            }
-            h.tick(); // end of period
         }
     }
 

@@ -570,6 +570,9 @@ mod tests {
             .map(|(i, _)| i)
             .unwrap_or(0);
 
+        // ±1 sample: sync_ms × SR / 1000 is fractional; the integer rounding
+        // for the read tap plus the 1-sample cable delay convention can shift
+        // the peak by one sample relative to the naive truncation.
         let deviation = (peak_idx as isize - (expected_sample - 1) as isize).abs();
         assert!(deviation <= 1,
             "sync_ms=10: peak at sample {} but expected ~{} (±1)", peak_idx + 1, expected_sample);

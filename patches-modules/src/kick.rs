@@ -301,52 +301,30 @@ mod tests {
         assert!(rms < 0.01, "kick should decay to near zero, rms = {rms}");
     }
 
+    /// Higher pitch should produce more zero-crossings per unit time.
+    /// Crossing count is a coarse frequency proxy — only the ordering is
+    /// asserted, not absolute values.
     #[test]
     fn pitch_parameter_affects_output() {
-        // Low pitch kick
-        let mut h_low = ModuleHarness::build::<Kick>(&[
-            ("pitch", ParameterValue::Float(40.0)),
-            ("sweep", ParameterValue::Float(40.0)), // No sweep
-            ("sweep_time", ParameterValue::Float(0.001)),
-            ("decay", ParameterValue::Float(0.5)),
-            ("drive", ParameterValue::Float(0.0)),
-            ("click", ParameterValue::Float(0.0)),
-        ]);
-        h_low.disconnect_inputs(&["voct", "velocity"]);
-
-        // High pitch kick
-        let mut h_high = ModuleHarness::build::<Kick>(&[
-            ("pitch", ParameterValue::Float(120.0)),
-            ("sweep", ParameterValue::Float(120.0)), // No sweep
-            ("sweep_time", ParameterValue::Float(0.001)),
-            ("decay", ParameterValue::Float(0.5)),
-            ("drive", ParameterValue::Float(0.0)),
-            ("click", ParameterValue::Float(0.0)),
-        ]);
-        h_high.disconnect_inputs(&["voct", "velocity"]);
-
-        // Trigger both
-        h_low.set_mono("trigger", 1.0);
-        h_low.tick();
-        h_low.set_mono("trigger", 0.0);
-        h_high.set_mono("trigger", 1.0);
-        h_high.tick();
-        h_high.set_mono("trigger", 0.0);
-
-        // Count zero-crossings over 1000 samples as a proxy for frequency
-        let low_samples = h_low.run_mono(1000, "out");
-        let high_samples = h_high.run_mono(1000, "out");
-
-        let count_crossings = |s: &[f32]| -> usize {
+        fn crossings_at_pitch(pitch: f32) -> usize {
+            let mut h = ModuleHarness::build::<Kick>(&[
+                ("pitch", ParameterValue::Float(pitch)),
+                ("sweep", ParameterValue::Float(pitch)), // no sweep
+                ("sweep_time", ParameterValue::Float(0.001)),
+                ("decay", ParameterValue::Float(0.5)),
+                ("drive", ParameterValue::Float(0.0)),
+                ("click", ParameterValue::Float(0.0)),
+            ]);
+            h.disconnect_inputs(&["voct", "velocity"]);
+            h.set_mono("trigger", 1.0);
+            h.tick();
+            h.set_mono("trigger", 0.0);
+            let s = h.run_mono(1000, "out");
             s.windows(2).filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0)).count()
-        };
-
-        let low_crossings = count_crossings(&low_samples);
-        let high_crossings = count_crossings(&high_samples);
-        assert!(
-            high_crossings > low_crossings,
-            "higher pitch should have more zero crossings: low={low_crossings}, high={high_crossings}"
-        );
+        }
+        let low = crossings_at_pitch(40.0);
+        let high = crossings_at_pitch(120.0);
+        assert!(high > low, "higher pitch should have more zero crossings: low={low}, high={high}");
     }
 
     #[test]

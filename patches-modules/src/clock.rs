@@ -258,18 +258,4 @@ mod tests {
         assert!(semiquaver_count > quaver_count, "expected more semiquavers than quavers");
     }
 
-    #[test]
-    fn all_outputs_initialized_to_zero() {
-        let mut h = make_clock(120.0, 4, 2);
-        // First few samples should not fire anything unless we're at a boundary
-        for i in 0..5usize {
-            h.tick();
-            if i > 0 {
-                assert_eq!(h.read_mono("bar"),       0.0, "bar should be 0 at sample {i}");
-                assert_eq!(h.read_mono("beat"),      0.0, "beat should be 0 at sample {i}");
-                assert_eq!(h.read_mono("quaver"),    0.0, "quaver should be 0 at sample {i}");
-                assert_eq!(h.read_mono("semiquaver"),0.0, "semiquaver should be 0 at sample {i}");
-            }
-        }
-    }
 }

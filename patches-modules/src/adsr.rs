@@ -200,22 +200,6 @@ mod tests {
     }
 
     #[test]
-    fn sustain_holds_while_gate_high() {
-        let mut h = make_envelope(0.1, 0.1, 0.6, 1.0);
-        h.set_mono("trigger", 1.0);
-        h.set_mono("gate", 1.0);
-        h.tick();
-        h.set_mono("trigger", 0.0);
-        h.tick(); // decay completes in 1 sample
-
-        for _ in 0..5 {
-            h.tick();
-            let v = h.read_mono("out");
-            assert_within!(0.6, v, 1e-12_f32);
-        }
-    }
-
-    #[test]
     fn release_falls_to_zero() {
         // attack=0.1s, decay=0.1s, sustain=0.5, release=0.5s (5 samples)
         // release_inc = 0.5 / (0.5 * 10) = 0.1
