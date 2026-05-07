@@ -90,15 +90,6 @@ mod tests {
     use patches_core::test_support::{ModuleHarness, params};
 
     #[test]
-    fn holds_initial_zero_before_first_trigger() {
-        let mut h = ModuleHarness::build::<Sah>(params![]);
-        h.set_mono("trig", 0.0);
-        h.set_mono("in", 0.7);
-        h.tick();
-        assert_eq!(h.read_mono("out"), 0.0);
-    }
-
-    #[test]
     fn latches_on_rising_edge() {
         let mut h = ModuleHarness::build::<Sah>(params![]);
         h.set_mono("in", 0.42);

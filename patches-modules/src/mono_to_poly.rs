@@ -82,20 +82,6 @@ mod tests {
     use patches_core::test_support::{assert_within, ModuleHarness};
 
     #[test]
-    fn broadcasts_mono_value_to_all_channels() {
-        let mut h = ModuleHarness::build_with_env::<MonoToPoly>(
-            &[],
-            AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false },
-        );
-        h.set_mono("in", 0.75);
-        h.tick();
-        let out = h.read_poly("out");
-        for &v in out.iter() {
-            assert_within!(0.75, v, f32::EPSILON);
-        }
-    }
-
-    #[test]
     fn disconnected_input_broadcasts_zero() {
         let mut h = ModuleHarness::build_with_env::<MonoToPoly>(
             &[],

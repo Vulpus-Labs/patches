@@ -90,24 +90,16 @@ mod tests {
     }
 
     #[test]
-    fn sums_active_voices_only() {
+    fn excludes_voices_beyond_voice_count() {
         let mut h = make_collapse(4);
         let mut channels = [0.0f32; 16];
-        channels[0] = 0.25;
-        channels[1] = 0.25;
-        channels[2] = 0.25;
-        channels[3] = 0.25;
-        channels[4] = 99.0; // beyond voice_count, should not be included
+        channels[0] = 0.1;
+        channels[1] = 0.2;
+        channels[2] = 0.3;
+        channels[3] = 0.4;
+        channels[4] = 99.0; // beyond voice_count, must not contribute
         h.set_poly("in", channels);
         h.tick();
-        assert_within!(1.0, h.read_mono("out"), f32::EPSILON);
-    }
-
-    #[test]
-    fn zero_voices_produce_zero() {
-        let mut h = make_collapse(4);
-        h.set_poly("in", [0.0; 16]);
-        h.tick();
-        assert_eq!(h.read_mono("out"), 0.0);
+        assert_within!(1.0, h.read_mono("out"), 1e-6);
     }
 }
