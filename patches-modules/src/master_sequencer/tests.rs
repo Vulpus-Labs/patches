@@ -50,53 +50,38 @@ fn simple_step(cv1: f32, trigger: bool, gate: bool) -> TrackerStep {
 // ── sync-enum → use_host_transport resolution ───────────────────────────
 
 #[test]
-fn sync_auto_selects_host_when_hosted() {
+fn sync_resolution_table() {
+    use super::params::SyncMode;
     let hosted_env = AudioEnvironment {
         sample_rate: SR,
         poly_voices: 16,
         periodic_update_interval: 32,
         hosted: true,
     };
-    let s = shape(1);
-    let desc = patches_core::describe_for::<MasterSequencer>(&s);
-    let seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
-    assert!(seq.use_host_transport, "auto mode should use host transport when hosted");
-}
 
-#[test]
-fn sync_auto_selects_free_when_standalone() {
-    let s = shape(1);
-    let desc = patches_core::describe_for::<MasterSequencer>(&s);
-    let seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
-    assert!(!seq.use_host_transport, "auto mode should not use host transport when standalone");
-}
+    // (sync override, hosted, expected use_host_transport)
+    let cases: &[(Option<SyncMode>, bool, bool)] = &[
+        (None,                  true,  true),  // auto + hosted     → host
+        (None,                  false, false), // auto + standalone → free
+        (Some(SyncMode::Free),  true,  false), // free overrides hosted
+        (Some(SyncMode::Host),  false, true),  // host overrides standalone
+    ];
 
-#[test]
-fn sync_free_overrides_hosted() {
-    let hosted_env = AudioEnvironment {
-        sample_rate: SR,
-        poly_voices: 16,
-        periodic_update_interval: 32,
-        hosted: true,
-    };
-    let s = shape(1);
-    let desc = patches_core::describe_for::<MasterSequencer>(&s);
-    let mut seq = MasterSequencer::prepare(&hosted_env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
-    let mut params = ParameterMap::new();
-    params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Free as u32));
-    apply_params_to(&mut seq, &params);
-    assert!(!seq.use_host_transport, "sync=free should override hosted");
-}
-
-#[test]
-fn sync_host_overrides_standalone() {
-    let s = shape(1);
-    let desc = patches_core::describe_for::<MasterSequencer>(&s);
-    let mut seq = MasterSequencer::prepare(&ENV, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
-    let mut params = ParameterMap::new();
-    params.insert("sync".into(), ParameterValue::Enum(super::params::SyncMode::Host as u32));
-    apply_params_to(&mut seq, &params);
-    assert!(seq.use_host_transport, "sync=host should override standalone");
+    for &(sync_override, hosted, expected) in cases {
+        let env = if hosted { &hosted_env } else { &ENV };
+        let s = shape(1);
+        let desc = patches_core::describe_for::<MasterSequencer>(&s);
+        let mut seq = MasterSequencer::prepare(env, desc, InstanceId::next(), &StructuralParams::new()).unwrap();
+        if let Some(mode) = sync_override {
+            let mut params = ParameterMap::new();
+            params.insert("sync".into(), ParameterValue::Enum(mode as u32));
+            apply_params_to(&mut seq, &params);
+        }
+        assert_eq!(
+            seq.use_host_transport, expected,
+            "sync={sync_override:?} hosted={hosted}: expected use_host_transport={expected}"
+        );
+    }
 }
 
 // ── end-to-end harness: poly clock bus encoding ─────────────────────────
