@@ -364,13 +364,29 @@ mod tests {
         assert_within!(1.0, samples[50], 1e-5_f32);
     }
 
+    /// PolyBLEP must round off discontinuities so transition samples never
+    /// hit ±1.0 exactly. Sawtooth wraps at phase 0; square has rising and
+    /// falling edges at phase 0 and 0.5 within one period.
     #[test]
-    fn sawtooth_polyblep_smooths_transition() {
+    fn polyblep_smooths_waveform_transitions() {
         let period = 100_usize;
-        let mut h = make_osc(0.0, C0_FREQ * period as f32);
-        h.tick();
-        let v = h.read_mono("sawtooth");
-        assert!(v > -1.0, "sawtooth at wrap transition must not output exact -1.0; got {v}");
+        let cases: &[(&str, &[usize])] = &[
+            ("sawtooth", &[0]),
+            ("square",   &[0, 50]),
+        ];
+        for &(port, transitions) in cases {
+            let mut h = make_osc(0.0, C0_FREQ * period as f32);
+            for i in 0..period {
+                h.tick();
+                let v = h.read_mono(port);
+                if transitions.contains(&i) {
+                    assert!(
+                        v > -1.0 && v < 1.0,
+                        "{port} at transition i={i} must not be exactly ±1; got {v}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -386,23 +402,6 @@ mod tests {
             // Phase increments are exact at this sample_rate; 1e-5 accounts for f32 arithmetic
             assert_within!(expected, v, 1e-5_f32);
         }
-    }
-
-    #[test]
-    fn square_polyblep_at_transition_not_exactly_plus_minus_one() {
-        let period = 100_usize;
-        let mut h = make_osc(0.0, C0_FREQ * period as f32);
-        h.tick();
-        let v = h.read_mono("square");
-        assert!(v > -1.0 && v < 1.0, "square at rising edge must not be exactly ±1; got {v}");
-
-        h.run_mono(49, "square");
-        h.tick();
-        let v = h.read_mono("square");
-        assert!(
-            v > -1.0 && v < 1.0,
-            "square at falling edge must not be exactly ±1; got {v}"
-        );
     }
 
     #[test]
