@@ -76,11 +76,12 @@ impl DocumentWorkspace {
         );
         // Capture URIs the previous run published to so we can clear
         // them with empty publishes when this run leaves them empty.
-        let prior_non_root = state
+        let prior_non_root: Vec<_> = state
             .last_publish_non_root
             .get(uri)
-            .map(|s| s.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
+            .into_iter()
+            .flat_map(|s| s.iter().cloned())
+            .collect();
         self.invalidate_artifact_closure(&mut state, uri);
 
         // Stage 1–5 pipeline runs eagerly here so one publishDiagnostics
@@ -146,11 +147,12 @@ impl DocumentWorkspace {
             uri.clone(),
             DocumentState { source, tree, model, line_index },
         );
-        let prior_non_root = state
+        let prior_non_root: Vec<_> = state
             .last_publish_non_root
             .get(uri)
-            .map(|s| s.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
+            .into_iter()
+            .flat_map(|s| s.iter().cloned())
+            .collect();
         self.invalidate_artifact_closure(state, uri);
 
         let pipeline_diags = self.run_pipeline_locked(state, uri);

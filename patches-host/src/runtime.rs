@@ -19,6 +19,11 @@ use rtrb::{Consumer, Producer};
 
 use crate::{load_patch, CompileError, HostFileSource, LoadedPatch};
 
+/// Sleep between retry attempts in [`HostRuntime::push_blocking`]. Tuned
+/// to fall under one audio block at typical buffer sizes while leaving
+/// enough room for the audio thread to drain a transient backlog.
+pub const PLAN_RING_PUSH_RETRY_MS: u64 = 10;
+
 /// Common shoulders carried by every audio-thread `AdoptionMessage`,
 /// regardless of which optional / variant attachments are present.
 pub struct PlanCommon {
@@ -182,12 +187,10 @@ impl HostRuntime {
     }
 
     /// Allocate the next tap-manifest generation. Starts at 1 (generation
-    /// `0` reserved for "no manifest yet"). `wrapping_add(1)` is harmless
-    /// in practice — 2^32 replans is effectively never.
+    /// `0` reserved for "no manifest yet"). On the impossible 2^32-replan
+    /// overflow, wrap to 1 rather than 0 so the sentinel stays distinct.
     fn next_generation(&mut self) -> u32 {
-        let g = self.next_tap_generation.wrapping_add(1);
-        // Skip 0 on wraparound so it never collides with the "unset" sentinel.
-        self.next_tap_generation = if g == 0 { 1 } else { g };
+        self.next_tap_generation = self.next_tap_generation.checked_add(1).unwrap_or(1);
         self.next_tap_generation
     }
 
@@ -274,7 +277,7 @@ impl HostRuntime {
                 }
                 Err(rtrb::PushError::Full(returned)) => {
                     msg = returned;
-                    thread::sleep(Duration::from_millis(10));
+                    thread::sleep(Duration::from_millis(PLAN_RING_PUSH_RETRY_MS));
                 }
             }
         }

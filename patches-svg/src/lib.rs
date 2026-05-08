@@ -131,6 +131,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
             FlatModule {
                 id: "vca".into(),
@@ -139,6 +140,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {
@@ -209,6 +211,7 @@ mod tests {
             params: vec![],
             port_aliases: vec![],
             provenance: Provenance::root(synthetic_span()),
+            param_block_span: None,
         }];
         let svg = render(&patch, &SvgOptions::default());
         assert!(svg.contains("a&amp;b : &lt;Odd&gt;"));
@@ -285,6 +288,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
             FlatModule {
                 id: "b".into(),
@@ -293,6 +297,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {
@@ -353,6 +358,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
             FlatModule {
                 id: "sink".into(),
@@ -361,6 +367,7 @@ mod tests {
                 params: vec![],
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {

@@ -301,6 +301,26 @@ fn scan_detail_lines(report: &patches_ffi::ScanReport) -> Vec<String> {
     out
 }
 
+fn project_manifest_taps(manifest: &Manifest) -> Vec<TapSummary> {
+    manifest
+        .iter()
+        .map(|d| TapSummary {
+            name: d.name.clone(),
+            slot: d.slot,
+            kind: if d.components.len() == 1 {
+                d.components[0].as_str().to_string()
+            } else {
+                "compound".to_string()
+            },
+            components: d
+                .components
+                .iter()
+                .map(|c| c.as_str().to_string())
+                .collect(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod sidecar_tests {
     use super::*;
@@ -423,24 +443,4 @@ mod sidecar_tests {
             }
         }
     }
-}
-
-fn project_manifest_taps(manifest: &Manifest) -> Vec<TapSummary> {
-    manifest
-        .iter()
-        .map(|d| TapSummary {
-            name: d.name.clone(),
-            slot: d.slot,
-            kind: if d.components.len() == 1 {
-                d.components[0].as_str().to_string()
-            } else {
-                "compound".to_string()
-            },
-            components: d
-                .components
-                .iter()
-                .map(|c| c.as_str().to_string())
-                .collect(),
-        })
-        .collect()
 }

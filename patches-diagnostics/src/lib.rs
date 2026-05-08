@@ -367,6 +367,22 @@ pub fn source_line_col(source_map: &SourceMap, source: SourceId, offset: usize) 
         .unwrap_or((0, 0))
 }
 
+/// Source-relative byte range of a refined identifier inside a
+/// diagnostic's enclosing span. `start` is absolute (byte offset within
+/// the source); `len` is in bytes. Encodes the `start..start+len`
+/// invariant the previous `(usize, usize)` tuples carried implicitly.
+#[derive(Debug, Clone, Copy)]
+struct TokenSpan {
+    start: u32,
+    len: u32,
+}
+
+impl TokenSpan {
+    fn end(self) -> u32 {
+        self.start + self.len
+    }
+}
+
 /// Narrow a `BindError`'s provenance from a full `module.port[index]`
 /// port-ref slice down to the specific identifier the error names.
 ///
@@ -380,59 +396,60 @@ fn refine_bind_provenance(
     message: &str,
     source_map: &SourceMap,
 ) -> Option<Provenance> {
-    let (offset_start, offset_end) = match code {
+    let token = match code {
         BindErrorCode::UnknownModule | BindErrorCode::UnknownPort => {
-            port_ref_token_offsets(prov.site, source_map, *code)?
+            port_ref_token(prov.site, source_map, *code)?
         }
-        BindErrorCode::UnknownParameter => {
-            param_name_token_offsets(prov.site, source_map, message)?
-        }
+        BindErrorCode::UnknownParameter => param_name_token(prov.site, source_map, message)?,
         _ => return None,
     };
     let site = prov.site;
     Some(Provenance::with_chain(
-        patches_core::source_span::Span::new(site.source, offset_start, offset_end),
+        patches_core::source_span::Span::new(site.source, token.start as usize, token.end() as usize),
         &prov.expansion,
     ))
 }
 
-/// Locate the byte offsets of the offending identifier inside a
-/// port-ref span `module.port[index]`. Returns `(start, end)` in the
-/// source's byte coordinates — `start >= span.start`, `end <= span.end`.
-///
-/// For `UnknownModule` the span covers `module`; for `UnknownPort` it
-/// covers `port` (excluding any `[index]`). Returns `None` if the slice
-/// has no `.` separator.
-fn port_ref_token_offsets(
+/// Locate the offending identifier inside a port-ref span
+/// `module.port[index]`. For `UnknownModule` the span covers `module`;
+/// for `UnknownPort` it covers `port` (excluding any `[index]`). Returns
+/// `None` if the slice has no `.` separator.
+fn port_ref_token(
     site: patches_core::source_span::Span,
     source_map: &SourceMap,
     code: BindErrorCode,
-) -> Option<(usize, usize)> {
+) -> Option<TokenSpan> {
     let text = source_map.source_text(site.source)?;
     let slice = text.get(site.start..site.end)?;
     let dot = slice.find('.')?;
     match code {
-        BindErrorCode::UnknownModule => Some((site.start, site.start + dot)),
+        BindErrorCode::UnknownModule => Some(TokenSpan {
+            start: site.start as u32,
+            len: dot as u32,
+        }),
         BindErrorCode::UnknownPort => {
             let port_start = site.start + dot + 1;
             let after_dot = &slice[dot + 1..];
             let port_len = after_dot.find('[').unwrap_or(after_dot.len());
-            Some((port_start, port_start + port_len))
+            Some(TokenSpan {
+                start: port_start as u32,
+                len: port_len as u32,
+            })
         }
         _ => None,
     }
 }
 
-/// Locate the byte offsets of the offending parameter identifier within
-/// the module-decl span. The bind error's site covers the whole
+/// Locate the offending parameter identifier within the module-decl
+/// span. The bind error's site covers the whole
 /// `module name : Type { ... }` block; we extract the parameter name
 /// from the error message (formatted as `unknown parameter '<name>'…`)
 /// and find its first token-bounded occurrence inside that block.
-fn param_name_token_offsets(
+fn param_name_token(
     site: patches_core::source_span::Span,
     source_map: &SourceMap,
     message: &str,
-) -> Option<(usize, usize)> {
+) -> Option<TokenSpan> {
     let name = extract_quoted_param_name(message)?;
     let text = source_map.source_text(site.source)?;
     let slice = text.get(site.start..site.end)?;
@@ -447,7 +464,10 @@ fn param_name_token_offsets(
             || !slice.as_bytes()[end].is_ascii_alphanumeric()
                 && slice.as_bytes()[end] != b'_';
         if before_ok && after_ok {
-            return Some((site.start + start, site.start + end));
+            return Some(TokenSpan {
+                start: (site.start + start) as u32,
+                len: name.len() as u32,
+            });
         }
         search_from = start + 1;
     }

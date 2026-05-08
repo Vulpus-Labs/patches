@@ -22,7 +22,7 @@ pub struct MidiSlice {
 impl MidiSlice {
     /// An empty slice.
     pub const EMPTY: Self = Self {
-        events: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
+        events: [MidiEvent::ZERO; MAX_STASH],
         len: 0,
     };
 
@@ -65,7 +65,7 @@ impl MidiInput {
     pub fn backplane(cable_idx: usize) -> Self {
         Self {
             inner: PolyInput::backplane(cable_idx),
-            stash: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
+            stash: [MidiEvent::ZERO; MAX_STASH],
             stash_count: 0,
         }
     }
@@ -80,7 +80,7 @@ impl MidiInput {
         if pi.is_connected() {
             Self {
                 inner: pi,
-                stash: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
+                stash: [MidiEvent::ZERO; MAX_STASH],
                 stash_count: 0,
             }
         } else {
@@ -146,7 +146,7 @@ impl MidiOutput {
     pub fn new(inner: PolyOutput) -> Self {
         Self {
             inner,
-            buffer: [MidiEvent { bytes: [0; 3] }; MAX_STASH],
+            buffer: [MidiEvent::ZERO; MAX_STASH],
             buffer_count: 0,
         }
     }

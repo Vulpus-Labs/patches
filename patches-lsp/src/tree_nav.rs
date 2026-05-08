@@ -259,15 +259,10 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
     }
 
     // Song block: pattern-name completion target.
-    let mut cur = node;
-    loop {
-        if SONG_KINDS.contains(&cur.kind()) {
-            return Some(CursorContext::SongRow { node: cur });
-        }
-        cur = match cur.parent() {
-            Some(p) => p,
-            None => break,
-        };
+    if let Some(song_node) = std::iter::successors(Some(node), |n| n.parent())
+        .find(|n| SONG_KINDS.contains(&n.kind()))
+    {
+        return Some(CursorContext::SongRow { node: song_node });
     }
 
     None

@@ -122,6 +122,18 @@ impl PartialEq<String> for QName {
     }
 }
 
+impl PartialEq<QName> for &str {
+    fn eq(&self, other: &QName) -> bool {
+        other.eq_display(self)
+    }
+}
+
+impl PartialEq<QName> for String {
+    fn eq(&self, other: &QName) -> bool {
+        other.eq_display(self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

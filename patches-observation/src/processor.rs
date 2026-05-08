@@ -796,7 +796,7 @@ mod tests {
             p.write_block(&dc_block(0.0), 0);
         }
         let v = p.scalar().unwrap();
-        assert!(v < 1.0 && v >= 0.0, "expected partial decay, got {v}");
+        assert!((0.0..1.0).contains(&v), "expected partial decay, got {v}");
     }
 
     #[test]

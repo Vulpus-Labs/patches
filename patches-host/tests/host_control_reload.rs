@@ -73,7 +73,7 @@ fn host_control_slot(meta: &patches_planner::MonitorMeta) -> Option<usize> {
 /// Returns true if `pool_index` is in any of `plan.tombstones` or
 /// `plan.new_modules`.
 fn touched_in_plan(plan: &patches_planner::ExecutionPlan, pool_index: usize) -> bool {
-    plan.tombstones.iter().any(|&i| i == pool_index)
+    plan.tombstones.contains(&pool_index)
         || plan.new_modules.iter().any(|(i, _)| *i == pool_index)
 }
 
@@ -167,11 +167,7 @@ fn shape_change_drops_and_replaces_host_control_instance() {
     let out2 = runtime.compile_only(&src2, &registry).expect("compile #2");
 
     assert!(
-        out2.common
-            .plan
-            .tombstones
-            .iter()
-            .any(|&i| i == old_hc_slot),
+        out2.common.plan.tombstones.contains(&old_hc_slot),
         "adding a host control must tombstone the old ~host_control slot \
          (expected {old_hc_slot} in {:?})",
         out2.common.plan.tombstones,

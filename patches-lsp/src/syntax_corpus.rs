@@ -58,9 +58,14 @@ fn load_corpus() -> Vec<Entry> {
     entries
 }
 
+/// In-progress entry accumulated by [`parse_corpus`]: line number, tag,
+/// args, description, body lines (joined with `\n` once the next entry
+/// header is seen).
+type PendingEntry = (usize, String, Vec<String>, String, Vec<String>);
+
 fn parse_corpus(path: &Path, text: &str) -> Vec<Entry> {
     let mut out = Vec::new();
-    let mut current: Option<(usize, String, Vec<String>, String, Vec<String>)> = None;
+    let mut current: Option<PendingEntry> = None;
     for (idx, raw) in text.lines().enumerate() {
         let line_no = idx + 1;
         if let Some(rest) = raw.strip_prefix("=== ") {
