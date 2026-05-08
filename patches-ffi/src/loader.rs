@@ -10,6 +10,7 @@
 
 use std::ffi::c_void;
 use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::{Arc, OnceLock};
 
 use patches_core::build_error::BuildError;
@@ -54,7 +55,7 @@ fn host_env() -> &'static HostEnv {
 /// so that `vtable.drop(handle)` completes (joining any plugin threads) before
 /// `Arc<Library>` decrements and potentially unloads the library.
 pub struct DylibModule {
-    handle: *mut c_void,
+    handle: NonNull<c_void>,
     vtable: FfiPluginVTable,
     descriptor: ModuleDescriptor,
     instance_id: InstanceId,
@@ -68,7 +69,7 @@ unsafe impl Send for DylibModule {}
 
 impl Drop for DylibModule {
     fn drop(&mut self) {
-        unsafe { (self.vtable.drop)(self.handle) };
+        unsafe { (self.vtable.drop)(self.handle.as_ptr()) };
     }
 }
 
@@ -89,7 +90,7 @@ impl Module for DylibModule {
         let bytes = params.wire_bytes();
         unsafe {
             (self.vtable.update_validated_parameters)(
-                self.handle as Handle,
+                self.handle.as_ptr() as Handle,
                 bytes.as_ptr(),
                 bytes.len(),
                 host_env() as *const HostEnv,
@@ -107,7 +108,7 @@ impl Module for DylibModule {
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let (ptr, len, wi) = pool.as_raw_parts_mut();
-        unsafe { (self.vtable.process)(self.handle, ptr, len, wi) };
+        unsafe { (self.vtable.process)(self.handle.as_ptr(), ptr, len, wi) };
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
@@ -118,7 +119,7 @@ impl Module for DylibModule {
         let bytes = self.port_frame.bytes();
         unsafe {
             (self.vtable.set_ports)(
-                self.handle as Handle,
+                self.handle.as_ptr() as Handle,
                 bytes.as_ptr(),
                 bytes.len(),
                 host_env() as *const HostEnv,
@@ -136,8 +137,75 @@ impl Module for DylibModule {
 
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let (ptr, len, wi) = pool.as_raw_parts();
-        unsafe { (self.vtable.periodic_update)(self.handle, ptr, len, wi) };
+        unsafe { (self.vtable.periodic_update)(self.handle.as_ptr(), ptr, len, wi) };
     }
+}
+
+// ── PrepareResult shim ───────────────────────────────────────────────────────
+
+/// Decoded outcome of a plugin's `prepare` vtable call. Collapses the three
+/// out-channels (status code, handle, error message) into a single Rust
+/// `Result`, so callers don't have to re-derive the "got handle ⇒ status was
+/// `PREPARE_OK`" invariant from raw out-params. The error string is already
+/// UTF-8-decoded (lossy) and the plugin-allocated error buffer has been
+/// freed via `free_bytes` before this returns.
+enum PrepareResult {
+    Ok(NonNull<c_void>),
+    Err(String),
+}
+
+/// Invoke `vtable.prepare` and decode the (status, handle, error_bytes)
+/// triple into a `PrepareResult`.
+///
+/// # Safety
+///
+/// `vtable` must conform to the FFI plugin ABI (the `vtable.prepare` /
+/// `vtable.free_bytes` function pointers must be the genuine plugin entry
+/// points; `desc_json_ptr` and `structural_ptr` must be valid for the
+/// indicated lengths). The plugin promises that on `status != PREPARE_OK`
+/// any returned `error_bytes` was allocated by the plugin and must be freed
+/// via `vtable.free_bytes`; this function takes responsibility for that
+/// free, so the caller never sees a dangling buffer.
+unsafe fn call_prepare(
+    vtable: &FfiPluginVTable,
+    desc_json_ptr: *const u8,
+    desc_json_len: usize,
+    ffi_env: FfiAudioEnvironment,
+    instance_id: InstanceId,
+    structural_ptr: *const u8,
+    structural_len: usize,
+) -> PrepareResult {
+    let mut handle: *mut c_void = std::ptr::null_mut();
+    let mut error_bytes = FfiBytes::empty();
+    let status = unsafe {
+        (vtable.prepare)(
+            desc_json_ptr,
+            desc_json_len,
+            ffi_env,
+            instance_id.as_u64(),
+            structural_ptr,
+            structural_len,
+            &mut handle as *mut *mut c_void,
+            &mut error_bytes as *mut FfiBytes,
+        )
+    };
+
+    if status == PREPARE_OK {
+        if let Some(nn) = NonNull::new(handle) {
+            return PrepareResult::Ok(nn);
+        }
+        // Plugin signalled OK but returned a null handle — protocol violation.
+    }
+
+    let message = if !error_bytes.ptr.is_null() && error_bytes.len > 0 {
+        let bytes = unsafe { error_bytes.as_slice() };
+        let msg = String::from_utf8_lossy(bytes).into_owned();
+        unsafe { (vtable.free_bytes)(error_bytes) };
+        msg
+    } else {
+        format!("plugin prepare failed (status {status})")
+    };
+    PrepareResult::Err(message)
 }
 
 // ── DylibModuleBuilder ───────────────────────────────────────────────────────
@@ -196,36 +264,28 @@ impl ModuleBuilder for DylibModuleBuilder {
 
         let structural_blob = pack_structural(&descriptor, structural);
 
-        let mut handle: *mut c_void = std::ptr::null_mut();
-        let mut error_bytes = FfiBytes::empty();
-        let status = unsafe {
-            (self.vtable.prepare)(
+        // SAFETY: vtable was validated against ABI_VERSION at load time;
+        // descriptor JSON and structural blob outlive the call.
+        let handle = match unsafe {
+            call_prepare(
+                &self.vtable,
                 desc_json.as_ptr(),
                 desc_json.len(),
                 ffi_env,
-                instance_id.as_u64(),
+                instance_id,
                 structural_blob.as_ptr(),
                 structural_blob.len(),
-                &mut handle as *mut *mut c_void,
-                &mut error_bytes as *mut FfiBytes,
             )
+        } {
+            PrepareResult::Ok(h) => h,
+            PrepareResult::Err(message) => {
+                return Err(BuildError::Custom {
+                    module: descriptor.module_name,
+                    message,
+                    origin: None,
+                });
+            }
         };
-
-        if status != PREPARE_OK || handle.is_null() {
-            let message = if !error_bytes.ptr.is_null() && error_bytes.len > 0 {
-                let bytes = unsafe { error_bytes.as_slice() };
-                let msg = String::from_utf8_lossy(bytes).into_owned();
-                unsafe { (self.vtable.free_bytes)(error_bytes) };
-                msg
-            } else {
-                format!("plugin prepare failed (status {status})")
-            };
-            return Err(BuildError::Custom {
-                module: descriptor.module_name,
-                message,
-                origin: None,
-            });
-        }
 
         let port_layout = PortLayout::new(
             descriptor.inputs.len() as u32,
