@@ -160,6 +160,7 @@ mod tests {
             },
             &ParameterMap::new(),
         )
+        .unwrap()
     }
 
     // ── Minimal module stub ───────────────────────────────────────────────────

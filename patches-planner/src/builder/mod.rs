@@ -105,17 +105,25 @@ impl ParamState {
     /// `params` into it. Intended for test harnesses that construct pool
     /// slots outside the planner; production call sites build the pieces
     /// inline for better control over allocation ordering.
+    ///
+    /// Returns [`BuildError`] (kind [`BuildErrorKind::ModuleCreationError`])
+    /// if `pack_into` rejects the parameter map (layout/hash mismatch,
+    /// missing scalar, type mismatch, or unsupported variant).
     pub fn new_for_descriptor(
         descriptor: &patches_core::modules::module_descriptor::ModuleDescriptor,
         params: &ParameterMap,
-    ) -> Self {
+    ) -> Result<Self, BuildError> {
         let layout = compute_layout(descriptor);
         let view_index = ParamViewIndex::from_layout(&layout);
         let mut frame = ParamFrame::with_layout(&layout);
         let defaults = defaults_from_descriptor(descriptor);
-        pack_into(&layout, &defaults, params, &mut frame)
-            .expect("new_for_descriptor: pack_into failed");
-        Self { layout, view_index, frame }
+        pack_into(&layout, &defaults, params, &mut frame).map_err(|e| {
+            BuildError::new(BuildErrorKind::ModuleCreationError(format!(
+                "ParamState::new_for_descriptor for '{}': pack_into failed: {e:?}",
+                descriptor.module_name
+            )))
+        })?;
+        Ok(Self { layout, view_index, frame })
     }
 }
 

@@ -111,10 +111,10 @@ impl Registry {
 
     pub fn describe(&self, name: &str, shape: &ModuleShape) -> Result<ModuleDescriptor, BuildError> {
         validate_shape(name, shape)?;
-        if !self.builders.contains_key(name) {
-            return Err(BuildError::UnknownModule { name: name.to_string(), origin: None });
-        }
-        let template = self.templates.get(name).expect("template recorded at register time");
+        let template = self
+            .templates
+            .get(name)
+            .ok_or_else(|| BuildError::UnknownModule { name: name.to_string(), origin: None })?;
         Ok(template.build_channels(shape.channels as u32))
     }
 

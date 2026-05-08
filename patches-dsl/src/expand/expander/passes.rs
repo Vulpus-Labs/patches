@@ -83,17 +83,15 @@ pub(in crate::expand) fn translate_modules(
             let inst_id = qualify(frame.ctx.namespace, &decl.name.name);
             let instance_alias_map = build_alias_map(&decl.call_block);
             let has_aliases = !instance_alias_map.is_empty();
-            if has_aliases {
-                frame
-                    .alias_map
-                    .insert(decl.name.name.clone(), instance_alias_map);
-            }
             // Primitive modules accept at most one positional shape arg
             // (channels). Translate the call block to FlatModule.shape.
             let shape = primitive_shape_from_call_block(decl, frame.ctx.param_env)?;
             let empty_alias_map = HashMap::new();
-            let alias_map_ref = if has_aliases {
-                frame.alias_map.get(decl.name.name.as_str()).unwrap()
+            let alias_map_ref: &HashMap<String, u32> = if has_aliases {
+                frame
+                    .alias_map
+                    .entry(decl.name.name.clone())
+                    .or_insert(instance_alias_map)
             } else {
                 &empty_alias_map
             };

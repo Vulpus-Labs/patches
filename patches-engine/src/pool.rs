@@ -231,7 +231,7 @@ mod tests {
             realtime_params: vec![],
             structural_params: vec![],
         };
-        ParamState::new_for_descriptor(&desc, &ParameterMap::new())
+        ParamState::new_for_descriptor(&desc, &ParameterMap::new()).unwrap()
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────

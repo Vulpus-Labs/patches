@@ -44,21 +44,31 @@ impl<T: ?Sized> PtrArray<T> {
 
     /// Populate from `indices` using `resolve` to obtain each pointer.
     ///
-    /// `resolve(idx)` must return `Some(ptr)` for every index. Panics if
-    /// `resolve` returns `None`.
-    ///
     /// Clears the vec first, then pushes. If the vec already has enough
     /// capacity from a previous rebuild, no allocation occurs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `resolve(idx)` returns `None` (slot empty or wrong type)
+    /// or returns a null pointer for any index in `indices`. This is a
+    /// planner-pool invariant violation: the [`ExecutionPlan`] is always
+    /// built against the same [`ModulePool`] that backs `resolve`, so every
+    /// listed slot must be populated at the right type. The slot index is
+    /// included in the panic message to identify the bad slot.
     fn rebuild<F>(&mut self, indices: &[usize], mut resolve: F)
     where
         F: FnMut(usize) -> Option<*mut T>,
     {
         self.ptrs.clear();
         for &idx in indices {
-            let ptr = resolve(idx)
-                .expect("PtrArray::rebuild: slot is empty or wrong type");
-            let non_null = NonNull::new(ptr)
-                .expect("PtrArray::rebuild: resolve returned null pointer");
+            // SAFETY: panic contract documented above.
+            let ptr = resolve(idx).unwrap_or_else(|| {
+                panic!("PtrArray::rebuild: slot {idx} is empty or wrong type")
+            });
+            // SAFETY: panic contract documented above.
+            let non_null = NonNull::new(ptr).unwrap_or_else(|| {
+                panic!("PtrArray::rebuild: resolve returned null pointer for slot {idx}")
+            });
             self.ptrs.push(non_null);
         }
     }
@@ -439,6 +449,7 @@ mod tests {
             },
             &ParameterMap::new(),
         )
+        .unwrap()
     }
 
     // ── Stub modules ─────────────────────────────────────────────────────────

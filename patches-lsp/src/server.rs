@@ -89,18 +89,27 @@ impl LanguageServer for PatchesLanguageServer {
         // Dynamically register a file watcher for `.patches` files so the
         // client forwards disk-level changes for files the editor hasn't
         // opened — needed to keep include-loaded docs in sync with disk.
+        let register_options = match serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+            watchers: vec![FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.patches".to_string()),
+                kind: None,
+            }],
+        }) {
+            Ok(v) => v,
+            Err(err) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("failed to serialize file-watch registration: {err}"),
+                    )
+                    .await;
+                return;
+            }
+        };
         let registration = Registration {
             id: "patches-watch".to_string(),
             method: "workspace/didChangeWatchedFiles".to_string(),
-            register_options: Some(
-                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                    watchers: vec![FileSystemWatcher {
-                        glob_pattern: GlobPattern::String("**/*.patches".to_string()),
-                        kind: None,
-                    }],
-                })
-                .expect("serialize watch registration"),
-            ),
+            register_options: Some(register_options),
         };
         if let Err(err) = self
             .client

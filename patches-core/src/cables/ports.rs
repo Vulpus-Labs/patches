@@ -23,6 +23,15 @@ impl InputPort {
         }
     }
 
+    /// Unwrap as [`MonoInput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Mono`. The planner's connection-time
+    /// type checking (ADR 0047 / ADR 0033) is the structural guarantee:
+    /// once a `ModuleGraph` has been built, every `InputPort` delivered to
+    /// `Module::set_ports` matches the descriptor's declared kind, so this
+    /// is infallible at audio-thread call sites.
     pub fn expect_mono(&self) -> MonoInput {
         self.as_mono().expect("expected mono input port")
     }
@@ -34,6 +43,13 @@ impl InputPort {
         }
     }
 
+    /// Unwrap as [`PolyInput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Poly`. See [`expect_mono`](Self::expect_mono)
+    /// for the planner-time type-check guarantee that makes this infallible
+    /// in module `set_ports` implementations.
     pub fn expect_poly(&self) -> PolyInput {
         self.as_poly().expect("expected poly input port")
     }
@@ -45,6 +61,13 @@ impl InputPort {
         }
     }
 
+    /// Unwrap as [`StereoInput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Stereo`. See [`expect_mono`](Self::expect_mono)
+    /// for the planner-time type-check guarantee that makes this infallible
+    /// in module `set_ports` implementations.
     pub fn expect_stereo(&self) -> StereoInput {
         self.as_stereo().expect("expected stereo input port")
     }
@@ -52,12 +75,20 @@ impl InputPort {
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono
     /// cables with a `MonoLayout::Trigger` layout tag. Retained for
     /// module-side readability.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Mono`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_trigger(&self) -> MonoInput {
         self.expect_mono()
     }
 
     /// Alias for [`expect_poly`](Self::expect_poly): poly-trigger ports are
     /// poly cables with a `PolyLayout::Trigger` layout tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Poly`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_poly_trigger(&self) -> PolyInput {
         self.expect_poly()
     }
@@ -80,6 +111,13 @@ impl OutputPort {
         }
     }
 
+    /// Unwrap as [`MonoOutput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Mono`. The planner's connection-time
+    /// type checking (ADR 0047 / ADR 0033) makes this infallible in module
+    /// `set_ports` implementations.
     pub fn expect_mono(&self) -> MonoOutput {
         self.as_mono().expect("expected mono output port")
     }
@@ -91,6 +129,11 @@ impl OutputPort {
         }
     }
 
+    /// Unwrap as [`PolyOutput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Poly`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_poly(&self) -> PolyOutput {
         self.as_poly().expect("expected poly output port")
     }
@@ -102,18 +145,31 @@ impl OutputPort {
         }
     }
 
+    /// Unwrap as [`StereoOutput`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Stereo`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_stereo(&self) -> StereoOutput {
         self.as_stereo().expect("expected stereo output port")
     }
 
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono
     /// cables with a `MonoLayout::Trigger` layout tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Mono`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_trigger(&self) -> MonoOutput {
         self.expect_mono()
     }
 
     /// Alias for [`expect_poly`](Self::expect_poly): poly-trigger ports are
     /// poly cables with a `PolyLayout::Trigger` layout tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the variant is not `Poly`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_poly_trigger(&self) -> PolyOutput {
         self.expect_poly()
     }

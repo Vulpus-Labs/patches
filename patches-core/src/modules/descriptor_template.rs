@@ -141,27 +141,32 @@ impl ModuleDescriptorTemplate {
         per_axis_structural_params: &[],
     };
 
-    fn axis_count(&self, counts: &[(AxisId, u32)], axis: AxisId) -> u32 {
+    fn try_axis_count(
+        &self,
+        counts: &[(AxisId, u32)],
+        axis: AxisId,
+    ) -> Result<u32, MissingAxis> {
         counts
             .iter()
             .find_map(|(id, n)| if *id == axis { Some(*n) } else { None })
-            .unwrap_or_else(|| {
-                panic!(
-                    "ModuleDescriptorTemplate {:?}: missing count for axis {:?}",
-                    self.name, axis
-                )
+            .ok_or(MissingAxis {
+                template: self.name,
+                axis,
             })
     }
 
     /// Build a runtime [`ModuleDescriptor`] from this template plus a count
     /// for each axis declared in `axes`.
-    pub fn build(&self, counts: &[(AxisId, u32)]) -> ModuleDescriptor {
+    ///
+    /// Returns [`MissingAxis`] if `counts` does not contain an entry for one
+    /// of the axes referenced by a per-axis port or parameter.
+    pub fn try_build(&self, counts: &[(AxisId, u32)]) -> Result<ModuleDescriptor, MissingAxis> {
         let mut inputs = Vec::with_capacity(self.global_inputs.len() + self.per_axis_inputs.len());
         for p in self.global_inputs {
             inputs.push(p.at(0));
         }
         for (axis, p) in self.per_axis_inputs {
-            let n = self.axis_count(counts, *axis);
+            let n = self.try_axis_count(counts, *axis)?;
             for i in 0..n as usize {
                 inputs.push(p.at(i));
             }
@@ -172,7 +177,7 @@ impl ModuleDescriptorTemplate {
             outputs.push(p.at(0));
         }
         for (axis, p) in self.per_axis_outputs {
-            let n = self.axis_count(counts, *axis);
+            let n = self.try_axis_count(counts, *axis)?;
             for i in 0..n as usize {
                 outputs.push(p.at(i));
             }
@@ -185,7 +190,7 @@ impl ModuleDescriptorTemplate {
             realtime_params.push(p.at(0));
         }
         for (axis, p) in self.per_axis_realtime_params {
-            let n = self.axis_count(counts, *axis);
+            let n = self.try_axis_count(counts, *axis)?;
             for i in 0..n as usize {
                 realtime_params.push(p.at(i));
             }
@@ -198,7 +203,7 @@ impl ModuleDescriptorTemplate {
             structural_params.push(p.at(0));
         }
         for (axis, p) in self.per_axis_structural_params {
-            let n = self.axis_count(counts, *axis);
+            let n = self.try_axis_count(counts, *axis)?;
             for i in 0..n as usize {
                 structural_params.push(p.at(i));
             }
@@ -209,19 +214,41 @@ impl ModuleDescriptorTemplate {
             .find_map(|(id, n)| if *id == AxisId::CHANNELS { Some(*n as usize) } else { None })
             .unwrap_or(1);
 
-        ModuleDescriptor {
+        Ok(ModuleDescriptor {
             module_name: self.name,
             shape: ModuleShape { channels },
             inputs,
             outputs,
             realtime_params,
             structural_params,
-        }
+        })
+    }
+
+    /// Build a runtime [`ModuleDescriptor`] from this template plus a count
+    /// for each axis declared in `axes`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `counts` does not contain an entry for every axis declared
+    /// in `self.axes`. Module templates are `const` and the axes they reference
+    /// are static, so a missing axis is a template-authoring bug, not a
+    /// runtime condition. Callers wanting the typed-error variant should use
+    /// [`try_build`](Self::try_build).
+    pub fn build(&self, counts: &[(AxisId, u32)]) -> ModuleDescriptor {
+        // SAFETY: `MissingAxis` indicates a template-authoring bug — a
+        // per-axis port references an axis the template did not declare.
+        // Documented in the `# Panics` section above.
+        self.try_build(counts)
+            .unwrap_or_else(|e| panic!("{}", e))
     }
 
     /// Single-axis convenience: build with `channels = n` and no other axes.
+    ///
+    /// # Panics
+    ///
     /// Panics if the template declares any axis other than
-    /// [`AxisId::CHANNELS`].
+    /// [`AxisId::CHANNELS`]. This is a template-authoring precondition;
+    /// templates with multiple axes must be built via [`build`](Self::build).
     pub fn build_channels(&self, channels: u32) -> ModuleDescriptor {
         for axis in self.axes {
             assert!(
@@ -234,6 +261,26 @@ impl ModuleDescriptorTemplate {
         self.build(&[(AxisId::CHANNELS, channels)])
     }
 }
+
+/// A per-axis port or parameter referenced an axis for which no count was
+/// supplied to [`ModuleDescriptorTemplate::try_build`].
+#[derive(Debug, Clone, Copy)]
+pub struct MissingAxis {
+    pub template: &'static str,
+    pub axis: AxisId,
+}
+
+impl std::fmt::Display for MissingAxis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ModuleDescriptorTemplate {:?}: missing count for axis {:?}",
+            self.template, self.axis
+        )
+    }
+}
+
+impl std::error::Error for MissingAxis {}
 
 #[cfg(test)]
 mod tests {

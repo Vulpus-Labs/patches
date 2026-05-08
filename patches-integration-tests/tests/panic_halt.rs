@@ -99,6 +99,7 @@ fn empty_param_state(name: &'static str) -> ParamState {
         },
         &ParameterMap::new(),
     )
+    .unwrap()
 }
 
 /// Build a plan that installs `module` at pool slot 0 as the single active module.

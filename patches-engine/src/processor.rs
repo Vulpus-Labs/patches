@@ -917,6 +917,7 @@ mod monitor_tests {
             },
             &ParameterMap::new(),
         )
+        .unwrap()
     }
 
     #[test]
