@@ -142,7 +142,7 @@ pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::QName;
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
 pub use tracker::Step as TrackerStep;
-pub use modules::{describe_for, validate_and_pack, validate_parameters, Module, PortConnectivity};
+pub use modules::{describe_for, validate_and_pack, validate_parameters, Module, PortConnectivity, ValidatedParamFrame};
 pub use modules::{ModuleDescriptor, ModuleShape, ParameterDescriptor, ParameterKind, ParameterRef, PortDescriptor, PortRef};
 pub use modules::{AxisId, CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 pub use modules::{ParameterKey, ParameterMap, ParameterValue};

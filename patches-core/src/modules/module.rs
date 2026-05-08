@@ -8,7 +8,7 @@ use super::module_descriptor::{ModuleDescriptor, ModuleShape, ParameterKind};
 use super::parameter_map::{ParameterMap, ParameterValue};
 use super::structural_params::StructuralParams;
 use crate::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
-use crate::param_layout::{compute_layout, defaults_from_descriptor};
+use crate::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};
 
 /// Validate `params` against `descriptor`.
 ///
@@ -136,6 +136,58 @@ pub fn validate_and_pack(
         origin: None,
     })?;
     Ok(frame)
+}
+
+/// A validated, packed realtime [`ParamFrame`] together with the
+/// [`ParamLayout`] and [`ParamViewIndex`] needed to read it back as a
+/// [`ParamView`].
+///
+/// Bundles the six-step setup (validate, pack, layout, view-index, view,
+/// update) used in module construction and FFI plugin prepare so callers
+/// can collapse it to two lines:
+///
+/// ```ignore
+/// let validated = ValidatedParamFrame::new(&descriptor, &filled)?;
+/// module.update_validated_parameters(&validated.view());
+/// ```
+///
+/// Owns its three pieces so the `ParamView` borrow it hands out lives as
+/// long as the bundle. Intended for control-thread use; the audio thread
+/// reads only the [`ParamView`].
+pub struct ValidatedParamFrame {
+    frame: ParamFrame,
+    layout: ParamLayout,
+    index: ParamViewIndex,
+}
+
+impl ValidatedParamFrame {
+    /// Validate `params` against `descriptor`, pack into a fresh frame,
+    /// and precompute the layout and view index.
+    pub fn new(
+        descriptor: &ModuleDescriptor,
+        params: &ParameterMap,
+    ) -> Result<Self, BuildError> {
+        let frame = validate_and_pack(descriptor, params)?;
+        let layout = compute_layout(descriptor);
+        let index = ParamViewIndex::from_layout(&layout);
+        Ok(Self { frame, layout, index })
+    }
+
+    /// Borrow as a [`ParamView`] suitable for
+    /// [`Module::update_validated_parameters`].
+    pub fn view(&self) -> ParamView<'_> {
+        ParamView::new(&self.index, &self.frame)
+    }
+
+    /// Borrow the underlying [`ParamFrame`].
+    pub fn frame(&self) -> &ParamFrame {
+        &self.frame
+    }
+
+    /// Borrow the underlying [`ParamLayout`].
+    pub fn layout(&self) -> &ParamLayout {
+        &self.layout
+    }
 }
 
 /// Describes which input and output ports of a module are connected in the current patch.
@@ -290,12 +342,9 @@ pub trait Module: Send {
             params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
 
-        let frame = validate_and_pack(instance.descriptor(), &packable)?;
+        let validated = ValidatedParamFrame::new(instance.descriptor(), &packable)?;
         instance.apply_unpacked_params(&unpacked)?;
-        let layout = compute_layout(instance.descriptor());
-        let index = ParamViewIndex::from_layout(&layout);
-        let view = ParamView::new(&index, &frame);
-        instance.update_validated_parameters(&view);
+        instance.update_validated_parameters(&validated.view());
         Ok(instance)
     }
 

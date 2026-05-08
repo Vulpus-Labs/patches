@@ -20,9 +20,9 @@ use patches_core::modules::{
     InstanceId, ModuleDescriptor, ModuleDescriptorTemplate, ModuleShape, ParameterMap,
     StructuralParams,
 };
-use patches_core::param_frame::{ParamView, ParamViewIndex};
+use patches_core::param_frame::ParamView;
 use patches_core::param_layout::{compute_layout, ParamLayout};
-use patches_core::{AudioEnvironment, Module};
+use patches_core::{AudioEnvironment, Module, ValidatedParamFrame};
 use patches_ffi_common::abi::{Handle, HostEnv};
 use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
 use patches_registry::ModuleBuilder;
@@ -306,11 +306,8 @@ impl ModuleBuilder for DylibModuleBuilder {
             &patches_core::parameter_map::ParameterMap::declared_defaults(&module.descriptor),
             params.iter().map(|(n, i, v)| (n.to_string(), i, v.clone())),
         );
-        let frame = patches_core::validate_and_pack(&module.descriptor, &filled)?;
-        let layout = compute_layout(&module.descriptor);
-        let index = ParamViewIndex::from_layout(&layout);
-        let view = ParamView::new(&index, &frame);
-        module.update_validated_parameters(&view);
+        let validated = ValidatedParamFrame::new(&module.descriptor, &filled)?;
+        module.update_validated_parameters(&validated.view());
 
         Ok(Box::new(module))
     }
