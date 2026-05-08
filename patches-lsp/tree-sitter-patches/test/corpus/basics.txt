@@ -20,21 +20,45 @@ patch {
         (param_block
           (param_entry
             (ident)
-            (value (scalar (float_unit)))))))
+            (value
+              (scalar
+                (float_unit)))))))
     (statement
       (module_decl
         name: (ident)
         type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (forward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
 
 ================================================================================
 Module with shape arguments
@@ -52,10 +76,11 @@ patch {
       (module_decl
         name: (ident)
         type: (ident)
-        (shape_block
-          (shape_arg
-            name: (ident)
-            (scalar (int_lit))))))))
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))))))
 
 ================================================================================
 Module with shape alias list
@@ -73,10 +98,12 @@ patch {
       (module_decl
         name: (ident)
         type: (ident)
-        (shape_block
-          (shape_arg
-            name: (ident)
-            (alias_list (ident) (ident))))))))
+        (call_block
+          (call_arg
+            (bare_arg
+              (alias_list
+                (ident)
+                (ident)))))))))
 
 ================================================================================
 Module with param block
@@ -97,10 +124,14 @@ patch {
         (param_block
           (param_entry
             (ident)
-            (value (scalar (float_lit))))
+            (value
+              (scalar
+                (float_lit))))
           (param_entry
             (ident)
-            (value (scalar (float_lit)))))))))
+            (value
+              (scalar
+                (float_lit)))))))))
 
 ================================================================================
 Scaled forward connection
@@ -117,14 +148,32 @@ patch {
 (file
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (forward_arrow (scale_val (scale_num))))
-        (port_ref (module_ident (ident)) (port_label (ident)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow
+            (scale_val
+              (scale_endpoint
+                (scale_num)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
 
 ================================================================================
 Scaled backward connection
@@ -141,14 +190,32 @@ patch {
 (file
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow (scale_val (scale_num))))
-        (port_ref (module_ident (ident)) (port_label (ident)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow
+            (scale_val
+              (scale_endpoint
+                (scale_num)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
 
 ================================================================================
 Negative scale (phase inversion)
@@ -165,19 +232,39 @@ patch {
 (file
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
-      (module_decl name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))))
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))))
     (statement
       (connection
-        (port_ref
-          (module_ident (ident))
-          (port_label (ident))
-          (port_index (nat)))
-        (arrow (backward_arrow (scale_val (scale_num))))
-        (port_ref (module_ident (ident)) (port_label (ident)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (nat))))
+        (arrow
+          (backward_arrow
+            (scale_val
+              (scale_endpoint
+                (scale_num)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
 
 ================================================================================
 Indexed port references (literal)
@@ -195,21 +282,54 @@ patch {
 (file
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))))
+      (module_decl
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (forward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (nat))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (forward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (nat))))))))
 
 ================================================================================
 Comments
@@ -228,4 +348,6 @@ patch {
   (patch
     (comment)
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))

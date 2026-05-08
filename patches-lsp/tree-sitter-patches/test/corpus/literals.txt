@@ -16,29 +16,54 @@ patch {
   (patch
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (float_unit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (float_unit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (float_unit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (float_unit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (float_unit)))))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit)))))))))
 
 ================================================================================
 Note literals
@@ -56,19 +81,34 @@ patch {
   (patch
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (note_lit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (note_lit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (note_lit)))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (note_lit)))))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_entry (ident) (value (scalar (note_lit)))))))))
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (note_lit)))))))))
 
 ================================================================================
 At-blocks
@@ -87,23 +127,45 @@ patch {
   (patch
     (statement
       (module_decl
-        name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident)
-            (alias_list (ident) (ident))))
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (alias_list
+                (ident)
+                (ident)))))
         (param_block
           (param_entry
             (at_block
-              (at_block_index (ident))
+              (at_block_index
+                (ident))
               (at_block_body
-                (at_block_entry (ident) (value (scalar (int_lit))))
-                (at_block_entry (ident) (value (scalar (float_lit)))))))
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (int_lit))))
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (float_lit)))))))
           (param_entry
             (at_block
-              (at_block_index (ident))
+              (at_block_index
+                (ident))
               (at_block_body
-                (at_block_entry (ident) (value (scalar (int_lit))))
-                (at_block_entry (ident) (value (scalar (float_lit))))))))))))
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (int_lit))))
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (float_lit))))))))))))
 
 ================================================================================
 Param references
@@ -128,30 +190,66 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (type_name) (scalar (float_lit))))
+      (param_decl
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit))))
     (port_decls
-      (in_decl (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
           (param_entry
             (ident)
-            (value (scalar (param_ref (param_ref_ident))))))))
+            (value
+              (scalar
+                (param_ref
+                  (param_ref_ident))))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))
 
 ================================================================================
 Scaled arrow with param ref
@@ -176,28 +274,70 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (type_name) (scalar (float_lit))))
+      (param_decl
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit))))
     (port_decls
-      (in_decl (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))))
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)) (port_index (nat)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (nat))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow (scale_val (param_ref (param_ref_ident)))))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow
+            (scale_val
+              (scale_endpoint
+                (param_ref
+                  (param_ref_ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))
 
 ================================================================================
 Shorthand param refs in param block
@@ -222,29 +362,65 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (ident) (type_name) (scalar (float_lit))))
+      (param_decl
+        (ident)
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit))))
     (port_decls
-      (in_decl (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
       (module_decl
-        name: (ident) type: (ident)
+        name: (ident)
+        type: (ident)
         (param_block
-          (param_ref (param_ref_ident))
-          (param_ref (param_ref_ident)))))
+          (param_ref
+            (param_ref_ident))
+          (param_ref
+            (param_ref_ident)))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))
 
 ================================================================================
 Indexed param entries
@@ -260,13 +436,25 @@ patch {
   (patch
     (statement
       (module_decl
-        name: (ident) type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))
         (param_block
           (param_entry
-            (ident) (param_index (nat))
-            (value (scalar (float_lit))))
+            (ident)
+            (param_index
+              (nat))
+            (value
+              (scalar
+                (float_lit))))
           (param_entry
-            (ident) (param_index (nat))
-            (value (scalar (float_lit)))))))))
+            (ident)
+            (param_index
+              (nat))
+            (value
+              (scalar
+                (float_lit)))))))))

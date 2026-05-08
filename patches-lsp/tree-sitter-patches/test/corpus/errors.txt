@@ -41,15 +41,21 @@ patch {
         type: (ident)))
     (statement
       (connection
-        (port_ref
-          (module_ident (ident))
-          (port_label (ident)))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
         (arrow
           (forward_arrow
             (MISSING "->")))
-        (port_ref
-          (module_ident (ident))
-          (port_label (ident)))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
 
 ================================================================================
 Error recovery: incomplete module declaration
@@ -63,11 +69,11 @@ patch {
 --------------------------------------------------------------------------------
 
 (file
-  (patch
+  (ERROR
     (statement
       (module_decl
         name: (ident)
         type: (ident)))
-    (ERROR
-      (module_ident (ident))
-      (module_ident (ident)))))
+    (module_ident
+      (ident))
+    (ident)))

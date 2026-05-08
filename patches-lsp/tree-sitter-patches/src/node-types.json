@@ -145,6 +145,29 @@
     "fields": {}
   },
   {
+    "type": "cable_endpoint",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "host_control_ref",
+          "named": true
+        },
+        {
+          "type": "port_ref",
+          "named": true
+        },
+        {
+          "type": "tap_target",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "call_arg",
     "named": true,
     "fields": {},
@@ -199,10 +222,44 @@
     },
     "children": {
       "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "channel_row_cont",
+          "named": true
+        },
+        {
+          "type": "step_or_generator",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "channel_row_cont",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "step_or_generator",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "comma_port_decls",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
       "required": true,
       "types": [
         {
-          "type": "step",
+          "type": "port_group_decl",
           "named": true
         }
       ]
@@ -221,15 +278,7 @@
           "named": true
         },
         {
-          "type": "host_control_ref",
-          "named": true
-        },
-        {
-          "type": "port_ref",
-          "named": true
-        },
-        {
-          "type": "tap_target",
+          "type": "cable_endpoint",
           "named": true
         }
       ]
@@ -392,11 +441,11 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
-          "type": "port_group_decl",
+          "type": "comma_port_decls",
           "named": true
         }
       ]
@@ -549,11 +598,11 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
-          "type": "port_group_decl",
+          "type": "comma_port_decls",
           "named": true
         }
       ]
@@ -1139,6 +1188,33 @@
     }
   },
   {
+    "type": "slide_endpoint",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "step_float",
+          "named": true
+        },
+        {
+          "type": "step_int",
+          "named": true
+        },
+        {
+          "type": "step_note",
+          "named": true
+        },
+        {
+          "type": "step_unit",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "slide_generator",
     "named": true,
     "fields": {},
@@ -1147,7 +1223,11 @@
       "required": true,
       "types": [
         {
-          "type": "step_value",
+          "type": "nat",
+          "named": true
+        },
+        {
+          "type": "slide_endpoint",
           "named": true
         }
       ]
@@ -1284,14 +1364,6 @@
       "required": true,
       "types": [
         {
-          "type": "slide_generator",
-          "named": true
-        },
-        {
-          "type": "step_active",
-          "named": true
-        },
-        {
           "type": "step_rest",
           "named": true
         },
@@ -1300,34 +1372,7 @@
           "named": true
         },
         {
-          "type": "step_trigger",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "step_active",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "step_cv2",
-          "named": true
-        },
-        {
-          "type": "step_repeat",
-          "named": true
-        },
-        {
-          "type": "step_slide_target",
-          "named": true
-        },
-        {
-          "type": "step_value",
+          "type": "step_valued",
           "named": true
         }
       ]
@@ -1342,11 +1387,38 @@
       "required": true,
       "types": [
         {
+          "type": "step_float",
+          "named": true
+        },
+        {
+          "type": "step_int",
+          "named": true
+        },
+        {
           "type": "step_slide_target",
           "named": true
         },
         {
-          "type": "step_value",
+          "type": "step_unit",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "step_or_generator",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "slide_generator",
+          "named": true
+        },
+        {
+          "type": "step",
           "named": true
         }
       ]
@@ -1376,33 +1448,26 @@
       "required": true,
       "types": [
         {
-          "type": "step_value",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "step_trigger",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "step_cv2",
+          "type": "step_float",
           "named": true
         },
         {
-          "type": "step_repeat",
+          "type": "step_int",
+          "named": true
+        },
+        {
+          "type": "step_note",
+          "named": true
+        },
+        {
+          "type": "step_unit",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "tap_components",
+    "type": "step_valued",
     "named": true,
     "fields": {},
     "children": {
@@ -1410,14 +1475,42 @@
       "required": true,
       "types": [
         {
-          "type": "tap_type",
+          "type": "step_cv2",
+          "named": true
+        },
+        {
+          "type": "step_float",
+          "named": true
+        },
+        {
+          "type": "step_int",
+          "named": true
+        },
+        {
+          "type": "step_note",
+          "named": true
+        },
+        {
+          "type": "step_repeat",
+          "named": true
+        },
+        {
+          "type": "step_slide_target",
+          "named": true
+        },
+        {
+          "type": "step_trigger",
+          "named": true
+        },
+        {
+          "type": "step_unit",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "tap_name",
+    "type": "tap_component",
     "named": true,
     "fields": {},
     "children": {
@@ -1432,6 +1525,21 @@
     }
   },
   {
+    "type": "tap_components",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "tap_component",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "tap_target",
     "named": true,
     "fields": {},
@@ -1440,20 +1548,15 @@
       "required": true,
       "types": [
         {
-          "type": "tap_components",
+          "type": "ident",
           "named": true
         },
         {
-          "type": "tap_name",
+          "type": "tap_components",
           "named": true
         }
       ]
     }
-  },
-  {
-    "type": "tap_type",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "template",
@@ -1631,16 +1734,8 @@
     "named": true
   },
   {
-    "type": "gate_led",
-    "named": false
-  },
-  {
     "type": "ident",
     "named": true
-  },
-  {
-    "type": "in",
-    "named": false
   },
   {
     "type": "include",
@@ -1663,10 +1758,6 @@
     "named": true
   },
   {
-    "type": "meter",
-    "named": false
-  },
-  {
     "type": "module",
     "named": false
   },
@@ -1677,14 +1768,6 @@
   {
     "type": "note_lit",
     "named": true
-  },
-  {
-    "type": "osc",
-    "named": false
-  },
-  {
-    "type": "out",
-    "named": false
   },
   {
     "type": "param_ref_ident",
@@ -1723,8 +1806,16 @@
     "named": false
   },
   {
-    "type": "spectrum",
-    "named": false
+    "type": "step_float",
+    "named": true
+  },
+  {
+    "type": "step_int",
+    "named": true
+  },
+  {
+    "type": "step_note",
+    "named": true
   },
   {
     "type": "step_rest",
@@ -1735,12 +1826,12 @@
     "named": true
   },
   {
-    "type": "step_value",
+    "type": "step_trigger",
     "named": true
   },
   {
-    "type": "stereo_meter",
-    "named": false
+    "type": "step_unit",
+    "named": true
   },
   {
     "type": "str",
@@ -1763,19 +1854,11 @@
     "named": false
   },
   {
-    "type": "trigger_led",
-    "named": false
-  },
-  {
     "type": "true",
     "named": false
   },
   {
     "type": "uni",
-    "named": false
-  },
-  {
-    "type": "x",
     "named": false
   },
   {

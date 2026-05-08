@@ -24,33 +24,86 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (type_name) (scalar (float_lit)))
-      (param_decl (ident) (type_name) (scalar (float_lit))))
+      (param_decl
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit)))
+      (param_decl
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit))))
     (port_decls
-      (in_decl (port_group_decl (ident)) (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (forward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))
 
 ================================================================================
 Nested templates
@@ -85,41 +138,99 @@ patch {
     name: (ident)
     (param_decls)
     (port_decls
-      (in_decl (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (template
     name: (ident)
     (param_decls)
     (port_decls
-      (in_decl (port_group_decl (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
-      (module_decl name: (ident) type: (ident)))
+      (module_decl
+        name: (ident)
+        type: (ident)))
     (statement
       (connection
-        (port_ref (module_ident (ident)) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident) (port_label (ident)))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))
 
 ================================================================================
 Template with arity port declarations
@@ -144,39 +255,74 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (type_name)))
+      (param_decl
+        (ident)
+        (type_name)))
     (port_decls
-      (in_decl (port_group_decl (ident) (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
       (module_decl
         name: (ident)
         type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (param_ref (param_ref_ident)))))))
+        (call_block
+          (call_arg
+            (shorthand_arg
+              (param_ref
+                (param_ref_ident)))))))
     (statement
       (connection
-        (port_ref
-          (module_ident (ident))
-          (port_label (ident))
-          (port_index (port_index_arity (ident))))
-        (arrow (backward_arrow))
-        (port_ref
-          (module_ident)
-          (port_label (ident))
-          (port_index (port_index_arity (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (port_index_arity
+                (ident)))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))
+            (port_index
+              (port_index_arity
+                (ident)))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (patch
     (statement
       (module_decl
         name: (ident)
         type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (int_lit))))))))
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))))))
 
 ================================================================================
 Template with group param declaration
@@ -200,21 +346,48 @@ patch {
   (template
     name: (ident)
     (param_decls
-      (param_decl (ident) (ident) (type_name) (scalar (float_lit))))
+      (param_decl
+        (ident)
+        (ident)
+        (type_name)
+        (scalar
+          (float_lit))))
     (port_decls
-      (in_decl (port_group_decl (ident) (ident)))
-      (out_decl (port_group_decl (ident))))
+      (in_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)
+            (ident))))
+      (out_decl
+        (comma_port_decls
+          (port_group_decl
+            (ident)))))
     (statement
       (module_decl
         name: (ident)
         type: (ident)
-        (shape_block
-          (shape_arg name: (ident) (scalar (param_ref (param_ref_ident)))))))
+        (call_block
+          (call_arg
+            (shorthand_arg
+              (param_ref
+                (param_ref_ident)))))))
     (statement
       (connection
-        (port_ref (module_ident) (port_label (ident)))
-        (arrow (backward_arrow))
-        (port_ref (module_ident (ident)) (port_label (ident))))))
+        (cable_endpoint
+          (port_ref
+            (module_ident)
+            (port_label
+              (ident))))
+        (arrow
+          (backward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident)))))))
   (patch
     (statement
-      (module_decl name: (ident) type: (ident)))))
+      (module_decl
+        name: (ident)
+        type: (ident)))))

@@ -39,6 +39,12 @@ module.exports = grammar({
 
     // ─── Unit-suffixed numeric literals ─────────────────────────────────
     // khz/hz/db, plus `c` (cents, N/1200) and `s` (semis, N/12).
+    // Note: pest carries a trailing `!(ASCII_ALPHANUMERIC | "_")` boundary
+    // so e.g. `1.0sin` backtracks past the unit (yielding `1.0` + `sin`).
+    // Tree-sitter's regex engine does not support `\b`, so we rely on the
+    // lexer's longest-match rule instead. The accepted language is identical
+    // in delimited contexts; pure-concatenation cases like `1.0sin` produce
+    // a parse error in both grammars (only the localization differs).
     float_unit: (_) =>
       token(
         seq(
@@ -54,7 +60,10 @@ module.exports = grammar({
       token(prec(1, seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/))),
 
     // ─── Parameter references ───────────────────────────────────────────
-    param_ref_ident: (_) => /[a-zA-Z_][a-zA-Z0-9_/.-]*/,
+    // Allow "/" so group-param indexed keys like <level/0> are valid. Mirrors
+    // the pest `param_ref_ident` charset; `.` is NOT permitted (canonical
+    // pest grammar excludes it).
+    param_ref_ident: (_) => /[a-zA-Z_][a-zA-Z0-9_/-]*/,
     param_ref: ($) => seq("<", $.param_ref_ident, ">"),
 
     // ─── Value hierarchy ────────────────────────────────────────────────
@@ -160,21 +169,15 @@ module.exports = grammar({
 
     // ─── Tap targets (ADR 0054) ─────────────────────────────────────────
     // Cable RHS form: `~taptype(name, k: v, ...)` and compound
-    // `~a+b+c(name, ...)`. The component set is closed; non-listed
-    // components produce an ERROR node localised to the tap target.
-    tap_type: (_) =>
-      choice(
-        "meter",
-        "stereo_meter",
-        "osc",
-        "spectrum",
-        "gate_led",
-        "trigger_led",
-      ),
-    tap_components: ($) => seq($.tap_type, repeat(seq("+", $.tap_type))),
-    tap_name: ($) => $.ident,
+    // `~a+b+c(name, ...)`. The canonical pest grammar leaves the component
+    // set OPEN (any ident); validation enforces the closed set at parse-
+    // adjacent stage (ticket 0711) so unknown components surface a
+    // structural diagnostic with a "did you mean" hint rather than a raw
+    // parse error.
+    tap_component: ($) => $.ident,
+    tap_components: ($) => seq($.tap_component, repeat(seq("+", $.tap_component))),
     tap_target: ($) =>
-      seq("~", $.tap_components, "(", $.tap_name, ")"),
+      seq("~", $.tap_components, "(", $.ident, ")"),
 
     // ─── Host controls (ADR 0057) ───────────────────────────────────────
     // Top-level declarations of DAW-facing parameters. Desugared to a
@@ -197,18 +200,18 @@ module.exports = grammar({
     host_control_ref: ($) => prec(-1, $.ident),
 
     // ─── Connections ────────────────────────────────────────────────────
-    // _cable_endpoint is a hidden alias (leading underscore) so the
-    // existing port_ref-under-connection tree shape is preserved when no
-    // tap target is involved. With a tap target on either side, the
-    // tap_target node appears directly under connection.
-    _cable_endpoint: ($) => choice($.tap_target, $.port_ref, $.host_control_ref),
+    // Mirror pest: `cable_endpoint` is a visible wrapper. tap_target first
+    // so the leading `~` disambiguates from a bare ident; port_ref before
+    // host_control_ref so `mod.port` parses as a port reference.
+    cable_endpoint: ($) =>
+      choice($.tap_target, $.port_ref, $.host_control_ref),
     connection: ($) =>
       seq(
-        $._cable_endpoint,
-        repeat(seq(",", $._cable_endpoint)),
+        $.cable_endpoint,
+        repeat(seq(",", $.cable_endpoint)),
         $.arrow,
-        $._cable_endpoint,
-        repeat(seq(",", $._cable_endpoint))
+        $.cable_endpoint,
+        repeat(seq(",", $.cable_endpoint))
       ),
 
     // ─── Statements ─────────────────────────────────────────────────────
@@ -219,10 +222,18 @@ module.exports = grammar({
     port_group_decl: ($) =>
       seq($.ident, optional(seq("[", $.ident, "]"))),
 
-    in_decl: ($) =>
-      seq("in", ":", $.port_group_decl, repeat(seq(",", $.port_group_decl))),
-    out_decl: ($) =>
-      seq("out", ":", $.port_group_decl, repeat(seq(",", $.port_group_decl))),
+    // Pest exposes `comma_port_decls` as a wrapper rule and tightens the
+    // keyword/colon adjacency (`"in:"` is a single literal). Mirror that.
+    // `prec.right` resolves the LR conflict on the trailing optional comma
+    // by preferring to continue the list when followed by another decl.
+    comma_port_decls: ($) =>
+      prec.right(seq(
+        $.port_group_decl,
+        repeat(seq(",", $.port_group_decl)),
+        optional(","),
+      )),
+    in_decl: ($) => seq(token(seq("in", ":")), $.comma_port_decls),
+    out_decl: ($) => seq(token(seq("out", ":")), $.comma_port_decls),
     port_decls: ($) => seq(optional($.in_decl), $.out_decl),
 
     // ─── Template parameter declarations ────────────────────────────────
@@ -265,64 +276,68 @@ module.exports = grammar({
         "}"
       ),
 
+    // Pest exposes channel_row_cont as a wrapper for "| step …" continuations
+    // and uses zero-or-more cardinality for steps. Mirror that here.
+    channel_row_cont: ($) => seq("|", repeat($.step_or_generator)),
     channel_row: ($) =>
       seq(
         field("label", $.ident),
         ":",
-        repeat1($.step),
-        repeat(seq("|", repeat1($.step)))
+        repeat($.step_or_generator),
+        repeat($.channel_row_cont)
       ),
 
     // ─── Step notation ──────────────────────────────────────────────────
-    step_cv2: ($) => seq(":", $.step_value, optional($.step_slide_target)),
+    // Pest decomposes step values into typed sub-rules so the AST sees
+    // unit/note/float/int distinctly. Mirror that structure. Tree-sitter
+    // regex has no `\b` so we rely on longest-match; in pattern row
+    // contexts steps are whitespace-separated by `extras`, matching pest's
+    // implicit-WHITESPACE behaviour.
+    step_note: (_) =>
+      token(prec(2, seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/))),
+    step_trigger: (_) => token(prec(3, "x")),
+    step_rest: (_) => token(prec(3, ".")),
+    step_tie: (_) => token(prec(3, "~")),
+    step_float: (_) =>
+      token(prec(2, seq(optional("-"), /\d+/, ".", /\d*/))),
+    step_int: (_) =>
+      token(prec(1, seq(optional("-"), /\d+/))),
+    step_unit: (_) =>
+      token(prec(2, seq(
+        optional("-"),
+        /\d+/,
+        optional(seq(".", /\d*/)),
+        /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/,
+      ))),
 
-    step_slide_target: ($) => seq(">", $.step_value),
+    // Slide target for cv1: ">value".
+    step_slide_target: ($) =>
+      seq(">", choice($.step_unit, $.step_note, $.step_float, $.step_int)),
+
+    // cv2 part: ":value" with optional slide ">value".
+    step_cv2: ($) =>
+      seq(":", choice($.step_unit, $.step_float, $.step_int), optional($.step_slide_target)),
 
     step_repeat: ($) => seq("*", $.nat),
 
-    step_value: (_) =>
-      token(
-        prec(2, choice(
-          // float with optional unit
-          seq(optional("-"), /\d+/, ".", /\d*/, optional(/[kK]?[hH][zZ]|[dD][bB]|[cCsS]/)),
-          // integer with optional unit
-          seq(optional("-"), /\d+/, /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/),
-          // plain integer
-          seq(optional("-"), /\d+/),
-          // note literal
-          seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/)
-        ))
-      ),
-
-    step: ($) =>
-      choice(
-        $.step_rest,
-        $.step_tie,
-        $.step_trigger,
-        $.slide_generator,
-        $.step_active
-      ),
-
-    step_rest: (_) => token(prec(3, ".")),
-    step_tie: (_) => token(prec(3, "~")),
-    step_trigger: ($) =>
-      prec(2, seq(
-        token(prec(3, "x")),
-        optional($.step_cv2),
-        optional($.step_repeat)
-      )),
-
-    step_active: ($) =>
-      prec(1, seq(
-        $.step_value,
+    // A full valued step: cv1 (with optional slide) + optional cv2 + optional repeat.
+    step_valued: ($) =>
+      seq(
+        choice($.step_unit, $.step_note, $.step_trigger, $.step_float, $.step_int),
         optional($.step_slide_target),
         optional($.step_cv2),
-        optional($.step_repeat)
-      )),
+        optional($.step_repeat),
+      ),
 
-    // slide(count, start, end)
+    step: ($) => choice($.step_rest, $.step_tie, $.step_valued),
+
+    // Pest wraps slide_generator alongside step under step_or_generator.
+    step_or_generator: ($) => choice($.slide_generator, $.step),
+
+    // slide(count, start, end) — endpoints may be unit/note/float/int.
+    slide_endpoint: ($) => choice($.step_unit, $.step_note, $.step_float, $.step_int),
     slide_generator: ($) =>
-      seq("slide", "(", $.step_value, ",", $.step_value, ",", $.step_value, ")"),
+      seq("slide", "(", $.nat, ",", $.slide_endpoint, ",", $.slide_endpoint, ")"),
 
     // ─── Song block (ADR 0035) ───────────────────────────────────────────
     // song name(lane, ...) { section | pattern | play | @loop ... }
@@ -374,6 +389,11 @@ module.exports = grammar({
 
     play_atom: ($) => choice(seq("(", $.play_expr, ")"), $.ident),
 
+    // Pest enforces a trailing word boundary (`!alphanum`); tree-sitter's
+    // regex has no `\b`, so we rely on lexer longest-match. Accepted
+    // language is identical: in valid input `@loop` is always followed by
+    // structural punctuation; in invalid input like `@loopy` both
+    // grammars reject (only error localization differs).
     loop_marker: (_) => token(seq("@", "loop")),
 
     // ─── Patch ──────────────────────────────────────────────────────────

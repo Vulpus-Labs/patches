@@ -51,7 +51,7 @@ pub(crate) fn compute_hover(
             try_hover_module_name(node, source, model, line_index)
         }
         crate::tree_nav::CursorContext::TapType { node } => {
-            tap::hover_for_tap_type(node, source, line_index)
+            tap::hover_for_tap_component(node, source, line_index)
         }
         crate::tree_nav::CursorContext::TapName { node } => {
             tap::hover_for_tap_name(node, source, line_index)

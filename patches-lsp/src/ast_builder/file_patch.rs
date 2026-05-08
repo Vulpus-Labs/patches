@@ -91,7 +91,16 @@ pub(super) fn build_statements(node: tree_sitter::Node, source: &str, diags: &mu
 fn build_connections(node: tree_sitter::Node, source: &str, diags: &mut Vec<Diagnostic>) -> Vec<Connection> {
     walk_errors(node, diags);
 
-    let port_refs = named_children_of_kind(node, "port_ref");
+    // The grammar wraps each endpoint in a `cable_endpoint` node (parity
+    // with the canonical pest grammar). Descend through it to find the
+    // inner `port_ref`. Endpoints that are `tap_target` or
+    // `host_control_ref` are silently skipped here — the LSP's connection
+    // model only carries port references; richer endpoints are handled
+    // by other passes.
+    let port_refs: Vec<tree_sitter::Node> = named_children_of_kind(node, "cable_endpoint")
+        .into_iter()
+        .filter_map(|ce| first_named_child_of_kind(ce, "port_ref"))
+        .collect();
     let lhs = port_refs.first().map(|n| build_port_ref(*n, source, diags));
     let arrow = first_named_child_of_kind(node, "arrow")
         .map(|n| build_arrow(n, source, diags));
@@ -220,12 +229,16 @@ fn build_arrow(node: tree_sitter::Node, source: &str, diags: &mut Vec<Diagnostic
 fn build_scale_val(node: tree_sitter::Node, source: &str, diags: &mut Vec<Diagnostic>) -> Option<Scalar> {
     walk_errors(node, diags);
 
-    if let Some(pr) = first_named_child_of_kind(node, "param_ref") {
+    // scale_val wraps either a scale_range or a scale_endpoint; for the
+    // simple-scalar case we descend through scale_endpoint to find the
+    // inner literal (param_ref / float_unit / note_lit / scale_num).
+    let endpoint = first_named_child_of_kind(node, "scale_endpoint")?;
+    if let Some(pr) = first_named_child_of_kind(endpoint, "param_ref") {
         if let Some(pri) = first_named_child_of_kind(pr, "param_ref_ident") {
             return Some(Scalar::ParamRef(build_ident(pri, source)));
         }
     }
-    if let Some(sn) = first_named_child_of_kind(node, "scale_num") {
+    if let Some(sn) = first_named_child_of_kind(endpoint, "scale_num") {
         let text = node_text(sn, source);
         if let Ok(f) = text.parse::<f64>() {
             if text.contains('.') {
@@ -311,22 +324,24 @@ fn build_port_decls(
 ) -> (Vec<PortGroupDecl>, Vec<PortGroupDecl>) {
     walk_errors(node, diags);
 
-    let in_ports = first_named_child_of_kind(node, "in_decl")
-        .map(|ind| {
-            named_children_of_kind(ind, "port_group_decl")
-                .into_iter()
-                .map(|n| build_port_group_decl(n, source, diags))
-                .collect()
-        })
-        .unwrap_or_default();
+    // in_decl / out_decl wrap their port-group list in `comma_port_decls`
+    // (parity with pest). Descend through it to find each port_group_decl.
+    let collect_groups = |decl: tree_sitter::Node, diags: &mut Vec<Diagnostic>| -> Vec<PortGroupDecl> {
+        first_named_child_of_kind(decl, "comma_port_decls")
+            .map(|cpd| {
+                named_children_of_kind(cpd, "port_group_decl")
+                    .into_iter()
+                    .map(|n| build_port_group_decl(n, source, diags))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
 
+    let in_ports = first_named_child_of_kind(node, "in_decl")
+        .map(|ind| collect_groups(ind, diags))
+        .unwrap_or_default();
     let out_ports = first_named_child_of_kind(node, "out_decl")
-        .map(|outd| {
-            named_children_of_kind(outd, "port_group_decl")
-                .into_iter()
-                .map(|n| build_port_group_decl(n, source, diags))
-                .collect()
-        })
+        .map(|outd| collect_groups(outd, diags))
         .unwrap_or_default();
 
     (in_ports, out_ports)

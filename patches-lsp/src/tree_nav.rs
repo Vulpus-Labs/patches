@@ -273,19 +273,25 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
     None
 }
 
-/// Tap-target sub-tokens (`tap_type`, `tap_param_key`, `tap_name`).
+/// Tap-target sub-tokens.
 ///
 /// The cursor often lands on the inner `ident` rather than on the
-/// wrapper rule, so we accept either: walk up at most one parent to
-/// reach the wrapper.
+/// wrapper rule. Two cases:
+///   1. Inside `tap_components` → component name (`meter`, `osc`, ...).
+///   2. Direct child `ident` of `tap_target` → tap name (the identifier
+///      after the components, inside the parentheses).
+/// The canonical pest grammar does not introduce a `tap_name` wrapper
+/// rule — the tap name is a bare `ident` — so we identify it positionally.
 fn classify_tap_node(node: Node<'_>) -> Option<CursorContext<'_>> {
-    if node.kind() == "tap_type" {
+    if node.kind() == "tap_component" {
         return Some(CursorContext::TapType { node });
     }
     if let Some(parent) = node.parent() {
         match parent.kind() {
-            "tap_type" => return Some(CursorContext::TapType { node: parent }),
-            "tap_name" => return Some(CursorContext::TapName { node: parent }),
+            "tap_component" => return Some(CursorContext::TapType { node: parent }),
+            "tap_target" if node.kind() == "ident" => {
+                return Some(CursorContext::TapName { node });
+            }
             _ => {}
         }
     }

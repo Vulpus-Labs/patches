@@ -1,0 +1,65 @@
+=== ok tap component is open ident (post-fix)
+module osc : Osc
+osc.out -> ~meter(level)
+
+=== ok tap component compound
+module mix : Mix
+mix.out -> ~meter+spectrum+osc(out)
+
+=== ok tap component unknown kind is parse-ok (validated post-parse)
+# Pest leaves the component set open so the validator can suggest
+# alternatives; tree-sitter now matches that. The closed set was
+# previously hardcoded in tree-sitter, producing a parse-time ERROR.
+module osc : Osc
+osc.out -> ~bogus(name)
+
+=== pest_error param_ref_ident does not accept '.'
+# Pest's `param_ref_ident` charset is `[A-Za-z_][A-Za-z0-9_/-]*` — no `.`.
+# Tree-sitter previously accepted `.` in the regex; now matches pest.
+module osc : Osc { freq: <foo.bar> }
+
+=== ok param_ref_ident accepts '/' for indexed group params
+template t(level[size]: float = 1.0) {
+    in: trigger
+    out: audio
+    module a : Osc { freq: <level/0> }
+}
+patch {
+    module v : t(2)
+}
+
+=== ok scaled arrow with bi-range scale
+module a : Osc
+module b : Vca
+a.out -[bi(-1, 1)]-> b.cv
+
+=== ok scaled arrow with uni-range scale
+module a : Osc
+module b : Vca
+a.out -[uni(1Hz, 2000Hz)]-> b.cv
+
+=== ok step_value decomposed: unit / note / float / int in one row
+pattern p {
+    c1: 1.0Hz 2.0c C4 5
+}
+patch {
+    module o : Osc
+    module out : AudioOut
+}
+
+=== ok loop_marker
+song s(lane) {
+    section a {
+        x
+    }
+    play a
+    @loop
+}
+patch {
+    module out : AudioOut
+}
+
+=== ok cable_endpoint with host-control source
+knob cutoff { low: 500Hz, high: 2000Hz }
+module filt : Svf
+cutoff -> filt.cutoff

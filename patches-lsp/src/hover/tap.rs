@@ -30,12 +30,15 @@ fn node_range(node: Node<'_>, source: &str, line_starts: &[usize]) -> Range {
     Range::new(start, end)
 }
 
-/// Hover for a `tap_type` token (a component name like `meter`).
-pub(crate) fn hover_for_tap_type(
+/// Hover for a `tap_component` token (a component name like `meter`).
+pub(crate) fn hover_for_tap_component(
     node: Node<'_>,
     source: &str,
     line_starts: &[usize],
 ) -> Option<Hover> {
+    // The grammar models `tap_component` as a wrapper over `ident` so the
+    // cursor may be on either; resolve the underlying name from the
+    // wrapper's text in both cases.
     let name = node_text(node, source);
     let summary = summary_for(name);
     if summary.is_empty() {
@@ -101,7 +104,7 @@ fn collect_component_names(tap_target: Node<'_>, source: &str) -> Vec<String> {
         if child.kind() == "tap_components" {
             let mut cc = child.walk();
             for tc in child.children(&mut cc) {
-                if tc.kind() == "tap_type" {
+                if tc.kind() == "tap_component" {
                     out.push(node_text(tc, source).to_owned());
                 }
             }
@@ -111,13 +114,17 @@ fn collect_component_names(tap_target: Node<'_>, source: &str) -> Vec<String> {
 }
 
 fn upstream_cable_expression(tap_target: Node<'_>, source: &str) -> Option<String> {
-    let conn = ancestor_of_kind(tap_target, "connection")?;
+    // tap_target is wrapped in a cable_endpoint inside the connection.
+    // Walk up to the cable_endpoint, then look for a sibling cable_endpoint
+    // (the upstream) under the connection.
+    let cable_endpoint = ancestor_of_kind(tap_target, "cable_endpoint")?;
+    let conn = ancestor_of_kind(cable_endpoint, "connection")?;
     let mut cursor = conn.walk();
     for child in conn.children(&mut cursor) {
-        if child.id() == tap_target.id() {
+        if child.id() == cable_endpoint.id() {
             continue;
         }
-        if matches!(child.kind(), "port_ref" | "tap_target") {
+        if child.kind() == "cable_endpoint" {
             return Some(node_text(child, source).to_owned());
         }
     }
