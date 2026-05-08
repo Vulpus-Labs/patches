@@ -52,27 +52,29 @@ fn out_port(kind: HostControlKind) -> &'static str {
 
 /// Rewrite `file.patch.body` so every host-control declaration lowers
 /// into a synthesised instance and every bare-name reference is rewritten
-/// to a `PortRef` on the synth instance. Returns the new file.
+/// to a `PortRef` on the synth instance. Consumes `file`, mutating its
+/// body in place when host controls exist; returns it unchanged otherwise.
 ///
 /// If the patch contains no host-control declarations, returns the file
 /// unchanged (and rejects any stray bare-name reference).
 pub fn desugar_host_controls(
-    file: &File,
+    mut file: File,
 ) -> Result<(File, HostControlManifest), ExpandError> {
-    // 1. Collect declarations from the patch body.
-    let mut decls: Vec<&HostControlBlock> = file
+    // 1. Collect declarations from the patch body. Clone (cheap on the
+    //    declaration; rejected stmts disappear in step 4 either way).
+    let mut decls: Vec<HostControlBlock> = file
         .patch
         .body
         .iter()
         .filter_map(|s| match s {
-            Statement::HostControl(hc) => Some(hc),
+            Statement::HostControl(hc) => Some(hc.clone()),
             _ => None,
         })
         .collect();
 
     if decls.is_empty() {
-        reject_unresolved_refs(file, &HashMap::new())?;
-        return Ok((file.clone(), Vec::new()));
+        reject_unresolved_refs(&file, &HashMap::new())?;
+        return Ok((file, Vec::new()));
     }
 
     // 2. Sort alphabetically by control name (ADR 0057 §3). Slot offset
@@ -85,36 +87,28 @@ pub fn desugar_host_controls(
         .map(|hc| (hc.name.name.clone(), hc.kind))
         .collect();
 
-    reject_unresolved_refs(file, &lookup)?;
+    reject_unresolved_refs(&file, &lookup)?;
 
     // 4. Build new body: synth module first, then the original body
     //    minus consumed declarations and with bare-name refs rewritten.
-    let mut new_body: Vec<Statement> = Vec::new();
-    new_body.push(Statement::Module(synth_module(&decls)));
-    for stmt in &file.patch.body {
+    let original_body = std::mem::take(&mut file.patch.body);
+    let mut new_body: Vec<Statement> = Vec::with_capacity(original_body.len() + 1);
+    let decl_refs: Vec<&HostControlBlock> = decls.iter().collect();
+    new_body.push(Statement::Module(synth_module(&decl_refs)));
+    for stmt in original_body {
         match stmt {
             Statement::HostControl(_) => continue,
             Statement::Connection(c) => {
-                new_body.push(Statement::Connection(rewrite_connection(c, &lookup)));
+                new_body.push(Statement::Connection(rewrite_connection(&c, &lookup)));
             }
-            other => new_body.push(other.clone()),
+            other => new_body.push(other),
         }
     }
 
-    let manifest = build_manifest(&decls);
+    let manifest = build_manifest(&decl_refs);
 
-    Ok((
-        File {
-            includes: file.includes.clone(),
-            templates: file.templates.clone(),
-            patterns: file.patterns.clone(),
-            songs: file.songs.clone(),
-            sections: file.sections.clone(),
-            patch: Patch { body: new_body, span: file.patch.span },
-            span: file.span,
-        },
-        manifest,
-    ))
+    file.patch.body = new_body;
+    Ok((file, manifest))
 }
 
 /// Build a [`HostControlManifest`] from the (already alphabetically

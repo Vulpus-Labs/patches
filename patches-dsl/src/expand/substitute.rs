@@ -87,12 +87,15 @@ pub(in crate::expand) fn expand_param_entries_with_enum(
                                     param, param
                                 )))?;
                         let n = scalar_to_usize(n_scalar, span)?;
-                        let resolved = subst_value(value, param_env, span)?;
-                        for i in 0..n {
-                            result.push((
-                                format!("{}/{}", name.name, i),
-                                resolved.clone(),
-                            ));
+                        if n > 0 {
+                            let resolved = subst_value(value, param_env, span)?;
+                            for i in 0..n - 1 {
+                                result.push((
+                                    format!("{}/{}", name.name, i),
+                                    resolved.clone(),
+                                ));
+                            }
+                            result.push((format!("{}/{}", name.name, n - 1), resolved));
                         }
                     }
                     Some(ParamIndex::Name { name: alias, arity_marker: false }) => {

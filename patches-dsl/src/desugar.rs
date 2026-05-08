@@ -77,9 +77,10 @@ fn classify(tap: &TapTarget) -> Kind {
 /// Rewrite `file.patch.body` so every tap-endpoint cable lands on the
 /// synthetic `~tap` module instance, and return the observer manifest.
 ///
-/// If the patch contains no tap targets, returns the file unchanged
-/// (clone) and an empty manifest.
-pub fn desugar_taps(file: &File) -> (File, Manifest) {
+/// If the patch contains no tap targets, returns the file unchanged.
+/// Consumes `file` and returns it (mutated in place when there are taps)
+/// to avoid the per-pass field-by-field clone.
+pub fn desugar_taps(mut file: File) -> (File, Manifest) {
     // 1. Walk source in order, collecting every TapTarget occurrence.
     // Each `(kind, name)` deduplicates onto a single synthetic channel;
     // the first occurrence sets its slot. Multiple cables to the same
@@ -97,7 +98,7 @@ pub fn desugar_taps(file: &File) -> (File, Manifest) {
     }
 
     if occurrences.is_empty() {
-        return (file.clone(), Vec::new());
+        return (file, Vec::new());
     }
 
     // 2. Coalesce by `(kind, name)` preserving source order. Same-kind
@@ -227,16 +228,8 @@ pub fn desugar_taps(file: &File) -> (File, Manifest) {
         }
     }
 
-    let new_file = File {
-        includes: file.includes.clone(),
-        templates: file.templates.clone(),
-        patterns: file.patterns.clone(),
-        songs: file.songs.clone(),
-        sections: file.sections.clone(),
-        patch: Patch { body: new_body, span: file.patch.span },
-        span: file.span,
-    };
-    (new_file, manifest)
+    file.patch.body = new_body;
+    (file, manifest)
 }
 
 /// Build a synthetic `module ~tap : Tap(channels: [a, b, ...]) {

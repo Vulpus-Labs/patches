@@ -17,7 +17,7 @@ use patches_dsl::StructuralCode;
 
 fn rewritten(src: &str) -> patches_dsl::ast::File {
     let file = parse(src).expect("parse ok");
-    desugar_host_controls(&file).expect("desugar ok").0
+    desugar_host_controls(file.clone()).expect("desugar ok").0
 }
 
 fn find_module<'a>(
@@ -164,7 +164,7 @@ fn undeclared_bare_name_rejected() {
         not_declared -> flt.voct
     }"#;
     let file = parse(src).expect("parse ok");
-    let err = desugar_host_controls(&file).map(|_| ()).expect_err("desugar rejects");
+    let err = desugar_host_controls(file.clone()).map(|_| ()).expect_err("desugar rejects");
     assert_eq!(err.code, StructuralCode::HostControlUnknownRef);
 }
 
@@ -199,7 +199,7 @@ fn rename_only_preserves_alias_count() {
 
 fn manifest(src: &str) -> patches_dsl::host_control_manifest::HostControlManifest {
     let file = parse(src).expect("parse ok");
-    desugar_host_controls(&file).expect("desugar ok").1
+    desugar_host_controls(file.clone()).expect("desugar ok").1
 }
 
 #[test]

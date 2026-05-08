@@ -73,15 +73,19 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     // Tap desugaring (ADR 0054 §§2, 3): rewrite the patch body so every
     // tap-endpoint cable lands on a synthetic `~audio_tap` /
     // `~trigger_tap` module instance, and capture the observer manifest.
-    // The expander runs against the rewritten file from here on.
-    let (rewritten, manifest) = crate::desugar::desugar_taps(file);
+    // The expander runs against the rewritten file from here on. The
+    // desugar passes consume `File` and return it (mutated in place when
+    // there is work) so a no-op pass costs zero field-level clones; we
+    // pay one entry-point clone here so the public API stays `&File`.
+    let owned = file.clone();
+    let (rewritten, manifest) = crate::desugar::desugar_taps(owned);
 
     // Host-control desugaring (ADR 0057 §2): collect knob / slider /
     // toggle / trigger declarations, synthesise one `~host_control`
     // and / or `~host_control_trigger` instance, and rewrite bare-name
     // references onto them.
     let (rewritten, host_control_manifest) =
-        crate::host_control_desugar::desugar_host_controls(&rewritten)?;
+        crate::host_control_desugar::desugar_host_controls(rewritten)?;
     let file = &rewritten;
 
     let templates: HashMap<&str, &Template> =
