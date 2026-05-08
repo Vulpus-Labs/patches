@@ -17,7 +17,7 @@ pub use controller::{
 };
 
 pub use gui::{
-    DiagnosticView, GuiSnapshot, Intent, TapDisplayOpts, TapFrame, TapSlotFrame, TapSummary,
-    STATUS_LOG_CAPACITY,
+    DiagnosticView, GuiSnapshot, Intent, ScopeMode, SpectrumRender, TapDisplayOpts, TapFrame,
+    TapSlotFrame, TapSummary, STATUS_LOG_CAPACITY,
 };
 pub use meter::MeterTap;

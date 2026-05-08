@@ -12,7 +12,8 @@ use patches_registry::Registry;
 use serde::{Deserialize, Serialize};
 
 use crate::gui::{
-    DiagnosticView, GuiSnapshot, TapDisplayOpts, TapSummary, STATUS_LOG_CAPACITY,
+    DiagnosticView, GuiSnapshot, ScopeMode, SpectrumRender, TapDisplayOpts, TapSummary,
+    STATUS_LOG_CAPACITY,
 };
 
 /// Patch identity — *which* patch is loaded. Local-machine-only:
@@ -497,8 +498,12 @@ impl Controller {
             TapOpt::SpectrumFftSize(n) => entry.spectrum_fft_size = n,
             TapOpt::ScopeDecimation(d) => entry.scope_decimation = d,
             TapOpt::ScopeWindowSamples(w) => entry.scope_window_samples = w,
-            TapOpt::ScopeSnap(b) => entry.scope_snap = b,
-            TapOpt::SpectrumHeatmap(b) => entry.spectrum_heatmap = b,
+            TapOpt::ScopeSnap(b) => {
+                entry.scope_snap = if b { ScopeMode::Snap } else { ScopeMode::Free }
+            }
+            TapOpt::SpectrumHeatmap(b) => {
+                entry.spectrum_heatmap = if b { SpectrumRender::Heatmap } else { SpectrumRender::Curves }
+            }
         }
         let changed = *entry != before;
         StateDelta {

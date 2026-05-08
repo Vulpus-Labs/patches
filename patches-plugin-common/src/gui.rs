@@ -32,6 +32,80 @@ pub struct TapSummary {
     pub components: Vec<String>,
 }
 
+/// Scope auto-trigger mode. Persisted as a `u32` (0/1) on the CLAP wire
+/// and as a `bool` in the webview JSON for backward compat.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScopeMode {
+    #[default]
+    Free = 0,
+    Snap = 1,
+}
+
+impl ScopeMode {
+    /// Decode from the CLAP wire `u32`. Unknown values clamp to
+    /// [`ScopeMode::Free`] (state is best-effort restore).
+    pub fn from_wire(v: u32) -> Self {
+        match v {
+            1 => Self::Snap,
+            _ => Self::Free,
+        }
+    }
+
+    pub fn to_wire(self) -> u32 {
+        self as u32
+    }
+}
+
+impl Serialize for ScopeMode {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_bool(matches!(self, Self::Snap))
+    }
+}
+
+impl<'de> Deserialize<'de> for ScopeMode {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let b = bool::deserialize(de)?;
+        Ok(if b { Self::Snap } else { Self::Free })
+    }
+}
+
+/// Spectrum display mode. Persisted as a `u32` (0/1) on the CLAP wire
+/// and as a `bool` in the webview JSON for backward compat.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpectrumRender {
+    #[default]
+    Curves = 0,
+    Heatmap = 1,
+}
+
+impl SpectrumRender {
+    pub fn from_wire(v: u32) -> Self {
+        match v {
+            1 => Self::Heatmap,
+            _ => Self::Curves,
+        }
+    }
+
+    pub fn to_wire(self) -> u32 {
+        self as u32
+    }
+}
+
+impl Serialize for SpectrumRender {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_bool(matches!(self, Self::Heatmap))
+    }
+}
+
+impl<'de> Deserialize<'de> for SpectrumRender {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let b = bool::deserialize(de)?;
+        Ok(if b { Self::Heatmap } else { Self::Curves })
+    }
+}
+
 /// Per-tap display configuration controlled by the webview. The
 /// observer holds raw sample buffers; these values pick the
 /// FFT size / decimation / window the next read uses.
@@ -43,9 +117,9 @@ pub struct TapDisplayOpts {
     /// Scope auto-trigger ("snap") toggle. Pure UI state, but persisted
     /// alongside the numeric opts so it survives window close/reopen
     /// and host save/load.
-    pub scope_snap: bool,
-    /// Spectrum display mode: `false` = curve, `true` = heatmap.
-    pub spectrum_heatmap: bool,
+    pub scope_snap: ScopeMode,
+    /// Spectrum display mode (curve vs. heatmap).
+    pub spectrum_heatmap: SpectrumRender,
 }
 
 impl Default for TapDisplayOpts {
@@ -54,8 +128,8 @@ impl Default for TapDisplayOpts {
             spectrum_fft_size: 1024,
             scope_decimation: 16,
             scope_window_samples: 512,
-            scope_snap: false,
-            spectrum_heatmap: false,
+            scope_snap: ScopeMode::Free,
+            spectrum_heatmap: SpectrumRender::Curves,
         }
     }
 }

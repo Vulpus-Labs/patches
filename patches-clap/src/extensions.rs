@@ -234,13 +234,7 @@ unsafe extern "C" fn state_save(
         .controller
         .tap_opts
         .iter()
-        .map(|(name, o)| {
-            (
-                name.as_str(),
-                if o.scope_snap { 1 } else { 0 },
-                if o.spectrum_heatmap { 1 } else { 0 },
-            )
-        })
+        .map(|(name, o)| (name.as_str(), o.scope_snap.to_wire(), o.spectrum_heatmap.to_wire()))
         .collect();
     let mode_count = tap_modes.len() as u32;
     if !stream_write_all(stream, &mode_count.to_le_bytes()) { return false; }
@@ -388,11 +382,11 @@ unsafe fn deserialize_state(
                 let name_bytes = read_length_prefixed(stream)?;
                 let name = String::from_utf8(name_bytes).ok()?;
                 let snap = match try_read_u32(stream) {
-                    ReadU32::Ok(n) => n != 0,
+                    ReadU32::Ok(n) => patches_plugin_common::ScopeMode::from_wire(n),
                     _ => return None,
                 };
                 let heat = match try_read_u32(stream) {
-                    ReadU32::Ok(n) => n != 0,
+                    ReadU32::Ok(n) => patches_plugin_common::SpectrumRender::from_wire(n),
                     _ => return None,
                 };
                 if name.is_empty() {
@@ -742,7 +736,7 @@ unsafe extern "C" fn params_get_value(
         return false;
     }
     let p = plugin::plugin_ref_pub(plugin);
-    match p.host_control_registry.live_by_id(param_id as u32) {
+    match p.host_control_registry.live_by_id(param_id) {
         Some((_, e)) => {
             *out_value = e.last_value as f64;
             true
@@ -765,8 +759,8 @@ unsafe extern "C" fn params_value_to_text(
     let bytes = s.as_bytes();
     let cap = (out_buffer_capacity as usize).saturating_sub(1);
     let n = bytes.len().min(cap);
-    for i in 0..n {
-        *out_buffer.add(i) = bytes[i] as c_char;
+    for (i, &b) in bytes.iter().take(n).enumerate() {
+        *out_buffer.add(i) = b as c_char;
     }
     *out_buffer.add(n) = 0;
     true
@@ -856,7 +850,7 @@ unsafe extern "C" fn params_flush(
                 value: pv.value as f32,
             };
             proc.write_host_control_event(event);
-            host_control_registry.record_value(pv.param_id as u32, pv.value as f32);
+            host_control_registry.record_value(pv.param_id, pv.value as f32);
             saw_event = true;
         }
     }

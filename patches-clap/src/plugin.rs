@@ -436,6 +436,12 @@ unsafe extern "C" fn plugin_process(
 }
 
 /// Resolve the primary output buffer if the host provided a usable one.
+///
+/// Takes `&clap_process` and returns a `&mut` to the buffer descriptor: the
+/// host hands us a const pointer to a struct that itself owns mutable audio
+/// data; the inner buffer must be writable for processing. Documenting the
+/// CLAP-side covariance via raw pointers would only obscure the call site.
+#[allow(clippy::mut_from_ref)]
 unsafe fn output_buffer(
     pr: &clap_process,
 ) -> Option<&mut clap_sys::audio_buffer::clap_audio_buffer> {
