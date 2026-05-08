@@ -41,7 +41,7 @@ pub use connections::{
     BoundConnection, BoundPortRef, ResolvedConnection, ResolvedPortRef, UnresolvedConnection,
     UnresolvedPortRef,
 };
-pub use errors::{BindError, BindErrorCode, ParamConversionError};
+pub use errors::{BindError, BindErrorCode, ParamConversionError, ParamConversionKind};
 pub use modules::{BoundModule, ResolvedModule, UnresolvedModule};
 
 use std::collections::HashMap;
@@ -381,19 +381,19 @@ mod tests {
 
     #[test]
     fn param_conversion_unknown_maps_to_unknown_parameter() {
-        let err = ParamConversionError::Unknown("unknown parameter 'x'".into());
+        let err = ParamConversionError::unknown("unknown parameter 'x'");
         assert_eq!(err.bind_code(), BindErrorCode::UnknownParameter);
     }
 
     #[test]
     fn param_conversion_type_mismatch_maps_to_invalid_parameter_type() {
-        let err = ParamConversionError::TypeMismatch("expected float, found string".into());
+        let err = ParamConversionError::type_mismatch("expected float, found string");
         assert_eq!(err.bind_code(), BindErrorCode::InvalidParameterType);
     }
 
     #[test]
     fn param_conversion_out_of_range_maps_to_parameter_conversion() {
-        let err = ParamConversionError::OutOfRange("invalid enum variant 'foo'".into());
+        let err = ParamConversionError::out_of_range("invalid enum variant 'foo'");
         assert_eq!(err.bind_code(), BindErrorCode::ParameterConversion);
     }
 

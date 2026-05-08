@@ -318,7 +318,7 @@ pub(crate) fn convert_params(
             .collect();
         known.sort();
         known.dedup();
-        return Err(ParamConversionError::Unknown(format!(
+        return Err(ParamConversionError::unknown(format!(
             "unknown parameter '{raw_name}'; known parameters: {}",
             known.join(", ")
         )));
@@ -361,7 +361,7 @@ fn convert_structural_value(
             validate_file_extension(&resolved, extensions, raw_name)?;
             Ok(StructuralValue::String(resolved))
         }
-        _ => Err(ParamConversionError::TypeMismatch(format!(
+        _ => Err(ParamConversionError::type_mismatch(format!(
             "parameter '{raw_name}': expected structural {}, found {}",
             kind.kind_name(),
             value_kind_name(value),
@@ -394,7 +394,7 @@ fn validate_file_extension(
         .map(|e| e.to_ascii_lowercase());
     match ext {
         Some(ref e) if extensions.iter().any(|x| x.eq_ignore_ascii_case(e)) => Ok(()),
-        _ => Err(ParamConversionError::OutOfRange(format!(
+        _ => Err(ParamConversionError::out_of_range(format!(
             "parameter '{raw_name}': file '{path}' does not have an accepted extension ({})",
             extensions.join(", "),
         ))),

@@ -4,8 +4,8 @@
 //! that:
 //! - a valid source-text variant name resolves to the expected `u32`
 //!   variant index via `ParameterValue::Enum`;
-//! - an unknown name produces a clean `ParamConversionError::OutOfRange`
-//!   rather than a panic or silent default;
+//! - an unknown name produces a clean `ParamConversionError` of kind
+//!   `OutOfRange` rather than a panic or silent default;
 //! - every declared variant name round-trips:
 //!   `name → index → VARIANTS[index] == name`.
 //!

@@ -209,7 +209,7 @@ pub(crate) fn convert_value(
             .position(|&v| v == s.as_str())
             .map(|idx| ParameterValue::Enum(idx as u32))
             .ok_or_else(|| {
-                ParamConversionError::OutOfRange(format!("invalid enum variant '{s}'"))
+                ParamConversionError::out_of_range(format!("invalid enum variant '{s}'"))
             }),
         (Value::Scalar(Scalar::Str(s)), ParameterKind::SongName) => {
             if s.is_empty() {
@@ -219,11 +219,11 @@ pub(crate) fn convert_value(
                     .get(s.as_str())
                     .map(|&idx| ParameterValue::Int(idx as i64))
                     .ok_or_else(|| {
-                        ParamConversionError::OutOfRange(format!("song '{s}' not found"))
+                        ParamConversionError::out_of_range(format!("song '{s}' not found"))
                     })
             }
         }
-        _ => Err(ParamConversionError::TypeMismatch(format!(
+        _ => Err(ParamConversionError::type_mismatch(format!(
             "expected {}, found {}",
             kind.kind_name(),
             value_kind_name(value)

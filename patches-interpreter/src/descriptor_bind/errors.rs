@@ -107,55 +107,66 @@ impl std::fmt::Display for BindError {
 
 impl std::error::Error for BindError {}
 
-/// Typed failure mode from [`crate::convert_params`].
-///
-/// Replaces the previous string-substring classification so
-/// [`BindErrorCode`] selection is a straight `match` on the variant.
-/// Each variant carries the rendered message — kept byte-identical to
-/// the previous `String` error so tests and diagnostics consumers are
-/// unaffected.
-#[derive(Debug, Clone)]
-pub enum ParamConversionError {
+/// Classification of a [`ParamConversionError`] used to select a
+/// [`BindErrorCode`] without re-inspecting the message string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamConversionKind {
     /// Parameter name is not defined on the descriptor.
-    Unknown(String),
+    Unknown,
     /// Value kind disagrees with the descriptor's expected
     /// [`patches_core::ParameterKind`] (e.g. `int` where `float` was expected).
-    TypeMismatch(String),
+    TypeMismatch,
     /// Value is well-typed but outside the accepted range — invalid enum
     /// variant, unknown song reference, or unsupported file extension.
-    OutOfRange(String),
+    OutOfRange,
+}
+
+/// Typed failure mode from [`crate::convert_params`].
+///
+/// Carries a `kind` discriminant (so [`BindErrorCode`] selection is a
+/// straight match) and a rendered `message` — kept byte-identical to the
+/// previous string-encoded error so tests and diagnostics consumers are
+/// unaffected.
+#[derive(Debug, Clone)]
+pub struct ParamConversionError {
+    pub kind: ParamConversionKind,
+    pub message: String,
 }
 
 impl ParamConversionError {
+    pub fn unknown(message: impl Into<String>) -> Self {
+        Self { kind: ParamConversionKind::Unknown, message: message.into() }
+    }
+
+    pub fn type_mismatch(message: impl Into<String>) -> Self {
+        Self { kind: ParamConversionKind::TypeMismatch, message: message.into() }
+    }
+
+    pub fn out_of_range(message: impl Into<String>) -> Self {
+        Self { kind: ParamConversionKind::OutOfRange, message: message.into() }
+    }
+
     pub fn message(&self) -> &str {
-        match self {
-            Self::Unknown(m) | Self::TypeMismatch(m) | Self::OutOfRange(m) => m.as_str(),
-        }
+        &self.message
     }
 
     pub fn into_message(self) -> String {
-        match self {
-            Self::Unknown(m) | Self::TypeMismatch(m) | Self::OutOfRange(m) => m,
-        }
+        self.message
     }
 
     /// Wrap the inner message with a `"parameter '{name}': "` prefix,
-    /// preserving the variant so `BindErrorCode` classification is
-    /// unaffected.
-    pub fn prefix_with_param(self, name: &str) -> Self {
-        match self {
-            Self::Unknown(m) => Self::Unknown(format!("parameter '{name}': {m}")),
-            Self::TypeMismatch(m) => Self::TypeMismatch(format!("parameter '{name}': {m}")),
-            Self::OutOfRange(m) => Self::OutOfRange(format!("parameter '{name}': {m}")),
-        }
+    /// preserving the kind so `BindErrorCode` classification is unaffected.
+    pub fn prefix_with_param(mut self, name: &str) -> Self {
+        self.message = format!("parameter '{name}': {}", self.message);
+        self
     }
 
     /// Map a typed conversion error to its descriptor-level [`BindErrorCode`].
     pub fn bind_code(&self) -> BindErrorCode {
-        match self {
-            Self::Unknown(_) => BindErrorCode::UnknownParameter,
-            Self::TypeMismatch(_) => BindErrorCode::InvalidParameterType,
-            Self::OutOfRange(_) => BindErrorCode::ParameterConversion,
+        match self.kind {
+            ParamConversionKind::Unknown => BindErrorCode::UnknownParameter,
+            ParamConversionKind::TypeMismatch => BindErrorCode::InvalidParameterType,
+            ParamConversionKind::OutOfRange => BindErrorCode::ParameterConversion,
         }
     }
 }
