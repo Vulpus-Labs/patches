@@ -111,31 +111,60 @@ pub(crate) fn compute_completions(
     vec![]
 }
 
+/// Sub-classification within a [`CursorContext::ParamBlock`]: drives the
+/// dispatch in [`complete_param_block`] without re-running the probes
+/// at every call site or in every reader's head.
+enum ParamBlockTarget<'tree, 'src> {
+    /// Cursor is just past a `@` — completing shape-alias names.
+    AtBlockAlias { module_decl: tree_sitter::Node<'tree> },
+    /// Cursor is in a MasterSequencer's `song:` slot — song names only.
+    MasterSequencerSong,
+    /// Cursor is just past a `param_name:` — completing values for the
+    /// named parameter (enum variants, etc.).
+    ParamValue { param_name: String, module_name: Option<&'src str> },
+    /// Plain parameter-name completion inside the block.
+    ParamName { module_name: Option<&'src str> },
+}
+
+fn classify_param_block<'tree, 'src>(
+    module_decl: tree_sitter::Node<'tree>,
+    source: &'src str,
+    byte_offset: usize,
+) -> ParamBlockTarget<'tree, 'src> {
+    if is_after_at_sign(source, byte_offset) {
+        return ParamBlockTarget::AtBlockAlias { module_decl };
+    }
+    if is_master_sequencer(module_decl, source)
+        && is_after_param_colon(source, byte_offset, "song")
+    {
+        return ParamBlockTarget::MasterSequencerSong;
+    }
+    let module_name = module_instance_name(module_decl, source);
+    if let Some(param_name) = preceding_param_name(source, byte_offset) {
+        return ParamBlockTarget::ParamValue { param_name, module_name };
+    }
+    ParamBlockTarget::ParamName { module_name }
+}
+
 /// Dispatch `ParamBlock`-kind completions: shape-alias list (`@`),
-/// MasterSequencer `song:` slot, or general parameter names.
+/// MasterSequencer `song:` slot, enum-value lookup, or parameter names.
 fn complete_param_block(
     module_decl: tree_sitter::Node,
     source: &str,
     byte_offset: usize,
     model: &SemanticModel,
 ) -> Vec<CompletionItem> {
-    if is_after_at_sign(source, byte_offset) {
-        return complete_at_block_aliases(module_decl, source);
-    }
-    if is_master_sequencer(module_decl, source)
-        && is_after_param_colon(source, byte_offset, "song")
-    {
-        return complete_song_names(model);
-    }
-    let module_name = module_instance_name(module_decl, source);
-    if let Some(param_name) = preceding_param_name(source, byte_offset) {
-        let values = complete_enum_values(module_name, &param_name, model);
-        if !values.is_empty() {
-            return values;
+    match classify_param_block(module_decl, source, byte_offset) {
+        ParamBlockTarget::AtBlockAlias { module_decl } => {
+            complete_at_block_aliases(module_decl, source)
         }
-        return vec![];
+        ParamBlockTarget::MasterSequencerSong => complete_song_names(model),
+        ParamBlockTarget::ParamValue { param_name, module_name } => {
+            let values = complete_enum_values(module_name, &param_name, model);
+            if values.is_empty() { vec![] } else { values }
+        }
+        ParamBlockTarget::ParamName { module_name } => complete_parameters(module_name, model),
     }
-    complete_parameters(module_name, model)
 }
 
 // ─── Formatting helpers (shared with hover) ──────────────────────────────

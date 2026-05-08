@@ -280,6 +280,7 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
 ///   1. Inside `tap_components` → component name (`meter`, `osc`, ...).
 ///   2. Direct child `ident` of `tap_target` → tap name (the identifier
 ///      after the components, inside the parentheses).
+///
 /// The canonical pest grammar does not introduce a `tap_name` wrapper
 /// rule — the tap name is a bare `ident` — so we identify it positionally.
 fn classify_tap_node(node: Node<'_>) -> Option<CursorContext<'_>> {
