@@ -124,8 +124,15 @@ module.exports = grammar({
       ),
 
     // ─── Module declaration ─────────────────────────────────────────────
+    // Optional `stereo` prefix (ADR 0070). Word-boundary handling comes
+    // from `word: $.ident` (literal keywords don't match longer
+    // identifiers like `stereo_in`). The keyword is wrapped in a named
+    // `stereo_kw` rule so the LSP's tree-nav can field-lookup
+    // `module_decl.stereo` without re-walking the keyword children.
+    stereo_kw: (_) => "stereo",
     module_decl: ($) =>
       seq(
+        optional(field("stereo", $.stereo_kw)),
         "module",
         field("name", $.ident),
         ":",

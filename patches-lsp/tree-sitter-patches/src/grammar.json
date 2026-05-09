@@ -858,9 +858,29 @@
         }
       ]
     },
+    "stereo_kw": {
+      "type": "STRING",
+      "value": "stereo"
+    },
     "module_decl": {
       "type": "SEQ",
       "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "stereo",
+              "content": {
+                "type": "SYMBOL",
+                "name": "stereo_kw"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
         {
           "type": "STRING",
           "value": "module"

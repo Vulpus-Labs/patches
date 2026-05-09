@@ -496,6 +496,16 @@
           }
         ]
       },
+      "stereo": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "stereo_kw",
+            "named": true
+          }
+        ]
+      },
       "type": {
         "multiple": false,
         "required": true,
@@ -1831,6 +1841,10 @@
   },
   {
     "type": "step_unit",
+    "named": true
+  },
+  {
+    "type": "stereo_kw",
     "named": true
   },
   {

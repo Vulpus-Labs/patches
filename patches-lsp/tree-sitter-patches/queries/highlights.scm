@@ -18,3 +18,6 @@
 ; components). Identified positionally as the only direct ident child of
 ; tap_target.
 (tap_target (ident) @variable)
+
+; The `stereo` prefix on stereo-paired module declarations (ADR 0070).
+(stereo_kw) @keyword
