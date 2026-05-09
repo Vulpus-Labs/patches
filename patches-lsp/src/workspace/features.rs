@@ -209,6 +209,7 @@ impl DocumentWorkspace {
     pub fn inlay_hints(&self, uri: &Url, range: Range) -> Vec<InlayHint> {
         let mut state = self.state.lock().expect("lock workspace state");
         let registry = self.registry_read();
+        let show_stereo = self.inlay_stereo_expansion();
         self.with_expansion_context(&mut state, uri, |ctx| {
             Some(crate::inlay::compute_inlay_hints(
                 uri,
@@ -219,6 +220,8 @@ impl DocumentWorkspace {
                 ctx.source_map,
                 &ctx.doc.line_index,
                 &registry,
+                Some(&ctx.doc.model),
+                show_stereo,
             ))
         })
         .unwrap_or_default()

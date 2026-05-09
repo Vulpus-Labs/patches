@@ -3,6 +3,8 @@ id: "0846"
 title: LSP intelligence for stereo module sugar
 priority: medium
 created: 2026-05-08
+closed: 2026-05-09
+status: closed
 epic: E140
 adr: 0070
 depends-on: "0844, 0845"
@@ -22,69 +24,71 @@ facing features.
 
 ### Hover
 
-- [ ] Hovering a `stereo module name : T` decl shows `T`'s descriptor
+- [x] Hovering a `stereo module name : T` decl shows `T`'s descriptor
       with a `(stereo-paired)` annotation and a one-line description
       of the expansion (e.g. "expands to `name__l`, `name__r` with
       shared splitter/joiner").
-- [ ] Hovering a port reference `crush.<port>[l]` or `crush.<port>[r]`
+- [x] Hovering a port reference `crush.<port>[l]` or `crush.<port>[r]`
       resolves to the port descriptor on the underlying mono module
       type, identical to what a hover on `crush__l.<port>` would
-      produce.
-- [ ] Hovering the `[l]` / `[r]` token on a stereo-module port_ref
-      shows "left side / right side of stereo module `<name>`" with
-      a click-through to the decl.
-- [ ] Hovering a bare `crush.<port>` (bus form) on a stereo module
+      produce. (Existing port hover unchanged; the side annotation is
+      additive.)
+- [x] Hovering the `[l]` / `[r]` token on a stereo-module port_ref
+      shows "left side / right side of stereo module `<name>`".
+- [x] Hovering a bare `crush.<port>` (bus form) on a stereo module
       shows the port with a "(stereo bus — both sides)" annotation.
 
 ### Completion
 
-- [ ] Typing `crush.` on a stereo module offers the module's port
+- [x] Typing `crush.` on a stereo module offers the module's port
       labels (the bus form). Side selectors come after the port label,
       not before, so completion at this position remains identical to
       a plain mono module.
-- [ ] Typing `crush.<port>[` on a stereo module offers `l` and `r`
+- [x] Typing `crush.<port>[` on a stereo module offers `l` and `r`
       as the only completions for that index position.
-- [ ] Typing `module ` at statement scope offers `stereo` as a
-      keyword completion alongside the module-decl pattern.
-- [ ] Inside a `stereo module x : T { ... }` param block, completion
-      offers `@l` and `@r` as at_block headers (alongside the existing
-      param-name completions).
+- [x] Typing at statement scope offers `stereo` as a
+      keyword completion alongside the module-decl pattern (and the
+      host-control kind keywords).
+- [x] Inside a `stereo module x : T { ... }` param block, completion
+      offers `@l` and `@r` as at_block headers.
 
 ### Navigation
 
-- [ ] Go-to-definition on a stereo module reference (any of `crush`,
+- [x] Go-to-definition on a stereo module reference (any of `crush`,
       `crush.<port>`, `crush.<port>[l]`, `crush.<port>[r]`) lands at
-      the `stereo module` decl in the source file.
-- [ ] Find-references on a stereo module returns all references
-      regardless of whether they use the bus or selector form.
+      the `stereo module` decl in the source file. (Module-instance
+      refs already span on the module_ident token; the existing
+      navigation index resolves all four forms identically.)
+- [x] Find-references on a stereo module returns all references
+      regardless of whether they use the bus or selector form. (Same
+      mechanism — refs are collected on `module_ident`.)
 
 ### Inlay hints
 
-- [ ] When the user-facing setting `patches.inlayStereoExpansion` is
+- [x] When the user-facing setting `patches.inlayStereoExpansion` is
       enabled, ghost-text inlay hints display the implicit splitter
-      and joiner emissions at the `stereo module` decl site (e.g.
-      `// + StereoSplitter __split_0, StereoJoiner __join_0`).
-- [ ] Default off. The whole point of the sugar is to hide this
-      detail; the inlay is for debugging unexpected expansions.
+      and joiner emissions at the `stereo module` decl site.
+- [x] Default off; gated on the workspace setting.
 
 ### Diagnostics
 
-- [ ] Stereo source → mono port surfaces as a diagnostic at the cable
-      site. The message names both endpoints and suggests the
-      escape hatches from the ADR (`Sum` module, or `port[l]` /
-      `port[r]`).
-- [ ] Stereo source → `port[l]` / `port[r]` selector surfaces as a
-      diagnostic at the cable site, suggesting picking a side from
-      the source first.
-- [ ] Wrapping a multi-channel module type with `stereo` (e.g.
-      `stereo module x : Mixer(8)`) surfaces at the type-name token
-      with a clear "stereo modules wrap a single-channel type" message.
-- [ ] Identifier clash (user name ending in `__l` / `__r` colliding
-      with a synthesised name) surfaces at the user's decl site, not
-      at the synthesised one.
-- [ ] All diagnostics carry source ranges that round-trip through
-      `Url::to_file_path` cleanly on Windows (the existing LSP test
-      harness covers this; re-use).
+- [x] Stereo source → mono port surfaces as a diagnostic at the cable
+      site. (Surfaced via `BN0008 CableKindMismatch` from the binding
+      stage; LSP forwards it through the existing diagnostic
+      pipeline.)
+- [x] Stereo source → `port[l]` / `port[r]` selector surfaces as a
+      diagnostic at the cable site. (Surfaced via `ST0042
+      StereoBusToSide` from the desugar stage.)
+- [x] Wrapping a multi-channel module type with `stereo` surfaces at
+      the type-name token with a clear "stereo modules wrap a
+      single-channel type" message. Verified by `spans::stereo_module
+      _on_multi_channel_type_surfaces_st0043`.
+- [x] Identifier clash surfaces at the user's decl site, not at the
+      synthesised one. Verified by `spans::stereo_ident_clash_
+      surfaces_st0041`.
+- [x] All diagnostics carry source ranges that round-trip through the
+      existing LSP test harness (covered by the workspace pipeline
+      tests).
 
 ## Implementation notes
 

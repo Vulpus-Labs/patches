@@ -117,6 +117,11 @@ pub(crate) struct ModuleDecl {
     pub shape: Vec<ShapeArg>,
     pub params: Vec<ParamEntry>,
     pub span: Span,
+    /// Optional `stereo` keyword prefix on `module` (ADR 0070). When
+    /// `Some`, carries the span of the keyword token so hover and
+    /// diagnostics can pin to it precisely; absent when the decl is
+    /// plain mono.
+    pub stereo_kw: Option<Span>,
 }
 
 // ─── Connections ────────────────────────────────────────────────────────────

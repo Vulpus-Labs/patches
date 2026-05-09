@@ -20,13 +20,37 @@ pub(super) fn is_after_at_sign(source: &str, byte_offset: usize) -> bool {
 }
 
 /// Complete with shape alias names for a port index (inside `[...]`).
+///
+/// On a `stereo module` decl the only valid named indexes are `l` and
+/// `r` (ADR 0070); the shape-alias path does not apply because stereo
+/// wraps a single-channel module type. Returning `l`/`r` here gives the
+/// editor the right two-item picker even when the underlying type
+/// happens to declare an alias list.
 pub(super) fn complete_port_index_aliases(module_name: &str, model: &SemanticModel) -> Vec<CompletionItem> {
+    if model.is_stereo_module(module_name) {
+        return stereo_side_completions();
+    }
     for module in &model.declarations.modules {
         if module.name == module_name {
             return shape_aliases_from_args(&module.shape_args);
         }
     }
     vec![]
+}
+
+fn stereo_side_completions() -> Vec<CompletionItem> {
+    [
+        ("l", "left side of stereo module"),
+        ("r", "right side of stereo module"),
+    ]
+    .into_iter()
+    .map(|(label, detail)| CompletionItem {
+        label: label.to_string(),
+        kind: Some(CompletionItemKind::ENUM_MEMBER),
+        detail: Some(detail.to_string()),
+        ..Default::default()
+    })
+    .collect()
 }
 
 /// Extract alias names from shape args as completion items.
@@ -50,6 +74,25 @@ pub(super) fn complete_at_block_aliases(
     module_decl: tree_sitter::Node,
     source: &str,
 ) -> Vec<CompletionItem> {
+    // Stereo decls (ADR 0070) accept `@l` / `@r` per-channel param
+    // overrides. They share the at_block grammar with shape-alias
+    // overrides, so the completion path lives here too even though
+    // the surface meaning differs.
+    if module_decl.child_by_field_name("stereo").is_some() {
+        return [
+            ("l", "left-side per-channel overrides"),
+            ("r", "right-side per-channel overrides"),
+        ]
+        .into_iter()
+        .map(|(label, detail)| CompletionItem {
+            label: label.to_string(),
+            kind: Some(CompletionItemKind::ENUM_MEMBER),
+            detail: Some(detail.to_string()),
+            ..Default::default()
+        })
+        .collect();
+    }
+
     let shape_block = match first_named_child_of_kind(module_decl, "call_block") {
         Some(sb) => sb,
         None => return vec![],

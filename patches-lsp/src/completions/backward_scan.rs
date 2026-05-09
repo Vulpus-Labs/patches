@@ -11,6 +11,12 @@ pub(super) enum BackwardContext {
     PortIndex(String),
     /// Inside a song block row (after `|`)
     SongRow,
+    /// Cursor sits at statement-start inside a `patch { … }` or
+    /// `template … { … }` body (immediately after `{`, `;`, or a
+    /// newline of whitespace), optionally with a partial identifier
+    /// already typed. Offer the statement-introducer keywords so users
+    /// can discover `stereo` (ADR 0070) alongside `module`.
+    StatementStart,
 }
 
 /// Scan backward from the cursor to determine context when tree-sitter nodes
@@ -87,7 +93,61 @@ pub(super) fn scan_backward_for_context(source: &str, byte_offset: usize) -> Opt
         return Some(BackwardContext::SongRow);
     }
 
+    // Statement-start inside a patch/template body: the immediately
+    // preceding non-whitespace char is `{` or `;`, and a partial ident
+    // (or none) follows. Used to surface `stereo` / `module` keywords
+    // before the user has typed enough for tree-sitter to classify.
+    if is_statement_start(source, byte_offset) {
+        return Some(BackwardContext::StatementStart);
+    }
+
     None
+}
+
+/// True when the cursor sits at the start of a statement inside a
+/// patch/template body. Matches `\s*` after `{` or `;`, optionally
+/// followed by a partial identifier the user is in the middle of typing.
+fn is_statement_start(source: &str, byte_offset: usize) -> bool {
+    let before = &source[..byte_offset];
+    let mut iter = before.char_indices().rev();
+    // Skip the partial identifier (if any) right before the cursor.
+    while let Some((idx, c)) = iter.clone().next() {
+        if c.is_alphanumeric() || c == '_' {
+            iter.next();
+            let _ = idx;
+        } else {
+            break;
+        }
+    }
+    // Skip whitespace.
+    let mut last = None;
+    for (_idx, c) in iter {
+        if c.is_whitespace() {
+            continue;
+        }
+        last = Some(c);
+        break;
+    }
+    let preceded_by_block_boundary = matches!(last, Some('{') | Some(';') | Some('}') | Some(','));
+    if !preceded_by_block_boundary {
+        return false;
+    }
+    // Confirm we're inside an open `patch` / `template` body.
+    is_inside_patch_or_template_body(source, byte_offset)
+}
+
+fn is_inside_patch_or_template_body(source: &str, byte_offset: usize) -> bool {
+    let before = &source[..byte_offset];
+    let last_open = before.rfind('{');
+    let Some(open) = last_open else { return false };
+    let prefix = &before[..open];
+    // Look at the keyword that introduced this `{`.
+    let keyword_chunk = prefix
+        .trim_end()
+        .rsplit(['{', '}', ';'])
+        .next()
+        .unwrap_or("");
+    keyword_chunk.contains("patch") || keyword_chunk.contains("template")
 }
 
 /// Heuristic: check if the cursor is inside a song block by scanning backward

@@ -179,6 +179,7 @@ pub(crate) fn extract_modules(body: &[ast::Statement], scope: &str, out: &mut Ve
                 type_name,
                 type_name_span,
                 shape_args,
+                is_stereo: m.stereo_kw.is_some(),
                 span: m.span,
             });
         }

@@ -10,6 +10,7 @@ pub(super) fn build_module_decl(node: tree_sitter::Node, source: &str, diags: &m
 
     let name = node.child_by_field_name("name").map(|n| build_ident(n, source));
     let type_name = node.child_by_field_name("type").map(|n| build_ident(n, source));
+    let stereo_kw = node.child_by_field_name("stereo").map(span_of);
 
     let shape = first_named_child_of_kind(node, "call_block")
         .map(|sb| build_shape_block(sb, source, diags))
@@ -25,6 +26,7 @@ pub(super) fn build_module_decl(node: tree_sitter::Node, source: &str, diags: &m
         shape,
         params,
         span: span_of(node),
+        stereo_kw,
     }
 }
 

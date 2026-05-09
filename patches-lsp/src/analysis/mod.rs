@@ -54,6 +54,16 @@ impl SemanticModel {
             .get(&top_key)
             .or_else(|| self.descriptors.get(self.unscoped_index.get(name)?))
     }
+
+    /// True when `name` resolves to a `stereo module` decl in the current
+    /// file. Used by hover/completion to switch between bus and side-
+    /// selector renderings on the same port name.
+    pub fn is_stereo_module(&self, name: &str) -> bool {
+        self.declarations
+            .modules
+            .iter()
+            .any(|m| m.name == name && m.is_stereo)
+    }
 }
 
 /// Run the full analysis pipeline.

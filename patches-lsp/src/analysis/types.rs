@@ -21,6 +21,10 @@ pub(crate) struct ModuleInfo {
     /// Span of the type name identifier, for diagnostic replacement targets.
     pub type_name_span: ast::Span,
     pub shape_args: Vec<(String, ShapeValue)>,
+    /// True when the decl carries a `stereo` keyword prefix (ADR 0070).
+    /// Tells hover, completion, and navigation to interpret the module as
+    /// a stereo bus that desugars into a `__l`/`__r` mono pair.
+    pub is_stereo: bool,
     #[allow(dead_code)]
     pub span: ast::Span,
 }

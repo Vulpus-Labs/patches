@@ -91,6 +91,15 @@ pub(crate) enum CursorContext<'tree> {
         label_node: Node<'tree>,
         port_ref_node: Node<'tree>,
     },
+    /// Port index inside a port reference (`osc.out[<index>]`). `index_node`
+    /// is the inner ident / nat / param_ref; `port_ref_node` is the
+    /// enclosing port_ref. Hover and completion use this to render the
+    /// stereo `[l]` / `[r]` side selectors against the parent module's
+    /// stereo-ness without forcing every port-handler to walk siblings.
+    PortIndex {
+        index_node: Node<'tree>,
+        port_ref_node: Node<'tree>,
+    },
     /// Module instance name in `module <name> : Type`. `node` is the
     /// name identifier.
     ModuleName {
@@ -232,6 +241,17 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
             {
                 return Some(CursorContext::PortRef {
                     label_node: port_label_node,
+                    port_ref_node,
+                });
+            }
+        }
+        if let Some(port_index_node) = first_named_child_of_kind(port_ref_node, "port_index") {
+            if node.start_byte() >= port_index_node.start_byte()
+                && node.end_byte() <= port_index_node.end_byte()
+            {
+                let index_node = port_index_node.named_child(0).unwrap_or(port_index_node);
+                return Some(CursorContext::PortIndex {
+                    index_node,
                     port_ref_node,
                 });
             }

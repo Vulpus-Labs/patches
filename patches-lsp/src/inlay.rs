@@ -14,6 +14,7 @@ use patches_dsl::flat::FlatPatch;
 use patches_dsl::SourceMap;
 use tower_lsp::lsp_types::*;
 
+use crate::analysis::SemanticModel;
 use crate::expansion::{FlatNodeRef, PatchReferences};
 use crate::lsp_util::{byte_offset_to_position, source_id_for_uri};
 use crate::shape_render::{module_shape_from_args, render_indexed_ports, render_shape_inline};
@@ -32,6 +33,8 @@ pub(crate) fn compute_inlay_hints(
     source_map: &SourceMap,
     line_index: &[usize],
     registry: &Registry,
+    model: Option<&SemanticModel>,
+    show_stereo_expansion: bool,
 ) -> Vec<InlayHint> {
     let Some(source_id) = source_id_for_uri(source_map, uri) else {
         return Vec::new();
@@ -68,7 +71,66 @@ pub(crate) fn compute_inlay_hints(
             data: None,
         });
     }
+
+    if show_stereo_expansion {
+        if let Some(model) = model {
+            push_stereo_expansion_hints(
+                &mut hints,
+                model,
+                source_id,
+                visible_start,
+                visible_end,
+                source,
+                line_index,
+            );
+        }
+    }
+
     hints
+}
+
+/// Append a ghost-text hint at every `stereo module` decl naming the
+/// synthesised modules its desugaring will emit. Off by default; gated
+/// by `patches.inlayStereoExpansion` so the everyday source view stays
+/// quiet and the sugar's purpose (hiding the splitter/joiner) is
+/// preserved.
+fn push_stereo_expansion_hints(
+    hints: &mut Vec<InlayHint>,
+    model: &SemanticModel,
+    source_id: SourceId,
+    visible_start: usize,
+    visible_end: usize,
+    source: &str,
+    line_index: &[usize],
+) {
+    let _ = source_id; // ModuleInfo carries no source id today; the LSP
+                       // analyses one file at a time, so spans are always
+                       // local to the active doc.
+    for module in &model.declarations.modules {
+        if !module.is_stereo {
+            continue;
+        }
+        if module.span.end <= visible_start || module.span.start >= visible_end {
+            continue;
+        }
+        let label = format!(
+            " // + StereoSplitter __split({name}), {name}__l, {name}__r, StereoJoiner __join({name})",
+            name = module.name,
+        );
+        let position = byte_offset_to_position(source, line_index, module.span.end);
+        hints.push(InlayHint {
+            position,
+            label: InlayHintLabel::String(label),
+            kind: Some(InlayHintKind::TYPE),
+            text_edits: None,
+            tooltip: Some(InlayHintTooltip::String(
+                "Synthesised by stereo-module desugaring (ADR 0070).".to_string(),
+            )),
+            padding_left: Some(true),
+            padding_right: None,
+            data: None,
+        });
+    }
 }
 
 /// Compute the hint body for one call site. Returns `None` when emitted

@@ -27,9 +27,19 @@ pub(super) fn try_hover_module_type(
     // `classify_cursor` already established that `node` is the `type` field
     // of its parent `module_decl`; no re-check needed here.
     let type_name = node_text(node, source);
+    let module_decl = node.parent();
+    let stereo_decl = module_decl
+        .and_then(|md| md.child_by_field_name("stereo"))
+        .is_some();
+    let instance_name = module_decl
+        .and_then(|md| md.child_by_field_name("name"))
+        .map(|n| node_text(n, source));
 
     if let Some(info) = model.declarations.templates.get(type_name) {
-        let md = format_template_hover(info);
+        let mut md = format_template_hover(info);
+        if stereo_decl {
+            push_stereo_decl_annotation(&mut md, instance_name);
+        }
         let range = node_to_range(node, source, line_starts);
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -49,7 +59,10 @@ pub(super) fn try_hover_module_type(
     let desc = registry
         .describe(type_name, &representative_shape())
         .ok()?;
-    let md = format_module_descriptor_hover(&desc);
+    let mut md = format_module_descriptor_hover(&desc);
+    if stereo_decl {
+        push_stereo_decl_annotation(&mut md, instance_name);
+    }
     let range = node_to_range(node, source, line_starts);
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -58,6 +71,20 @@ pub(super) fn try_hover_module_type(
         }),
         range: Some(range),
     })
+}
+
+/// Append the `(stereo-paired)` annotation + expansion note used at every
+/// stereo-decl hover site. Kept centralised so the wording stays in one
+/// place if tweaks land later.
+fn push_stereo_decl_annotation(md: &mut String, instance_name: Option<&str>) {
+    md.push_str("\n\n_(stereo-paired)_ — ");
+    if let Some(name) = instance_name {
+        md.push_str(&format!(
+            "expands to `{name}__l`, `{name}__r` with shared splitter / joiner (ADR 0070)."
+        ));
+    } else {
+        md.push_str("expands to `<name>__l`, `<name>__r` with shared splitter / joiner (ADR 0070).");
+    }
 }
 
 /// Hover over a module instance name (e.g. `osc` in `module osc : Osc`).
@@ -75,7 +102,7 @@ pub(super) fn try_hover_module_name(
     let type_name = crate::tree_nav::module_type_name(module_decl, source)?;
 
     let desc = model.get_descriptor(instance_name)?;
-    let summary = match desc {
+    let mut summary = match desc {
         ResolvedDescriptor::Module { desc: md, .. } => format!(
             "**{}** : `{}`\n\n{} inputs, {} outputs, {} parameters",
             instance_name,
@@ -92,6 +119,10 @@ pub(super) fn try_hover_module_name(
             out_ports.len()
         ),
     };
+
+    if module_decl.child_by_field_name("stereo").is_some() {
+        push_stereo_decl_annotation(&mut summary, Some(instance_name));
+    }
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {

@@ -47,6 +47,9 @@ pub(crate) fn compute_hover(
             let node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
             try_hover_port(node, source, model, line_index)
         }
+        crate::tree_nav::CursorContext::PortIndex { index_node, port_ref_node } => {
+            port::try_hover_port_index(index_node, port_ref_node, source, model, line_index)
+        }
         crate::tree_nav::CursorContext::ModuleName { node, .. } => {
             try_hover_module_name(node, source, model, line_index)
         }
@@ -354,6 +357,85 @@ mod tests {
         };
         let s = render_cable_map(&m);
         assert!(s.contains("0") && s.contains("6.91"), "got {s}");
+    }
+
+    #[test]
+    fn hover_on_stereo_module_type_includes_paired_annotation() {
+        let source = "patch {\n    stereo module bus : Vca\n}";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find(": Vca").unwrap() + 2;
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for stereo module type");
+        let s = markup(h);
+        assert!(s.contains("stereo-paired"), "expected paired annotation: {s}");
+        assert!(
+            s.contains("bus__l") && s.contains("bus__r"),
+            "expected expansion names: {s}"
+        );
+    }
+
+    #[test]
+    fn hover_on_stereo_module_name_includes_paired_annotation() {
+        let source = "patch {\n    stereo module bus : Vca\n}";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("module bus").unwrap() + "module ".len();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for stereo module name");
+        let s = markup(h);
+        assert!(s.contains("stereo-paired"), "expected paired annotation: {s}");
+    }
+
+    #[test]
+    fn hover_on_bare_port_of_stereo_module_shows_bus_annotation() {
+        let source = "\
+patch {
+    module src : Osc
+    stereo module bus : Vca
+    src.sine -> bus.in
+    bus.out -> src.voct
+}";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("bus.out").unwrap() + "bus.".len();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for stereo bus port");
+        let s = markup(h);
+        assert!(s.contains("stereo bus"), "expected bus annotation: {s}");
+        assert!(!s.contains("left side"), "bare port should not call out a side: {s}");
+    }
+
+    #[test]
+    fn hover_on_l_token_in_index_shows_side_annotation() {
+        let source = "\
+patch {
+    stereo module bus : Vca
+    module out_l : AudioOut
+    bus.out[l] -> out_l.in
+}";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("bus.out[l]").unwrap() + "bus.out[".len();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for [l] index token");
+        let s = markup(h);
+        assert!(
+            s.contains("left side") && s.contains("bus__l"),
+            "expected left-side hover with synthesised name: {s}"
+        );
+    }
+
+    #[test]
+    fn hover_on_bus_out_side_l_shows_left_side_annotation() {
+        let source = "\
+patch {
+    stereo module bus : Vca
+    module out_l : AudioOut
+    bus.out[l] -> out_l.in
+}";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("bus.out[l]").unwrap() + "bus.".len();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for stereo selector port");
+        let s = markup(h);
+        assert!(s.contains("left side"), "expected left-side annotation: {s}");
     }
 
     #[test]

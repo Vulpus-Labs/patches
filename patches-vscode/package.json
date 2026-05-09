@@ -71,6 +71,11 @@
           },
           "default": [],
           "description": "Directories or dylib files scanned at LSP start-up for FFI module bundles (.dylib/.so/.dll). Resolves external modules such as patches-vintage's VChorus/VBbd/VFlanger/VReverb so hover and diagnostics work in .patches files that reference them."
+        },
+        "patches.inlayStereoExpansion": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inlay hints listing the synthesised splitter / __l / __r / joiner modules at every `stereo module` decl (ADR 0070). Off by default — the whole point of the sugar is to hide this detail; enable while debugging unexpected stereo expansions."
         }
       }
     }

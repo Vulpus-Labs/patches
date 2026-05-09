@@ -41,6 +41,9 @@ impl LanguageServer for PatchesLanguageServer {
             if let Some(paths) = extract_module_paths(opts) {
                 self.workspace.set_module_paths(paths);
             }
+            if let Some(on) = extract_inlay_stereo_expansion(opts) {
+                self.workspace.set_inlay_stereo_expansion(on);
+            }
         }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -310,6 +313,10 @@ fn extract_module_paths(value: &serde_json::Value) -> Option<Vec<PathBuf>> {
     )
 }
 
+fn extract_inlay_stereo_expansion(value: &serde_json::Value) -> Option<bool> {
+    value.get("patches")?.get("inlayStereoExpansion")?.as_bool()
+}
+
 /// Params payload for `patches/rescanModules` (empty; all required inputs are
 /// in the workspace's current module-path configuration).
 #[derive(Debug, Default, Deserialize)]
@@ -365,6 +372,9 @@ impl PatchesLanguageServer {
                 let wrapped = serde_json::json!({ "patches": first });
                 if let Some(paths) = extract_module_paths(&wrapped) {
                     self.workspace.set_module_paths(paths);
+                }
+                if let Some(on) = extract_inlay_stereo_expansion(&wrapped) {
+                    self.workspace.set_inlay_stereo_expansion(on);
                 }
             }
         }

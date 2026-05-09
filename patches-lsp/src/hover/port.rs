@@ -61,7 +61,7 @@ pub(super) fn try_hover_port(
         analysis::PortDirection::Output => "output",
         analysis::PortDirection::Input => "input",
     };
-    let value = match m {
+    let mut value = match m {
         analysis::PortMatch::Module { port, .. } => {
             let kind = cable_kind_str(&port.kind);
             format!(
@@ -77,12 +77,90 @@ pub(super) fn try_hover_port(
             format!("**{direction_str}** `{port_name}` (template)")
         }
     };
+
+    if model.is_stereo_module(module_name) {
+        // Bus form vs side form is decided by whether the port_ref carries
+        // a `[l]` / `[r]` named index. Annotate accordingly so the hover
+        // distinguishes `bus.out` (both sides) from `bus.out[l]` (one side).
+        match stereo_side_index(port_ref_node, source) {
+            Some(StereoSide::Left) => value.push_str(
+                "\n\n_(left side of stereo module — runs the `__l` instance only)_",
+            ),
+            Some(StereoSide::Right) => value.push_str(
+                "\n\n_(right side of stereo module — runs the `__r` instance only)_",
+            ),
+            None => value.push_str("\n\n_(stereo bus — both sides via shared splitter/joiner)_"),
+        }
+    }
+
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value,
         }),
         range: Some(node_to_range(port_label_node, source, line_starts)),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StereoSide {
+    Left,
+    Right,
+}
+
+/// Return the side selector when a `port_ref` carries a `port_index`
+/// containing the literal `l` or `r` ident. Anything else (numeric,
+/// param ref, arity marker, missing) yields `None` — hover treats those
+/// as the bus form even on a stereo module, mirroring how the expander
+/// will fail validation rather than silently route.
+fn stereo_side_index(port_ref_node: tree_sitter::Node, source: &str) -> Option<StereoSide> {
+    let port_index = first_named_child_of_kind(port_ref_node, "port_index")?;
+    let inner = port_index.named_child(0)?;
+    if inner.kind() != "ident" {
+        return None;
+    }
+    match node_text(inner, source) {
+        "l" => Some(StereoSide::Left),
+        "r" => Some(StereoSide::Right),
+        _ => None,
+    }
+}
+
+/// Hover over a `port_index` token inside a port_ref. For stereo
+/// modules the named indexes `l` / `r` carry meaning; everything else
+/// hovers as a generic `[index]` annotation.
+pub(super) fn try_hover_port_index(
+    index_node: tree_sitter::Node,
+    port_ref_node: tree_sitter::Node,
+    source: &str,
+    model: &SemanticModel,
+    line_starts: &[usize],
+) -> Option<Hover> {
+    let module_ident_node = first_named_child_of_kind(port_ref_node, "module_ident")?;
+    let module_name = first_named_child_of_kind(module_ident_node, "ident")
+        .map(|n| node_text(n, source))
+        .unwrap_or_else(|| node_text(module_ident_node, source));
+
+    if !model.is_stereo_module(module_name) {
+        return None;
+    }
+
+    let value = match node_text(index_node, source) {
+        "l" => format!(
+            "**left side** of stereo module `{module_name}` — runs the `{module_name}__l` instance only"
+        ),
+        "r" => format!(
+            "**right side** of stereo module `{module_name}` — runs the `{module_name}__r` instance only"
+        ),
+        _ => return None,
+    };
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: Some(node_to_range(index_node, source, line_starts)),
     })
 }
 

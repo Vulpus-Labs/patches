@@ -38,7 +38,7 @@ use crate::tree_nav::{
 };
 
 use backward_scan::{scan_backward_for_context, BackwardContext};
-use module_types::complete_module_types;
+use module_types::{complete_module_types, complete_statement_keywords};
 use params::{
     complete_enum_values, complete_parameters, complete_pattern_names, complete_song_names,
     is_after_param_colon, preceding_param_name,
@@ -83,6 +83,7 @@ pub(crate) fn compute_completions(
             return complete_pattern_names(model);
         }
         CursorContext::ModuleName { .. }
+        | CursorContext::PortIndex { .. }
         | CursorContext::TapType { .. }
         | CursorContext::TapName { .. }
         | CursorContext::HostControlDecl { .. }
@@ -105,6 +106,7 @@ pub(crate) fn compute_completions(
                 complete_port_index_aliases(&module_name, model)
             }
             BackwardContext::SongRow => complete_pattern_names(model),
+            BackwardContext::StatementStart => complete_statement_keywords(),
         };
     }
 
@@ -309,6 +311,59 @@ mod tests {
             labels.contains(&"bass"),
             "expected bass in completions, got: {labels:?}"
         );
+    }
+
+    #[test]
+    fn completions_at_statement_start_offer_stereo_keyword() {
+        // ADR 0070: cursor on a fresh line inside the patch body should
+        // discover the `stereo` keyword alongside the existing `module`
+        // statement-introducer.
+        let source = "patch {\n    \n}";
+        let (tree, model, registry) = setup(source);
+        // Position cursor on the empty indented line.
+        let byte_offset = source.find("    \n").unwrap() + 4;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.contains(&"stereo") && labels.contains(&"module"),
+            "expected `stereo` and `module` keywords: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn completions_for_stereo_module_port_after_dot() {
+        // ADR 0070 — bus form: typing `bus.` on a stereo module offers
+        // the underlying mono module's port labels exactly like a plain
+        // mono module does. Side selectors come *after* the port label.
+        let source = "patch {\n    stereo module bus : Vca\n    bus.\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find("bus.\n").unwrap() + 4;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.iter().any(|l| *l == "in") && labels.iter().any(|l| *l == "out"),
+            "expected Vca's in/out ports for stereo bus form: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn completions_for_stereo_port_index_offers_l_and_r() {
+        let source = "patch {\n    stereo module bus : Vca\n    bus.out[\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find("out[").unwrap() + 4;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["l", "r"], "got: {labels:?}");
+    }
+
+    #[test]
+    fn completions_for_stereo_at_block_offers_l_and_r() {
+        let source = "patch {\n    stereo module bus : Vca {\n        @\n    }\n}";
+        let (tree, model, registry) = setup(source);
+        let byte_offset = source.find("@\n").unwrap() + 1;
+        let items = compute_completions(&tree, source, byte_offset, &model, &registry);
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["l", "r"], "got: {labels:?}");
     }
 
     #[test]

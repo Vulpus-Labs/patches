@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use patches_ffi::{PluginScanner, ScanReport};
@@ -81,6 +82,11 @@ pub struct DocumentWorkspace {
     pub(super) module_paths: Mutex<Vec<PathBuf>>,
     pub(super) parser: Mutex<Parser>,
     pub(super) state: Mutex<WorkspaceState>,
+    /// `patches.inlayStereoExpansion` — when true, inlay hints render
+    /// the splitter / joiner / `__l` / `__r` modules synthesised at a
+    /// `stereo module` decl (ADR 0070). Default off; the whole point of
+    /// the sugar is to hide this detail.
+    pub(super) inlay_stereo_expansion: AtomicBool,
 }
 
 impl DocumentWorkspace {
@@ -101,6 +107,7 @@ impl DocumentWorkspace {
                 artifacts: HashMap::new(),
                 last_publish_non_root: HashMap::new(),
             }),
+            inlay_stereo_expansion: AtomicBool::new(false),
         }
     }
 }
@@ -126,6 +133,17 @@ impl DocumentWorkspace {
     /// Current module paths.
     pub fn module_paths(&self) -> Vec<PathBuf> {
         self.module_paths.lock().expect("module_paths lock poisoned").clone()
+    }
+
+    /// Toggle the `patches.inlayStereoExpansion` setting. Off by default;
+    /// only the inlay-hint provider reads it.
+    pub fn set_inlay_stereo_expansion(&self, on: bool) {
+        self.inlay_stereo_expansion.store(on, Ordering::Relaxed);
+    }
+
+    /// Read the current value of `patches.inlayStereoExpansion`.
+    pub(crate) fn inlay_stereo_expansion(&self) -> bool {
+        self.inlay_stereo_expansion.load(Ordering::Relaxed)
     }
 
     /// Hard-rebuild the registry from the default set plus a fresh scan of

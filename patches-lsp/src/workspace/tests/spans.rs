@@ -67,6 +67,100 @@ patch {
 }
 
 #[test]
+fn stereo_module_on_multi_channel_type_surfaces_st0043() {
+    // ADR 0070 / 0846: wrapping a multi-channel module type with the
+    // `stereo` keyword produces ST0043 ("stereo module wraps a
+    // multi-channel type") at the type-name token.
+    let src = "\
+patch {
+    stereo module mix : Mixer(channels: 4)
+}
+";
+    let tmp = TempDir::new("st0043");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let diags = ws.analyse_flat(&uri, src.to_string());
+    let st = diags
+        .iter()
+        .find(|d| matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "ST0043"))
+        .unwrap_or_else(|| panic!("ST0043 missing in {diags:?}"));
+    assert!(
+        st.message.contains("stereo") && st.message.contains("Mixer"),
+        "ST0043 message should name keyword + type: {}",
+        st.message
+    );
+}
+
+#[test]
+fn stereo_ident_clash_surfaces_st0041() {
+    // A user-named `bus__l` collides with the synthesised `__l` of a
+    // sibling `stereo module bus`; the expander should emit ST0041 at
+    // the user's decl, not at the synthesised name.
+    let src = "\
+patch {
+    stereo module bus : Vca
+    module bus__l : Osc
+}
+";
+    let tmp = TempDir::new("st0041");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let diags = ws.analyse_flat(&uri, src.to_string());
+    let st = diags
+        .iter()
+        .find(|d| matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "ST0041"))
+        .unwrap_or_else(|| panic!("ST0041 missing in {diags:?}"));
+    assert!(
+        st.message.contains("bus"),
+        "ST0041 should name the offending module: {}",
+        st.message
+    );
+}
+
+#[test]
+fn goto_definition_from_stereo_selector_lands_on_decl() {
+    // ADR 0070 / 0846: cursor on `bus` in `bus.out[l]` should resolve
+    // to the `stereo module bus` decl, identical to the bus form.
+    let src = "\
+patch {
+    stereo module bus : Vca
+    module out_l : AudioOut
+    bus.out[l] -> out_l.in
+}
+";
+    let tmp = TempDir::new("stereo_goto");
+    let _ = tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let _ = ws.analyse(&uri, src.to_string());
+
+    // Cursor on the `bus` ident inside `bus.out[l]` (the second `bus`
+    // occurrence in the source).
+    let first = src.find("bus").expect("first `bus`");
+    let from = first + 3;
+    let cable_bus = src[from..].find("bus").expect("second `bus`") + from;
+    let line_index = crate::lsp_util::build_line_index(src);
+    let pos = crate::lsp_util::byte_offset_to_position(src, &line_index, cable_bus + 1);
+    let loc = ws
+        .goto_definition(&uri, pos)
+        .expect("goto_definition resolves stereo selector");
+    assert_eq!(loc.uri, uri, "definition lives in same file");
+    // The decl `bus` token sits on line 1 (zero-indexed) right after the
+    // `stereo module ` prefix.
+    let want_col = "    stereo module ".len() as u32;
+    assert_eq!(
+        (loc.range.start.line, loc.range.start.character),
+        (1, want_col),
+        "definition range {:?}",
+        loc.range
+    );
+}
+
+#[test]
 fn fan_in_into_same_port_no_longer_diagnosed() {
     // Two outputs driving the same input port on `mix` are now collapsed
     // into a synthesized auto-Sum at descriptor bind, so neither BN0009

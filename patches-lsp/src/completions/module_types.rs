@@ -28,3 +28,29 @@ pub(super) fn complete_module_types(model: &SemanticModel, registry: &Registry) 
     items.sort_by(|a, b| a.label.cmp(&b.label));
     items
 }
+
+/// Statement-introducer keywords offered at the start of a patch /
+/// template body. Surfacing `stereo` here is the LSP's discoverability
+/// hook for ADR 0070 — without it users only learn the keyword from
+/// docs.
+pub(super) fn complete_statement_keywords() -> Vec<CompletionItem> {
+    [
+        ("module", "module instance declaration"),
+        (
+            "stereo",
+            "stereo-paired module decl (ADR 0070) — desugars to mono pair",
+        ),
+        ("knob", "host control: knob"),
+        ("slider", "host control: slider"),
+        ("toggle", "host control: toggle"),
+        ("trigger", "host control: trigger"),
+    ]
+    .into_iter()
+    .map(|(label, detail)| CompletionItem {
+        label: label.to_string(),
+        kind: Some(CompletionItemKind::KEYWORD),
+        detail: Some(detail.to_string()),
+        ..Default::default()
+    })
+    .collect()
+}

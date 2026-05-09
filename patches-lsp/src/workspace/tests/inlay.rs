@@ -106,3 +106,38 @@ patch { module v : voice }
     );
     assert!(hints.is_empty(), "range filter must prune out-of-range calls: {hints:?}");
 }
+
+#[test]
+fn inlay_stereo_expansion_off_by_default() {
+    // ADR 0070 / 0846: a `stereo module` decl produces no inlay hint
+    // unless the user opts in via `patches.inlayStereoExpansion`.
+    let tmp = TempDir::new("inlay_stereo_off");
+    let src = "patch {\n    stereo module bus : Vca\n}\n";
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let _ = ws.analyse_flat(&uri, src.to_string());
+    let hints = ws.inlay_hints(&uri, full_range(src));
+    assert!(
+        hints.iter().all(|h| !matches!(&h.label, InlayHintLabel::String(s) if s.contains("__l"))),
+        "stereo expansion hint must stay off by default: {hints:?}"
+    );
+}
+
+#[test]
+fn inlay_stereo_expansion_on_renders_synthesised_pair() {
+    let tmp = TempDir::new("inlay_stereo_on");
+    let src = "patch {\n    stereo module bus : Vca\n}\n";
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    ws.set_inlay_stereo_expansion(true);
+    let _ = ws.analyse_flat(&uri, src.to_string());
+    let hints = ws.inlay_hints(&uri, full_range(src));
+    let snapshot = snapshot_hints(&hints);
+    assert!(
+        snapshot.contains("bus__l") && snapshot.contains("bus__r")
+            && snapshot.contains("__split") && snapshot.contains("__join"),
+        "expected synthesised stereo pair in hint: {snapshot}"
+    );
+}
