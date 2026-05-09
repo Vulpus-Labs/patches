@@ -1,0 +1,65 @@
+# Syntax corpus — stereo module sugar (ADR 0070).
+#
+# The `stereo` keyword prefix on `module_decl` is the only new grammar
+# surface. Per-channel param overrides reuse the existing `@l: { ... }` /
+# `@r: { ... }` at_block form, and channel selectors on ports reuse the
+# existing `port[l]` / `port[r]` index form. Both grammars must agree on
+# parse acceptance for these cases.
+
+=== ok bare stereo module
+stereo module bus : Lpf
+
+=== ok stereo module with shape arg
+stereo module bus : Lpf(2)
+
+=== ok stereo module with param block
+stereo module bus : Lpf { cutoff: 1000Hz, q: 0.7 }
+
+=== ok stereo module with @l and @r per-channel at_blocks
+stereo module bus : Lpf {
+    cutoff: 1000Hz,
+    @l: { q: 0.5 },
+    @r: { q: 0.9 }
+}
+
+=== ok stereo module with shape and per-channel overrides
+stereo module bus : Lpf(2) {
+    cutoff: 1000Hz,
+    @l: { drive: 0.2 },
+    @r: { drive: 0.8 }
+}
+
+=== ok stereo bus reference on cable endpoints
+module src : Osc
+stereo module bus : Lpf
+src.sine -> bus.in
+bus.out -> src.voct
+
+=== ok port[l] / port[r] channel selectors
+stereo module bus : Lpf
+module out_l : AudioOut
+module out_r : AudioOut
+bus.out[l] -> out_l.in
+bus.out[r] -> out_r.in
+
+=== ok mixed bus + selector references in same patch
+module src : Osc
+stereo module bus : Lpf
+module probe : AudioOut
+src.sine -> bus.in
+bus.out -> probe.in, ~scope(bus_full)
+bus.out[l] -> ~meter(bus_l)
+bus.out[r] -> ~meter(bus_r)
+
+=== ok stereo identifier prefix is not the keyword (word boundary)
+module stereo_in : Osc
+module stereo-bus : Vca
+stereo_in.sine -> stereo-bus.in
+
+=== both_error stereo with no module keyword
+stereo bus : Lpf
+
+=== both_error stereo on connection
+module a : Osc
+module b : AudioOut
+stereo a.sine -> b.in

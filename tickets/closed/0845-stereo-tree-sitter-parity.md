@@ -3,6 +3,8 @@ id: "0845"
 title: Tree-sitter grammar parity for stereo module sugar
 priority: medium
 created: 2026-05-08
+closed: 2026-05-09
+status: closed
 epic: E140
 adr: 0070
 depends-on: "0843"
@@ -27,11 +29,11 @@ must pass with the new syntax in both grammars.
 
 ## Acceptance criteria
 
-- [ ] `module_decl` in `grammar.js` accepts an optional `stereo`
+- [x] `module_decl` in `grammar.js` accepts an optional `stereo`
       keyword prefix matching the pest rule.
-- [ ] Word-boundary handling matches pest: `stereo_in` does not
+- [x] Word-boundary handling matches pest: `stereo_in` does not
       tokenise as `stereo` + `_in`.
-- [ ] New corpus file `patches-lsp/tests/syntax_corpus/stereo_module.corpus`
+- [x] New corpus file `patches-lsp/tests/syntax_corpus/stereo_module.corpus`
       with cases:
   - bare `stereo module x : Foo`
   - with shape and params
@@ -39,14 +41,14 @@ must pass with the new syntax in both grammars.
   - with `port[l]` / `port[r]` channel selectors in cables
   - mixed bus + selector references in the same patch
   - corpus driver passes (pest and tree-sitter agree on parse trees).
-- [ ] `patches-lsp/tree-sitter-patches/queries/highlights.scm` highlights
+- [x] `patches-lsp/tree-sitter-patches/queries/highlights.scm` highlights
       the `stereo` keyword as a keyword.
-- [ ] `tree-sitter test` in `patches-lsp/tree-sitter-patches/` passes
-      for any inline test files that exercise the new rule.
-- [ ] Tree-sitter generated artefacts (`src/parser.c`, etc.) are
-      regenerated and committed if the project's convention is to
-      check them in (verify against current state of
-      `patches-lsp/tree-sitter-patches/src/`).
+- [x] `tree-sitter test` in `patches-lsp/tree-sitter-patches/` passes
+      for any inline test files that exercise the new rule
+      (`test/corpus/stereo.txt` — pre-existing unrelated `errors.txt`
+      failure on incomplete-module recovery is not introduced here).
+- [x] Tree-sitter generated artefacts (`src/parser.c`, etc.) are
+      regenerated and committed (landed in commit 41d73f3).
 
 ## Notes
 

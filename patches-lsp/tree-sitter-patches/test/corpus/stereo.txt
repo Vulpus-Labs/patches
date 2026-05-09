@@ -1,0 +1,175 @@
+================================================================================
+Bare stereo module
+================================================================================
+
+patch {
+    stereo module bus : Lpf
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        stereo: (stereo_kw)
+        name: (ident)
+        type: (ident)))))
+
+================================================================================
+Stereo module with shape and per-channel at_blocks
+================================================================================
+
+patch {
+    stereo module bus : Lpf(2) {
+        cutoff: 1000Hz,
+        @l: { q: 0.5 },
+        @r: { q: 0.9 }
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        stereo: (stereo_kw)
+        name: (ident)
+        type: (ident)
+        (call_block
+          (call_arg
+            (bare_arg
+              (scalar
+                (int_lit)))))
+        (param_block
+          (param_entry
+            (ident)
+            (value
+              (scalar
+                (float_unit))))
+          (param_entry
+            (at_block
+              (at_block_index
+                (ident))
+              (at_block_body
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (float_lit)))))))
+          (param_entry
+            (at_block
+              (at_block_index
+                (ident))
+              (at_block_body
+                (at_block_entry
+                  (ident)
+                  (value
+                    (scalar
+                      (float_lit))))))))))))
+
+================================================================================
+Channel selectors port[l] / port[r]
+================================================================================
+
+patch {
+    stereo module bus : Lpf
+    module out_l : AudioOut
+    module out_r : AudioOut
+    bus.out[l] -> out_l.in
+    bus.out[r] -> out_r.in
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        stereo: (stereo_kw)
+        name: (ident)
+        type: (ident)))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))
+    (statement
+      (connection
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))
+            (port_index
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
+
+================================================================================
+Word boundary: stereo_in is an identifier, not the keyword
+================================================================================
+
+patch {
+    module stereo_in : Osc
+    module dst : AudioOut
+    stereo_in.sine -> dst.in
+}
+
+--------------------------------------------------------------------------------
+
+(file
+  (patch
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (module_decl
+        name: (ident)
+        type: (ident)))
+    (statement
+      (connection
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))
+        (arrow
+          (forward_arrow))
+        (cable_endpoint
+          (port_ref
+            (module_ident
+              (ident))
+            (port_label
+              (ident))))))))
