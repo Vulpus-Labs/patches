@@ -20,6 +20,7 @@ pub mod poly_sum;
 pub mod poly_osc;
 pub mod poly_to_mono;
 pub mod poly_vca;
+pub mod stereo_sum;
 pub mod sum;
 pub mod vca;
 pub mod glide;
@@ -95,6 +96,7 @@ pub use poly_sum::PolySum;
 pub use poly_osc::PolyOsc;
 pub use poly_to_mono::PolyToMono;
 pub use poly_vca::PolyVca;
+pub use stereo_sum::StereoSum;
 pub use sum::Sum;
 pub use vca::Vca;
 pub use glide::Glide;
@@ -170,6 +172,7 @@ pub fn default_registry() -> patches_registry::Registry {
     r.register::<PolyAdsr>();
     r.register::<PolyVca>();
     r.register::<PolySum>();
+    r.register::<StereoSum>();
     r.register::<PolyToMono>();
     r.register::<MonoToPoly>();
     r.register::<Mixer>();
@@ -255,6 +258,7 @@ mod tests {
             "PolyAdsr",
             "PolyVca",
             "PolySum",
+            "StereoSum",
             "PolyToMono",
             "MonoToPoly",
             "PolyLowpass",

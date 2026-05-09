@@ -1,5 +1,5 @@
-//! Diagnostic-span narrowing: recursive-template range and BN0007/BN0009
-//! specific span assertions.
+//! Diagnostic-span narrowing: recursive-template range and BN0007 specific
+//! span assertions.
 
 use super::*;
 
@@ -67,10 +67,11 @@ patch {
 }
 
 #[test]
-fn duplicate_input_connection_surfaces_as_bn0009() {
-    // Two outputs driving the same input port on `mix` should be caught
-    // at descriptor bind and published as BN0009 so the LSP flags it
-    // before the engine would at runtime.
+fn fan_in_into_same_port_no_longer_diagnosed() {
+    // Two outputs driving the same input port on `mix` are now collapsed
+    // into a synthesized auto-Sum at descriptor bind, so neither BN0009
+    // (the retired duplicate-input code) nor any other bind error should
+    // fire. The LSP sees a clean patch.
     let src = "\
 patch {
     module a : Osc
@@ -80,14 +81,15 @@ patch {
     b.sine -> mix.in
 }
 ";
-    let tmp = TempDir::new("bn0009");
+    let tmp = TempDir::new("autosum_fanin");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");
     let diags = ws.analyse_flat(&uri, src.to_string());
     assert!(
-        diags.iter().any(|d| matches!(&d.code,
-            Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "BN0009")),
-        "expected BN0009 for duplicate input, got: {diags:?}"
+        diags.iter().all(|d| !matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c))
+                if c == "BN0009" || c == "BN0014")),
+        "fan-in should be auto-summed, not diagnosed: {diags:?}",
     );
 }

@@ -36,6 +36,14 @@ pub enum BindErrorCode {
     /// Mono layout mismatch (Audio ↔ Trigger) between connection endpoints
     /// (ADR 0047).
     MonoLayoutMismatch,
+    /// Multiple connections fan into the same input port but their source
+    /// cable kinds disagree (e.g. one mono and one poly). Auto-summing
+    /// requires uniform source kinds.
+    HeterogeneousFanIn,
+    /// Auto-summing required for fan-in but the registry is missing the
+    /// `Sum` / `PolySum` / `StereoSum` module needed to synthesize the
+    /// merge node.
+    AutoSumModuleMissing,
 }
 
 impl BindErrorCode {
@@ -52,6 +60,8 @@ impl BindErrorCode {
             Self::DuplicateInputConnection => "BN0009",
             Self::PolyLayoutMismatch => "BN0012",
             Self::MonoLayoutMismatch => "BN0013",
+            Self::HeterogeneousFanIn => "BN0014",
+            Self::AutoSumModuleMissing => "BN0015",
         }
     }
 
@@ -68,6 +78,8 @@ impl BindErrorCode {
             Self::DuplicateInputConnection => "duplicate input connection",
             Self::PolyLayoutMismatch => "poly layout mismatch",
             Self::MonoLayoutMismatch => "mono layout mismatch",
+            Self::HeterogeneousFanIn => "heterogeneous fan-in",
+            Self::AutoSumModuleMissing => "auto-sum module missing from registry",
         }
     }
 }

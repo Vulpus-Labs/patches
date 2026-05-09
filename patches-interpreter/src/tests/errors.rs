@@ -63,41 +63,49 @@ fn unknown_input_port_returns_interpret_error() {
 
 #[test]
 fn graph_error_wrapped_with_span() {
-    let osc2 = FlatModule {
-        id: "osc2".into(),
-        type_name: "Osc".to_string(),
-        shape: vec![],
-        params: vec![],
-        port_aliases: vec![],
-        provenance: Provenance::root(span()),
-        param_block_span: None,
-    };
+    // Heterogeneous fan-in (mono vs poly into the same input) is not
+    // auto-summable. Bind surfaces a `HeterogeneousFanIn` error whose
+    // span is the offending duplicate connection's provenance.
     let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
-    let dup_conn = FlatConnection {
-        from_module: "osc2".into(),
-        from_port: "sine".to_string(),
-        from_index: 0,
-        to_module: "mix".into(),
-        to_port: "in".to_string(),
-        to_index: 0,
-        map: patches_dsl::CableMap::scalar(1.0),
-        provenance: dup_prov.clone(),
-        from_provenance: dup_prov.clone(),
-        to_provenance: dup_prov,
-    };
     let mut flat = empty_flat();
-    flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];
+    flat.modules = vec![
+        osc_module("osc1"),
+        FlatModule {
+            id: "polyosc".into(),
+            type_name: "PolyOsc".to_string(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: Provenance::root(span()),
+            param_block_span: None,
+        },
+        sum_module("mix", 1),
+    ];
     flat.connections = vec![
         connection("osc1", "sine", 0, "mix", "in", 0),
-        dup_conn,
+        FlatConnection {
+            from_module: "polyosc".into(),
+            from_port: "sine".to_string(),
+            from_index: 0,
+            to_module: "mix".into(),
+            to_port: "in".to_string(),
+            to_index: 0,
+            map: patches_dsl::CableMap::scalar(1.0),
+            provenance: dup_prov.clone(),
+            from_provenance: dup_prov.clone(),
+            to_provenance: dup_prov,
+        },
     ];
     let err = build(&flat, &registry(), &env()).unwrap_err();
-    assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 50, 60));
-    // Two outputs feeding "mix.in/0" — must surface as the
-    // already-connected GraphError, not a generic "build failed".
+    // Note: the `polyosc.sine` source is poly while `osc1.sine` is mono;
+    // the per-edge bind already rejects this with `CableKindMismatch`
+    // (kinds disagree against the mono target). That is the error the
+    // user sees — `HeterogeneousFanIn` only fires when both individual
+    // sources independently bind successfully.
     assert!(
-        err.message.to_lowercase().contains("already"),
-        "expected input-already-connected error, got: {}", err.message
+        err.message.to_lowercase().contains("cable kind") ||
+            err.message.to_lowercase().contains("heterogeneous"),
+        "expected fan-in / kind-mismatch error, got: {}", err.message,
     );
 }
 
@@ -127,8 +135,12 @@ fn duplicate_module_id_is_error() {
 }
 
 #[test]
-fn input_already_connected_is_error() {
-    // Two outputs feeding the same input port: second connect must fail.
+fn input_already_connected_does_not_reach_graph_builder() {
+    // The graph-stage `GraphError::InputAlreadyConnected` (RT0001) is no
+    // longer reachable from a successful bind: bind's auto-sum rewrite
+    // collapses uniform-kind fan-in before connections are added to the
+    // graph. The build must succeed and the rewritten graph must contain
+    // the synthesized auto-sum node.
     let mut flat = empty_flat();
     flat.modules = vec![osc_module("a"), osc_module("b"), sum_module("mix", 1)];
     let b_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 77, 88));
@@ -147,12 +159,13 @@ fn input_already_connected_is_error() {
             to_provenance: b_prov,
         },
     ];
-    let err = build(&flat, &registry(), &env()).unwrap_err();
+    let result = build(&flat, &registry(), &env())
+        .expect("uniform-kind fan-in should auto-sum, not fail");
+    let names: Vec<_> = result.graph.node_ids().iter().map(|id| id.to_string()).collect();
     assert!(
-        err.message.to_lowercase().contains("already"),
-        "expected input-already-connected error, got: {}", err.message
+        names.iter().any(|n| n.starts_with("__autosum_mix_in")),
+        "expected synthesized auto-sum node: {names:?}",
     );
-    assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 77, 88));
 }
 
 #[test]
@@ -350,10 +363,11 @@ fn unknown_port_surfaces_as_bind_error() {
 }
 
 #[test]
-fn connect_duplicate_surfaces_as_bind_error() {
-    // Duplicate input (`mix.in/0` fed from two outputs) is caught at
-    // descriptor bind so the LSP (which stops at bind) flags it before
-    // the engine would at `ModuleGraph::connect`.
+fn fan_in_synthesizes_sum_module() {
+    // Two mono sources feeding the same input port are no longer rejected.
+    // Bind synthesizes a `Sum` (channels = 2) and rewires the edges through
+    // it. The graph builder still enforces single-source per input — the
+    // rewrite is what makes that invariant hold.
     let osc2 = FlatModule {
         id: "osc2".into(),
         type_name: "Osc".to_string(),
@@ -374,7 +388,7 @@ fn connect_duplicate_surfaces_as_bind_error() {
         map: patches_dsl::CableMap::scalar(1.0),
         provenance: dup_prov.clone(),
         from_provenance: dup_prov.clone(),
-        to_provenance: dup_prov.clone(),
+        to_provenance: dup_prov,
     };
     let mut flat = empty_flat();
     flat.modules = vec![osc_module("osc1"), osc2, sum_module("mix", 1)];
@@ -383,10 +397,20 @@ fn connect_duplicate_surfaces_as_bind_error() {
         dup_conn,
     ];
     let bound = bind(&flat, &registry());
-    assert_eq!(bound.errors.len(), 1);
-    assert_eq!(bound.errors[0].code, BindErrorCode::DuplicateInputConnection);
-    // Diagnostic points at the duplicate's destination, not the first hit.
-    assert_eq!(bound.errors[0].provenance.site, dup_prov.site);
+    assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+    assert_eq!(bound.modules.len(), 4, "expected 3 user modules + 1 auto-sum");
+    assert!(
+        bound.modules.iter().any(|m| matches!(
+            m,
+            BoundModule::Resolved(r) if r.type_name == "Sum"
+                && r.descriptor.shape.channels == 2
+                && r.id.name.starts_with("__autosum_")
+        )),
+        "expected synthesized Sum module: {:?}",
+        bound.modules,
+    );
+    // Connection count: 2 source→sum + 1 sum→mix = 3.
+    assert_eq!(bound.connections.len(), 3);
 }
 
 // ── Ticket 0783: bind is the canonical validation gate ──────────────
@@ -431,15 +455,23 @@ fn bind_is_canonical_unknown_input_port() {
 }
 
 #[test]
-fn bind_is_canonical_input_already_connected() {
+fn fan_in_does_not_reach_graph_builder() {
+    // The graph-stage `GraphError::InputAlreadyConnected` (RT0001) must
+    // never surface to the user — bind's auto-sum rewrite collapses the
+    // fan-in before connections reach `ModuleGraph::connect`.
     let mut flat = empty_flat();
     flat.modules = vec![osc_module("a"), osc_module("b"), sum_module("mix", 1)];
     flat.connections = vec![
         connection("a", "sine", 0, "mix", "in", 0),
         connection("b", "sine", 0, "mix", "in", 0),
     ];
-    let err = build(&flat, &registry(), &env()).unwrap_err();
-    assert_bind_source(&err, BindErrorCode::DuplicateInputConnection);
+    let result = build(&flat, &registry(), &env())
+        .expect("auto-sum rewrite should produce a buildable graph");
+    let names: Vec<_> = result.graph.node_ids().iter().map(|id| id.to_string()).collect();
+    assert!(
+        names.iter().any(|n| n.starts_with("__autosum_mix_in")),
+        "expected synthetic auto-sum node in graph: {names:?}",
+    );
 }
 
 #[test]

@@ -35,6 +35,7 @@
 
 pub mod connections;
 pub mod errors;
+mod fan_in;
 pub mod modules;
 
 pub use connections::{
@@ -192,31 +193,22 @@ pub fn bind_with_base_dir(
         connections.push(bind_connection(conn, &by_id, &port_aliases, &mut errors));
     }
 
-    // Each input port may be driven by at most one source. Detect duplicates
-    // here so the LSP flags them; the engine's graph builder enforces the
-    // same invariant at runtime (RT0001). Key on (module, port-name, index)
-    // and report the *second* occurrence, leaving the first as authoritative.
-    let mut seen_inputs: HashMap<(QName, &'static str, usize), &patches_core::Provenance> =
-        HashMap::new();
-    for (bc, raw) in connections.iter().zip(flat.connections.iter()) {
-        let BoundConnection::Resolved(rc) = bc else { continue };
-        let key = (rc.to_module.clone(), rc.to_port.name, rc.to_port.index);
-        if seen_inputs.insert(key, &raw.to_provenance).is_some() {
-            errors.push(BindError::new(
-                BindErrorCode::DuplicateInputConnection,
-                raw.to_provenance.clone(),
-                format!(
-                    "input port '{}/{}' on module '{}' already has a connection",
-                    rc.to_port.name, rc.to_port.index, rc.to_module
-                ),
-            ));
-        }
-    }
-
     let mut port_refs: Vec<BoundPortRef> = Vec::with_capacity(flat.port_refs.len());
     for pr in &flat.port_refs {
         port_refs.push(bind_port_ref(pr, &by_id, &port_aliases, &mut errors));
     }
+
+    // Drop the borrow of `modules` held by `by_id` so the fan-in pass can
+    // mutate `modules` (it appends synthesized Sum / PolySum / StereoSum
+    // nodes).
+    drop(by_id);
+
+    // Auto-sum multi-fan-in: when several connections target the same input
+    // port, group them and route through a synthesized Sum module of the
+    // matching kind. The runtime graph builder still enforces single-source
+    // per input (RT0001) — coalescing here ensures the rewritten edges
+    // satisfy that invariant.
+    fan_in::coalesce_fan_in(&mut modules, &mut connections, registry, &mut errors);
 
     BoundPatch {
         graph: BoundGraph { modules, connections, port_refs, errors },
@@ -417,5 +409,129 @@ mod tests {
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
         assert_eq!(bound.errors[0].code, BindErrorCode::InvalidParameterType);
+    }
+
+    // ── Auto-summing of multi-fan-in ────────────────────────────────────
+
+    #[test]
+    fn two_mono_sources_into_one_input_synthesize_sum() {
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("a"), osc("b"), sum("mix", 1)];
+        flat.connections = vec![conn("a", "sine", "mix", "in"), conn("b", "sine", "mix", "in")];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let sums: Vec<_> = bound
+            .modules
+            .iter()
+            .filter_map(|m| match m {
+                BoundModule::Resolved(r) if r.type_name == "Sum" => Some(r),
+                _ => None,
+            })
+            .collect();
+        let synth = sums
+            .iter()
+            .find(|r| r.id.name.starts_with("__autosum_"))
+            .expect("auto-sum module synthesized");
+        assert_eq!(synth.descriptor.shape.channels, 2);
+        // 2 source→sum + 1 sum→mix.
+        assert_eq!(bound.connections.len(), 3);
+    }
+
+    #[test]
+    fn three_sources_synthesize_three_channel_sum() {
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("a"), osc("b"), osc("c"), sum("mix", 1)];
+        flat.connections = vec![
+            conn("a", "sine", "mix", "in"),
+            conn("b", "sine", "mix", "in"),
+            conn("c", "sine", "mix", "in"),
+        ];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let synth = bound
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                BoundModule::Resolved(r) if r.id.name.starts_with("__autosum_") => Some(r),
+                _ => None,
+            })
+            .expect("auto-sum module synthesized");
+        assert_eq!(synth.descriptor.shape.channels, 3);
+        assert_eq!(bound.connections.len(), 4);
+    }
+
+    #[test]
+    fn single_connection_is_not_rewritten() {
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("o"), sum("mix", 1)];
+        flat.connections = vec![conn("o", "sine", "mix", "in")];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty());
+        assert_eq!(bound.modules.len(), 2);
+        assert_eq!(bound.connections.len(), 1);
+    }
+
+    #[test]
+    fn fan_in_preserves_per_source_cable_map() {
+        // Each source carries its own scale; the rewrite must keep them on
+        // the source→sum edge. The sum→target edge is identity.
+        let prov = || CoreProv::root(syn());
+        let scaled = |from: &str, scale: f64| FlatConnection {
+            from_module: from.into(),
+            from_port: "sine".into(),
+            from_index: 0,
+            to_module: "mix".into(),
+            to_port: "in".into(),
+            to_index: 0,
+            map: patches_dsl::CableMap::scalar(scale),
+            provenance: prov(),
+            from_provenance: prov(),
+            to_provenance: prov(),
+        };
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("a"), osc("b"), sum("mix", 1)];
+        flat.connections = vec![scaled("a", 0.25), scaled("b", 0.75)];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+
+        let mut source_scales: Vec<f32> = Vec::new();
+        let mut sum_to_mix_scale: Option<f32> = None;
+        for bc in &bound.connections {
+            let BoundConnection::Resolved(rc) = bc else { continue };
+            if rc.to_module.name.starts_with("__autosum_") {
+                source_scales.push(rc.map.scale as f32);
+            } else if rc.from_module.name.starts_with("__autosum_") {
+                sum_to_mix_scale = Some(rc.map.scale as f32);
+            }
+        }
+        source_scales.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        assert_eq!(source_scales, vec![0.25, 0.75]);
+        assert_eq!(sum_to_mix_scale, Some(1.0));
+    }
+
+    #[test]
+    fn two_independent_fan_ins_each_synthesize_a_sum() {
+        let mut flat = empty_flat();
+        flat.modules = vec![
+            osc("a"),
+            osc("b"),
+            osc("c"),
+            osc("d"),
+            sum("mixL", 2),
+        ];
+        // mixL.in/0 driven by a,b ; mixL.in/1 driven by c,d.
+        let mut c_a = conn("a", "sine", "mixL", "in"); c_a.to_index = 0;
+        let mut c_b = conn("b", "sine", "mixL", "in"); c_b.to_index = 0;
+        let mut c_c = conn("c", "sine", "mixL", "in"); c_c.to_index = 1;
+        let mut c_d = conn("d", "sine", "mixL", "in"); c_d.to_index = 1;
+        flat.connections = vec![c_a, c_b, c_c, c_d];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let synth_count = bound
+            .modules
+            .iter()
+            .filter(|m| matches!(m, BoundModule::Resolved(r) if r.id.name.starts_with("__autosum_")))
+            .count();
+        assert_eq!(synth_count, 2);
     }
 }
