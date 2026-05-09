@@ -7,6 +7,7 @@ use patches_core::graphs::graph::{ModuleGraph, NodeId};
 
 pub mod alloc;
 pub mod graph_index;
+pub mod scc;
 
 pub use alloc::{
     allocate_buffers, BufferAllocState, BufferAllocation, ModuleAllocDiff, ModuleAllocState,
@@ -158,6 +159,18 @@ pub struct PlanDecisions<'a> {
     pub order: Vec<NodeId>,
     pub buf_alloc: BufferAllocation,
     pub decisions: Vec<(NodeId, NodeDecision<'a>)>,
+    /// Per-edge fused/cyclic classification, parallel to `index.edges`
+    /// (ADR 0072 phase 1). `true` means the cable spans a forward
+    /// (inter-SCC) edge in the condensation: in phase 2 the engine
+    /// reads it from the producer's same-tick write slot. `false`
+    /// means the cable lies inside a non-trivial SCC and must retain
+    /// the 1-sample feedback delay. Phase 1 emits this metadata; the
+    /// engine continues to apply the delay to every cable.
+    pub cable_fused: Vec<bool>,
+    /// Size of the feedback arc set: number of cables internal to a
+    /// non-trivial SCC. Reported on plan build to validate the
+    /// assumption that typical patches have very few cyclic cables.
+    pub fas_size: usize,
 }
 
 // ── classify_nodes ────────────────────────────────────────────────────────────
@@ -259,16 +272,95 @@ pub fn make_decisions<'a>(
 ) -> Result<PlanDecisions<'a>, PlanError> {
     let index = GraphIndex::build(graph);
     let node_ids = graph.node_ids();
-    let order = compute_order(&node_ids);
+    let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
+    validate_fused_invariant(&order, &index.edges, &cable_fused);
     let buf_alloc = allocate_buffers(&index, &order, &prev_state.buffer_alloc, pool_capacity)?;
     let decisions = classify_nodes(&index, &order, prev_state)?;
-    Ok(PlanDecisions { index, order, buf_alloc, decisions })
+    Ok(PlanDecisions { index, order, buf_alloc, decisions, cable_fused, fas_size })
 }
 
-fn compute_order(node_ids: &[NodeId]) -> Vec<NodeId> {
-    let mut order = node_ids.to_vec();
-    order.sort_unstable();
-    order
+/// Compute execution order over the SCC condensation and classify
+/// every cable as fused (inter-SCC, forward) or cyclic (internal to
+/// a non-trivial SCC). Returns:
+///
+/// - `order`: nodes in condensation topo order; within each SCC,
+///   alphabetical for determinism.
+/// - `cable_fused`: parallel to `edges`. `true` iff the cable's
+///   producer and consumer live in different SCCs.
+/// - `fas_size`: count of cyclic cables.
+///
+/// For an empty edge set this returns alphabetical node order, the
+/// same ordering the planner used before ADR 0072.
+pub(crate) fn compute_order_with_fusion(
+    node_ids: &[NodeId],
+    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+) -> (Vec<NodeId>, Vec<bool>, usize) {
+    let mut adj: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(node_ids.len());
+    for id in node_ids {
+        adj.insert(id.clone(), Vec::new());
+    }
+    for (from, _, _, to, _, _, _) in edges {
+        if let Some(succs) = adj.get_mut(from) {
+            succs.push(to.clone());
+        }
+    }
+
+    let part = scc::tarjan_scc(node_ids, &adj);
+
+    let mut order: Vec<NodeId> = Vec::with_capacity(node_ids.len());
+    for &scc_idx in &part.topo_scc {
+        let mut members = part.members[scc_idx].clone();
+        members.sort();
+        order.extend(members);
+    }
+
+    let mut cable_fused: Vec<bool> = Vec::with_capacity(edges.len());
+    let mut fas_size: usize = 0;
+    for (from, _, _, to, _, _, _) in edges {
+        let fused = match (part.scc_of.get(from), part.scc_of.get(to)) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        };
+        if !fused {
+            fas_size += 1;
+        }
+        cable_fused.push(fused);
+    }
+
+    (order, cable_fused, fas_size)
+}
+
+/// Assert that every fused cable points forward in `order`. A
+/// violation is a planner bug — phase 2 would read stale data.
+fn validate_fused_invariant(
+    order: &[NodeId],
+    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    cable_fused: &[bool],
+) {
+    debug_assert_eq!(edges.len(), cable_fused.len());
+    let pos: HashMap<&NodeId, usize> = order.iter().enumerate().map(|(i, n)| (n, i)).collect();
+    for (i, edge) in edges.iter().enumerate() {
+        if !cable_fused[i] {
+            continue;
+        }
+        let (from, _, _, to, _, _, _) = edge;
+        let pi = pos.get(from);
+        let pj = pos.get(to);
+        match (pi, pj) {
+            (Some(&p), Some(&c)) => {
+                assert!(
+                    p < c,
+                    "ADR 0072 invariant violated: fused cable {from} -> {to} \
+                     has producer at active_indices[{p}] and consumer at active_indices[{c}]; \
+                     producer must precede consumer in topo order",
+                );
+            }
+            _ => panic!(
+                "ADR 0072 invariant violated: fused cable {from} -> {to} references \
+                 a node missing from active_indices",
+            ),
+        }
+    }
 }
 
 // ── classify_nodes tests (T-0099) ────────────────────────────────────────────

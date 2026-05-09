@@ -348,14 +348,14 @@ pub(super) fn flatten_song(
     let mut local_patterns: Vec<&PatternDef> = Vec::new();
     for item in &song.items {
         match item {
-            SongItem::Section(sd) => {
-                if local_sections.insert(sd.name.name.clone(), sd).is_some() {
-                    return Err(ExpandError::new(
-                        Code::DuplicateSection,
-                        sd.span,
-                        format!("duplicate section '{}' in song", sd.name.name),
-                    ));
-                }
+            SongItem::Section(sd)
+                if local_sections.insert(sd.name.name.clone(), sd).is_some() =>
+            {
+                return Err(ExpandError::new(
+                    Code::DuplicateSection,
+                    sd.span,
+                    format!("duplicate section '{}' in song", sd.name.name),
+                ));
             }
             SongItem::Pattern(pd) => {
                 if local_patterns.iter().any(|p| p.name.name == pd.name.name) {

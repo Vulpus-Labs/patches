@@ -347,21 +347,17 @@ pub(in crate::expand) fn validate_song_pattern_params(
         let name = &param_decl.name.name;
         if let Some(Scalar::Str(ref val)) = sub_param_env.get(name.as_str()).cloned() {
             match param_decl.ty {
-                ParamType::Pattern => {
-                    if scope.resolve_pattern(val).is_none() {
-                        return Err(ExpandError::new(Code::PatternNotFound, decl.span, format!(
-                                "template '{}' param '{}': '{}' is not a known pattern",
-                                type_name, name, val,
-                            )));
-                    }
+                ParamType::Pattern if scope.resolve_pattern(val).is_none() => {
+                    return Err(ExpandError::new(Code::PatternNotFound, decl.span, format!(
+                            "template '{}' param '{}': '{}' is not a known pattern",
+                            type_name, name, val,
+                        )));
                 }
-                ParamType::Song => {
-                    if scope.resolve_song(val).is_none() {
-                        return Err(ExpandError::new(Code::SongNotFound, decl.span, format!(
-                                "template '{}' param '{}': '{}' is not a known song",
-                                type_name, name, val,
-                            )));
-                    }
+                ParamType::Song if scope.resolve_song(val).is_none() => {
+                    return Err(ExpandError::new(Code::SongNotFound, decl.span, format!(
+                            "template '{}' param '{}': '{}' is not a known song",
+                            type_name, name, val,
+                        )));
                 }
                 _ => {}
             }

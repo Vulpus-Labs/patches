@@ -251,6 +251,19 @@ pub struct ExecutionPlan {
     /// [`Module::set_ports`] called on them inline before being pushed to
     /// [`new_modules`](Self::new_modules). Empty when no surviving module changed ports.
     pub port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)>,
+    /// Input ports whose feeding cable lies inside a non-trivial SCC
+    /// (ADR 0072 phase 1). Each entry is `(consumer_pool_index,
+    /// input_port_idx)`. Engine reads still use the 1-sample-delayed
+    /// path for every cable in phase 1; phase 2 consumes this list to
+    /// flip `InputPort.fused = true` on the complement (every input
+    /// port not listed here). The list is sized by the feedback arc
+    /// set, which the planner expects to be small.
+    pub cyclic_inputs: Vec<(usize, usize)>,
+    /// Feedback arc set size: number of cables internal to a
+    /// non-trivial SCC (parallel to `cyclic_inputs.len()`). Carried
+    /// for diagnostics — the planner reports it so test corpora can
+    /// confirm the assumption that typical patches are nearly acyclic.
+    pub fas_size: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
     /// `None` for patches that don't use pattern/song blocks — zero overhead
@@ -286,6 +299,8 @@ impl ExecutionPlan {
             periodic_indices: vec![],
             active_indices: vec![],
             port_updates: vec![],
+            cyclic_inputs: vec![],
+            fas_size: 0,
             tracker_data: None,
             tracker_receiver_indices: vec![],
             tap_manifest_generation: 0,
@@ -381,8 +396,14 @@ impl PatchBuilder {
         // (ADR 0060). The interpreter populates them via
         // `ModuleGraph::add_module_with_structural` before plan-build; the
         // planner threads them into `Module::prepare` on `Install`.
-        let PlanDecisions { index, order, buf_alloc, mut decisions } =
-            make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
+        let PlanDecisions {
+            index,
+            order,
+            buf_alloc,
+            mut decisions,
+            cable_fused,
+            fas_size,
+        } = make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 
         // ── Action phase ─────────────────────────────────────────────────────
 
@@ -645,6 +666,44 @@ impl PatchBuilder {
         let tombstones = module_diff.tombstoned;
         let active_indices: Vec<usize> = slots.iter().map(|s| s.pool_index).collect();
 
+        // Translate per-edge cyclic flags into (consumer pool slot,
+        // input port positional index) pairs. The engine ignores this
+        // list in phase 1 (ADR 0072); phase 2 consumes it to set
+        // `InputPort.fused`.
+        let mut cyclic_inputs: Vec<(usize, usize)> = Vec::with_capacity(fas_size);
+        for (i, edge) in index.edges.iter().enumerate() {
+            if cable_fused[i] {
+                continue;
+            }
+            let (_, _, _, to, in_name, in_idx, _) = edge;
+            let consumer_inst = *instance_ids.get(to).ok_or_else(|| {
+                BuildErrorKind::InternalError(format!(
+                    "cyclic cable references unknown consumer node {to:?}"
+                ))
+            })?;
+            let consumer_slot = *module_diff.slot_map.get(&consumer_inst).ok_or_else(|| {
+                BuildErrorKind::InternalError(format!(
+                    "cyclic cable consumer {to:?} missing pool slot"
+                ))
+            })?;
+            let consumer_node = index.get_node(to).ok_or_else(|| {
+                BuildErrorKind::InternalError(format!(
+                    "cyclic cable consumer {to:?} missing from graph"
+                ))
+            })?;
+            let port_idx = consumer_node
+                .module_descriptor
+                .inputs
+                .iter()
+                .position(|p| p.name == *in_name && p.index == *in_idx)
+                .ok_or_else(|| {
+                    BuildErrorKind::InternalError(format!(
+                        "cyclic cable references unknown input port {in_name}/{in_idx} on {to:?}"
+                    ))
+                })?;
+            cyclic_inputs.push((consumer_slot, port_idx));
+        }
+
         Ok((
             ExecutionPlan {
                 slots,
@@ -658,6 +717,8 @@ impl PatchBuilder {
                 periodic_indices,
                 active_indices,
                 port_updates,
+                cyclic_inputs,
+                fas_size,
                 tracker_data: None,
                 tracker_receiver_indices: Vec::new(),
                 tap_manifest_generation: 0,

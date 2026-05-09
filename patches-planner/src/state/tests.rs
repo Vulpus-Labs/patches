@@ -1,5 +1,5 @@
 use super::*;
-use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
+use patches_core::cables::{CableKind, CableMap, MonoLayout, PolyLayout};
 use patches_core::modules::{InstanceId, ModuleDescriptor, ParameterDescriptor, ParameterKind, ParameterValue, PortDescriptor, PortRef};
 use patches_core::ModuleGraph;
 
@@ -360,4 +360,204 @@ fn classify_surviving_removed_param_produces_diff_with_default() {
         }
         NodeDecision::Install { .. } => panic!("expected Update"),
     }
+}
+
+// ── compute_order_with_fusion + invariant tests (ADR 0072 phase 1) ───────────
+
+type Edge = (NodeId, &'static str, usize, NodeId, &'static str, usize, CableMap);
+
+fn edge(from: &str, to: &str) -> Edge {
+    (
+        NodeId::from(from),
+        "out",
+        0,
+        NodeId::from(to),
+        "in",
+        0,
+        CableMap::scalar(1.0),
+    )
+}
+
+fn ids(strs: &[&str]) -> Vec<NodeId> {
+    strs.iter().map(|s| NodeId::from(*s)).collect()
+}
+
+fn pos_of(order: &[NodeId], n: &str) -> usize {
+    order.iter().position(|x| x == &NodeId::from(n)).expect("node missing from order")
+}
+
+#[test]
+fn compute_order_with_fusion_linear_chain_topo_not_alphabetical() {
+    // c → b → a. Alphabetical would emit [a, b, c]; topo must emit [c, b, a].
+    let nodes = ids(&["a", "b", "c"]);
+    let edges = vec![edge("c", "b"), edge("b", "a")];
+    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    assert!(pos_of(&order, "c") < pos_of(&order, "b"));
+    assert!(pos_of(&order, "b") < pos_of(&order, "a"));
+    assert_eq!(fused, vec![true, true], "all forward edges are fused");
+    assert_eq!(fas_size, 0);
+}
+
+#[test]
+fn compute_order_with_fusion_cycle_marks_cable_cyclic() {
+    // a → b → a. Single SCC, both cables internal → fas_size = 2.
+    let nodes = ids(&["a", "b"]);
+    let edges = vec![edge("a", "b"), edge("b", "a")];
+    let (_order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    assert_eq!(fused, vec![false, false]);
+    assert_eq!(fas_size, 2);
+}
+
+#[test]
+fn compute_order_with_fusion_isolated_node_passes_through() {
+    let nodes = ids(&["a"]);
+    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &[]);
+    assert_eq!(order, ids(&["a"]));
+    assert!(fused.is_empty());
+    assert_eq!(fas_size, 0);
+}
+
+#[test]
+fn compute_order_with_fusion_mixed_acyclic_and_cyclic() {
+    // src → loopA, loopA ⇄ loopB, loopB → sink. Two cyclic cables
+    // (loopA↔loopB), two fused (src→loopA, loopB→sink).
+    let nodes = ids(&["src", "loopA", "loopB", "sink"]);
+    let edges = vec![
+        edge("src", "loopA"),
+        edge("loopA", "loopB"),
+        edge("loopB", "loopA"),
+        edge("loopB", "sink"),
+    ];
+    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    assert_eq!(fused, vec![true, false, false, true]);
+    assert_eq!(fas_size, 2);
+    // src precedes the loop, which precedes sink.
+    let p_src = pos_of(&order, "src");
+    let p_a = pos_of(&order, "loopA");
+    let p_b = pos_of(&order, "loopB");
+    let p_sink = pos_of(&order, "sink");
+    assert!(p_src < p_a && p_src < p_b);
+    assert!(p_a < p_sink && p_b < p_sink);
+}
+
+#[test]
+fn compute_order_with_fusion_empty_edges_alphabetical_within_scc() {
+    // No edges → every node is its own trivial SCC. Tarjan visits in
+    // input order and the per-SCC sort is a no-op (one element each).
+    // The condensation topo order is therefore the visit order; for
+    // determinism we require the planner to always feed `node_ids` in
+    // a deterministic order — this test pins that input.
+    let nodes = ids(&["zeta", "alpha", "mu"]);
+    let (order, _fused, fas_size) = compute_order_with_fusion(&nodes, &[]);
+    assert_eq!(fas_size, 0);
+    // Every input node must appear exactly once.
+    let mut sorted = order.clone();
+    sorted.sort();
+    assert_eq!(sorted, ids(&["alpha", "mu", "zeta"]));
+}
+
+#[test]
+fn compute_order_with_fusion_disjoint_subgraphs_each_topo_sorted() {
+    // a → b, x → y (no edges between subgraphs). Each chain is topo
+    // ordered locally; the relative order between subgraphs is
+    // unspecified but deterministic.
+    let nodes = ids(&["a", "b", "x", "y"]);
+    let edges = vec![edge("a", "b"), edge("x", "y")];
+    let (order, fused, _) = compute_order_with_fusion(&nodes, &edges);
+    assert_eq!(fused, vec![true, true]);
+    assert!(pos_of(&order, "a") < pos_of(&order, "b"));
+    assert!(pos_of(&order, "x") < pos_of(&order, "y"));
+}
+
+#[test]
+fn fused_cables_satisfy_topo_invariant_on_pseudo_random_dags() {
+    // Property test: for many random DAGs (no cycles), every cable
+    // is classified `fused` and the producer's index in `order`
+    // strictly precedes the consumer's. Regenerated each run from a
+    // fixed seed for determinism.
+    let mut rng = LcgRng::seed(0xC07_2C0DEu64);
+    for _ in 0..200 {
+        let n = 1 + (rng.next_u32() as usize % 12);
+        let names: Vec<String> = (0..n).map(|i| format!("n{i:02}")).collect();
+        let nodes: Vec<NodeId> = names.iter().map(|s| NodeId::from(s.as_str())).collect();
+        // Build a DAG: edges only from lower-source-index to higher.
+        // Apply a random permutation to the input order so the
+        // planner cannot lean on insertion order.
+        let perm = rng.permutation(n);
+        let permuted_nodes: Vec<NodeId> = perm.iter().map(|&i| nodes[i].clone()).collect();
+        let mut edges: Vec<Edge> = Vec::new();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if rng.next_u32().is_multiple_of(4) {
+                    let from = leak_str(&names[i]);
+                    let to = leak_str(&names[j]);
+                    edges.push((
+                        NodeId::from(from),
+                        "out",
+                        0,
+                        NodeId::from(to),
+                        "in",
+                        0,
+                        CableMap::scalar(1.0),
+                    ));
+                }
+            }
+        }
+        let (order, fused, fas_size) = compute_order_with_fusion(&permuted_nodes, &edges);
+        assert_eq!(fas_size, 0, "DAG must have empty feedback arc set");
+        assert!(fused.iter().all(|&b| b), "every cable in a DAG must be fused");
+        let pos: std::collections::HashMap<&NodeId, usize> =
+            order.iter().enumerate().map(|(i, n)| (n, i)).collect();
+        for (from, _, _, to, _, _, _) in &edges {
+            let p = pos[from];
+            let c = pos[to];
+            assert!(p < c, "{from} (pos {p}) must precede {to} (pos {c})");
+        }
+    }
+}
+
+// ── Tiny PRNG + helpers used only by the property tests above ────────────────
+
+/// Linear congruential generator. Deterministic, suitable only for
+/// shaping test-input distributions.
+struct LcgRng { state: u64 }
+
+impl LcgRng {
+    fn seed(s: u64) -> Self { Self { state: s.wrapping_mul(6364136223846793005).wrapping_add(1) } }
+    fn next_u32(&mut self) -> u32 {
+        // Numerical Recipes parameters.
+        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (self.state >> 32) as u32
+    }
+    fn permutation(&mut self, n: usize) -> Vec<usize> {
+        let mut v: Vec<usize> = (0..n).collect();
+        // Fisher-Yates.
+        for i in (1..n).rev() {
+            let j = (self.next_u32() as usize) % (i + 1);
+            v.swap(i, j);
+        }
+        v
+    }
+}
+
+/// Intentional small leak: the property test stores edges as
+/// `&'static str` to match the production EdgeList shape. Test names
+/// are drawn from a bounded set per run, and the test process is
+/// short-lived — leaking the small number of formatted ids is the
+/// simplest way to satisfy the lifetime without redesigning EdgeList.
+fn leak_str(s: &str) -> &'static str {
+    Box::leak(s.to_string().into_boxed_str())
+}
+
+#[test]
+#[should_panic(expected = "ADR 0072 invariant violated")]
+fn validate_fused_invariant_panics_on_backward_fused_cable() {
+    // Construct a deliberately-broken classification: edge a → b
+    // marked fused but the order places b before a. This shape
+    // cannot arise from `compute_order_with_fusion`; the assertion
+    // exists to catch planner bugs that bypass it.
+    let order = vec![NodeId::from("b"), NodeId::from("a")];
+    let edges = vec![edge("a", "b")];
+    let fused = vec![true];
+    super::validate_fused_invariant(&order, &edges, &fused);
 }

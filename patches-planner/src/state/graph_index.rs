@@ -21,7 +21,7 @@ type InputBufferMap = HashMap<(NodeId, &'static str, usize), (usize, CableMap, b
 /// connectivity queries. Used by the decision phase and action phase of plan building.
 pub struct GraphIndex<'a> {
     graph: &'a ModuleGraph,
-    pub(super) edges: EdgeList,
+    pub(crate) edges: EdgeList,
     connected_inputs: HashSet<(NodeId, &'static str, usize)>,
     connected_outputs: HashSet<(NodeId, &'static str, usize)>,
 }
