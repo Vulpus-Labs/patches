@@ -111,7 +111,7 @@ pub(crate) fn parse_wav(data: &[u8]) -> Result<AudioData, AudioIoError> {
 
     let n_ch = num_channels as usize;
     let frame_size = bytes_per_sample * n_ch;
-    let total_frames = if frame_size > 0 { raw.len() / frame_size } else { 0 };
+    let total_frames = raw.len().checked_div(frame_size).unwrap_or(0);
 
     let mut channels: Vec<Vec<f32>> =
         (0..n_ch).map(|_| Vec::with_capacity(total_frames)).collect();
