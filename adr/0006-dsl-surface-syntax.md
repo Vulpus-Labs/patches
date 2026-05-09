@@ -437,6 +437,87 @@ scale interpolations are substituted by the expander before the flat patch
 reaches Stage 3. Stage 3 sees only concrete port labels and concrete scale
 values.
 
+## Amendment — 2026-05-09: stereo module sugar
+
+ADR 0070 introduces a `stereo` keyword prefix on `module_decl` that
+desugars at expand time into the existing `StereoSplitter` / paired-mono
+/ `StereoJoiner` quartet. The sugar is purely syntactic — runtime,
+planner, and module catalogue are unchanged.
+
+### Surface syntax
+
+```text
+stereo module <name> : <TypeName>(<shape>) { <params> }
+```
+
+The `stereo` keyword wraps a single-channel module type and synthesises
+two mono instances (`<name>__l`, `<name>__r`) plus a shared
+`StereoSplitter` and `StereoJoiner`. Wrapping a multi-channel type
+(`stereo module x : Mixer(channels: 4)`) is a structural error.
+
+### Per-channel parameter overrides
+
+The regular `{ <params> }` block accepts the existing `@<index>: { ... }`
+at_block form. `@l: { ... }` and `@r: { ... }` apply to the left and
+right synthesised instances respectively; bare entries apply to both.
+
+```text
+stereo module bus : Lpf {
+    cutoff: 1000Hz,
+    @l: { q: 0.5 },
+    @r: { q: 0.9 }
+}
+```
+
+### Channel selectors on port references
+
+Existing `port[<name>]` named-index form gains two reserved indices on
+references to a stereo module: `port[l]` and `port[r]` select a single
+side of the stereo bus. A bare `<name>.<port>` refers to the bus form
+(both sides via the shared splitter / joiner).
+
+```text
+stereo module bus : Lpf
+src.sine -> bus.in            # bus form
+bus.out[l] -> probe_l.in      # left side only
+bus.out[r] -> probe_r.in      # right side only
+```
+
+### Worked example
+
+```text
+# Hand-written form
+module split : StereoSplitter
+module hi_l : Highpass { cutoff: 500Hz }
+module hi_r : Highpass { cutoff: 500Hz }
+module join : StereoJoiner
+mix.send_a   -> split.in
+split.out[l] -> hi_l.in
+split.out[r] -> hi_r.in
+hi_l.out     -> join.in[l]
+hi_r.out     -> join.in[r]
+join.out     -> delay.in
+
+# Sugared form
+stereo module hi : Highpass { cutoff: 500Hz }
+mix.send_a -> hi.in
+hi.out     -> delay.in
+```
+
+See ADR 0070 for the full expansion rules, identifier-clash policy,
+and the rationale for keeping `_left` / `_right` on the splitter /
+joiner modules themselves.
+
+### Updated grammar sketch (amendment)
+
+```ebnf
+ModuleDecl    = "stereo"? "module" Ident ":" Ident ShapeBlock? ParamBlock?
+```
+
+All other grammar rules are unchanged. The `@l` / `@r` at_blocks reuse
+the existing `at_block` rule; `port[l]` / `port[r]` reuse the existing
+named-index form.
+
 ## Alternatives considered
 
 **Poly annotation on connections (`poly N`).** An earlier version of this ADR

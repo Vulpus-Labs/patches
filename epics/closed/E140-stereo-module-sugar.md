@@ -1,8 +1,9 @@
 ---
 id: E140
 title: Stereo module sugar
-status: open
+status: closed
 created: 2026-05-08
+closed: 2026-05-09
 adr: 0070
 ---
 

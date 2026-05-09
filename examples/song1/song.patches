@@ -85,10 +85,7 @@ patch {
         @bass { pan: 0, send_a: 0.3, level: 0.4 }
     }
 
-    module send_split : StereoSplitter
-    module return_join : StereoJoiner
-    module hi_l : Highpass { cutoff: 500Hz }
-    module hi_r : Highpass { cutoff: 500Hz }
+    stereo module hi : Highpass { cutoff: 500Hz }
     module delay : StereoDelay(1) {
         delay_ms: 375,
         feedback: 0.3,
@@ -98,12 +95,8 @@ patch {
         tone: 0.5
     }
 
-    mix.send_a -> send_split.in
-    send_split.out_left  -> hi_l.in
-    send_split.out_right -> hi_r.in
-    hi_l.out -> return_join.in_left
-    hi_r.out -> return_join.in_right
-    return_join.out -> delay.in
+    mix.send_a -> hi.in
+    hi.out -> delay.in
 
     delay.out -> mix.return_a
 

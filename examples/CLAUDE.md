@@ -242,9 +242,14 @@ confirm port and parameter names. Don't guess.
 
 - **Stereo ports are single ports** (`in`, `out`, `send_a`, `return_b`)
   carrying a stereo signal. A mono source feeding a stereo input is
-  silently broadcast (L = R). Use `StereoSplitter` / `StereoJoiner` only
-  where the two channels need to flow through different mono effects.
-  `_left` / `_right` survive only on those splitter/joiner modules.
+  silently broadcast (L = R). For applying a mono effect to a stereo
+  bus, prefer the `stereo` keyword (ADR 0070) over a hand-written
+  `StereoSplitter` / `StereoJoiner` triple — `stereo module hi :
+  Highpass { cutoff: 500Hz }` desugars to the splitter/pair/joiner
+  pattern automatically. Drop down to explicit `StereoSplitter` /
+  `StereoJoiner` only when the two channels need genuinely different
+  processing (e.g. mid/side, asymmetric delay). `_left` / `_right`
+  survive only on those splitter/joiner modules.
 - **Trigger vs gate**: `trigger` is a one-sample pulse on note-on;
   `gate` is held high for the note duration. ADSR needs both.
 - **Attenuate poly sums**: after `PolyToMono`, scale by ~`0.1` for 16
