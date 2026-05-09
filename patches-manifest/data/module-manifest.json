@@ -5312,6 +5312,43 @@
       }
     },
     {
+      "name": "StereoSum",
+      "template": {
+        "name": "StereoSum",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [],
+        "per_axis_inputs": [
+          [
+            "channels",
+            {
+              "name": "in",
+              "kind": "Stereo",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ]
+        ],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Sum",
       "template": {
         "name": "Sum",
