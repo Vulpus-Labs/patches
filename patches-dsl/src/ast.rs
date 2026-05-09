@@ -124,12 +124,22 @@ pub enum ParamEntry {
 }
 
 /// `module <name> : <TypeName>(<shape>) { <params> }`
+///
+/// The optional `stereo` prefix is ADR 0070 sugar; it is recorded at parse
+/// time but only consumed by the stereo expander (ticket 0844). Until that
+/// lands the validator rejects `is_stereo: true` so the grammar surface is
+/// reservable without a runtime path. Side-specific params reuse the
+/// existing `at_block` (`@l: { ... }` / `@r: { ... }`) inside `params`,
+/// and side selectors on ports reuse `port[l]` / `port[r]`; no new AST
+/// shape is needed for either.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleDecl {
     pub name: Ident,
     pub type_name: Ident,
     pub call_block: Option<CallBlock>,
     pub params: Vec<ParamEntry>,
+    /// `stereo module ...` prefix from the source.
+    pub is_stereo: bool,
     pub span: Span,
 }
 
@@ -168,6 +178,9 @@ pub enum PortIndex {
 /// A port reference: `<module>.<port>[<index>]`.
 ///
 /// `module` is either `"$"` (template port namespace) or a module instance name.
+/// On a stereo module (ADR 0070), `port[l]` / `port[r]` channel selectors
+/// reuse the existing `PortIndex::Name` form — the expander interprets the
+/// alias as a side selector against the declared module kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PortRef {
     pub module: String,

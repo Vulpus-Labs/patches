@@ -24,6 +24,7 @@ pub mod flat;
 mod parser;
 pub mod structural;
 pub mod desugar;
+pub mod stereo_desugar;
 pub mod host_control_desugar;
 pub mod host_control_manifest;
 pub mod manifest;

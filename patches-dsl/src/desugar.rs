@@ -278,6 +278,7 @@ fn synth_tap_module(
         type_name: Ident { name: TYPE_TAP.to_owned(), span },
         call_block,
         params,
+        is_stereo: false,
         span,
     }
 }

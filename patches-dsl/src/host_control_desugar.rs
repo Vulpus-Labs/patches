@@ -198,6 +198,7 @@ fn synth_module(decls: &[&HostControlBlock]) -> ModuleDecl {
         type_name: Ident { name: TYPE_HOST_CONTROL.to_owned(), span },
         call_block,
         params,
+        is_stereo: false,
         span,
     }
 }

@@ -86,6 +86,7 @@ fn module_decl(
         type_name: ident(type_name),
         call_block: call_block_of(call_args),
         params,
+        is_stereo: false,
         span: sp(),
     }
 }

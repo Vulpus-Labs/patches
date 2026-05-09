@@ -92,7 +92,17 @@ pub(super) fn build_include_file(pair: Pair<'_, Rule>) -> Result<IncludeFile, Pa
 
 pub(super) fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, ParseError> {
     // pair.as_rule() == Rule::module_decl
-    let mut it = pair.into_inner();
+    // Grammar: stereo_kw? ~ "module" ~ ident ~ ":" ~ ident
+    //          ~ call_block? ~ param_block?
+    let mut it = pair.into_inner().peekable();
+
+    // Optional `stereo` prefix (ADR 0070). Side-specific params live as
+    // `@l` / `@r` at_blocks inside `param_block`; no extra walker state.
+    let is_stereo = matches!(it.peek().map(|p| p.as_rule()), Some(Rule::stereo_kw));
+    if is_stereo {
+        it.next();
+    }
+
     let name = build_ident(it.next().unwrap());
     let type_name = build_ident(it.next().unwrap());
     // Narrow span to `name : type_name` — tight enough that diagnostics like
@@ -128,7 +138,7 @@ pub(super) fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, Pars
         }
     }
 
-    Ok(ModuleDecl { name, type_name, call_block, params, span })
+    Ok(ModuleDecl { name, type_name, call_block, params, is_stereo, span })
 }
 
 fn build_param_decl(pair: Pair<'_, Rule>) -> Result<ParamDecl, ParseError> {

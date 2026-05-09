@@ -10,7 +10,9 @@
 //! them with no plumbing change.
 
 
-use crate::ast::{CableEndpoint, File, HostControlBlock, HostControlKind, Statement, TapTarget};
+use crate::ast::{
+    CableEndpoint, File, HostControlBlock, HostControlKind, Statement, TapTarget,
+};
 use crate::expand::ExpandError;
 use crate::manifest::TapType;
 use crate::structural::StructuralCode as Code;
@@ -222,3 +224,4 @@ fn validate_host_control_fields(hc: &HostControlBlock) -> Result<(), ExpandError
     }
     Ok(())
 }
+

@@ -94,6 +94,10 @@ structural_codes! {
     HostControlDuplicateName=> ("ST0035", "duplicate host-control name"),
     HostControlDuplicateField=> ("ST0036", "duplicate field in host-control block"),
     HostControlUnknownRef   => ("ST0037", "bare reference to undeclared host control"),
+    StereoInTemplate        => ("ST0040", "stereo module inside template body"),
+    StereoIdentClash        => ("ST0041", "module name clashes with synthesised stereo instance"),
+    StereoBusToSide         => ("ST0042", "stereo bus source feeding a side-selector"),
+    StereoMultiChannelType  => ("ST0043", "stereo module wraps a multi-channel type"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

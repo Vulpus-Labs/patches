@@ -70,6 +70,14 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     // (top-level only, name uniqueness, qualifier matching, etc.).
     crate::validate::validate(file)?;
 
+    // Stereo-module desugaring (ADR 0070, ticket 0844): split each
+    // `stereo module X : T` into `X__l` / `X__r` mono pairs, rewrite
+    // `X.<port>[l]` / `X.<port>[r]` selectors, and emit splitters /
+    // joiners at bus-form boundaries. Runs before tap / host-control
+    // desugars so they see a homogeneous mono module surface.
+    let owned = file.clone();
+    let owned = crate::stereo_desugar::desugar_stereo(owned)?;
+
     // Tap desugaring (ADR 0054 §§2, 3): rewrite the patch body so every
     // tap-endpoint cable lands on a synthetic `~audio_tap` /
     // `~trigger_tap` module instance, and capture the observer manifest.
@@ -77,7 +85,6 @@ pub fn expand(file: &File) -> Result<ExpandResult, ExpandError> {
     // desugar passes consume `File` and return it (mutated in place when
     // there is work) so a no-op pass costs zero field-level clones; we
     // pay one entry-point clone here so the public API stays `&File`.
-    let owned = file.clone();
     let (rewritten, manifest) = crate::desugar::desugar_taps(owned);
 
     // Host-control desugaring (ADR 0057 §2): collect knob / slider /

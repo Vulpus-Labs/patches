@@ -96,14 +96,24 @@ param_entry = { at_block | ident ~ param_index? ~ ":" ~ value }
 param_block = { "{" ~ ((param_ref | param_entry) ~ ","?)* ~ "}" }
 
 // ─── Module declaration ───────────────────────────────────────────────────────
-module_decl = { "module" ~ ident ~ ":" ~ ident ~ call_block? ~ param_block? }
+// Optional `stereo` prefix marks the module as stereo-paired (ADR 0070).
+// Word-boundary lookahead prevents `stereo_in` from being consumed as the
+// keyword (matches the `bool_lit` treatment). Side-specific params live
+// inside the regular param block as `@l: { ... }` / `@r: { ... }` at_blocks
+// (no new surface needed — at_block is already a valid ParamEntry); side
+// selectors on ports reuse the existing `port[l]` / `port[r]` index form.
+stereo_kw   = @{ "stereo" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+module_decl = { stereo_kw? ~ "module" ~ ident ~ ":" ~ ident ~ call_block? ~ param_block? }
 
 // ─── Port references ──────────────────────────────────────────────────────────
 // Compound-atomic: no whitespace within "mod.port[k]"
 module_ident = { "$" | ident }
 // Port index — three forms:
 //   [0]   → Literal(0)
-//   [k]   → Param("k")   (bare ident in brackets)
+//   [k]   → Param("k")   (bare ident in brackets; `port[l]` / `port[r]`
+//                         on a stereo module are channel selectors —
+//                         disambiguated by the expander against the
+//                         declared module kind)
 //   [*n]  → Arity("n")   (* followed by ident)
 port_index_arity = ${ "*" ~ ident }
 port_index       = ${ "[" ~ (port_index_arity | nat | param_ref | ident) ~ "]" }
