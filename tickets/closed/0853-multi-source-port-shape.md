@@ -3,8 +3,15 @@ id: "0853"
 title: Multi-source input port shape (Source + SmallVec)
 priority: medium
 created: 2026-05-09
+closed: 2026-05-09
+status: superseded
 epic: E142
 ---
+
+## Status: superseded
+
+ADR 0071 rejected. Auto-Sum (ticket 0852) kept; fusion (ADR 0072) covers
+the delay concern. See ADR 0071 §Resolution.
 
 ## Summary
 

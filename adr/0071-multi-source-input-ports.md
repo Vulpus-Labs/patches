@@ -1,12 +1,45 @@
 # ADR 0071 — Multi-source input ports
 
 **Date:** 2026-05-09
-**Status:** Proposed
+**Status:** Rejected (2026-05-09)
 **Related:**
 [ADR 0033 — Poly cables and layout strictness](0033-poly-cables.md),
 [ADR 0047 — Trigger / mono-layout cables](0047-trigger-cables.md),
 [ADR 0059 — Stereo cables and the mono→stereo broadcast](0059-stereo-cables.md),
-ticket 0852 (synthesized-Sum fan-in rewrite — superseded by this ADR)
+[ADR 0072 — Cycle-free subgraph fusion](0072-cycle-free-subgraph-fusion.md),
+ticket 0852 (auto-sum fan-in rewrite — kept; this ADR would have replaced it)
+
+## Resolution
+
+Rejected in favour of keeping ticket 0852's auto-Sum rewrite. Reasoning:
+
+- The structural cost of multi-source ports is large. `MonoInput` /
+  `PolyInput` / `StereoInput` become non-`Copy` (the inline `SmallVec`
+  is non-`Copy`), which ripples through every `expect_mono()` /
+  `as_mono()` site (~25 modules), forces a `Module::set_ports`
+  signature change to transfer ownership, and adds a new cleanup-ring
+  variant for displaced port bundles (the old SmallVec, if spilled,
+  cannot drop on the audio thread). None of the existing port-update
+  RT-safety machinery survives unchanged.
+- The performance and correctness motivations dissolve under ADR 0072.
+  The 1-sample delay an auto-Sum introduces is the same delay every
+  cable already carries; fusion eliminates it inside acyclic SCCs the
+  same way it eliminates every other cable delay. Fan-in is not a
+  special timing case; it is "one more cable hop" and fusion handles
+  it generically.
+- Auto-Sum is sugar for `Sum(N)` / `PolySum(N)` / `StereoSum(N)` that
+  users could already write explicitly. It introduces no behaviour the
+  engine could not already express, and its RT-safety story rides on
+  the existing module install / cleanup ring (proven; in use for
+  every other module).
+
+What remains of the multi-source motivation — `__autosum_*` nodes
+appearing in graph view / SVG / profiler readouts — is a presentation
+concern, not a structural one. Solved at the view layer by collapsing
+or labelling synthesised nodes (ticket 0857).
+
+The `Sum` / `PolySum` / `StereoSum` modules stay. Tickets 0853, 0854,
+0855, 0856 closed superseded.
 
 ## Context
 

@@ -1,9 +1,16 @@
 ---
 id: E142
 title: Multi-source input ports (ADR 0071)
-status: open
+status: superseded
 created: 2026-05-09
+closed: 2026-05-09
 ---
+
+## Status: superseded
+
+ADR 0071 rejected. Auto-Sum (ticket 0852) kept; fusion (ADR 0072 / E141)
+covers the cable-delay concern that motivated the multi-source rewrite.
+Tickets 0853, 0854, 0855, 0856 closed superseded. See ADR 0071 §Resolution.
 
 ## Goal
 

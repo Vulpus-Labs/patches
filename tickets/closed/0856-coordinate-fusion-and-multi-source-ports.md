@@ -3,10 +3,17 @@ id: "0856"
 title: Coordinate fusion (ADR 0072) and multi-source input ports (ADR 0071) — per-Source flag, slot tag, land order
 priority: medium
 created: 2026-05-09
+closed: 2026-05-09
+status: superseded
 epic: E141
 adr: 0072
 related: "E142, ADR 0071"
 ---
+
+## Status: superseded
+
+ADR 0071 rejected; coordination moot. Fusion (ADR 0072 / E141) lands
+against today's single-source `InputPort`. See ADR 0071 §Resolution.
 
 ## Summary
 

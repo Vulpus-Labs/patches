@@ -3,8 +3,15 @@ id: "0854"
 title: Builder accepts multi-edge inputs; retire fan-in synthesised-Sum
 priority: medium
 created: 2026-05-09
+closed: 2026-05-09
+status: superseded
 epic: E142
 ---
+
+## Status: superseded
+
+ADR 0071 rejected. Auto-Sum (ticket 0852) kept; fusion (ADR 0072) covers
+the delay concern. See ADR 0071 §Resolution.
 
 ## Summary
 

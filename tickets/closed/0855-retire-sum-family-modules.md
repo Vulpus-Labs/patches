@@ -3,8 +3,15 @@ id: "0855"
 title: Retire Sum / PolySum / StereoSum modules
 priority: low
 created: 2026-05-09
+closed: 2026-05-09
+status: superseded
 epic: E142
 ---
+
+## Status: superseded
+
+ADR 0071 rejected. Sum / PolySum / StereoSum stay — they are the modules
+auto-Sum (ticket 0852) instantiates at fan-in. See ADR 0071 §Resolution.
 
 ## Summary
 
