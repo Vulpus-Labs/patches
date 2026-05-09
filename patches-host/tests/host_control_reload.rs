@@ -39,7 +39,7 @@ patch {{
     knob {name} {{ low: {low}, high: {high} }}
     module osc : Osc()
     module out : AudioOut
-    {name} -> osc.voct
+    ~{name} -> osc.voct
     osc.sine -> out.in
 }}
 "#
@@ -53,8 +53,8 @@ patch {
     knob z { low: 1Hz, high: 2Hz }
     module osc : Osc()
     module out : AudioOut
-    a -> osc.voct
-    z -> osc.fm
+    ~a -> osc.voct
+    ~z -> osc.fm
     osc.sine -> out.in
 }
 "#
