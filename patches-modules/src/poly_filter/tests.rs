@@ -73,9 +73,9 @@ fn set_static_ports(m: &mut Box<dyn Module>) {
     m.set_ports(
         &[
             InputPort::Poly(PolyInput::scalar(0, 1.0)),
-            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, offset: 0.0, clip: None, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false }),
+            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
         ],
         &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
     );
@@ -87,8 +87,8 @@ fn set_cutoff_cv_ports(m: &mut Box<dyn Module>) {
         &[
             InputPort::Poly(PolyInput::scalar(0, 1.0)),
             InputPort::Poly(PolyInput::scalar(1, 1.0)),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false }),
+            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
         ],
         &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
     );

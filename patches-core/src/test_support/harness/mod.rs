@@ -667,6 +667,7 @@ impl ModuleHarness {
                     offset: 0.0,
                     clip: None,
                     connected,
+                    fused: false,
                 };
                 let poly = PolyInput {
                     cable_idx: RESERVED_SLOTS + i,
@@ -674,6 +675,7 @@ impl ModuleHarness {
                     offset: 0.0,
                     clip: None,
                     connected,
+                    fused: false,
                 };
                 let stereo = crate::cables::StereoInput {
                     cable_idx: RESERVED_SLOTS + i,
@@ -682,6 +684,7 @@ impl ModuleHarness {
                     clip: None,
                     connected,
                     broadcast_from_mono: false,
+                    fused: false,
                 };
                 match kind {
                     CableKind::Mono => InputPort::Mono(mono),

@@ -59,12 +59,19 @@ impl<'a> CablePool<'a> {
     }
 
     #[inline(always)]
-    /// Read a mono value from `input`, applying `input.scale`. Reads the
-    /// **read slot** (`1 - wi`). Lanes outside lane 0 are unspecified
-    /// for a Mono cable per ADR 0068.
+    /// Read a mono value from `input`, applying `input.scale`.
+    ///
+    /// Selects the ping-pong slot from `input.fused` (ADR 0072): non-fused
+    /// reads slot `1 - wi` (last tick's write, the legacy 1-sample-delayed
+    /// path); fused reads slot `wi` (this tick's write — the producer's
+    /// `process` must have run earlier in the tick, which the planner
+    /// enforces by emitting `active_indices` in topological order within
+    /// each acyclic region).
+    ///
+    /// Lanes outside lane 0 are unspecified for a Mono cable per ADR 0068.
     pub fn read_mono(&self, input: &MonoInput) -> f32 {
-        let ri = 1 - self.wi;
-        let v = self.pool[input.cable_idx][ri].as_mono();
+        let si = if input.fused { self.wi } else { 1 - self.wi };
+        let v = self.pool[input.cable_idx][si].as_mono();
         let y = v * input.scale + input.offset;
         match input.clip {
             Some((lo, hi)) => y.clamp(lo, hi),
@@ -74,15 +81,16 @@ impl<'a> CablePool<'a> {
 
     #[inline(always)]
     /// Read a 16-channel poly value from `input`, applying `input.scale` to each channel.
-    /// Reads the **read slot** (`1 - wi`).
+    ///
+    /// See [`read_mono`](Self::read_mono) for slot selection on `input.fused`.
     ///
     /// Uses a `scale == 1.0` fast path (exact comparison) to skip the 16-channel
     /// multiply in the common case.  Scale values are set from DSL-parsed literals
     /// or default constants — never accumulated arithmetic — so the value is
     /// exactly `1.0_f32` when unscaled.
     pub fn read_poly(&self, input: &PolyInput) -> [f32; 16] {
-        let ri = 1 - self.wi;
-        let channels = self.pool[input.cable_idx][ri].as_poly();
+        let si = if input.fused { self.wi } else { 1 - self.wi };
+        let channels = self.pool[input.cable_idx][si].as_poly();
         if input.scale == 1.0 && input.offset == 0.0 && input.clip.is_none() {
             channels
         } else {
@@ -109,14 +117,15 @@ impl<'a> CablePool<'a> {
 
     #[inline(always)]
     /// Read a stereo `(L, R)` pair from `input`, applying `input.scale`.
-    /// Reads the **read slot** (`1 - wi`).
+    ///
+    /// See [`read_mono`](Self::read_mono) for slot selection on `input.fused`.
     ///
     /// When `input.broadcast_from_mono` is set the underlying slot is
     /// produced by a mono source feeding a stereo input (ADR 0059 §2);
     /// lane 0 is replicated as `(s, s)`. Otherwise lanes 0 and 1 are
     /// returned as `(L, R)`.
     pub fn read_stereo(&self, input: &StereoInput) -> StereoSample {
-        let ri = 1 - self.wi;
+        let si = if input.fused { self.wi } else { 1 - self.wi };
         let apply = |v: f32| {
             let y = v * input.scale + input.offset;
             match input.clip {
@@ -124,7 +133,7 @@ impl<'a> CablePool<'a> {
                 None => y,
             }
         };
-        let slot = self.pool[input.cable_idx][ri];
+        let slot = self.pool[input.cable_idx][si];
         if input.broadcast_from_mono {
             let s = apply(slot.as_mono());
             (s, s)

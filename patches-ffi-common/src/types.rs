@@ -5,7 +5,7 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 8;
+pub const ABI_VERSION: u32 = 9;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -143,6 +143,12 @@ pub struct FfiInputPort {
     /// the reader splays the mono sample across both lanes. Always `0`
     /// for non-stereo variants.
     pub broadcast: u8,
+    /// ADR 0072 phase 2: when `1`, the cable lies in an acyclic region
+    /// and the consumer reads the producer's current-tick output (slot
+    /// `wi`) instead of the previous-tick output (slot `1 - wi`). Set
+    /// by the planner; FFI plugins must thread the bit into the
+    /// reconstructed `MonoInput` / `PolyInput` / `StereoInput`.
+    pub fused: u8,
 }
 
 impl From<&patches_core::InputPort> for FfiInputPort {
@@ -154,6 +160,7 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: m.scale,
                 connected: m.connected as u8,
                 broadcast: 0,
+                fused: m.fused as u8,
             },
             patches_core::InputPort::Poly(p) => Self {
                 tag: PORT_TAG_POLY,
@@ -161,6 +168,7 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: p.scale,
                 connected: p.connected as u8,
                 broadcast: 0,
+                fused: p.fused as u8,
             },
             patches_core::InputPort::Stereo(s) => Self {
                 tag: PORT_TAG_STEREO,
@@ -168,6 +176,7 @@ impl From<&patches_core::InputPort> for FfiInputPort {
                 scale: s.scale,
                 connected: s.connected as u8,
                 broadcast: s.broadcast_from_mono as u8,
+                fused: s.fused as u8,
             },
         }
     }
@@ -176,12 +185,14 @@ impl From<&patches_core::InputPort> for FfiInputPort {
 impl From<FfiInputPort> for patches_core::InputPort {
     fn from(ffi: FfiInputPort) -> Self {
         let connected = ffi.connected != 0;
+        let fused = ffi.fused != 0;
         let mono = patches_core::MonoInput {
             cable_idx: ffi.cable_idx,
             scale: ffi.scale,
             offset: 0.0,
             clip: None,
             connected,
+            fused,
         };
         let poly = patches_core::PolyInput {
             cable_idx: ffi.cable_idx,
@@ -189,6 +200,7 @@ impl From<FfiInputPort> for patches_core::InputPort {
             offset: 0.0,
             clip: None,
             connected,
+            fused,
         };
         let stereo = patches_core::StereoInput {
             cable_idx: ffi.cable_idx,
@@ -197,6 +209,7 @@ impl From<FfiInputPort> for patches_core::InputPort {
             clip: None,
             connected,
             broadcast_from_mono: ffi.broadcast != 0,
+            fused,
         };
         match ffi.tag {
             PORT_TAG_POLY => patches_core::InputPort::Poly(poly),
@@ -393,6 +406,7 @@ mod tests {
             offset: 0.0,
             clip: None,
             connected: false,
+            fused: false,
         });
         let ffi: FfiInputPort = (&orig).into();
         let back: patches_core::InputPort = ffi.into();
@@ -411,6 +425,7 @@ mod tests {
             clip: None,
             connected: true,
             broadcast_from_mono: true,
+            fused: false,
         });
         let ffi: FfiInputPort = (&orig).into();
         assert_eq!(ffi.tag, PORT_TAG_STEREO);

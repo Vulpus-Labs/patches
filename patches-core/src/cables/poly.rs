@@ -32,6 +32,8 @@ impl PolyLayout {
 }
 
 /// A poly input port (16-channel).
+///
+/// See [`MonoInput`](super::MonoInput) for the meaning of `fused` (ADR 0072).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PolyInput {
     pub cable_idx: usize,
@@ -39,6 +41,7 @@ pub struct PolyInput {
     pub offset: f32,
     pub clip: Option<(f32, f32)>,
     pub connected: bool,
+    pub fused: bool,
 }
 
 impl Default for PolyInput {
@@ -49,6 +52,7 @@ impl Default for PolyInput {
             offset: 0.0,
             clip: None,
             connected: false,
+            fused: false,
         }
     }
 }
@@ -62,6 +66,7 @@ impl PolyInput {
             offset: 0.0,
             clip: None,
             connected: true,
+            fused: false,
         }
     }
 

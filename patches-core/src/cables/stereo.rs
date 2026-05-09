@@ -6,6 +6,8 @@ pub type StereoSample = (f32, f32);
 
 /// A stereo input port. Backed by a `[f32; 16]` cable slot; only lanes
 /// 0 (`L`) and 1 (`R`) are read.
+///
+/// See [`MonoInput`](super::MonoInput) for the meaning of `fused` (ADR 0072).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StereoInput {
     pub cable_idx: usize,
@@ -19,6 +21,7 @@ pub struct StereoInput {
     /// implemented in ticket 0736). Always `false` for the kind-only work
     /// in ticket 0735.
     pub broadcast_from_mono: bool,
+    pub fused: bool,
 }
 
 impl Default for StereoInput {
@@ -30,6 +33,7 @@ impl Default for StereoInput {
             clip: None,
             connected: false,
             broadcast_from_mono: false,
+            fused: false,
         }
     }
 }
@@ -45,6 +49,7 @@ impl StereoInput {
             clip: None,
             connected: true,
             broadcast_from_mono: false,
+            fused: false,
         }
     }
 

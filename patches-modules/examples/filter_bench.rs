@@ -50,7 +50,7 @@ fn make_pool() -> Vec<[CableValue; 2]> {
 }
 
 fn poly_in(cable_idx: usize, connected: bool) -> InputPort {
-    InputPort::Poly(PolyInput { cable_idx, scale: 1.0, offset: 0.0, clip: None, connected })
+    InputPort::Poly(PolyInput { cable_idx, scale: 1.0, offset: 0.0, clip: None, connected, fused: false })
 }
 
 fn poly_out(cable_idx: usize, connected: bool) -> OutputPort {

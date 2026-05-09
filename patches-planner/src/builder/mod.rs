@@ -251,18 +251,13 @@ pub struct ExecutionPlan {
     /// [`Module::set_ports`] called on them inline before being pushed to
     /// [`new_modules`](Self::new_modules). Empty when no surviving module changed ports.
     pub port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)>,
-    /// Input ports whose feeding cable lies inside a non-trivial SCC
-    /// (ADR 0072 phase 1). Each entry is `(consumer_pool_index,
-    /// input_port_idx)`. Engine reads still use the 1-sample-delayed
-    /// path for every cable in phase 1; phase 2 consumes this list to
-    /// flip `InputPort.fused = true` on the complement (every input
-    /// port not listed here). The list is sized by the feedback arc
-    /// set, which the planner expects to be small.
-    pub cyclic_inputs: Vec<(usize, usize)>,
     /// Feedback arc set size: number of cables internal to a
-    /// non-trivial SCC (parallel to `cyclic_inputs.len()`). Carried
-    /// for diagnostics — the planner reports it so test corpora can
-    /// confirm the assumption that typical patches are nearly acyclic.
+    /// non-trivial SCC (ADR 0072). Carried for diagnostics — the
+    /// planner reports it so test corpora can confirm the assumption
+    /// that typical patches are nearly acyclic. The per-cable fused
+    /// classification itself is consumed at plan-build time and
+    /// applied directly to each `InputPort.fused` (phase 2); the
+    /// engine's read path branches on that flag.
     pub fas_size: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
@@ -299,7 +294,6 @@ impl ExecutionPlan {
             periodic_indices: vec![],
             active_indices: vec![],
             port_updates: vec![],
-            cyclic_inputs: vec![],
             fas_size: 0,
             tracker_data: None,
             tracker_receiver_indices: vec![],
@@ -461,6 +455,18 @@ impl PatchBuilder {
         // Build resolved graph: extend index with input-buffer map.
         let resolved = ResolvedGraph::build(&index, &buf_alloc.output_buf)?;
 
+        // Per-(consumer, input-port) fused flag (ADR 0072 phase 2). A
+        // cable is fused iff its producer precedes its consumer in
+        // `active_indices` (different SCCs); see
+        // `compute_order_with_fusion`. Each input port has at most one
+        // incoming edge (ADR 0071 was rejected; see commit
+        // "E142: reject ADR 0071"), so this map is well-defined.
+        let mut fused_by_input: HashMap<(NodeId, &'static str, usize), bool> =
+            HashMap::with_capacity(index.edges.len());
+        for (i, (_, _, _, to, in_name, in_idx, _)) in index.edges.iter().enumerate() {
+            fused_by_input.insert((to.clone(), *in_name, *in_idx), cable_fused[i]);
+        }
+
         // Step C – assemble ModuleSlots, NodeStates, and collect diff vectors.
         // Build a set of newly-allocated/recycled buffer slots for fast lookup.
         let to_zero_set: HashSet<usize> = buf_alloc.to_zero.iter().copied().collect();
@@ -535,16 +541,20 @@ impl PatchBuilder {
                     let scale = map.scale;
                     let offset = map.offset;
                     let clip = map.clip;
+                    let fused = connected
+                        && *fused_by_input
+                            .get(&(id.clone(), port_desc.name, port_desc.index))
+                            .unwrap_or(&false);
                     match port_desc.kind {
                         CableKind::Mono => InputPort::Mono(MonoInput {
-                            cable_idx: buf_idx, scale, offset, clip, connected,
+                            cable_idx: buf_idx, scale, offset, clip, connected, fused,
                         }),
                         CableKind::Poly => InputPort::Poly(PolyInput {
-                            cable_idx: buf_idx, scale, offset, clip, connected,
+                            cable_idx: buf_idx, scale, offset, clip, connected, fused,
                         }),
                         CableKind::Stereo => InputPort::Stereo(StereoInput {
                             cable_idx: buf_idx, scale, offset, clip, connected,
-                            broadcast_from_mono: broadcast,
+                            broadcast_from_mono: broadcast, fused,
                         }),
                     }
                 })
@@ -666,44 +676,6 @@ impl PatchBuilder {
         let tombstones = module_diff.tombstoned;
         let active_indices: Vec<usize> = slots.iter().map(|s| s.pool_index).collect();
 
-        // Translate per-edge cyclic flags into (consumer pool slot,
-        // input port positional index) pairs. The engine ignores this
-        // list in phase 1 (ADR 0072); phase 2 consumes it to set
-        // `InputPort.fused`.
-        let mut cyclic_inputs: Vec<(usize, usize)> = Vec::with_capacity(fas_size);
-        for (i, edge) in index.edges.iter().enumerate() {
-            if cable_fused[i] {
-                continue;
-            }
-            let (_, _, _, to, in_name, in_idx, _) = edge;
-            let consumer_inst = *instance_ids.get(to).ok_or_else(|| {
-                BuildErrorKind::InternalError(format!(
-                    "cyclic cable references unknown consumer node {to:?}"
-                ))
-            })?;
-            let consumer_slot = *module_diff.slot_map.get(&consumer_inst).ok_or_else(|| {
-                BuildErrorKind::InternalError(format!(
-                    "cyclic cable consumer {to:?} missing pool slot"
-                ))
-            })?;
-            let consumer_node = index.get_node(to).ok_or_else(|| {
-                BuildErrorKind::InternalError(format!(
-                    "cyclic cable consumer {to:?} missing from graph"
-                ))
-            })?;
-            let port_idx = consumer_node
-                .module_descriptor
-                .inputs
-                .iter()
-                .position(|p| p.name == *in_name && p.index == *in_idx)
-                .ok_or_else(|| {
-                    BuildErrorKind::InternalError(format!(
-                        "cyclic cable references unknown input port {in_name}/{in_idx} on {to:?}"
-                    ))
-                })?;
-            cyclic_inputs.push((consumer_slot, port_idx));
-        }
-
         Ok((
             ExecutionPlan {
                 slots,
@@ -717,7 +689,6 @@ impl PatchBuilder {
                 periodic_indices,
                 active_indices,
                 port_updates,
-                cyclic_inputs,
                 fas_size,
                 tracker_data: None,
                 tracker_receiver_indices: Vec::new(),

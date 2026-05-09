@@ -33,6 +33,7 @@ fn main() {
         offset: 0.25,
         clip: None,
         connected: true,
+        fused: false,
     };
     let clipped = MonoInput {
         cable_idx: 3,
@@ -40,6 +41,7 @@ fn main() {
         offset: 0.25,
         clip: Some((-1.0, 1.0)),
         connected: true,
+        fused: false,
     };
 
     // Warm.

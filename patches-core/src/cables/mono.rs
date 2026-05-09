@@ -30,6 +30,13 @@ impl MonoLayout {
 /// A mono input port. `cable_idx` indexes the shared cable pool; reads apply
 /// `v * scale + offset` then optional `clip` clamp. `connected` tracks
 /// whether a cable is attached.
+///
+/// `fused` (ADR 0072) selects which ping-pong slot is read: `false` reads the
+/// previous-tick slot (`1 - wi`, the legacy 1-sample-delayed path); `true`
+/// reads the current-tick slot (`wi`), so the consumer sees this tick's
+/// producer write. The planner sets `fused = true` only on cables in
+/// acyclic regions of the graph where the producer precedes the consumer
+/// in `active_indices`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MonoInput {
     pub cable_idx: usize,
@@ -37,6 +44,7 @@ pub struct MonoInput {
     pub offset: f32,
     pub clip: Option<(f32, f32)>,
     pub connected: bool,
+    pub fused: bool,
 }
 
 impl Default for MonoInput {
@@ -47,6 +55,7 @@ impl Default for MonoInput {
             offset: 0.0,
             clip: None,
             connected: false,
+            fused: false,
         }
     }
 }
@@ -55,7 +64,7 @@ impl MonoInput {
     /// Pure-scalar `connected` input: `offset = 0.0`, `clip = None`. Keeps
     /// test churn down for sites that don't care about cable-range affine.
     pub fn scalar(cable_idx: usize, scale: f32) -> Self {
-        Self { cable_idx, scale, offset: 0.0, clip: None, connected: true }
+        Self { cable_idx, scale, offset: 0.0, clip: None, connected: true, fused: false }
     }
 
     pub fn from_port(port: &InputPort) -> Self {
