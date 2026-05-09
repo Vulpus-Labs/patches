@@ -153,17 +153,19 @@ host_control_kind  = @{ ("knob" | "slider" | "toggle" | "trigger") ~ !(ASCII_ALP
 host_control_field = { ident ~ ":" ~ value }
 host_control_block = { host_control_kind ~ ident ~ "{" ~ (host_control_field ~ ","?)* ~ "}" }
 
-// Bare-name reference to a declared host control, used in cable endpoints.
-// Compound-atomic; the !"." lookahead prevents `mod.port` from being
-// consumed as a bare ident before port_ref gets a chance.
-host_control_ref = ${ ident ~ !"." }
+// `~name` reference to a declared host control, used in cable endpoints.
+// The leading `~` mirrors tap targets (ADR 0054 §2 reserves `~` for
+// expander-synthesised names, of which the host-control synth instance
+// is one). Compound-atomic; tap_target is tried first in cable_endpoint
+// so `~name(...)` parses as a tap, `~name` falls through here.
+host_control_ref = ${ "~" ~ ident }
 
 // ─── Connections ──────────────────────────────────────────────────────────────
-// A cable endpoint is a port reference, a tap target, or a bare host-control
-// reference (resolved at expand time). tap_target must come first so the
-// leading `~` disambiguates from a bare ident; port_ref before
-// host_control_ref so `mod.port` parses as a port reference.
-cable_endpoint = { tap_target | port_ref | host_control_ref }
+// A cable endpoint is a port reference, a tap target, or a `~name`
+// host-control reference (resolved at expand time). tap_target must come
+// first so `~comp(name)` parses as a tap before host_control_ref's
+// `~name` form would otherwise consume the ident.
+cable_endpoint = { tap_target | host_control_ref | port_ref }
 // Fan-out / fan-in: lists allowed on either side of the arrow. Forward
 // (`->`) lists fan out from a single source on the LHS; backward (`<-`)
 // lists fan in to a single source on the RHS. The builder rejects lists

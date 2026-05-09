@@ -119,9 +119,9 @@ pub(crate) enum CursorContext<'tree> {
     /// the name identifier of a `knob` / `slider` / `toggle` / `trigger`
     /// block. `block` is the enclosing `host_control_block` node.
     HostControlDecl { block: Node<'tree> },
-    /// Cursor sits on a bare-name reference to a host control on a
-    /// cable endpoint. `node` is the `host_control_ref` (or its inner
-    /// `ident`) containing the referenced name.
+    /// Cursor sits on a `~name` reference to a host control on a
+    /// cable endpoint. `node` is the `host_control_ref` (or its `~`
+    /// punctuator / inner `ident`) containing the referenced name.
     HostControlRef { node: Node<'tree> },
     /// Inside a song/section/pattern-row structure where pattern names are
     /// the relevant completion set.
@@ -182,7 +182,9 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
         return Some(CursorContext::HostControlDecl { block });
     }
 
-    // Host-control bare-name reference on a cable endpoint.
+    // Host-control `~name` reference on a cable endpoint. Cursor may
+    // land on the `host_control_ref` wrapper, the leading `~`
+    // punctuator, or the inner ident — all classify the same.
     if node.kind() == "host_control_ref"
         || node
             .parent()

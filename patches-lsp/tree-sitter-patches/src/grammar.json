@@ -1328,12 +1328,17 @@
       ]
     },
     "host_control_ref": {
-      "type": "PREC",
-      "value": -1,
-      "content": {
-        "type": "SYMBOL",
-        "name": "ident"
-      }
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "~"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "ident"
+        }
+      ]
     },
     "cable_endpoint": {
       "type": "CHOICE",
@@ -1344,11 +1349,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "port_ref"
+          "name": "host_control_ref"
         },
         {
           "type": "SYMBOL",
-          "name": "host_control_ref"
+          "name": "port_ref"
         }
       ]
     },

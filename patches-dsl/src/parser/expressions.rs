@@ -397,7 +397,7 @@ fn build_cable_endpoint(pair: Pair<'_, Rule>) -> Result<CableEndpoint, ParseErro
         Rule::tap_target => Ok(CableEndpoint::Tap(build_tap_target(inner)?)),
         Rule::port_ref => Ok(CableEndpoint::Port(build_port_ref(inner)?)),
         Rule::host_control_ref => {
-            // host_control_ref = ${ ident ~ !"." } — single ident child.
+            // host_control_ref = ${ "~" ~ ident } — single ident child.
             let id_pair = inner.into_inner().next().unwrap();
             Ok(CableEndpoint::HostControlRef(build_ident(id_pair)))
         }

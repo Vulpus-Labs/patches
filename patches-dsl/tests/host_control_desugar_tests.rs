@@ -87,11 +87,11 @@ fn alphabetical_slot_ordering() {
 }
 
 #[test]
-fn bare_name_reference_rewrites_to_synth_port() {
+fn tilde_name_reference_rewrites_to_synth_port() {
     let src = r#"patch {
         knob cutoff { low: 20Hz, high: 2000Hz }
         module filter : Filter()
-        cutoff -> filter.voct
+        ~cutoff -> filter.voct
     }"#;
     let r = rewritten(src);
     let conn = r
@@ -118,8 +118,8 @@ fn audio_and_trigger_share_one_synth_module_with_split_ports() {
         trigger fire { }
         module flt : Filter()
         module env : Env()
-        k -> flt.voct
-        fire -> env.gate
+        ~k -> flt.voct
+        ~fire -> env.gate
     }"#;
     let r = rewritten(src);
     let m = find_module(&r, SYNTH_HOST_CONTROL).expect("synth module");
@@ -158,10 +158,10 @@ fn audio_and_trigger_share_one_synth_module_with_split_ports() {
 }
 
 #[test]
-fn undeclared_bare_name_rejected() {
+fn undeclared_tilde_name_rejected() {
     let src = r#"patch {
         module flt : Filter()
-        not_declared -> flt.voct
+        ~not_declared -> flt.voct
     }"#;
     let file = parse(src).expect("parse ok");
     let err = desugar_host_controls(file.clone()).map(|_| ()).expect_err("desugar rejects");

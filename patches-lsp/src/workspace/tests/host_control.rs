@@ -63,7 +63,7 @@ fn host_control_collides_with_module_emits_st0034() {
 
 #[test]
 fn hover_on_declaration_kind_renders_kind_and_fields() {
-    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    cutoff -> flt.cv\n}\n";
+    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n";
     let tmp = TempDir::new("hover_decl");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
@@ -81,7 +81,7 @@ fn hover_on_declaration_kind_renders_kind_and_fields() {
 
 #[test]
 fn hover_on_declaration_name_renders_kind_and_fields() {
-    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    cutoff -> flt.cv\n}\n";
+    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n";
     let tmp = TempDir::new("hover_decl_name");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
@@ -96,29 +96,29 @@ fn hover_on_declaration_name_renders_kind_and_fields() {
 }
 
 #[test]
-fn hover_on_bare_name_reference_resolves_to_declaration() {
-    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    cutoff -> flt.cv\n}\n";
+fn hover_on_tilde_name_reference_resolves_to_declaration() {
+    let src = "patch {\n    knob cutoff { low: 20Hz, high: 2000Hz }\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n";
     let tmp = TempDir::new("hover_ref_resolved");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");
     let _ = ws.analyse_flat(&uri, src.to_string());
 
-    // Cursor on the second occurrence of `cutoff` (the bare-name ref
-    // on the LHS of the cable).
+    // Cursor on the `cutoff` ident inside the `~cutoff` ref on the LHS
+    // of the cable.
     let needle = "cutoff -> flt";
     let pos = position_at(src, needle, 0);
-    let h = ws.hover(&uri, pos).expect("hover on bare-name ref");
+    let h = ws.hover(&uri, pos).expect("hover on host-control ref");
     let body = hover_value(&h);
     assert!(body.contains("cutoff"), "body: {body}");
     assert!(body.contains("low") && body.contains("high"), "body: {body}");
 }
 
 #[test]
-fn hover_on_unresolved_bare_name_reference_returns_explanatory_text() {
-    // `cutoff` referenced bare but never declared. Hover still fires
+fn hover_on_unresolved_tilde_name_reference_returns_explanatory_text() {
+    // `~cutoff` referenced but never declared. Hover still fires
     // (explanatory message) so the editor can guide the user.
-    let src = "patch {\n    module flt : Svf\n    cutoff -> flt.cv\n}\n";
+    let src = "patch {\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n";
     let tmp = TempDir::new("hover_ref_unresolved");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
@@ -136,12 +136,12 @@ fn hover_on_unresolved_bare_name_reference_returns_explanatory_text() {
 }
 
 #[test]
-fn bare_name_reference_to_undeclared_host_control_emits_st0037() {
-    // `cutoff` is referenced bare but never declared as a knob/slider/etc.
+fn tilde_name_reference_to_undeclared_host_control_emits_st0037() {
+    // `~cutoff` is referenced but never declared as a knob/slider/etc.
     let tmp = TempDir::new("hc_unknown_ref");
     tmp.write(
         "a.patches",
-        "patch {\n    module flt : Svf\n    cutoff -> flt.cv\n}\n",
+        "patch {\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n",
     );
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");

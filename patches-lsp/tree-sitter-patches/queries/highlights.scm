@@ -21,3 +21,8 @@
 
 ; The `stereo` prefix on stereo-paired module declarations (ADR 0070).
 (stereo_kw) @keyword
+
+; Host-control reference: `~name` on a cable endpoint. Same `~` punctuator
+; as tap targets (ADR 0054 §2 reserves `~` for expander-synthesised names).
+(host_control_ref "~" @punctuation.special)
+(host_control_ref (ident) @variable)

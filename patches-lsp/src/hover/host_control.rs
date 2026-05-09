@@ -115,12 +115,15 @@ pub(crate) fn hover_for_ref(
     line_starts: &[usize],
 ) -> Option<Hover> {
     // `node` may be the host_control_ref wrapper or the inner ident.
+    // The wrapper carries a leading `~` punctuator; the ident child is
+    // the actual control name.
     let ref_node = if node.kind() == "host_control_ref" {
         node
     } else {
         node.parent()?
     };
-    let name = node_text(ref_node, source).trim();
+    let name_node = ref_node.named_child(0)?;
+    let name = node_text(name_node, source).trim();
     if name.is_empty() {
         return None;
     }
@@ -128,7 +131,7 @@ pub(crate) fn hover_for_ref(
     let body = match find_block_by_name(root, name, source) {
         Some(block) => render_block(block, source, &format!("→ `{name}`\n\n")),
         None => format!(
-            "**`{name}`**\n\nBare-name host-control reference, but no `knob` / `slider` / `toggle` / `trigger` block declares `{name}`."
+            "**`~{name}`**\n\nHost-control reference, but no `knob` / `slider` / `toggle` / `trigger` block declares `{name}`."
         ),
     };
     Some(Hover {

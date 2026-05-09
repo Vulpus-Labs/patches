@@ -13,7 +13,7 @@
 //! sides recompute the same mapping independently from the same input
 //! list.
 //!
-//! Bare-name [`CableEndpoint::HostControlRef`]s are rewritten into
+//! `~name` [`CableEndpoint::HostControlRef`]s are rewritten into
 //! `PortRef`s on the synth instance, dispatching to `audio_out` or
 //! `trigger_out` by the declared kind. Declaration statements are
 //! consumed (not re-emitted).

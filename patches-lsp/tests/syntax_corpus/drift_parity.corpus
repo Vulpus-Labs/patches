@@ -62,4 +62,4 @@ patch {
 === ok cable_endpoint with host-control source
 knob cutoff { low: 500Hz, high: 2000Hz }
 module filt : Svf
-cutoff -> filt.cutoff
+~cutoff -> filt.cutoff

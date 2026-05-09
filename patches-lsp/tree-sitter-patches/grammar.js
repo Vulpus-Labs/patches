@@ -202,16 +202,18 @@ module.exports = grammar({
         "}"
       ),
 
-    // Bare-name reference to a host control on a cable endpoint.
-    // Tried after `port_ref` so `module.port` is never misclassified.
-    host_control_ref: ($) => prec(-1, $.ident),
+    // `~name` reference to a host control on a cable endpoint.
+    // The leading `~` mirrors tap targets (ADR 0054 §2). tap_target is
+    // tried first in cable_endpoint so `~name(...)` parses as a tap; the
+    // `~name` form (no parens) falls through to here.
+    host_control_ref: ($) => seq("~", $.ident),
 
     // ─── Connections ────────────────────────────────────────────────────
     // Mirror pest: `cable_endpoint` is a visible wrapper. tap_target first
-    // so the leading `~` disambiguates from a bare ident; port_ref before
-    // host_control_ref so `mod.port` parses as a port reference.
+    // so `~name(...)` parses as a tap before host_control_ref's bare
+    // `~name` form would otherwise consume the ident.
     cable_endpoint: ($) =>
-      choice($.tap_target, $.port_ref, $.host_control_ref),
+      choice($.tap_target, $.host_control_ref, $.port_ref),
     connection: ($) =>
       seq(
         $.cable_endpoint,

@@ -78,11 +78,11 @@ fn parses_trigger_no_required_fields() {
 }
 
 #[test]
-fn bare_name_reference_in_cable() {
+fn tilde_name_reference_in_cable() {
     let src = r#"patch {
         knob cutoff { low: 21Hz, high: 2001Hz }
         module filter : Filter()
-        cutoff -> filter.voct
+        ~cutoff -> filter.voct
     }"#;
     let file = parse(src).expect("parse ok");
     let conn = file

@@ -91,10 +91,10 @@ knob   cutoff { low: 20Hz, high: 20kHz }
 slider attack { low: 0s, high: 2s }
 toggle bypass { default: false }
 trigger fire  {}
-cutoff -> filter.voct
-attack -> vca.attack_cv
-bypass -> reverb.bypass
-fire   -> env.gate
+~cutoff -> filter.voct
+~attack -> vca.attack_cv
+~bypass -> reverb.bypass
+~fire   -> env.gate
 
 # desugared (alphabetical: attack, bypass, cutoff, fire)
 module ~host_control : HostControl(channels: [attack, bypass, cutoff, fire]) {
@@ -339,8 +339,10 @@ The inline `~kind(name, k: v, ...)` source syntax in §1 does not scale.
 Host controls have many host-side parameters (display name, unit, low,
 high, midpoint, default, taper, colour) and inlining them at the cable
 site makes the wiring unreadable. The remedy is to split declaration
-from reference: declarations are top-level blocks, references are bare
-names usable anywhere a source would be.
+from reference: declarations are top-level blocks, references are
+`~name` tokens usable anywhere a source would be (the `~` prefix
+mirrors tap targets, ADR 0054 §2 — the synth instance the reference
+expands to is itself a `~`-prefixed module).
 
 ### Surface syntax (replaces §1)
 
@@ -400,13 +402,16 @@ Rules:
 
 ### Reference syntax
 
-A declared host control is referenced by bare name in cable
-expressions, as if it were a source module's output:
+A declared host control is referenced by `~name` in cable expressions,
+as if it were a source module's output. The `~` prefix is the same
+punctuator tap targets use (ADR 0054 §2): both forms denote
+expander-synthesised names that the desugar pass rewrites to ports on
+a `~`-prefixed synth module.
 
 ```text
-frequency_knob -[uni(20Hz, 2000Hz)]-> filter.cutoff
-vca_attack     -[uni(0.001s, 2.0s)]-> vca.attack_cv
-reverb_bypass                       -> reverb.bypass
+~frequency_knob -[uni(20Hz, 2000Hz)]-> filter.cutoff
+~vca_attack     -[uni(0.001s, 2.0s)]-> vca.attack_cv
+~reverb_bypass                       -> reverb.bypass
 ```
 
 The cable's range expression (ADR 0062) maps the normalized control

@@ -89,7 +89,7 @@ patch {
     module filt_broadcast : MonoToPoly
     # voct offset around the filter's 1000Hz base: -1 oct (500Hz) … +1 oct (2000Hz)
     knob filter_base { low: -1.0, high: 1.0 }
-    filter_base -> filt_broadcast.in
+    ~filter_base -> filt_broadcast.in
     filt_broadcast.out     -> filt_sum.in[base]
     filt_env.out   -[0.7]-> filt_sum.in[env]
     filt_sum.out           -> filt.voct
@@ -125,8 +125,8 @@ patch {
     }
 
     knob delay_knob { low: 50, high: 200 }
-    delay_knob -[bi(1.0, 2.0)]-> delay.delay_cv, ~osc(delay_amount)
-    delay_knob -> ~osc(delay_knob)
+    ~delay_knob -[bi(1.0, 2.0)]-> delay.delay_cv, ~osc(delay_amount)
+    ~delay_knob -> ~osc(delay_knob)
     
     limit.out -> chorus.in
     chorus.out -> delay.in[0]
