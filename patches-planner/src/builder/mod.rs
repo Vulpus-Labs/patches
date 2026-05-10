@@ -396,6 +396,11 @@ impl PatchBuilder {
             buf_alloc,
             mut decisions,
             cable_fused,
+            // Phase 3 (ticket 0850) plumbs producer-port cycle/scratch
+            // classification into the planner. C2 will consume this in
+            // the allocator; C3 lifts it into the engine's CablePool
+            // dispatch. Phase 1 builder ignores it.
+            producer_port_cycle: _,
             fas_size,
         } = make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 

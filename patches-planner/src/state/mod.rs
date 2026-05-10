@@ -167,6 +167,15 @@ pub struct PlanDecisions<'a> {
     /// the 1-sample feedback delay. Phase 1 emits this metadata; the
     /// engine continues to apply the delay to every cable.
     pub cable_fused: Vec<bool>,
+    /// Per-producer-port cycle/scratch classification (ADR 0072 phase 3,
+    /// ticket 0850). Keyed by `(NodeId, output_port_idx)`. `true` means
+    /// the port has at least one delayed (non-fused) consumer and must
+    /// occupy a cycle pair slot. `false` means every consumer is fused
+    /// and the port may occupy a single-slot scratch entry.
+    ///
+    /// Producer ports with no consumers default to `false` (scratch),
+    /// since there is no read path that needs the delay.
+    pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
     /// Size of the feedback arc set: number of cables internal to a
     /// non-trivial SCC. Reported on plan build to validate the
     /// assumption that typical patches have very few cyclic cables.
@@ -274,9 +283,43 @@ pub fn make_decisions<'a>(
     let node_ids = graph.node_ids();
     let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
     validate_fused_invariant(&order, &index.edges, &cable_fused);
+    let producer_port_cycle = classify_producer_ports(&index.edges, &cable_fused);
     let buf_alloc = allocate_buffers(&index, &order, &prev_state.buffer_alloc, pool_capacity)?;
     let decisions = classify_nodes(&index, &order, prev_state)?;
-    Ok(PlanDecisions { index, order, buf_alloc, decisions, cable_fused, fas_size })
+    Ok(PlanDecisions {
+        index,
+        order,
+        buf_alloc,
+        decisions,
+        cable_fused,
+        producer_port_cycle,
+        fas_size,
+    })
+}
+
+/// Build per-producer-port cycle/scratch classification from the
+/// per-edge fused flag. A producer port is `cycle` iff at least one of
+/// its consuming edges is non-fused (the consumer needs last-tick's
+/// value via the ping-pong pair). Otherwise it is `scratch`.
+///
+/// Producer ports with zero consumers do not appear in the map; callers
+/// should treat absent keys as `scratch` (no read path requires the
+/// delay).
+fn classify_producer_ports(
+    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    cable_fused: &[bool],
+) -> HashMap<(NodeId, usize), bool> {
+    debug_assert_eq!(edges.len(), cable_fused.len());
+    let mut by_port: HashMap<(NodeId, usize), bool> = HashMap::new();
+    for (i, (from, _, out_idx, _, _, _, _)) in edges.iter().enumerate() {
+        let key = (from.clone(), *out_idx);
+        let needs_cycle = !cable_fused[i];
+        by_port
+            .entry(key)
+            .and_modify(|v| *v = *v || needs_cycle)
+            .or_insert(needs_cycle);
+    }
+    by_port
 }
 
 /// Compute execution order over the SCC condensation and classify

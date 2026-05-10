@@ -549,6 +549,69 @@ fn leak_str(s: &str) -> &'static str {
     Box::leak(s.to_string().into_boxed_str())
 }
 
+// ── classify_producer_ports tests (ticket 0850) ──────────────────────────────
+
+/// A producer port whose only consumer reads through a fused (acyclic)
+/// edge maps to `false` (scratch).
+#[test]
+fn classify_producer_ports_all_fused_consumers_yields_scratch() {
+    let nodes = ids(&["src", "dst"]);
+    let edges = vec![edge("src", "dst")];
+    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
+    let by_port = super::classify_producer_ports(&edges, &fused);
+    assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&false));
+}
+
+/// A producer port whose any consumer is in a cycle (non-fused edge)
+/// maps to `true` (cycle pair).
+#[test]
+fn classify_producer_ports_any_cyclic_consumer_yields_cycle() {
+    // Two-node SCC: both edges are non-fused.
+    let nodes = ids(&["a", "b"]);
+    let edges = vec![edge("a", "b"), edge("b", "a")];
+    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
+    let by_port = super::classify_producer_ports(&edges, &fused);
+    assert_eq!(by_port.get(&(NodeId::from("a"), 0)), Some(&true));
+    assert_eq!(by_port.get(&(NodeId::from("b"), 0)), Some(&true));
+}
+
+/// A producer port that fans out to one fused consumer and one cyclic
+/// consumer must be classified `cycle` — the cyclic consumer needs
+/// last-tick storage.
+#[test]
+fn classify_producer_ports_mixed_fanout_yields_cycle() {
+    // src → loopA → loopB → loopA (back edge), plus src → loopB so
+    // src's port 0 has two consumers (one inside the SCC, one feeding
+    // it). src is outside the SCC, so the src → loopA and src → loopB
+    // edges are fused; the loopA ↔ loopB edges are cyclic. src's
+    // producer-port classification stays scratch (all its consumers
+    // are fused). Reshape: make src→loopA the only edge from src and
+    // additionally include loopA→src to put src in the SCC.
+    let nodes = ids(&["src", "loopA", "loopB"]);
+    let edges = vec![
+        edge("src", "loopA"),
+        edge("loopA", "src"),     // back edge → src now part of cycle
+        edge("loopA", "loopB"),
+    ];
+    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
+    let by_port = super::classify_producer_ports(&edges, &fused);
+    // src→loopA is internal to the SCC, so src's output is consumed by
+    // a delayed reader.
+    assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&true));
+    // loopA fans out to src (cyclic) and loopB (fused). Mixed → cycle.
+    assert_eq!(by_port.get(&(NodeId::from("loopA"), 0)), Some(&true));
+}
+
+/// A producer port with no consumers does not appear in the map (the
+/// caller treats absent keys as scratch — there is no read path).
+#[test]
+fn classify_producer_ports_unconsumed_port_is_absent() {
+    let nodes = ids(&["src"]);
+    let by_port = super::classify_producer_ports(&[], &[]);
+    assert!(by_port.is_empty());
+    assert!(by_port.get(&(NodeId::from(nodes[0].as_str()), 0)).is_none());
+}
+
 #[test]
 #[should_panic(expected = "ADR 0072 invariant violated")]
 fn validate_fused_invariant_panics_on_backward_fused_cable() {
