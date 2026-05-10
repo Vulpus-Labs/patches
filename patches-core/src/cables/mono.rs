@@ -67,6 +67,15 @@ impl MonoInput {
         Self { cable_idx, scale, offset: 0.0, clip: None, connected: true, fused: false }
     }
 
+    /// Create a `MonoInput` connected to a backplane slot
+    /// (e.g. `AUDIO_IN_L`, `GLOBAL_DRIFT`). Backplane slots live in
+    /// the scratch region (ticket 0858) and are written by the engine
+    /// before any module runs each tick, so reads are inherently
+    /// same-tick (`fused: true`).
+    pub fn backplane(cable_idx: usize) -> Self {
+        Self { cable_idx, scale: 1.0, offset: 0.0, clip: None, connected: true, fused: true }
+    }
+
     pub fn from_port(port: &InputPort) -> Self {
         port.expect_mono()
     }

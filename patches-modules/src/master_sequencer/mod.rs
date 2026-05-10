@@ -156,7 +156,7 @@ impl Module for MasterSequencer {
             hosted: env.hosted,
             use_host_transport: env.hosted,
             core: SequencerCore::new(env.sample_rate, channels),
-            transport_in: PolyInput::scalar(GLOBAL_TRANSPORT, 1.0),
+            transport_in: PolyInput::backplane(GLOBAL_TRANSPORT),
             in_start: MonoInput::default(),
             in_stop: MonoInput::default(),
             in_pause: MonoInput::default(),

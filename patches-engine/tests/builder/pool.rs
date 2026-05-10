@@ -150,12 +150,13 @@ fn scratch_indices_are_topo_ordered_and_dense() {
     let a_out = state.buffer_alloc.output_buf[&(NodeId::from("a_osc"), 0)];
     let b_out = state.buffer_alloc.output_buf[&(NodeId::from("b_sum"), 0)];
     let cap = patches_core::cables::CYCLE_CAPACITY;
-    assert!(a_out >= cap && b_out >= cap, "all outputs are fused → scratch");
+    let dyn_start = cap + patches_core::cables::RESERVED_SLOTS;
+    assert!(a_out >= dyn_start && b_out >= dyn_start, "all outputs are fused → scratch");
     assert!(a_out < b_out, "a precedes b in topo order → a.out < b.out");
-    // Dense: scratch starts at CYCLE_CAPACITY and the sweep emits
-    // every Output port of every node (a_osc has multiple outputs).
-    // Collect every scratch index and verify they form a contiguous
-    // range starting at CYCLE_CAPACITY.
+    // Dense: dyn-scratch starts above the reserved backplane range
+    // (`CYCLE_CAPACITY + RESERVED_SLOTS`, ticket 0858) and the sweep
+    // emits every Output port of every node. Collect every scratch
+    // index and verify they form a contiguous run from `dyn_start`.
     let mut scratch_indices: Vec<usize> = state
         .buffer_alloc
         .output_buf
@@ -164,14 +165,14 @@ fn scratch_indices_are_topo_ordered_and_dense() {
         .filter(|&i| i >= cap)
         .collect();
     scratch_indices.sort_unstable();
-    let expected: Vec<usize> = (cap..cap + scratch_indices.len()).collect();
+    let expected: Vec<usize> = (dyn_start..dyn_start + scratch_indices.len()).collect();
     assert_eq!(
         scratch_indices, expected,
-        "scratch indices must be a dense run starting at CYCLE_CAPACITY"
+        "scratch indices must be a dense run starting just past the reserved backplane range"
     );
     assert_eq!(
-        a_out, cap,
-        "first scratch index must be CYCLE_CAPACITY (the topo-source port)"
+        a_out, dyn_start,
+        "first scratch index must be the topo-source port (just past the reserved backplane range)"
     );
 }
 

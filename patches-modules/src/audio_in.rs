@@ -52,8 +52,8 @@ impl Module for AudioIn {
         Self {
             instance_id,
             descriptor,
-            in_left: MonoInput::scalar(AUDIO_IN_L, 1.0),
-            in_right: MonoInput::scalar(AUDIO_IN_R, 1.0),
+            in_left: MonoInput::backplane(AUDIO_IN_L),
+            in_right: MonoInput::backplane(AUDIO_IN_R),
             out_stereo: StereoOutput::default(),
         }
     })}

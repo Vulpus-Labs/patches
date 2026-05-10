@@ -131,7 +131,7 @@ impl Module for VOtaPolyVcf {
             kernel: PolyOtaLadderKernel::new_static(coeffs, poles.into()),
             in_audio: PolyInput::default(),
             in_cutoff_cv: PolyInput::default(),
-            in_global_drift: MonoInput::scalar(GLOBAL_DRIFT, 1.0),
+            in_global_drift: MonoInput::backplane(GLOBAL_DRIFT),
             out_audio: PolyOutput::default(),
         }
     })}

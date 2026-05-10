@@ -176,15 +176,12 @@ pub struct PlanDecisions<'a> {
     /// Producer ports with no consumers default to `false` (scratch),
     /// since there is no read path that needs the delay.
     pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
-    /// Cutoff between cycle and scratch regions in the eventual
-    /// two-region cable pool (ADR 0072 phase 3, ticket 0850). Indices
-    /// `< cycle_slot_start` are cycle pairs (reserved infrastructure
-    /// slots + dynamic cycle producers); indices `>= cycle_slot_start`
-    /// are single-slot scratch entries.
-    ///
-    /// Computed as `RESERVED_SLOTS + count(cycle producer ports)`. The
-    /// engine does not consume this in C1/C2; the storage split lands
-    /// in C3.
+    /// Diagnostic high-water mark of the cycle region in this plan
+    /// (ADR 0072 phase 3, tickets 0850 + 0858). Computed as
+    /// `SINK_SLOTS + count(cycle producer ports)`. The actual cycle/
+    /// scratch cutoff is the per-pool constant [`CYCLE_CAPACITY`]; the
+    /// backplane lives in `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)`
+    /// of the scratch region. Carried here for tests and diagnostics.
     pub cycle_slot_start: usize,
     /// Size of the feedback arc set: number of cables internal to a
     /// non-trivial SCC. Reported on plan build to validate the
@@ -298,7 +295,7 @@ pub fn make_decisions<'a>(
     // value remains here as diagnostic metadata reflecting the actual
     // cycle slots in use by the producer-port set.
     let dyn_cycle_count = producer_port_cycle.values().filter(|&&v| v).count();
-    let cycle_slot_start = RESERVED_SLOTS + dyn_cycle_count;
+    let cycle_slot_start = patches_core::cables::SINK_SLOTS + dyn_cycle_count;
     let buf_alloc = allocate_buffers(
         &index,
         &order,

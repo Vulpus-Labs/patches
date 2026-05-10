@@ -78,7 +78,7 @@ impl Module for HostTransport {
         Self {
             instance_id,
             descriptor,
-            transport_in: PolyInput::scalar(GLOBAL_TRANSPORT, 1.0),
+            transport_in: PolyInput::backplane(GLOBAL_TRANSPORT),
             out_playing: MonoOutput::default(),
             out_tempo: MonoOutput::default(),
             out_beat: MonoOutput::default(),

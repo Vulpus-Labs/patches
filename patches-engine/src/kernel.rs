@@ -2,47 +2,42 @@ use std::thread;
 use std::time::Duration;
 
 use patches_core::{
-    CableValue, CYCLE_CAPACITY, GLOBAL_MIDI, GLOBAL_TRANSPORT, HOST_CONTROL_BASE,
-    HOST_CONTROL_SLOTS, POLY_READ_SINK, POLY_WRITE_SINK,
+    CableValue, CYCLE_CAPACITY, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
 };
 
 use crate::cleanup::CleanupAction;
 
 /// Allocate and initialise the cycle region of the cable buffer pool
-/// (ADR 0072 phase 3, ticket 0850). Sized at [`CYCLE_CAPACITY`] entries
-/// — the boundary between cycle pairs (low) and scratch slots (high).
+/// (ADR 0072 phase 3, tickets 0850 + 0858). Sized at [`CYCLE_CAPACITY`]
+/// entries — the boundary between cycle pairs (low) and scratch slots
+/// (high). The backplane lives in scratch (ticket 0858); only the
+/// read/write sinks remain at the bottom of cycle.
 ///
-/// All slots default to `Mono(0.0)` except `POLY_READ_SINK`,
-/// `POLY_WRITE_SINK`, `GLOBAL_TRANSPORT`, `GLOBAL_MIDI`, and the
-/// host-control backplane lanes, which are `Poly([0.0; 16])` so that
-/// poly reads never see a kind mismatch.
+/// All slots default to `Mono(0.0)` except `POLY_READ_SINK` and
+/// `POLY_WRITE_SINK`, which are `Poly([0.0; 16])` so poly reads of
+/// disconnected ports never see a kind mismatch. (Storage is the same
+/// `[f32; 16]` either way per ADR 0068; the distinction is cosmetic.)
 pub fn init_cycle_pool() -> Box<[[CableValue; 2]]> {
     let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; CYCLE_CAPACITY]
         .into_boxed_slice();
     pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    pool[GLOBAL_TRANSPORT] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    pool[GLOBAL_MIDI] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    // Host-control backplane (ADR 0057 §4): two `Poly` slots holding
-    // 32 lanes total. Control thread writes these once per block before
-    // `tick`; the `HostControl` module reads via `PolyInput::backplane`.
-    for i in 0..HOST_CONTROL_SLOTS {
-        pool[HOST_CONTROL_BASE + i] =
-            [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    }
     pool
 }
 
 /// Allocate and initialise the scratch region of the cable buffer pool
-/// (ADR 0072 phase 3, ticket 0850). Sized at
-/// `buffer_capacity - CYCLE_CAPACITY` single-slot `CableValue` entries
-/// — backs producer ports whose every consumer is fused. All slots
-/// default to `Mono(0.0)`; modules that read poly-shaped scratch slots
-/// receive an all-zero poly via `as_poly()` regardless of the
-/// underlying default's `Mono` constructor — `CableValue` is a
-/// `[f32; 16]` per ADR 0068.
+/// (ADR 0072 phase 3, tickets 0850 + 0858). Sized at
+/// `max(RESERVED_SLOTS, buffer_capacity - CYCLE_CAPACITY)` single-slot
+/// `CableValue` entries. Backs the backplane (bottom `RESERVED_SLOTS`
+/// slots, written by the engine each tick) plus producer ports whose
+/// every consumer is fused (above). The minimum guarantees the engine
+/// can always write the backplane, even when callers pass a tiny
+/// `buffer_capacity` (typical in unit tests). All slots default to
+/// `Mono(0.0)`; `CableValue` is a `[f32; 16]` per ADR 0068, so the
+/// storage is identical for poly readers regardless of the constructor.
 pub fn init_scratch_pool(buffer_capacity: usize) -> Box<[CableValue]> {
-    let scratch_capacity = buffer_capacity.saturating_sub(CYCLE_CAPACITY);
+    let dyn_scratch = buffer_capacity.saturating_sub(CYCLE_CAPACITY + RESERVED_SLOTS);
+    let scratch_capacity = RESERVED_SLOTS + dyn_scratch;
     vec![CableValue::mono(0.0); scratch_capacity].into_boxed_slice()
 }
 

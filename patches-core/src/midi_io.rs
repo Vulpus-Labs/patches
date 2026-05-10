@@ -191,7 +191,7 @@ impl MidiOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CableValue, GLOBAL_MIDI};
+    use crate::{CableValue, CYCLE_CAPACITY, GLOBAL_MIDI};
 
     fn note_on(note: u8, vel: u8) -> MidiEvent {
         MidiEvent { bytes: [0x90, note, vel] }
@@ -212,16 +212,24 @@ mod tests {
         frame
     }
 
-    /// Write a MIDI frame to the GLOBAL_MIDI backplane slot at the given
-    /// write index.
-    fn set_midi_frame(pool: &mut [[CableValue; 2]], wi: usize, frame: [f32; 16]) {
-        pool[GLOBAL_MIDI][wi] = CableValue::poly(frame);
+    /// Write a MIDI frame to the GLOBAL_MIDI backplane slot. Backplane
+    /// lives in scratch (ticket 0858); single-slot, no ping-pong half.
+    fn set_midi_frame(scratch: &mut [CableValue], frame: [f32; 16]) {
+        scratch[GLOBAL_MIDI - CYCLE_CAPACITY] = CableValue::poly(frame);
     }
 
-    /// Minimal buffer pool for testing (just enough for backplane slots).
-    fn test_pool() -> Box<[[CableValue; 2]]> {
+    /// Minimal cycle pool for testing — sized so disconnected sink reads
+    /// don't go out of bounds; modules under test read backplane slots
+    /// from the scratch slice.
+    fn test_cycle() -> Box<[[CableValue; 2]]> {
         vec![[CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])]; 16]
             .into_boxed_slice()
+    }
+
+    /// Minimal scratch pool for testing — just enough to cover the
+    /// reserved backplane range.
+    fn test_scratch() -> Box<[CableValue]> {
+        vec![CableValue::poly([0.0; 16]); crate::cables::RESERVED_SLOTS].into_boxed_slice()
     }
 
     // ── MidiSlice ────────────────────────────────────────────────────────────
@@ -238,14 +246,13 @@ mod tests {
 
     #[test]
     fn single_frame_delivers_immediately() {
-        let mut pool_buf = test_pool();
-        let wi = 0;
+        let mut cycle = test_cycle();
+        let mut scratch = test_scratch();
         let events = [note_on(60, 100), note_on(64, 80)];
-        // Write to the *read* slot (1 - wi).
-        set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events, 2));
+        set_midi_frame(&mut scratch, make_frame(&events, 2));
 
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
-        let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+        let cable_pool = CablePool::new(&mut scratch, &mut cycle, 0);
         let result = input.read(&cable_pool);
 
         assert_eq!(result.len(), 2);
@@ -257,35 +264,33 @@ mod tests {
 
     #[test]
     fn multi_frame_batch_delivers_on_final_frame() {
-        let mut pool_buf = test_pool();
+        let mut cycle = test_cycle();
+        let mut scratch = test_scratch();
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
 
         // Frame 1: 5 events packed, total = 12 (7 more coming).
         let events_1: Vec<MidiEvent> = (60..65).map(|n| note_on(n, 100)).collect();
-        let wi = 0;
-        set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_1, 12));
+        set_midi_frame(&mut scratch, make_frame(&events_1, 12));
         {
-            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+            let cable_pool = CablePool::new(&mut scratch, &mut cycle, 0);
             let result = input.read(&cable_pool);
             assert!(result.is_empty(), "should hold back events while more are pending");
         }
 
         // Frame 2: 5 events packed, total = 7 (2 more coming).
         let events_2: Vec<MidiEvent> = (65..70).map(|n| note_on(n, 90)).collect();
-        let wi = 1;
-        set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_2, 7));
+        set_midi_frame(&mut scratch, make_frame(&events_2, 7));
         {
-            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+            let cable_pool = CablePool::new(&mut scratch, &mut cycle, 1);
             let result = input.read(&cable_pool);
             assert!(result.is_empty(), "still more pending");
         }
 
         // Frame 3: 2 events packed, total = 2 (done).
         let events_3 = [note_off(60), note_off(61)];
-        let wi = 0;
-        set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_3, 2));
+        set_midi_frame(&mut scratch, make_frame(&events_3, 2));
         {
-            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+            let cable_pool = CablePool::new(&mut scratch, &mut cycle, 0);
             let result = input.read(&cable_pool);
             assert_eq!(result.len(), 12, "all 12 events delivered together");
             // Verify order: events_1 then events_2 then events_3.
@@ -300,12 +305,12 @@ mod tests {
 
     #[test]
     fn empty_frame_returns_empty() {
-        let mut pool_buf = test_pool();
-        let wi = 0;
-        set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&[], 0));
+        let mut cycle = test_cycle();
+        let mut scratch = test_scratch();
+        set_midi_frame(&mut scratch, make_frame(&[], 0));
 
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
-        let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+        let cable_pool = CablePool::new(&mut scratch, &mut cycle, 0);
         let result = input.read(&cable_pool);
         assert!(result.is_empty());
     }
@@ -314,7 +319,8 @@ mod tests {
 
     #[test]
     fn stash_overflow_silently_drops() {
-        let mut pool_buf = test_pool();
+        let mut cycle = test_cycle();
+        let mut scratch = test_scratch();
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
 
         // Deliver 7 frames of 5 events each (35 total), with "more coming".
@@ -323,12 +329,8 @@ mod tests {
             let events: Vec<MidiEvent> = (0..5).map(|i| note_on(frame_idx * 5 + i, 100)).collect();
             let remaining = 35 - ((frame_idx as usize + 1) * 5);
             let wi = (frame_idx as usize) % 2;
-            set_midi_frame(
-                &mut pool_buf,
-                1 - wi,
-                make_frame(&events, events.len() + remaining),
-            );
-            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
+            set_midi_frame(&mut scratch, make_frame(&events, events.len() + remaining));
+            let cable_pool = CablePool::new(&mut scratch, &mut cycle, wi);
             let result = input.read(&cable_pool);
             if remaining > 0 {
                 assert!(result.is_empty());

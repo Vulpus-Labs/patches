@@ -157,7 +157,7 @@ impl Module for Oscillator {
             in_pulse_width: MonoInput::default(),
             in_phase_mod: MonoInput::default(),
             in_sync: TriggerInput::default(),
-            in_global_drift: MonoInput::scalar(GLOBAL_DRIFT, 1.0),
+            in_global_drift: MonoInput::backplane(GLOBAL_DRIFT),
             out_sine: MonoOutput::default(),
             out_triangle: MonoOutput::default(),
             out_sawtooth: MonoOutput::default(),

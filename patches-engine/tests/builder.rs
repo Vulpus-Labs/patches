@@ -50,14 +50,10 @@ mod builder {
         graph
     }
 
-    pub(crate) fn make_buffer_pool(capacity: usize) -> Vec<[CableValue; 2]> {
-        (0..capacity).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
-    }
-
     /// Build cycle and scratch pools sized for the planner's two-region
-    /// layout (ADR 0072 phase 3, ticket 0850). `capacity` is the total
-    /// pool capacity passed to `PatchBuilder` — the scratch pool gets
-    /// `capacity - CYCLE_CAPACITY` slots.
+    /// layout (ADR 0072 phase 3, tickets 0850 + 0858). `capacity` is
+    /// the total pool capacity passed to `PatchBuilder` — the scratch
+    /// pool gets `capacity - CYCLE_CAPACITY` slots.
     pub(crate) fn make_split_pool(capacity: usize) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
         let cycle = (0..patches_core::CYCLE_CAPACITY)
             .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])

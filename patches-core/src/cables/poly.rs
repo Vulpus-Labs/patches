@@ -70,9 +70,20 @@ impl PolyInput {
         }
     }
 
-    /// Create a `PolyInput` connected to a backplane slot (e.g. `GLOBAL_MIDI`).
+    /// Create a `PolyInput` connected to a backplane slot
+    /// (e.g. `GLOBAL_TRANSPORT`, `GLOBAL_MIDI`, `HOST_CONTROL_BASE`).
+    /// Backplane slots live in the scratch region (ticket 0858) and
+    /// are written by the engine before any module runs each tick, so
+    /// reads are inherently same-tick (`fused: true`).
     pub fn backplane(cable_idx: usize) -> Self {
-        Self::scalar(cable_idx, 1.0)
+        Self {
+            cable_idx,
+            scale: 1.0,
+            offset: 0.0,
+            clip: None,
+            connected: true,
+            fused: true,
+        }
     }
 
     /// Extract the `PolyInput` at position `idx` from a port slice.

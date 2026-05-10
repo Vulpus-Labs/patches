@@ -259,12 +259,12 @@ pub struct ExecutionPlan {
     /// applied directly to each `InputPort.fused` (phase 2); the
     /// engine's read path branches on that flag.
     pub fas_size: usize,
-    /// Cutoff between cycle and scratch regions in the eventual
-    /// two-region cable pool (ADR 0072 phase 3, ticket 0850). Indices
-    /// `< cycle_slot_start` will be cycle pairs; indices
-    /// `>= cycle_slot_start` will be scratch single slots once the
-    /// storage split lands (C3/C4). For now, the engine retains the
-    /// uniform pair pool and ignores this field.
+    /// Diagnostic high-water mark of the cycle region in this plan
+    /// (ADR 0072 phase 3, tickets 0850 + 0858). The actual cycle/
+    /// scratch cutoff is the per-pool constant [`patches_core::CYCLE_CAPACITY`];
+    /// the backplane lives in the bottom `RESERVED_SLOTS` of scratch.
+    /// Carried for tests and diagnostics only — the engine does not
+    /// consume this field.
     pub cycle_slot_start: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
@@ -302,7 +302,7 @@ impl ExecutionPlan {
             active_indices: vec![],
             port_updates: vec![],
             fas_size: 0,
-            cycle_slot_start: patches_core::cables::RESERVED_SLOTS,
+            cycle_slot_start: patches_core::cables::SINK_SLOTS,
             tracker_data: None,
             tracker_receiver_indices: vec![],
             tap_manifest_generation: 0,

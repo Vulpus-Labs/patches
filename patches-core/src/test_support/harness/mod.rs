@@ -3,7 +3,7 @@ use crate::audio_environment::AudioEnvironment;
 use crate::cable_pool::CablePool;
 use crate::cables::{
     CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput,
-    POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+    CYCLE_CAPACITY, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
 };
 use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue, StructuralParams};
 use crate::COEFF_UPDATE_INTERVAL;
@@ -29,7 +29,12 @@ use crate::modules::parameter_map::ParameterMap;
 /// to mark specific ports as disconnected before the first tick.
 pub struct ModuleHarness {
     module: Box<dyn Module>,
+    /// Cycle region. Backs read/write sinks (`[0, SINK_SLOTS)`) and
+    /// the harness's user input/output cables (`[RESERVED_SLOTS, ...)`).
     pool: Vec<[CableValue; 2]>,
+    /// Scratch region. Backs the backplane reserved range
+    /// (ticket 0858), addressed at `slot - CYCLE_CAPACITY`.
+    scratch: Vec<CableValue>,
     /// (name, index) → descriptor position for input ports.
     /// Cable slot for input at position i = i.
     input_idx: HashMap<(String, usize), usize>,
@@ -122,25 +127,19 @@ impl ModuleHarness {
             output_connected.push(true);
         }
 
-        // Pool: reserved backplane slots occupy 0..RESERVED_SLOTS; user cables follow.
-        // User inputs occupy RESERVED_SLOTS..RESERVED_SLOTS+n_inputs;
-        // user outputs occupy RESERVED_SLOTS+n_inputs..RESERVED_SLOTS+n_inputs+n_outputs.
-        // This mirrors the real planner's slot assignment so modules that write to
-        // backplane slots (e.g. AudioOut → AUDIO_OUT_L/R) stay in-bounds.
-        let pool_size = RESERVED_SLOTS + n_inputs + n_outputs;
-        let mut pool = vec![[CableValue::mono(0.0); 2]; pool_size];
+        // Cycle region: read/write sinks at `[0, SINK_SLOTS)` plus the
+        // harness's user input/output cables placed at
+        // `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs + n_outputs)`.
+        // The slot offsets mirror the real planner's reservation so
+        // modules built against the same convention stay in-bounds.
+        let cycle_size = RESERVED_SLOTS + n_inputs + n_outputs;
+        let mut pool = vec![[CableValue::mono(0.0); 2]; cycle_size];
 
-        // Poly reserved slots must hold Poly values to avoid kind-mismatch panics.
+        // Poly sink slots hold poly values for cosmetic well-typedness.
+        // (CableValue is `[f32; 16]` per ADR 0068, so the storage is
+        // identical regardless of the constructor.)
         pool[POLY_READ_SINK]  = [CableValue::poly([0.0; 16]); 2];
         pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]); 2];
-        pool[crate::cables::GLOBAL_TRANSPORT] = [CableValue::poly([0.0; 16]); 2];
-        pool[crate::cables::GLOBAL_MIDI] = [CableValue::poly([0.0; 16]); 2];
-        for i in 0..crate::cables::TAP_SLOTS {
-            pool[crate::cables::TAP_BASE + i] = [CableValue::poly([0.0; 16]); 2];
-        }
-        for i in 0..crate::cables::HOST_CONTROL_SLOTS {
-            pool[crate::cables::HOST_CONTROL_BASE + i] = [CableValue::poly([0.0; 16]); 2];
-        }
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
@@ -154,9 +153,17 @@ impl ModuleHarness {
             }
         }
 
+        // Scratch region: backs the backplane reserved range (ticket
+        // 0858). Sized at `RESERVED_SLOTS` so any backplane const
+        // (`AUDIO_OUT_L`, `GLOBAL_TRANSPORT`, etc., all in
+        // `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)`) is in
+        // bounds at `slot - CYCLE_CAPACITY`.
+        let scratch = vec![CableValue::poly([0.0; 16]); RESERVED_SLOTS];
+
         let mut harness = Self {
             module,
             pool,
+            scratch,
             input_idx,
             output_idx,
             n_inputs,
@@ -261,13 +268,16 @@ impl ModuleHarness {
 
     // ── Pool initialisation ───────────────────────────────────────────────────
 
-    /// Fill all pool slots with `value`.
+    /// Fill all pool slots with `value` (cycle and scratch).
     ///
     /// Useful for sentinel-value tests (e.g. verifying that a disconnected output
     /// is never written by seeding it with a known non-zero value).
     pub fn init_pool(&mut self, value: CableValue) {
         for slot in &mut self.pool {
             *slot = [value; 2];
+        }
+        for slot in &mut self.scratch {
+            *slot = value;
         }
     }
 
@@ -329,14 +339,14 @@ impl ModuleHarness {
     /// [`COEFF_UPDATE_INTERVAL`] samples before the main process call.
     pub fn tick(&mut self) -> &mut Self {
         if self.sample_counter == 0 && self.module.wants_periodic() {
-            let pool = CablePool::with_cycle_only(&mut self.pool, self.wi);
+            let pool = CablePool::new(&mut self.scratch, &mut self.pool, self.wi);
             self.module.periodic_update(&pool);
         }
         self.sample_counter += 1;
         if self.sample_counter >= COEFF_UPDATE_INTERVAL {
             self.sample_counter = 0;
         }
-        let mut pool = CablePool::with_cycle_only(&mut self.pool, self.wi);
+        let mut pool = CablePool::new(&mut self.scratch, &mut self.pool, self.wi);
         self.module.process(&mut pool);
         self.wi = 1 - self.wi;
         self
@@ -350,25 +360,35 @@ impl ModuleHarness {
 
     /// Read a raw `CableValue` from `(slot, ping)` of the pool. Used
     /// by tests that need to stage backplane slots before ticking.
+    /// Cycle slots dispatch on `ping`; scratch slots ignore it
+    /// (single-slot, no ping-pong).
     pub fn pool_value(&self, slot: usize, ping: usize) -> CableValue {
-        self.pool[slot][ping]
+        if slot < CYCLE_CAPACITY {
+            self.pool[slot][ping]
+        } else {
+            self.scratch[slot - CYCLE_CAPACITY]
+        }
     }
 
     /// Write a raw `CableValue` into `(slot, ping)` of the pool. Used
     /// by tests that need to stage backplane slots before ticking.
+    /// Cycle slots dispatch on `ping`; scratch slots ignore it.
     pub fn set_pool_value(&mut self, slot: usize, ping: usize, value: CableValue) {
-        self.pool[slot][ping] = value;
+        if slot < CYCLE_CAPACITY {
+            self.pool[slot][ping] = value;
+        } else {
+            self.scratch[slot - CYCLE_CAPACITY] = value;
+        }
     }
 
-    /// Snapshot the four `TAP_BASE` poly slots from the cable pool's
-    /// read side after the most recent tick, packed into a flat
-    /// `[f32; MAX_TAPS]`. Replaces the legacy parallel `backplane()`
-    /// view; tap-module tests read tap-region values via this method.
+    /// Snapshot the four `TAP_BASE` poly slots from the scratch pool
+    /// after the most recent tick, packed into a flat `[f32; MAX_TAPS]`.
+    /// Tap-module tests read tap-region values via this method.
     pub fn tap_backplane(&self) -> [f32; crate::MAX_TAPS] {
-        let ri = 1 - self.wi;
         let mut out = [0.0_f32; crate::MAX_TAPS];
         for i in 0..crate::cables::TAP_SLOTS {
-            let lanes = self.pool[crate::cables::TAP_BASE + i][ri].as_poly();
+            let lanes =
+                self.scratch[crate::cables::TAP_BASE + i - CYCLE_CAPACITY].as_poly();
             out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
         }
         out
@@ -639,20 +659,32 @@ impl ModuleHarness {
         RESERVED_SLOTS + self.n_inputs + self.output_pos(name, index)
     }
 
-    /// Read both ping-pong slots for a raw pool index.
+    /// Read the most-recently-written value at a raw pool index.
     ///
     /// Useful for verifying writes to backplane slots (e.g. `AUDIO_OUT_L`)
-    /// that are not exposed as named output ports.
+    /// that are not exposed as named output ports. Cycle slots return
+    /// the read-side ping-pong half (`1 - wi`); scratch slots return
+    /// their single value.
     pub fn pool_slot(&self, idx: usize) -> CableValue {
-        self.pool[idx][1 - self.wi]
+        if idx < CYCLE_CAPACITY {
+            self.pool[idx][1 - self.wi]
+        } else {
+            self.scratch[idx - CYCLE_CAPACITY]
+        }
     }
 
-    /// Write `value` to both ping-pong slots at a raw pool index.
+    /// Write `value` at a raw pool index. Cycle slots write both
+    /// ping-pong halves so the value persists across ticks; scratch
+    /// slots are single-slot.
     ///
-    /// Useful for seeding backplane slots (e.g. `AUDIO_IN_L`) that are not
-    /// exposed as named input ports.
+    /// Useful for seeding backplane slots (e.g. `AUDIO_IN_L`) that are
+    /// not exposed as named input ports.
     pub fn set_pool_slot(&mut self, idx: usize, value: CableValue) {
-        self.pool[idx] = [value; 2];
+        if idx < CYCLE_CAPACITY {
+            self.pool[idx] = [value; 2];
+        } else {
+            self.scratch[idx - CYCLE_CAPACITY] = value;
+        }
     }
 
     fn rebuild_ports(&mut self) {

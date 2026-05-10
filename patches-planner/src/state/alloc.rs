@@ -9,7 +9,7 @@ use super::PlanError;
 // cables directly.
 pub use patches_core::cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
-    CYCLE_CAPACITY,
+    SINK_SLOTS, CYCLE_CAPACITY,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
 
@@ -19,14 +19,14 @@ pub use patches_core::cables::{
 ///
 /// Two index regions (ADR 0072 phases 3–4, tickets 0850 + 0851):
 ///
-/// - **Cycle** `[RESERVED_SLOTS, CYCLE_CAPACITY)` — producer ports with at
+/// - **Cycle** `[SINK_SLOTS, CYCLE_CAPACITY)` — producer ports with at
 ///   least one delayed (non-fused) consumer. Backed by `[CableValue; 2]` pair
 ///   slots. Indices are **stable across replans**: a surviving
 ///   `(NodeId, output_port_index)` keeps the same cycle slot so the audio
 ///   thread's in-flight feedback state is preserved on plan swap. Stability
 ///   is delivered by [`cycle_freelist`](Self::cycle_freelist) +
 ///   [`cycle_hwm`](Self::cycle_hwm).
-/// - **Scratch** `[CYCLE_CAPACITY, pool_capacity)` — producer ports whose
+/// - **Scratch** `[CYCLE_CAPACITY + RESERVED_SLOTS, pool_capacity)` — producer ports whose
 ///   every consumer is fused. Backed by single `CableValue` slots. Values
 ///   are tick-local: every consumer reads same-tick output, so prior
 ///   contents never reach the read path. The scratch region is therefore
@@ -45,15 +45,16 @@ pub struct BufferAllocState {
     /// drained when a new cycle producer port appears or a scratch port
     /// flips to cycle.
     pub cycle_freelist: Vec<usize>,
-    /// High-water mark for the cycle region. Starts at [`RESERVED_SLOTS`] so
-    /// that infrastructure slots are never aliased by a dynamic cycle cable.
-    /// Capped at [`CYCLE_CAPACITY`].
+    /// High-water mark for the cycle region. Starts at [`SINK_SLOTS`] so
+    /// that the read/write sink slots are never aliased by a dynamic
+    /// cycle cable. Capped at [`CYCLE_CAPACITY`].
     pub cycle_hwm: usize,
     /// High-water mark for the scratch region in the *most recent* plan.
-    /// Reset to [`CYCLE_CAPACITY`] at the start of every allocation pass and
-    /// rises as the forward sweep emits scratch indices. Carried in state
-    /// only as the post-build snapshot (used by tests and diagnostics);
-    /// not consulted by the next allocation pass.
+    /// Reset to `CYCLE_CAPACITY + RESERVED_SLOTS` at the start of every
+    /// allocation pass (skipping the backplane reserved range) and rises
+    /// as the forward sweep emits scratch indices. Carried in state only
+    /// as the post-build snapshot (used by tests and diagnostics); not
+    /// consulted by the next allocation pass.
     pub scratch_hwm: usize,
 }
 
@@ -62,8 +63,8 @@ impl Default for BufferAllocState {
         Self {
             output_buf: HashMap::new(),
             cycle_freelist: Vec::new(),
-            cycle_hwm: RESERVED_SLOTS,
-            scratch_hwm: CYCLE_CAPACITY,
+            cycle_hwm: SINK_SLOTS,
+            scratch_hwm: CYCLE_CAPACITY + RESERVED_SLOTS,
         }
     }
 }
@@ -216,8 +217,9 @@ pub fn allocate_buffers(
 ) -> Result<BufferAllocation, PlanError> {
     let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
     let mut cycle_hwm = prev_alloc.cycle_hwm;
-    // Scratch is rebuilt fresh each plan; no carry-over of hwm.
-    let mut scratch_hwm: usize = CYCLE_CAPACITY;
+    // Scratch is rebuilt fresh each plan; no carry-over of hwm. Skip
+    // the backplane reserved range at the bottom of scratch.
+    let mut scratch_hwm: usize = CYCLE_CAPACITY + RESERVED_SLOTS;
     let mut to_zero = Vec::new();
     let mut output_buf: HashMap<(NodeId, usize), usize> = HashMap::new();
 
