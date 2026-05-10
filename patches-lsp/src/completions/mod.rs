@@ -341,7 +341,7 @@ mod tests {
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
-            labels.iter().any(|l| *l == "in") && labels.iter().any(|l| *l == "out"),
+            labels.contains(&"in") && labels.contains(&"out"),
             "expected Vca's in/out ports for stereo bus form: {labels:?}"
         );
     }

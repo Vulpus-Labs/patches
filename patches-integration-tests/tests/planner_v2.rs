@@ -60,10 +60,6 @@ fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
     }
 }
 
-fn make_buffer_pool() -> Vec<[CableValue; 2]> {
-    (0..POOL_CAP).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
-}
-
 /// Cycle + scratch pools for the planner's two-region layout
 /// (ADR 0072 phase 3, ticket 0850).
 fn make_split_pool() -> (Vec<[CableValue; 2]>, Vec<CableValue>) {

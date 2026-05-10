@@ -609,7 +609,7 @@ fn classify_producer_ports_unconsumed_port_is_absent() {
     let nodes = ids(&["src"]);
     let by_port = super::classify_producer_ports(&[], &[]);
     assert!(by_port.is_empty());
-    assert!(by_port.get(&(NodeId::from(nodes[0].as_str()), 0)).is_none());
+    assert!(!by_port.contains_key(&(NodeId::from(nodes[0].as_str()), 0)));
 }
 
 #[test]
