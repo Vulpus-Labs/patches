@@ -64,6 +64,17 @@ fn make_buffer_pool() -> Vec<[CableValue; 2]> {
     (0..POOL_CAP).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
 }
 
+/// Cycle + scratch pools for the planner's two-region layout
+/// (ADR 0072 phase 3, ticket 0850).
+fn make_split_pool() -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
+    let cycle = (0..patches_core::CYCLE_CAPACITY)
+        .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
+        .collect();
+    let scratch_len = POOL_CAP.saturating_sub(patches_core::CYCLE_CAPACITY);
+    let scratch = vec![CableValue::mono(0.0); scratch_len];
+    (cycle, scratch)
+}
+
 /// Resolve pool index from planner state: `module_alloc.pool_map[instance_id]`.
 fn pool_index_for(state: &PlannerState, node_id: &NodeId) -> usize {
     let ns = &state.nodes[node_id];
@@ -288,7 +299,7 @@ fn state_preserved_across_parameter_update() {
         build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
 
     let pool = ModulePool::new(MODULE_CAP);
-    let mut bufs = make_buffer_pool();
+    let (mut cycle_bufs, mut scratch_bufs) = make_split_pool();
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan_a, &mut stale);
     let mut state = stale.rebuild(&plan_a, 32);
@@ -296,7 +307,7 @@ fn state_preserved_across_parameter_update() {
     // Tick 100 times at 440 Hz.
     const TICKS: usize = 100;
     for i in 0..TICKS {
-        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, i % 2);
         state.tick(&mut cable_pool);
     }
 
@@ -318,7 +329,7 @@ fn state_preserved_across_parameter_update() {
     );
 
     for i in TICKS..(TICKS + 2) {
-        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, i % 2);
         state.tick(&mut cable_pool);
     }
 }
@@ -339,7 +350,7 @@ fn oscillator_phase_continuous_across_parameter_replan() {
         build_patch(&graph_a, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
 
     let pool = ModulePool::new(MODULE_CAP);
-    let mut bufs = make_buffer_pool();
+    let (mut cycle_bufs, mut scratch_bufs) = make_split_pool();
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan_a, &mut stale);
     let mut state = stale.rebuild(&plan_a, 32);
@@ -348,11 +359,11 @@ fn oscillator_phase_continuous_across_parameter_replan() {
     // a re-zero would be visible. 2000 ticks ≈ 0.045 s, around half a cycle.
     const TICKS: usize = 2000;
     for i in 0..TICKS {
-        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, i % 2);
         state.tick(&mut cable_pool);
     }
     let last_wi = (TICKS - 1) % 2;
-    let pre_replan = bufs[AUDIO_OUT_L][last_wi].as_mono();
+    let pre_replan = cycle_bufs[AUDIO_OUT_L][last_wi].as_mono();
     assert!(
         pre_replan.abs() > 0.1,
         "test premise: pre-replan sample should be well above zero, got {pre_replan}"
@@ -370,10 +381,10 @@ fn oscillator_phase_continuous_across_parameter_replan() {
     // Tick once more.
     let next_wi = TICKS % 2;
     {
-        let mut cable_pool = CablePool::new(&mut bufs, next_wi);
+        let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, next_wi);
         state.tick(&mut cable_pool);
     }
-    let post_replan = bufs[AUDIO_OUT_L][next_wi].as_mono();
+    let post_replan = cycle_bufs[AUDIO_OUT_L][next_wi].as_mono();
     // Phase continuity: the jump must be small relative to the pre-replan
     // magnitude. A reset would land near 0, producing a large jump.
     let jump = (post_replan - pre_replan).abs();
@@ -398,18 +409,18 @@ fn initial_plan_uses_provided_sample_rate() {
         build_patch(&graph, &registry, &env(), &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
 
     let pool = ModulePool::new(MODULE_CAP);
-    let mut bufs = make_buffer_pool();
+    let (mut cycle_bufs, mut scratch_bufs) = make_split_pool();
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan, &mut stale);
     let mut state = stale.rebuild(&plan, 32);
 
     for i in 0..3 {
-        let mut cable_pool = CablePool::new(&mut bufs, i % 2);
+        let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, i % 2);
         state.tick(&mut cable_pool);
     }
 
     // Last tick was i=2, wi = 2 % 2 = 0. AudioOut wrote to AUDIO_OUT_L[0].
-    let out_val = bufs[AUDIO_OUT_L][0].as_mono();
+    let out_val = cycle_bufs[AUDIO_OUT_L][0].as_mono();
     assert!(out_val.is_finite(), "audio output must be finite");
     assert!(out_val.abs() <= 1.0, "audio output must be bounded");
 }

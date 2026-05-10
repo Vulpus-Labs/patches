@@ -242,7 +242,7 @@ mod tests {
         pool.install(2, Box::new(ConstSource::new(0.75)), empty_param_state());
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
         {
-            let mut cp = CablePool::new(&mut bufs, 0);
+            let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
             pool.process(2, &mut cp);
         }
         assert!((bufs[RESERVED_SLOTS][0].as_mono() - 0.75).abs() < 1e-12);
@@ -255,7 +255,7 @@ mod tests {
         pool.install(0, Box::new(ConstSource::new(2.0)), empty_param_state());
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
         {
-            let mut cp = CablePool::new(&mut bufs, 0);
+            let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
             pool.process(0, &mut cp);
         }
         assert!((bufs[RESERVED_SLOTS][0].as_mono() - 2.0).abs() < 1e-12,
@@ -277,7 +277,7 @@ mod tests {
     fn process_on_empty_slot_panics_in_debug() {
         let mut pool = ModulePool::new(4);
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cp = CablePool::new(&mut bufs, 0);
+        let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
         pool.process(0, &mut cp);
     }
 
@@ -287,7 +287,7 @@ mod tests {
     fn process_on_empty_slot_is_noop_in_release() {
         let mut pool = ModulePool::new(4);
         let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
-        let mut cp = CablePool::new(&mut bufs, 0);
+        let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
         pool.process(0, &mut cp);
         drop(cp);
         assert_eq!(bufs[RESERVED_SLOTS][0].as_mono(), 0.0);

@@ -127,7 +127,7 @@ fn main() {
     print!("warming up ({WARMUP_TICKS} inner ticks, {OVERSAMPLING_FACTOR}× oversampling)… ");
     let mut wi = 0usize;
     for _ in 0..WARMUP_TICKS {
-        let mut cp = CablePool::new(&mut buffer_pool, wi);
+        let mut cp = CablePool::with_cycle_only(&mut buffer_pool, wi);
         // SAFETY: state was rebuilt above; no tombstoning since then.
         state.tick(&mut cp);
         wi = 1 - wi;
@@ -162,7 +162,7 @@ fn main() {
     // inner ticks; headroom is calculated per output frame (not per inner tick).
     for _ in 0..PROFILE_ITERS {
         for _ in 0..OVERSAMPLING_FACTOR {
-            let mut cp = CablePool::new(&mut buffer_pool, wi);
+            let mut cp = CablePool::with_cycle_only(&mut buffer_pool, wi);
             // SAFETY: state was rebuilt above after shim re-installation.
             state.tick(&mut cp);
             wi = 1 - wi;

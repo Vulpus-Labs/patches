@@ -107,8 +107,15 @@ impl Module for DylibModule {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let (ptr, len, wi) = pool.as_raw_parts_mut();
-        unsafe { (self.vtable.process)(self.handle.as_ptr(), ptr, len, wi) };
+        let parts = pool.as_raw_parts_mut();
+        unsafe {
+            (self.vtable.process)(
+                self.handle.as_ptr(),
+                parts.scratch_ptr, parts.scratch_len,
+                parts.cycle_ptr, parts.cycle_len,
+                parts.wi,
+            )
+        };
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
@@ -136,8 +143,15 @@ impl Module for DylibModule {
     }
 
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
-        let (ptr, len, wi) = pool.as_raw_parts();
-        unsafe { (self.vtable.periodic_update)(self.handle.as_ptr(), ptr, len, wi) };
+        let parts = pool.as_raw_parts();
+        unsafe {
+            (self.vtable.periodic_update)(
+                self.handle.as_ptr(),
+                parts.scratch_ptr, parts.scratch_len,
+                parts.cycle_ptr, parts.cycle_len,
+                parts.wi,
+            )
+        };
     }
 }
 

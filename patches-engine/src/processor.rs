@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use patches_core::{
     BoundedRandomWalk, CablePool, CableValue, HostControlEvent, MidiEvent, MidiFrame,
     TapBlockFrame, TapFrame, TransportFrame,
-    AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R,
+    AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R, CYCLE_CAPACITY,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
     HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_TAPS,
     TAP_BASE, TAP_SLOTS,
@@ -25,16 +25,15 @@ use patches_core::{
 use crate::host_control_scratch::HostControlScratch;
 use crate::midi_scratch::MidiScratch;
 
-/// Read the four `TAP_BASE` poly slots from `buffer_pool` at index
-/// `idx` (0 or 1) and pack them into a flat `[f32; MAX_TAPS]` frame.
-/// The four slots are zero-initialised by `init_buffer_pool` and held
-/// `Poly` for the lifetime of the engine; the match arms degrade
-/// gracefully if a malformed plan ever leaves a slot non-`Poly`.
+/// Read the four `TAP_BASE` poly slots from the cycle pool at ping-pong
+/// frame `idx` (0 or 1) and pack them into a flat `[f32; MAX_TAPS]`
+/// frame. `TAP_BASE` lives in the reserved cycle range, so reads are
+/// always against the cycle pool.
 #[inline]
-fn snapshot_tap_lanes(buffer_pool: &[[CableValue; 2]], idx: usize) -> TapFrame {
+fn snapshot_tap_lanes(cycle_pool: &[[CableValue; 2]], idx: usize) -> TapFrame {
     let mut out = [0.0_f32; MAX_TAPS];
     for i in 0..TAP_SLOTS {
-        let lanes = buffer_pool[TAP_BASE + i][idx].as_poly();
+        let lanes = cycle_pool[TAP_BASE + i][idx].as_poly();
         out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
     }
     out
@@ -68,7 +67,16 @@ const CLOCK_WRAP_MASK: usize = (1 << 16) - 1;
 /// - Spawning and joining the cleanup thread (holds the `Consumer` end).
 pub struct PatchProcessor {
     state: ReadyState,
-    buffer_pool: Box<[[CableValue; 2]]>,
+    /// Ping-pong cycle region (ADR 0072 phase 3, ticket 0850). Sized
+    /// at [`CYCLE_CAPACITY`] entries; backs reserved infrastructure
+    /// slots and dynamic cycle producer ports. `cable_idx < CYCLE_CAPACITY`
+    /// dispatches here.
+    cycle_pool: Box<[[CableValue; 2]]>,
+    /// Single-slot scratch region (ADR 0072 phase 3, ticket 0850).
+    /// Sized at `buffer_capacity - CYCLE_CAPACITY`; backs producer
+    /// ports whose every consumer is fused. `cable_idx >= CYCLE_CAPACITY`
+    /// dispatches here, indexed by `cable_idx - CYCLE_CAPACITY`.
+    scratch_pool: Box<[CableValue]>,
     previous_plan: Option<ExecutionPlan>,
     cleanup_tx: rtrb::Producer<CleanupAction>,
     /// Ping-pong write index (0 or 1).
@@ -155,15 +163,19 @@ impl PatchProcessor {
         oversampling_factor: usize,
         cleanup_tx: rtrb::Producer<CleanupAction>,
     ) -> Self {
-        let buffer_pool = crate::kernel::init_buffer_pool(buffer_capacity);
+        let cycle_pool = crate::kernel::init_cycle_pool();
+        let scratch_pool = crate::kernel::init_scratch_pool(buffer_capacity);
         let module_pool = ModulePool::new(module_capacity);
-        Self::from_parts(buffer_pool, module_pool, oversampling_factor, cleanup_tx)
+        Self::from_parts(
+            cycle_pool, scratch_pool, module_pool, oversampling_factor, cleanup_tx,
+        )
     }
 
     /// Construct from pre-existing pools (used by `SoundEngine` which
     /// pre-allocates pools before it knows if/when `start()` will be called).
     pub fn from_parts(
-        buffer_pool: Box<[[CableValue; 2]]>,
+        cycle_pool: Box<[[CableValue; 2]]>,
+        scratch_pool: Box<[CableValue]>,
         module_pool: ModulePool,
         oversampling_factor: usize,
         cleanup_tx: rtrb::Producer<CleanupAction>,
@@ -175,7 +187,8 @@ impl PatchProcessor {
             .rebuild(&ExecutionPlan::empty(), interval);
         Self {
             state,
-            buffer_pool,
+            cycle_pool,
+            scratch_pool,
             previous_plan: None,
             cleanup_tx,
             wi: 0,
@@ -340,10 +353,18 @@ impl PatchProcessor {
             }
         }
         for &i in &plan.to_zero {
-            self.buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
+            if i < CYCLE_CAPACITY {
+                self.cycle_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
+            } else {
+                self.scratch_pool[i - CYCLE_CAPACITY] = CableValue::mono(0.0);
+            }
         }
         for &i in &plan.to_zero_poly {
-            self.buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+            if i < CYCLE_CAPACITY {
+                self.cycle_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+            } else {
+                self.scratch_pool[i - CYCLE_CAPACITY] = CableValue::poly([0.0; 16]);
+            }
         }
 
         self.state = stale.rebuild(&plan, self.periodic_update_interval);
@@ -430,8 +451,8 @@ impl PatchProcessor {
     /// see the input via the 1-sample cable delay.
     #[inline]
     pub fn write_input(&mut self, left: f32, right: f32) {
-        self.buffer_pool[AUDIO_IN_L][self.wi] = CableValue::mono(left);
-        self.buffer_pool[AUDIO_IN_R][self.wi] = CableValue::mono(right);
+        self.cycle_pool[AUDIO_IN_L][self.wi] = CableValue::mono(left);
+        self.cycle_pool[AUDIO_IN_R][self.wi] = CableValue::mono(right);
     }
 
     /// Advance the patch by one sample.
@@ -545,8 +566,8 @@ impl PatchProcessor {
         // the write index so the ping-pong buffer stays coherent for reads.
         if self.halt.is_halted() {
             let wi = self.wi;
-            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
-            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
+            self.cycle_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
+            self.cycle_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -554,9 +575,9 @@ impl PatchProcessor {
         let wi = self.wi;
 
         TransportFrame::set_sample_count(&mut self.transport_poly, self.sample_count as f32);
-        self.buffer_pool[GLOBAL_TRANSPORT][wi] = CableValue::poly(self.transport_poly);
+        self.cycle_pool[GLOBAL_TRANSPORT][wi] = CableValue::poly(self.transport_poly);
         self.sample_count = (self.sample_count + 1) & CLOCK_WRAP_MASK;
-        self.buffer_pool[GLOBAL_DRIFT][wi] =
+        self.cycle_pool[GLOBAL_DRIFT][wi] =
             CableValue::mono(self.global_drift_walk.advance());
 
         // Flush the host-control AoS frame row into the four contiguous
@@ -569,12 +590,12 @@ impl PatchProcessor {
                 for i in 0..HOST_CONTROL_SLOTS {
                     let mut chunk = [0.0_f32; 16];
                     chunk.copy_from_slice(&row[i * 16..(i + 1) * 16]);
-                    self.buffer_pool[HOST_CONTROL_BASE + i][wi] = CableValue::poly(chunk);
+                    self.cycle_pool[HOST_CONTROL_BASE + i][wi] = CableValue::poly(chunk);
                 }
             }
             None => {
                 for i in 0..HOST_CONTROL_SLOTS {
-                    self.buffer_pool[HOST_CONTROL_BASE + i][wi] =
+                    self.cycle_pool[HOST_CONTROL_BASE + i][wi] =
                         CableValue::poly([0.0; 16]);
                 }
             }
@@ -592,17 +613,18 @@ impl PatchProcessor {
             }
             MidiFrame::set_event_count(&mut self.midi_poly, count);
         }
-        self.buffer_pool[GLOBAL_MIDI][wi] = CableValue::poly(self.midi_poly);
+        self.cycle_pool[GLOBAL_MIDI][wi] = CableValue::poly(self.midi_poly);
 
         // ADR 0051: wrap the tick in catch_unwind so a module panic becomes a
         // sticky halt rather than an unwind through FFI into the host.
         // AssertUnwindSafe is justified because halt is sticky: the torn
         // mid-tick state is never observed again.
         let state = &mut self.state;
-        let buffer_pool = &mut self.buffer_pool;
+        let cycle_pool = &mut self.cycle_pool;
+        let scratch_pool = &mut self.scratch_pool;
         let monitor = self.monitor.as_mut();
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut cable_pool = CablePool::new(buffer_pool, wi);
+            let mut cable_pool = CablePool::new(scratch_pool, cycle_pool, wi);
             // Off path is byte-identical to today's dispatch (ADR 0065): the
             // outer match here is per-sample, not per-module, and the `None`
             // arm calls the unchanged `tick`.
@@ -615,8 +637,8 @@ impl PatchProcessor {
             let slot = self.halt.current_module_slot.load(Ordering::Relaxed);
             let name = self.state.slot_module_name(slot).unwrap_or("<unknown>");
             self.halt.record(slot, name, payload_summary(payload));
-            self.buffer_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
-            self.buffer_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
+            self.cycle_pool[AUDIO_OUT_L][wi] = CableValue::mono(0.0);
+            self.cycle_pool[AUDIO_OUT_R][wi] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -627,7 +649,7 @@ impl PatchProcessor {
             self.tap_block.sample_time = self.tap_sample_counter;
             self.tap_block.manifest_generation = self.tap_manifest_generation;
         }
-        self.tap_block.samples[self.tap_block_idx] = snapshot_tap_lanes(&self.buffer_pool, wi);
+        self.tap_block.samples[self.tap_block_idx] = snapshot_tap_lanes(&self.cycle_pool, wi);
         self.tap_block_idx += 1;
         self.tap_sample_counter = self.tap_sample_counter.wrapping_add(1);
         if self.tap_block_idx == patches_core::TAP_BLOCK {
@@ -637,17 +659,26 @@ impl PatchProcessor {
             self.tap_block_idx = 0;
         }
 
-        let out_l = self.buffer_pool[AUDIO_OUT_L][wi].as_mono();
-        let out_r = self.buffer_pool[AUDIO_OUT_R][wi].as_mono();
+        let out_l = self.cycle_pool[AUDIO_OUT_L][wi].as_mono();
+        let out_r = self.cycle_pool[AUDIO_OUT_R][wi].as_mono();
 
         self.wi = 1 - self.wi;
 
         (out_l, out_r)
     }
 
-    /// Inspect a raw cable buffer pool slot (both ping-pong frames).
+    /// Inspect a raw cable buffer pool slot. Cycle slots return both
+    /// ping-pong frames; scratch slots synthesize a pair where both
+    /// halves equal the single-slot value (so existing callers that
+    /// pattern-match `[CableValue; 2]` keep working without dispatch
+    /// branches).
     pub fn pool_slot(&self, idx: usize) -> [CableValue; 2] {
-        self.buffer_pool[idx]
+        if idx < CYCLE_CAPACITY {
+            self.cycle_pool[idx]
+        } else {
+            let v = self.scratch_pool[idx - CYCLE_CAPACITY];
+            [v, v]
+        }
     }
 
     /// Snapshot of the observation backplane after the most recent
@@ -657,7 +688,7 @@ impl PatchProcessor {
         // After a tick, the read slot is `1 - wi` from the *next* tick's
         // perspective (which is `self.wi` at this point — `wi` was
         // already toggled). The freshly-written value is at `1 - wi`.
-        snapshot_tap_lanes(&self.buffer_pool, 1 - self.wi)
+        snapshot_tap_lanes(&self.cycle_pool, 1 - self.wi)
     }
 
     /// Return the current periodic update interval (inner ticks).

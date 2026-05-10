@@ -98,6 +98,17 @@ fn make_buffer_pool(capacity: usize) -> Vec<[CableValue; 2]> {
     (0..capacity).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
 }
 
+/// Cycle + scratch pools sized for the planner's two-region layout
+/// (ADR 0072 phase 3, ticket 0850).
+fn make_split_pool(capacity: usize) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
+    let cycle = (0..patches_core::CYCLE_CAPACITY)
+        .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
+        .collect();
+    let scratch_len = capacity.saturating_sub(patches_core::CYCLE_CAPACITY);
+    let scratch = vec![CableValue::mono(0.0); scratch_len];
+    (cycle, scratch)
+}
+
 fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
     let pool = stale.module_pool_mut();
     for &idx in &plan.tombstones {
@@ -122,10 +133,10 @@ fn planner_reuses_module_instance_across_rebuild() {
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan_a, &mut stale);
 
-    let mut buffer_pool = make_buffer_pool(256);
+    let (mut cycle_pool, mut scratch_pool) = make_split_pool(256);
     let mut state = stale.rebuild(&plan_a, 32);
     for i in 0..5 {
-        let mut cp = patches_core::CablePool::new(&mut buffer_pool, i % 2);
+        let mut cp = patches_core::CablePool::new(&mut scratch_pool, &mut cycle_pool, i % 2);
         state.tick(&mut cp);
     }
 
@@ -136,7 +147,7 @@ fn planner_reuses_module_instance_across_rebuild() {
     adopt_plan(&mut plan_b, &mut stale);
     let mut state = stale.rebuild(&plan_b, 32);
 
-    let mut cp = patches_core::CablePool::new(&mut buffer_pool, 1);
+    let mut cp = patches_core::CablePool::new(&mut scratch_pool, &mut cycle_pool, 1);
     state.tick(&mut cp);
     assert!(plan_b.tombstones.is_empty(), "no module should be tombstoned on an identical rebuild");
 }
@@ -159,9 +170,9 @@ fn planner_uses_fresh_modules_when_no_prev_plan() {
     let mut stale = ReadyState::new_stale(pool);
     adopt_plan(&mut plan, &mut stale);
 
-    let mut buffer_pool = make_buffer_pool(256);
+    let (mut cycle_pool, mut scratch_pool) = make_split_pool(256);
     let mut state = stale.rebuild(&plan, 32);
-    let mut cp = patches_core::CablePool::new(&mut buffer_pool, 0);
+    let mut cp = patches_core::CablePool::new(&mut scratch_pool, &mut cycle_pool, 0);
     state.tick(&mut cp);
 }
 

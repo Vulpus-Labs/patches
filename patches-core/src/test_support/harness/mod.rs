@@ -329,14 +329,14 @@ impl ModuleHarness {
     /// [`COEFF_UPDATE_INTERVAL`] samples before the main process call.
     pub fn tick(&mut self) -> &mut Self {
         if self.sample_counter == 0 && self.module.wants_periodic() {
-            let pool = CablePool::new(&mut self.pool, self.wi);
+            let pool = CablePool::with_cycle_only(&mut self.pool, self.wi);
             self.module.periodic_update(&pool);
         }
         self.sample_counter += 1;
         if self.sample_counter >= COEFF_UPDATE_INTERVAL {
             self.sample_counter = 0;
         }
-        let mut pool = CablePool::new(&mut self.pool, self.wi);
+        let mut pool = CablePool::with_cycle_only(&mut self.pool, self.wi);
         self.module.process(&mut pool);
         self.wi = 1 - self.wi;
         self

@@ -78,7 +78,7 @@ fn build_and_process_with_default_gain() {
 
     // Process with wi=0 (reads from ri=1)
     {
-        let mut cp = CablePool::new(&mut pool, 0);
+        let mut cp = CablePool::with_cycle_only(&mut pool, 0);
         module.process(&mut cp);
     }
 
@@ -119,7 +119,7 @@ fn update_parameters_changes_gain() {
         [CableValue::mono(0.0), CableValue::mono(0.0)],
     ];
     {
-        let mut cp = CablePool::new(&mut pool, 0);
+        let mut cp = CablePool::with_cycle_only(&mut pool, 0);
         module.process(&mut cp);
     }
 

@@ -54,6 +54,19 @@ mod builder {
         (0..capacity).map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)]).collect()
     }
 
+    /// Build cycle and scratch pools sized for the planner's two-region
+    /// layout (ADR 0072 phase 3, ticket 0850). `capacity` is the total
+    /// pool capacity passed to `PatchBuilder` — the scratch pool gets
+    /// `capacity - CYCLE_CAPACITY` slots.
+    pub(crate) fn make_split_pool(capacity: usize) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
+        let cycle = (0..patches_core::CYCLE_CAPACITY)
+            .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
+            .collect();
+        let scratch_len = capacity.saturating_sub(patches_core::CYCLE_CAPACITY);
+        let scratch = vec![CableValue::mono(0.0); scratch_len];
+        (cycle, scratch)
+    }
+
     pub(crate) fn default_registry() -> Registry {
         patches_modules::default_registry()
     }

@@ -245,7 +245,7 @@ mod tests {
         set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events, 2));
 
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
-        let cable_pool = CablePool::new(&mut pool_buf, wi);
+        let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
         let result = input.read(&cable_pool);
 
         assert_eq!(result.len(), 2);
@@ -265,7 +265,7 @@ mod tests {
         let wi = 0;
         set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_1, 12));
         {
-            let cable_pool = CablePool::new(&mut pool_buf, wi);
+            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
             let result = input.read(&cable_pool);
             assert!(result.is_empty(), "should hold back events while more are pending");
         }
@@ -275,7 +275,7 @@ mod tests {
         let wi = 1;
         set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_2, 7));
         {
-            let cable_pool = CablePool::new(&mut pool_buf, wi);
+            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
             let result = input.read(&cable_pool);
             assert!(result.is_empty(), "still more pending");
         }
@@ -285,7 +285,7 @@ mod tests {
         let wi = 0;
         set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&events_3, 2));
         {
-            let cable_pool = CablePool::new(&mut pool_buf, wi);
+            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
             let result = input.read(&cable_pool);
             assert_eq!(result.len(), 12, "all 12 events delivered together");
             // Verify order: events_1 then events_2 then events_3.
@@ -305,7 +305,7 @@ mod tests {
         set_midi_frame(&mut pool_buf, 1 - wi, make_frame(&[], 0));
 
         let mut input = MidiInput::backplane(GLOBAL_MIDI);
-        let cable_pool = CablePool::new(&mut pool_buf, wi);
+        let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
         let result = input.read(&cable_pool);
         assert!(result.is_empty());
     }
@@ -328,7 +328,7 @@ mod tests {
                 1 - wi,
                 make_frame(&events, events.len() + remaining),
             );
-            let cable_pool = CablePool::new(&mut pool_buf, wi);
+            let cable_pool = CablePool::with_cycle_only(&mut pool_buf, wi);
             let result = input.read(&cable_pool);
             if remaining > 0 {
                 assert!(result.is_empty());

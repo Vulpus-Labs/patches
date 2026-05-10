@@ -266,7 +266,7 @@ mod tests {
         let wi = 0;
         pool[HOST_CONTROL_BASE][1 - wi] = CableValue::poly(row);
 
-        let mut cp = CablePool::new(&mut pool, wi);
+        let mut cp = CablePool::with_cycle_only(&mut pool, wi);
         hc.process(&mut cp);
 
         assert_eq!(pool[audio_out_slot][wi].as_mono(), 0.42);
@@ -290,7 +290,7 @@ mod tests {
         let wi = 0;
         pool[HOST_CONTROL_BASE][1 - wi] = CableValue::poly(row);
 
-        let mut cp = CablePool::new(&mut pool, wi);
+        let mut cp = CablePool::with_cycle_only(&mut pool, wi);
         hc.process(&mut cp);
 
         assert_eq!(pool[trigger_out_slot][wi].as_mono(), 1.0);
@@ -314,7 +314,7 @@ mod tests {
         let mut pool = make_pool(&hc);
         let audio_out_slot = wire_outputs(&mut hc);
 
-        let mut cp = CablePool::new(&mut pool, 0);
+        let mut cp = CablePool::with_cycle_only(&mut pool, 0);
         hc.process(&mut cp);
 
         assert_eq!(pool[audio_out_slot][0].as_mono(), 0.0);

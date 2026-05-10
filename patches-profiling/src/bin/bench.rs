@@ -57,7 +57,7 @@ fn run_ticks(
 ) {
     let mut wi = 0usize;
     for _ in 0..n {
-        let mut cable_pool = CablePool::new(buffer_pool, wi);
+        let mut cable_pool = CablePool::with_cycle_only(buffer_pool, wi);
         // SAFETY: state was rebuilt from a consistent plan + pool before this call.
         state.tick(&mut cable_pool);
         wi = 1 - wi;

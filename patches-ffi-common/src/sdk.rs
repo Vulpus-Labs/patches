@@ -309,29 +309,36 @@ macro_rules! export_plugin {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_process(
             handle: *mut ::std::ffi::c_void,
-            pool_ptr: *mut [::patches_core::cables::CableValue; 2],
-            pool_len: usize,
+            scratch_ptr: *mut ::patches_core::cables::CableValue,
+            scratch_len: usize,
+            cycle_ptr: *mut [::patches_core::cables::CableValue; 2],
+            cycle_len: usize,
             write_index: usize,
         ) {
             // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer;
-            // host supplies a valid cable-pool slice exclusively borrowed for
-            // this call.
+            // host supplies valid scratch and cycle pool slices exclusively
+            // borrowed for this call (ABI v10, ticket 0850).
             let inst = unsafe {
                 &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
             };
-            let slice = unsafe {
-                ::std::slice::from_raw_parts_mut(pool_ptr, pool_len)
+            let scratch = unsafe {
+                ::std::slice::from_raw_parts_mut(scratch_ptr, scratch_len)
+            };
+            let cycle = unsafe {
+                ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
             };
             let mut pool =
-                ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                ::patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
             ::patches_core::Module::process(&mut inst.module, &mut pool);
         }
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_periodic_update(
             handle: *mut ::std::ffi::c_void,
-            pool_ptr: *const [::patches_core::cables::CableValue; 2],
-            pool_len: usize,
+            scratch_ptr: *const ::patches_core::cables::CableValue,
+            scratch_len: usize,
+            cycle_ptr: *const [::patches_core::cables::CableValue; 2],
+            cycle_len: usize,
             write_index: usize,
         ) -> i32 {
             // SAFETY: see __patches_process. Read-only access only; we cast
@@ -340,14 +347,20 @@ macro_rules! export_plugin {
             let inst = unsafe {
                 &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
             };
-            let slice = unsafe {
+            let scratch = unsafe {
                 ::std::slice::from_raw_parts_mut(
-                    pool_ptr as *mut [::patches_core::cables::CableValue; 2],
-                    pool_len,
+                    scratch_ptr as *mut ::patches_core::cables::CableValue,
+                    scratch_len,
+                )
+            };
+            let cycle = unsafe {
+                ::std::slice::from_raw_parts_mut(
+                    cycle_ptr as *mut [::patches_core::cables::CableValue; 2],
+                    cycle_len,
                 )
             };
             let pool =
-                ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                ::patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
             if ::patches_core::Module::wants_periodic(&inst.module) {
                 ::patches_core::Module::periodic_update(&mut inst.module, &pool);
                 1
@@ -474,8 +487,10 @@ macro_rules! export_plugin_with_hash_override {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_process(
             _h: *mut ::std::ffi::c_void,
-            _p: *mut [::patches_core::cables::CableValue; 2],
-            _l: usize,
+            _sp: *mut ::patches_core::cables::CableValue,
+            _sl: usize,
+            _cp: *mut [::patches_core::cables::CableValue; 2],
+            _cl: usize,
             _w: usize,
         ) {
         }
@@ -483,8 +498,10 @@ macro_rules! export_plugin_with_hash_override {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_periodic_update(
             _h: *mut ::std::ffi::c_void,
-            _p: *const [::patches_core::cables::CableValue; 2],
-            _l: usize,
+            _sp: *const ::patches_core::cables::CableValue,
+            _sl: usize,
+            _cp: *const [::patches_core::cables::CableValue; 2],
+            _cl: usize,
             _w: usize,
         ) -> i32 {
             0
@@ -655,41 +672,56 @@ macro_rules! export_modules {
 
                 pub unsafe extern "C" fn process(
                     handle: *mut ::std::ffi::c_void,
-                    pool_ptr: *mut [::patches_core::cables::CableValue; 2],
-                    pool_len: usize,
+                    scratch_ptr: *mut ::patches_core::cables::CableValue,
+                    scratch_len: usize,
+                    cycle_ptr: *mut [::patches_core::cables::CableValue; 2],
+                    cycle_len: usize,
                     write_index: usize,
                 ) {
-                    // SAFETY: see the module docs on `export_modules!`; host
-                    // supplies a valid exclusive cable-pool slice.
+                    // SAFETY: see export_modules! docs; host supplies valid
+                    // exclusive scratch and cycle pool slices (ABI v10).
                     let inst = unsafe {
                         &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
                     };
-                    let slice = unsafe {
-                        ::std::slice::from_raw_parts_mut(pool_ptr, pool_len)
+                    let scratch = unsafe {
+                        ::std::slice::from_raw_parts_mut(scratch_ptr, scratch_len)
                     };
-                    let mut pool =
-                        ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                    let cycle = unsafe {
+                        ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
+                    };
+                    let mut pool = ::patches_core::cable_pool::CablePool::new(
+                        scratch, cycle, write_index,
+                    );
                     ::patches_core::Module::process(&mut inst.module, &mut pool);
                 }
 
                 pub unsafe extern "C" fn periodic_update(
                     handle: *mut ::std::ffi::c_void,
-                    pool_ptr: *const [::patches_core::cables::CableValue; 2],
-                    pool_len: usize,
+                    scratch_ptr: *const ::patches_core::cables::CableValue,
+                    scratch_len: usize,
+                    cycle_ptr: *const [::patches_core::cables::CableValue; 2],
+                    cycle_len: usize,
                     write_index: usize,
                 ) -> i32 {
                     // SAFETY: same contract as process; read-only use.
                     let inst = unsafe {
                         &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
                     };
-                    let slice = unsafe {
+                    let scratch = unsafe {
                         ::std::slice::from_raw_parts_mut(
-                            pool_ptr as *mut [::patches_core::cables::CableValue; 2],
-                            pool_len,
+                            scratch_ptr as *mut ::patches_core::cables::CableValue,
+                            scratch_len,
                         )
                     };
-                    let pool =
-                        ::patches_core::cable_pool::CablePool::new(slice, write_index);
+                    let cycle = unsafe {
+                        ::std::slice::from_raw_parts_mut(
+                            cycle_ptr as *mut [::patches_core::cables::CableValue; 2],
+                            cycle_len,
+                        )
+                    };
+                    let pool = ::patches_core::cable_pool::CablePool::new(
+                        scratch, cycle, write_index,
+                    );
                     if ::patches_core::Module::wants_periodic(&inst.module) {
                         ::patches_core::Module::periodic_update(&mut inst.module, &pool);
                         1
@@ -1034,9 +1066,18 @@ mod tests {
         });
 
         // process: trivial no-op, prove the entry point doesn't panic.
-        let mut pool_mem: Vec<[CableValue; 2]> =
+        // ABI v10: pass split scratch + cycle pointers (ticket 0850).
+        let mut cycle_mem: Vec<[CableValue; 2]> =
             vec![[CableValue::mono(0.0); 2]; 4];
-        unsafe { __patches_process(handle, pool_mem.as_mut_ptr(), pool_mem.len(), 0) };
+        let mut scratch_mem: Vec<CableValue> = Vec::new();
+        unsafe {
+            __patches_process(
+                handle,
+                scratch_mem.as_mut_ptr(), scratch_mem.len(),
+                cycle_mem.as_mut_ptr(), cycle_mem.len(),
+                0,
+            )
+        };
 
         // destroy
         let before = DROP_COUNT.with(|c| c.get());

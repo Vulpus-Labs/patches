@@ -5,7 +5,10 @@ use patches_core::cables::CableValue;
 // ── ABI version ──────────────────────────────────────────────────────────────
 
 /// Increment this when the vtable layout or any repr(C) type changes.
-pub const ABI_VERSION: u32 = 9;
+///
+/// v10: process / periodic_update split the cable pool into separate
+/// scratch and cycle pointers (ADR 0072 phase 3, ticket 0850).
+pub const ABI_VERSION: u32 = 10;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -323,20 +326,32 @@ pub struct FfiPluginVTable {
     /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
     pub update_validated_parameters: crate::abi::UpdateValidatedParametersFn,
 
+    /// Audio-thread per-tick processing. ABI v10 (ticket 0850): the
+    /// cable pool is split into a scratch region (single `CableValue`
+    /// per slot) and a cycle region (ping-pong `[CableValue; 2]` per
+    /// slot). The plugin reconstructs a `CablePool` via
+    /// `CablePool::new(scratch_slice, cycle_slice, write_index)` and
+    /// dispatches reads/writes on `cable_idx < CYCLE_CAPACITY`.
     pub process: unsafe extern "C" fn(
         handle: *mut c_void,
-        pool_ptr: *mut [CableValue; 2],
-        pool_len: usize,
+        scratch_ptr: *mut CableValue,
+        scratch_len: usize,
+        cycle_ptr: *mut [CableValue; 2],
+        cycle_len: usize,
         write_index: usize,
     ),
 
     /// Audio-thread: packed `PortFrame` wire bytes (see ADR 0045 §5).
     pub set_ports: crate::abi::SetPortsFn,
 
+    /// Periodic non-audio update path. Same scratch+cycle split as
+    /// `process` but `*const` pointers (read-only).
     pub periodic_update: unsafe extern "C" fn(
         handle: *mut c_void,
-        pool_ptr: *const [CableValue; 2],
-        pool_len: usize,
+        scratch_ptr: *const CableValue,
+        scratch_len: usize,
+        cycle_ptr: *const [CableValue; 2],
+        cycle_len: usize,
         write_index: usize,
     ) -> i32,
 
@@ -511,13 +526,19 @@ mod tests {
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
     ) {}
     unsafe extern "C" fn stub_process(
-        _h: *mut c_void, _p: *mut [CableValue; 2], _l: usize, _w: usize,
+        _h: *mut c_void,
+        _sp: *mut CableValue, _sl: usize,
+        _cp: *mut [CableValue; 2], _cl: usize,
+        _w: usize,
     ) {}
     unsafe extern "C" fn stub_set_ports(
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
     ) {}
     unsafe extern "C" fn stub_periodic(
-        _h: *mut c_void, _p: *const [CableValue; 2], _l: usize, _w: usize,
+        _h: *mut c_void,
+        _sp: *const CableValue, _sl: usize,
+        _cp: *const [CableValue; 2], _cl: usize,
+        _w: usize,
     ) -> i32 { 0 }
     unsafe extern "C" fn stub_drop(_h: *mut c_void) {}
     unsafe extern "C" fn stub_free_bytes(_b: FfiBytes) {}

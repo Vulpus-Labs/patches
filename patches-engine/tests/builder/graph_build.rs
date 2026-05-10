@@ -24,17 +24,17 @@ fn tick_runs_without_panic() {
     // Verify only that tick() completes without panic and output stays in [-1, 1].
     let graph = sine_to_audio_out_graph();
     let (plan, _, module_pool) = default_build(&graph);
-    let mut buffer_pool = make_buffer_pool(256);
+    let (mut cycle_pool, mut scratch_pool) = make_split_pool(256);
 
     let stale = patches_engine::ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, 32);
     let mut collected = Vec::with_capacity(1000);
     for i in 0..1000 {
         let wi = i % 2;
-        let mut cp = CablePool::new(&mut buffer_pool, wi);
+        let mut cp = CablePool::new(&mut scratch_pool, &mut cycle_pool, wi);
         // SAFETY: state rebuilt from consistent plan+pool; no tombstoning since.
         state.tick(&mut cp);
-        let left = buffer_pool[AUDIO_OUT_L][wi].as_mono();
+        let left = cycle_pool[AUDIO_OUT_L][wi].as_mono();
         collected.push(left);
     }
     // Oscillator output must stay bounded and cover a non-trivial range.
@@ -68,8 +68,8 @@ fn input_scale_is_applied_at_tick_time() {
     let graph_full = make_graph(1.0);
     let (plan_half, _, pool_half) = default_build(&graph_half);
     let (plan_full, _, pool_full) = default_build(&graph_full);
-    let mut buf_half = make_buffer_pool(256);
-    let mut buf_full = make_buffer_pool(256);
+    let (mut cycle_half, mut scratch_half) = make_split_pool(256);
+    let (mut cycle_full, mut scratch_full) = make_split_pool(256);
 
     let stale_half = patches_engine::ReadyState::new_stale(pool_half);
     let mut state_half = stale_half.rebuild(&plan_half, 32);
@@ -78,16 +78,16 @@ fn input_scale_is_applied_at_tick_time() {
 
     for i in 0..100 {
         let wi = i % 2;
-        let mut cp_half = CablePool::new(&mut buf_half, wi);
+        let mut cp_half = CablePool::new(&mut scratch_half, &mut cycle_half, wi);
         // SAFETY: states rebuilt from consistent plans+pools; no tombstoning since.
         state_half.tick(&mut cp_half);
-        let mut cp_full = CablePool::new(&mut buf_full, wi);
+        let mut cp_full = CablePool::new(&mut scratch_full, &mut cycle_full, wi);
         state_full.tick(&mut cp_full);
     }
 
     let last_wi = 99 % 2;
-    let half = buf_half[AUDIO_OUT_L][last_wi].as_mono();
-    let full = buf_full[AUDIO_OUT_L][last_wi].as_mono();
+    let half = cycle_half[AUDIO_OUT_L][last_wi].as_mono();
+    let full = cycle_full[AUDIO_OUT_L][last_wi].as_mono();
     assert!(
         full.abs() > 1e-4,
         "full-scale path produced no audible signal: full={full}"
@@ -289,7 +289,7 @@ fn uni_range_clips_and_offsets_at_tick_time() {
     let map = CableMap { scale: 0.6, offset: 0.2, clip: Some((0.2, 0.8)) };
     let graph = sine_to_audio_out_with_map(map);
     let (plan, _, module_pool) = default_build(&graph);
-    let mut buffer_pool = make_buffer_pool(256);
+    let (mut cycle_pool, mut scratch_pool) = make_split_pool(256);
 
     let stale = patches_engine::ReadyState::new_stale(module_pool);
     let mut state = stale.rebuild(&plan, 32);
@@ -297,9 +297,9 @@ fn uni_range_clips_and_offsets_at_tick_time() {
     let mut max_v = f32::NEG_INFINITY;
     for i in 0..2000 {
         let wi = i % 2;
-        let mut cp = CablePool::new(&mut buffer_pool, wi);
+        let mut cp = CablePool::new(&mut scratch_pool, &mut cycle_pool, wi);
         state.tick(&mut cp);
-        let v = buffer_pool[AUDIO_OUT_L][wi].as_mono();
+        let v = cycle_pool[AUDIO_OUT_L][wi].as_mono();
         min_v = min_v.min(v);
         max_v = max_v.max(v);
     }

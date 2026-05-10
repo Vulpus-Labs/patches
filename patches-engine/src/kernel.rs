@@ -2,19 +2,22 @@ use std::thread;
 use std::time::Duration;
 
 use patches_core::{
-    CableValue, GLOBAL_MIDI, GLOBAL_TRANSPORT, HOST_CONTROL_BASE, HOST_CONTROL_SLOTS,
-    POLY_READ_SINK, POLY_WRITE_SINK,
+    CableValue, CYCLE_CAPACITY, GLOBAL_MIDI, GLOBAL_TRANSPORT, HOST_CONTROL_BASE,
+    HOST_CONTROL_SLOTS, POLY_READ_SINK, POLY_WRITE_SINK,
 };
 
 use crate::cleanup::CleanupAction;
 
-/// Allocate and initialise a cable buffer pool.
+/// Allocate and initialise the cycle region of the cable buffer pool
+/// (ADR 0072 phase 3, ticket 0850). Sized at [`CYCLE_CAPACITY`] entries
+/// — the boundary between cycle pairs (low) and scratch slots (high).
 ///
-/// All slots are `Mono(0.0)` except `POLY_READ_SINK`, `POLY_WRITE_SINK`, and
-/// `GLOBAL_TRANSPORT` which are `Poly([0.0; 16])` so that poly reads never
-/// see a kind mismatch.
-pub fn init_buffer_pool(capacity: usize) -> Box<[[CableValue; 2]]> {
-    let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; capacity]
+/// All slots default to `Mono(0.0)` except `POLY_READ_SINK`,
+/// `POLY_WRITE_SINK`, `GLOBAL_TRANSPORT`, `GLOBAL_MIDI`, and the
+/// host-control backplane lanes, which are `Poly([0.0; 16])` so that
+/// poly reads never see a kind mismatch.
+pub fn init_cycle_pool() -> Box<[[CableValue; 2]]> {
+    let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; CYCLE_CAPACITY]
         .into_boxed_slice();
     pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
@@ -28,6 +31,19 @@ pub fn init_buffer_pool(capacity: usize) -> Box<[[CableValue; 2]]> {
             [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
     pool
+}
+
+/// Allocate and initialise the scratch region of the cable buffer pool
+/// (ADR 0072 phase 3, ticket 0850). Sized at
+/// `buffer_capacity - CYCLE_CAPACITY` single-slot `CableValue` entries
+/// — backs producer ports whose every consumer is fused. All slots
+/// default to `Mono(0.0)`; modules that read poly-shaped scratch slots
+/// receive an all-zero poly via `as_poly()` regardless of the
+/// underlying default's `Mono` constructor — `CableValue` is a
+/// `[f32; 16]` per ADR 0068.
+pub fn init_scratch_pool(buffer_capacity: usize) -> Box<[CableValue]> {
+    let scratch_capacity = buffer_capacity.saturating_sub(CYCLE_CAPACITY);
+    vec![CableValue::mono(0.0); scratch_capacity].into_boxed_slice()
 }
 
 /// Spawn the `"patches-cleanup"` background thread that drains and drops
@@ -112,10 +128,14 @@ fn apply_plan(
     for (idx, inputs, outputs) in &plan.port_updates {
         pool.set_ports(*idx, inputs, outputs);
     }
+    // Tests fixture only zeroes cycle-region indices; scratch dispatch
+    // is exercised by the production `adopt_plan_with_meta` path.
     for &i in &plan.to_zero {
+        debug_assert!(i < CYCLE_CAPACITY, "kernel test fixture only handles cycle slots");
         buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
     }
     for &i in &plan.to_zero_poly {
+        debug_assert!(i < CYCLE_CAPACITY, "kernel test fixture only handles cycle slots");
         buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
     let ready = stale.rebuild(&plan, periodic_update_interval);
@@ -146,7 +166,7 @@ mod tests {
     use crate::execution_state::ReadyState;
     use crate::pool::ModulePool;
 
-    use super::{apply_plan, init_buffer_pool, spawn_cleanup_thread};
+    use super::{apply_plan, init_cycle_pool, spawn_cleanup_thread};
 
     fn empty_param_state() -> ParamState {
         ParamState::new_for_descriptor(
@@ -227,23 +247,26 @@ mod tests {
     );
 
     /// Allocate the standard test fixtures for `apply_plan` tests.
-    fn fixtures(buf_len: usize, pool_cap: usize) -> Fixtures {
+    /// `_buf_len` is ignored after 0850 C4 (cycle pool is always
+    /// [`patches_core::CYCLE_CAPACITY`] entries); kept for callers'
+    /// historical signature.
+    fn fixtures(_buf_len: usize, pool_cap: usize) -> Fixtures {
         let (tx, rx) = rtrb::RingBuffer::<CleanupAction>::new(pool_cap * 2 + 4);
         let pool = ModulePool::new(pool_cap);
         let ready = ready_from_pool(pool);
-        (init_buffer_pool(buf_len), ready, None, tx, rx)
+        (init_cycle_pool(), ready, None, tx, rx)
     }
 
-    // ── init_buffer_pool ─────────────────────────────────────────────────────
+    // ── init_cycle_pool ─────────────────────────────────────────────────────
 
     #[test]
-    fn buffer_pool_has_requested_length() {
-        assert_eq!(init_buffer_pool(64).len(), 64);
+    fn cycle_pool_is_sized_at_cycle_capacity() {
+        assert_eq!(init_cycle_pool().len(), patches_core::CYCLE_CAPACITY);
     }
 
     #[test]
     fn buffer_pool_general_slots_are_zero() {
-        let pool = init_buffer_pool(RESERVED_SLOTS + 4);
+        let pool = init_cycle_pool();
         for i in [0, 2, 4, RESERVED_SLOTS, RESERVED_SLOTS + 1] {
             for frame in 0..2 {
                 assert_eq!(
@@ -257,7 +280,7 @@ mod tests {
 
     #[test]
     fn buffer_pool_poly_sink_slots_are_zero() {
-        let pool = init_buffer_pool(RESERVED_SLOTS + 4);
+        let pool = init_cycle_pool();
         for frame in 0..2 {
             assert_eq!(pool[POLY_READ_SINK][frame].as_poly(), [0.0; 16]);
             assert_eq!(pool[POLY_WRITE_SINK][frame].as_poly(), [0.0; 16]);

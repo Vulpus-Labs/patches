@@ -62,7 +62,7 @@ fn time_process(module: &mut dyn Module, pool: &mut [[CableValue; 2]], n: u64) -
     let mut wi = 0usize;
     let t0 = Instant::now();
     for _ in 0..n {
-        let mut cp = CablePool::new(pool, wi);
+        let mut cp = CablePool::with_cycle_only(pool, wi);
         module.process(&mut cp);
         wi = 1 - wi;
     }

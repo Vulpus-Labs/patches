@@ -145,8 +145,10 @@ pub extern "C" fn __rop_set_ports(
 #[unsafe(no_mangle)]
 pub extern "C" fn __rop_process(
     _h: *mut c_void,
-    _p: *mut [CableValue; 2],
-    _l: usize,
+    _sp: *mut CableValue,
+    _sl: usize,
+    _cp: *mut [CableValue; 2],
+    _cl: usize,
     _w: usize,
 ) {
 }
@@ -154,8 +156,10 @@ pub extern "C" fn __rop_process(
 #[unsafe(no_mangle)]
 pub extern "C" fn __rop_periodic(
     _h: *mut c_void,
-    _p: *const [CableValue; 2],
-    _l: usize,
+    _sp: *const CableValue,
+    _sl: usize,
+    _cp: *const [CableValue; 2],
+    _cl: usize,
     _w: usize,
 ) -> i32 {
     0

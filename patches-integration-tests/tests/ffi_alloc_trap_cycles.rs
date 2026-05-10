@@ -62,7 +62,7 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
 
     // Warm-up outside the guard.
     for _ in 0..32 {
-        let mut cp = CablePool::new(&mut pool, 0);
+        let mut cp = CablePool::with_cycle_only(&mut pool, 0);
         module.process(&mut cp);
     }
 
@@ -70,7 +70,7 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
         let _g = NoAllocGuard::enter();
         for i in 0..10_000 {
             {
-                let mut cp = CablePool::new(&mut pool, (i & 1) as usize);
+                let mut cp = CablePool::with_cycle_only(&mut pool, (i & 1) as usize);
                 module.process(&mut cp);
             }
             // Every 128 iterations interleave a param update.

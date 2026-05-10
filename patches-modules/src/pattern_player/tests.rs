@@ -106,7 +106,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     pool_buf[clock_slot] = [CableValue::poly(clock_bus); 2];
 
     {
-        let mut cp = CablePool::new(&mut pool_buf, wi);
+        let mut cp = CablePool::with_cycle_only(&mut pool_buf, wi);
         player.process(&mut cp);
     }
     wi = 1 - wi;
@@ -131,7 +131,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     for _sample in 1..tick_samples {
         pool_buf[clock_slot] = [CableValue::poly(silent_clock); 2];
         {
-            let mut cp = CablePool::new(&mut pool_buf, wi);
+            let mut cp = CablePool::with_cycle_only(&mut pool_buf, wi);
             player.process(&mut cp);
         }
         wi = 1 - wi;
