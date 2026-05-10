@@ -184,6 +184,23 @@ pub const MAX_HOST_CONTROL_BLOCK: usize = 2048;
 /// allocated cable ever aliases a reserved slot.
 pub const RESERVED_SLOTS: usize = 32;
 
+/// Total capacity of the cycle region in the eventual two-region
+/// cable pool (ADR 0072 phase 3, ticket 0850). Indices `[0, CYCLE_CAPACITY)`
+/// are cycle pairs (`[CableValue; 2]`), preserving the legacy 1-sample
+/// ping-pong delay for feedback paths and the reserved infrastructure
+/// slots. Indices `>= CYCLE_CAPACITY` are scratch single slots.
+///
+/// Pinned at a generous compile-time constant so the cutoff is stable
+/// across replans — any plan whose cycle allocations stay below this
+/// cap keeps surviving scratch indices fixed regardless of feedback
+/// topology growth in subsequent plans.
+///
+/// Sized for typical patches: `RESERVED_SLOTS = 32` plus 96 dynamic
+/// cycle slots covers the feedback arc set of all in-tree examples.
+/// Patches whose cycle count exceeds this raise `BufferPoolExhausted`
+/// at plan-build time.
+pub const CYCLE_CAPACITY: usize = 128;
+
 /// Threshold used by gate input types (and legacy producers that still emit
 /// level signals on mono cables). Triggers now use sub-sample encoding
 /// (ADR 0047) and do not consult this constant.

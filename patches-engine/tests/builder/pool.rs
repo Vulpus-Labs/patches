@@ -39,7 +39,12 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
     };
 
     let state_a = build_two(&PlannerState::empty());
-    let hwm_after_first_two = state_a.buffer_alloc.next_hwm;
+    // The graph is acyclic (Oscillator → AudioOut), so all dynamic
+    // producer ports land in the scratch region. After 0850 C3 the
+    // cycle high-water mark stays at RESERVED_SLOTS; check that
+    // recycling holds the scratch HWM steady across rebuilds.
+    let scratch_hwm_after_first_two = state_a.buffer_alloc.scratch_hwm;
+    let cycle_hwm_after_first_two = state_a.buffer_alloc.cycle_hwm;
 
     let mut current_state = state_a;
     for _ in 0..20 {
@@ -48,9 +53,12 @@ fn freelist_recycles_indices_preventing_hwm_growth() {
     }
 
     assert_eq!(
-        current_state.buffer_alloc.next_hwm,
-        hwm_after_first_two,
-        "hwm grew: freelist should have prevented new allocations"
+        current_state.buffer_alloc.scratch_hwm, scratch_hwm_after_first_two,
+        "scratch hwm grew: freelist should have prevented new allocations",
+    );
+    assert_eq!(
+        current_state.buffer_alloc.cycle_hwm, cycle_hwm_after_first_two,
+        "cycle hwm grew: acyclic graph should never allocate cycle slots",
     );
 }
 

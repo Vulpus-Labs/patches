@@ -714,8 +714,10 @@ impl PatchBuilder {
                 nodes: node_states,
                 buffer_alloc: BufferAllocState {
                     output_buf: buf_alloc.output_buf,
-                    freelist: buf_alloc.freelist,
-                    next_hwm: buf_alloc.next_hwm,
+                    cycle_freelist: buf_alloc.cycle_freelist,
+                    scratch_freelist: buf_alloc.scratch_freelist,
+                    cycle_hwm: buf_alloc.cycle_hwm,
+                    scratch_hwm: buf_alloc.scratch_hwm,
                 },
                 module_alloc: ModuleAllocState {
                     pool_map: module_diff.slot_map,

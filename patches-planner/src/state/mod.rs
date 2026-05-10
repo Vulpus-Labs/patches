@@ -294,9 +294,18 @@ pub fn make_decisions<'a>(
     let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
     validate_fused_invariant(&order, &index.edges, &cable_fused);
     let producer_port_cycle = classify_producer_ports(&index.edges, &cable_fused);
+    // Cutoff is a per-pool constant (CYCLE_CAPACITY); the per-plan
+    // value remains here as diagnostic metadata reflecting the actual
+    // cycle slots in use by the producer-port set.
     let dyn_cycle_count = producer_port_cycle.values().filter(|&&v| v).count();
     let cycle_slot_start = RESERVED_SLOTS + dyn_cycle_count;
-    let buf_alloc = allocate_buffers(&index, &order, &prev_state.buffer_alloc, pool_capacity)?;
+    let buf_alloc = allocate_buffers(
+        &index,
+        &order,
+        &prev_state.buffer_alloc,
+        &producer_port_cycle,
+        pool_capacity,
+    )?;
     let decisions = classify_nodes(&index, &order, prev_state)?;
     Ok(PlanDecisions {
         index,

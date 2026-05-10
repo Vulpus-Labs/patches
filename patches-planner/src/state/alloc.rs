@@ -9,6 +9,7 @@ use super::PlanError;
 // cables directly.
 pub use patches_core::cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+    CYCLE_CAPACITY,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
 
@@ -20,25 +21,41 @@ pub use patches_core::cables::{
 /// across re-plans to reuse the same pool slot, so the audio thread reads/writes the
 /// same memory before and after a plan swap.
 ///
-/// The `Default` implementation starts the high-water mark at [`RESERVED_SLOTS`],
-/// keeping slots 0–3 free for null/sink infrastructure.
+/// Two index regions (ADR 0072 phase 3, ticket 0850):
+/// - **Cycle** `[RESERVED_SLOTS, CYCLE_CAPACITY)` — producer ports with at
+///   least one delayed (non-fused) consumer. Backed by `[CableValue; 2]` pair
+///   slots in the engine's eventual split pool.
+/// - **Scratch** `[CYCLE_CAPACITY, pool_capacity)` — producer ports whose
+///   every consumer is fused. Backed by single `CableValue` slots.
+///
+/// Each region has its own freelist and high-water mark. The `output_buf`
+/// map remains a single `(NodeId, port_idx) → cable_idx` dictionary; the
+/// region a slot lives in is encoded by the index value (`< CYCLE_CAPACITY`
+/// vs `>=`).
 pub struct BufferAllocState {
     /// Maps `(NodeId, output_port_index)` to a stable buffer pool index.
     pub output_buf: HashMap<(NodeId, usize), usize>,
-    /// Recycled buffer indices available for reuse (LIFO via [`Vec::pop`]).
-    pub freelist: Vec<usize>,
-    /// High-water mark: the next index to allocate when the freelist is empty.
-    /// Starts at [`RESERVED_SLOTS`] so that the null and write-sink slots are
-    /// never aliased by a cable allocation.
-    pub next_hwm: usize,
+    /// Recycled cycle-region indices available for reuse (LIFO via [`Vec::pop`]).
+    pub cycle_freelist: Vec<usize>,
+    /// Recycled scratch-region indices available for reuse (LIFO via [`Vec::pop`]).
+    pub scratch_freelist: Vec<usize>,
+    /// High-water mark for the cycle region. Starts at [`RESERVED_SLOTS`] so
+    /// that infrastructure slots are never aliased by a dynamic cycle cable.
+    /// Capped at [`CYCLE_CAPACITY`].
+    pub cycle_hwm: usize,
+    /// High-water mark for the scratch region. Starts at [`CYCLE_CAPACITY`].
+    /// Capped at the per-build `pool_capacity`.
+    pub scratch_hwm: usize,
 }
 
 impl Default for BufferAllocState {
     fn default() -> Self {
         Self {
             output_buf: HashMap::new(),
-            freelist: Vec::new(),
-            next_hwm: RESERVED_SLOTS,
+            cycle_freelist: Vec::new(),
+            scratch_freelist: Vec::new(),
+            cycle_hwm: RESERVED_SLOTS,
+            scratch_hwm: CYCLE_CAPACITY,
         }
     }
 }
@@ -129,33 +146,50 @@ impl ModuleAllocState {
 // ── BufferAllocation ──────────────────────────────────────────────────────────
 
 /// Result of the buffer allocation phase, passed into the action phase.
+///
+/// See [`BufferAllocState`] for the cycle/scratch region split.
 pub struct BufferAllocation {
     pub output_buf: HashMap<(NodeId, usize), usize>,
     pub to_zero: Vec<usize>,
-    pub freelist: Vec<usize>,
-    pub next_hwm: usize,
+    pub cycle_freelist: Vec<usize>,
+    pub scratch_freelist: Vec<usize>,
+    pub cycle_hwm: usize,
+    pub scratch_hwm: usize,
 }
 
 // ── allocate_buffers ──────────────────────────────────────────────────────────
 
-/// Assign stable cable buffer pool indices for `order`.
+/// Assign stable cable buffer pool indices for `order`, dispatching each
+/// producer port to either the cycle or scratch region based on
+/// `producer_port_cycle` (ADR 0072 phase 3, ticket 0850).
 ///
 /// Reuses any `(NodeId, port_idx)` key already present in `prev_alloc`.
-/// New keys are filled from the freelist (LIFO) or the high-water mark.
-/// Old keys absent from the new graph are returned to the freelist and marked
-/// for zeroing on plan adoption.
+/// A surviving port's region cannot change across replans (cycle ↔ scratch
+/// flips would cross the cutoff and invalidate the slot's storage shape);
+/// flipped ports are dropped from the old map and freshly allocated in the
+/// new region, leaving the old slot on its region's freelist.
 ///
-/// Returns [`PlanError::BufferPoolExhausted`] if the index would reach `pool_capacity`.
+/// Returns [`PlanError::BufferPoolExhausted`] if either region exhausts its
+/// capacity. Cycle exhaustion fires when `cycle_hwm` would reach
+/// [`CYCLE_CAPACITY`]; scratch exhaustion fires when `scratch_hwm` would
+/// reach `pool_capacity`.
 pub fn allocate_buffers(
     index: &GraphIndex<'_>,
     order: &[NodeId],
     prev_alloc: &BufferAllocState,
+    producer_port_cycle: &HashMap<(NodeId, usize), bool>,
     pool_capacity: usize,
 ) -> Result<BufferAllocation, PlanError> {
-    let mut freelist = prev_alloc.freelist.clone();
-    let mut next_hwm = prev_alloc.next_hwm;
+    let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
+    let mut scratch_freelist = prev_alloc.scratch_freelist.clone();
+    let mut cycle_hwm = prev_alloc.cycle_hwm;
+    let mut scratch_hwm = prev_alloc.scratch_hwm;
     let mut to_zero = Vec::new();
     let mut output_buf: HashMap<(NodeId, usize), usize> = HashMap::new();
+
+    let is_cycle = |key: &(NodeId, usize)| -> bool {
+        producer_port_cycle.get(key).copied().unwrap_or(false)
+    };
 
     for id in order {
         let desc = &index
@@ -165,32 +199,73 @@ pub fn allocate_buffers(
 
         for (port_idx, _) in desc.outputs.iter().enumerate() {
             let key = (id.clone(), port_idx);
+            let want_cycle = is_cycle(&key);
+            // Survivor: reuse only when region matches. A flipped
+            // classification frees the old slot back to its source region
+            // and forces fresh allocation in the new region.
             if let Some(&existing) = prev_alloc.output_buf.get(&key) {
-                output_buf.insert(key, existing);
-            } else {
-                let idx = freelist.pop().unwrap_or_else(|| {
-                    let i = next_hwm;
-                    next_hwm += 1;
+                let existing_in_cycle = existing < CYCLE_CAPACITY;
+                if existing_in_cycle == want_cycle {
+                    output_buf.insert(key, existing);
+                    continue;
+                } else {
+                    // Region flip: surrender old slot, allocate fresh.
+                    if existing_in_cycle {
+                        cycle_freelist.push(existing);
+                    } else {
+                        scratch_freelist.push(existing);
+                    }
+                    to_zero.push(existing);
+                }
+            }
+
+            let idx = if want_cycle {
+                cycle_freelist.pop().unwrap_or_else(|| {
+                    let i = cycle_hwm;
+                    cycle_hwm += 1;
                     i
-                });
-                if idx >= pool_capacity {
+                })
+            } else {
+                scratch_freelist.pop().unwrap_or_else(|| {
+                    let i = scratch_hwm;
+                    scratch_hwm += 1;
+                    i
+                })
+            };
+            // Region-specific cap.
+            if want_cycle {
+                if idx >= CYCLE_CAPACITY {
                     return Err(PlanError::BufferPoolExhausted);
                 }
-                to_zero.push(idx);
-                output_buf.insert(key, idx);
+            } else if idx >= pool_capacity {
+                return Err(PlanError::BufferPoolExhausted);
+            }
+            to_zero.push(idx);
+            output_buf.insert(key, idx);
+        }
+    }
+
+    // Deallocate ports present in the old alloc that are not in the new graph,
+    // returning them to the appropriate region's freelist.
+    for (key, &buf_idx) in &prev_alloc.output_buf {
+        if !output_buf.contains_key(key) {
+            to_zero.push(buf_idx);
+            if buf_idx < CYCLE_CAPACITY {
+                cycle_freelist.push(buf_idx);
+            } else {
+                scratch_freelist.push(buf_idx);
             }
         }
     }
 
-    // Deallocate ports present in the old alloc that are not in the new graph.
-    for (key, &buf_idx) in &prev_alloc.output_buf {
-        if !output_buf.contains_key(key) {
-            to_zero.push(buf_idx);
-            freelist.push(buf_idx);
-        }
-    }
-
-    Ok(BufferAllocation { output_buf, to_zero, freelist, next_hwm })
+    Ok(BufferAllocation {
+        output_buf,
+        to_zero,
+        cycle_freelist,
+        scratch_freelist,
+        cycle_hwm,
+        scratch_hwm,
+    })
 }
 
 #[cfg(test)]
