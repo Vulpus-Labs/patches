@@ -259,6 +259,13 @@ pub struct ExecutionPlan {
     /// applied directly to each `InputPort.fused` (phase 2); the
     /// engine's read path branches on that flag.
     pub fas_size: usize,
+    /// Cutoff between cycle and scratch regions in the eventual
+    /// two-region cable pool (ADR 0072 phase 3, ticket 0850). Indices
+    /// `< cycle_slot_start` will be cycle pairs; indices
+    /// `>= cycle_slot_start` will be scratch single slots once the
+    /// storage split lands (C3/C4). For now, the engine retains the
+    /// uniform pair pool and ignores this field.
+    pub cycle_slot_start: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
     /// `None` for patches that don't use pattern/song blocks — zero overhead
@@ -295,6 +302,7 @@ impl ExecutionPlan {
             active_indices: vec![],
             port_updates: vec![],
             fas_size: 0,
+            cycle_slot_start: patches_core::cables::RESERVED_SLOTS,
             tracker_data: None,
             tracker_receiver_indices: vec![],
             tap_manifest_generation: 0,
@@ -397,10 +405,11 @@ impl PatchBuilder {
             mut decisions,
             cable_fused,
             // Phase 3 (ticket 0850) plumbs producer-port cycle/scratch
-            // classification into the planner. C2 will consume this in
-            // the allocator; C3 lifts it into the engine's CablePool
-            // dispatch. Phase 1 builder ignores it.
+            // classification into the planner. The allocator restructure
+            // in C3 will consume this; the storage split in C4 lifts it
+            // into the engine's CablePool dispatch.
             producer_port_cycle: _,
+            cycle_slot_start,
             fas_size,
         } = make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 
@@ -695,6 +704,7 @@ impl PatchBuilder {
                 active_indices,
                 port_updates,
                 fas_size,
+                cycle_slot_start,
                 tracker_data: None,
                 tracker_receiver_indices: Vec::new(),
                 tap_manifest_generation: 0,

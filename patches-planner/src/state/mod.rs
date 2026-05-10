@@ -176,6 +176,16 @@ pub struct PlanDecisions<'a> {
     /// Producer ports with no consumers default to `false` (scratch),
     /// since there is no read path that needs the delay.
     pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
+    /// Cutoff between cycle and scratch regions in the eventual
+    /// two-region cable pool (ADR 0072 phase 3, ticket 0850). Indices
+    /// `< cycle_slot_start` are cycle pairs (reserved infrastructure
+    /// slots + dynamic cycle producers); indices `>= cycle_slot_start`
+    /// are single-slot scratch entries.
+    ///
+    /// Computed as `RESERVED_SLOTS + count(cycle producer ports)`. The
+    /// engine does not consume this in C1/C2; the storage split lands
+    /// in C3.
+    pub cycle_slot_start: usize,
     /// Size of the feedback arc set: number of cables internal to a
     /// non-trivial SCC. Reported on plan build to validate the
     /// assumption that typical patches have very few cyclic cables.
@@ -284,6 +294,8 @@ pub fn make_decisions<'a>(
     let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
     validate_fused_invariant(&order, &index.edges, &cable_fused);
     let producer_port_cycle = classify_producer_ports(&index.edges, &cable_fused);
+    let dyn_cycle_count = producer_port_cycle.values().filter(|&&v| v).count();
+    let cycle_slot_start = RESERVED_SLOTS + dyn_cycle_count;
     let buf_alloc = allocate_buffers(&index, &order, &prev_state.buffer_alloc, pool_capacity)?;
     let decisions = classify_nodes(&index, &order, prev_state)?;
     Ok(PlanDecisions {
@@ -293,6 +305,7 @@ pub fn make_decisions<'a>(
         decisions,
         cable_fused,
         producer_port_cycle,
+        cycle_slot_start,
         fas_size,
     })
 }
