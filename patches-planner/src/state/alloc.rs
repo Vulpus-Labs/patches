@@ -17,34 +17,43 @@ pub use patches_core::cables::{
 
 /// Stable buffer index allocation state threaded across successive plan builds.
 ///
-/// `BufferAllocState` allows cables that share a `(NodeId, output_port_index)` key
-/// across re-plans to reuse the same pool slot, so the audio thread reads/writes the
-/// same memory before and after a plan swap.
+/// Two index regions (ADR 0072 phases 3–4, tickets 0850 + 0851):
 ///
-/// Two index regions (ADR 0072 phase 3, ticket 0850):
 /// - **Cycle** `[RESERVED_SLOTS, CYCLE_CAPACITY)` — producer ports with at
 ///   least one delayed (non-fused) consumer. Backed by `[CableValue; 2]` pair
-///   slots in the engine's eventual split pool.
+///   slots. Indices are **stable across replans**: a surviving
+///   `(NodeId, output_port_index)` keeps the same cycle slot so the audio
+///   thread's in-flight feedback state is preserved on plan swap. Stability
+///   is delivered by [`cycle_freelist`](Self::cycle_freelist) +
+///   [`cycle_hwm`](Self::cycle_hwm).
 /// - **Scratch** `[CYCLE_CAPACITY, pool_capacity)` — producer ports whose
-///   every consumer is fused. Backed by single `CableValue` slots.
-///
-/// Each region has its own freelist and high-water mark. The `output_buf`
-/// map remains a single `(NodeId, port_idx) → cable_idx` dictionary; the
-/// region a slot lives in is encoded by the index value (`< CYCLE_CAPACITY`
-/// vs `>=`).
+///   every consumer is fused. Backed by single `CableValue` slots. Values
+///   are tick-local: every consumer reads same-tick output, so prior
+///   contents never reach the read path. The scratch region is therefore
+///   **rebuilt fresh on every plan**: a forward sweep over `order` packs
+///   indices densely in topological order, with no freelist and no
+///   carry-over of high-water mark from the previous plan. This delivers
+///   ADR 0072 phase 4's cache-proximity layout (consumers read producers'
+///   outputs from monotonically increasing addresses).
 pub struct BufferAllocState {
-    /// Maps `(NodeId, output_port_index)` to a stable buffer pool index.
+    /// Maps `(NodeId, output_port_index)` to its current buffer pool index.
+    /// Cycle entries persist across replans; scratch entries are recomputed
+    /// each plan and may move freely.
     pub output_buf: HashMap<(NodeId, usize), usize>,
     /// Recycled cycle-region indices available for reuse (LIFO via [`Vec::pop`]).
+    /// Populated when a cycle producer port disappears or flips to scratch;
+    /// drained when a new cycle producer port appears or a scratch port
+    /// flips to cycle.
     pub cycle_freelist: Vec<usize>,
-    /// Recycled scratch-region indices available for reuse (LIFO via [`Vec::pop`]).
-    pub scratch_freelist: Vec<usize>,
     /// High-water mark for the cycle region. Starts at [`RESERVED_SLOTS`] so
     /// that infrastructure slots are never aliased by a dynamic cycle cable.
     /// Capped at [`CYCLE_CAPACITY`].
     pub cycle_hwm: usize,
-    /// High-water mark for the scratch region. Starts at [`CYCLE_CAPACITY`].
-    /// Capped at the per-build `pool_capacity`.
+    /// High-water mark for the scratch region in the *most recent* plan.
+    /// Reset to [`CYCLE_CAPACITY`] at the start of every allocation pass and
+    /// rises as the forward sweep emits scratch indices. Carried in state
+    /// only as the post-build snapshot (used by tests and diagnostics);
+    /// not consulted by the next allocation pass.
     pub scratch_hwm: usize,
 }
 
@@ -53,7 +62,6 @@ impl Default for BufferAllocState {
         Self {
             output_buf: HashMap::new(),
             cycle_freelist: Vec::new(),
-            scratch_freelist: Vec::new(),
             cycle_hwm: RESERVED_SLOTS,
             scratch_hwm: CYCLE_CAPACITY,
         }
@@ -152,27 +160,53 @@ pub struct BufferAllocation {
     pub output_buf: HashMap<(NodeId, usize), usize>,
     pub to_zero: Vec<usize>,
     pub cycle_freelist: Vec<usize>,
-    pub scratch_freelist: Vec<usize>,
     pub cycle_hwm: usize,
     pub scratch_hwm: usize,
 }
 
 // ── allocate_buffers ──────────────────────────────────────────────────────────
 
-/// Assign stable cable buffer pool indices for `order`, dispatching each
-/// producer port to either the cycle or scratch region based on
-/// `producer_port_cycle` (ADR 0072 phase 3, ticket 0850).
+/// Assign cable buffer pool indices for `order`, dispatching each producer
+/// port to either the cycle or scratch region based on `producer_port_cycle`
+/// (ADR 0072 phases 3–4, tickets 0850 + 0851).
 ///
-/// Reuses any `(NodeId, port_idx)` key already present in `prev_alloc`.
-/// A surviving port's region cannot change across replans (cycle ↔ scratch
-/// flips would cross the cutoff and invalidate the slot's storage shape);
-/// flipped ports are dropped from the old map and freshly allocated in the
-/// new region, leaving the old slot on its region's freelist.
+/// **Cycle region.** Indices are stable across replans: a surviving
+/// `(NodeId, port_idx)` whose previous slot lived in cycle space and remains
+/// classified as cycle keeps that slot, preserving the audio thread's
+/// in-flight feedback values on plan swap. Vacated slots return to
+/// `cycle_freelist` (LIFO).
 ///
-/// Returns [`PlanError::BufferPoolExhausted`] if either region exhausts its
-/// capacity. Cycle exhaustion fires when `cycle_hwm` would reach
-/// [`CYCLE_CAPACITY`]; scratch exhaustion fires when `scratch_hwm` would
-/// reach `pool_capacity`.
+/// **Scratch region.** Indices are recomputed every plan via a single
+/// forward sweep over `order`. Scratch values are tick-local — the consumer
+/// reads same-tick producer output, so prior contents never reach the read
+/// path — which means scratch indices may compact freely without breaking
+/// audio. The forward sweep emits dense, topologically-ordered scratch
+/// indices starting at `CYCLE_CAPACITY`; consumers therefore read
+/// producers' outputs from monotonically increasing addresses, which is
+/// the cache-proximity goal of ADR 0072 phase 4.
+///
+/// **Region flips.** A port that previously occupied a cycle slot but is
+/// now classified as scratch returns its old cycle slot to the freelist
+/// (preserves cycle-region fragmentation guarantees) and is assigned a
+/// fresh scratch index by the forward sweep. A port that previously
+/// occupied a scratch slot but is now classified as cycle simply abandons
+/// its old scratch index — the next plan's scratch region is rebuilt from
+/// scratch, so no bookkeeping is needed.
+///
+/// **Cache layout.** `CableValue` is 64 bytes (`[f32; 16]`), exactly one
+/// cache line on the targeted architectures. As long as the scratch buffer
+/// base is 64-byte-aligned (the engine's pool storage uses `Vec<CableValue>`
+/// whose base allocation is suitably aligned in practice on x86_64 / aarch64
+/// glibc allocators), each scratch slot occupies its own cache line and no
+/// false sharing is possible across slots even if a future scheduler
+/// partitions the scratch region by thread. No explicit padding is emitted
+/// at SCC boundaries because the slot stride already equals the cache
+/// line size.
+///
+/// Returns [`PlanError::BufferPoolExhausted`] if either region exhausts
+/// its capacity. Cycle exhaustion fires when the next cycle index would
+/// reach [`CYCLE_CAPACITY`]; scratch exhaustion fires when the next
+/// scratch index would reach `pool_capacity`.
 pub fn allocate_buffers(
     index: &GraphIndex<'_>,
     order: &[NodeId],
@@ -181,15 +215,20 @@ pub fn allocate_buffers(
     pool_capacity: usize,
 ) -> Result<BufferAllocation, PlanError> {
     let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
-    let mut scratch_freelist = prev_alloc.scratch_freelist.clone();
     let mut cycle_hwm = prev_alloc.cycle_hwm;
-    let mut scratch_hwm = prev_alloc.scratch_hwm;
+    // Scratch is rebuilt fresh each plan; no carry-over of hwm.
+    let mut scratch_hwm: usize = CYCLE_CAPACITY;
     let mut to_zero = Vec::new();
     let mut output_buf: HashMap<(NodeId, usize), usize> = HashMap::new();
 
     let is_cycle = |key: &(NodeId, usize)| -> bool {
         producer_port_cycle.get(key).copied().unwrap_or(false)
     };
+
+    // Track cycle slots already returned to the freelist by inline
+    // region-flip handling so the post-pass reconciliation does not
+    // double-free them.
+    let mut cycle_already_freed: HashSet<usize> = HashSet::new();
 
     for id in order {
         let desc = &index
@@ -200,69 +239,77 @@ pub fn allocate_buffers(
         for (port_idx, _) in desc.outputs.iter().enumerate() {
             let key = (id.clone(), port_idx);
             let want_cycle = is_cycle(&key);
-            // Survivor: reuse only when region matches. A flipped
-            // classification frees the old slot back to its source region
-            // and forces fresh allocation in the new region.
-            if let Some(&existing) = prev_alloc.output_buf.get(&key) {
-                let existing_in_cycle = existing < CYCLE_CAPACITY;
-                if existing_in_cycle == want_cycle {
-                    output_buf.insert(key, existing);
-                    continue;
-                } else {
-                    // Region flip: surrender old slot, allocate fresh.
-                    if existing_in_cycle {
-                        cycle_freelist.push(existing);
-                    } else {
-                        scratch_freelist.push(existing);
-                    }
-                    to_zero.push(existing);
-                }
-            }
+            let prev = prev_alloc.output_buf.get(&key).copied();
 
             let idx = if want_cycle {
-                cycle_freelist.pop().unwrap_or_else(|| {
+                // Cycle survivor: keep the old cycle slot to preserve
+                // in-flight feedback state across plan swap.
+                if let Some(existing) = prev {
+                    if existing < CYCLE_CAPACITY {
+                        output_buf.insert(key, existing);
+                        continue;
+                    }
+                    // Scratch → cycle flip: the old scratch index is
+                    // abandoned (scratch is rebuilt this plan; reconcile
+                    // will zero it if nothing else reuses it). The new
+                    // cycle slot is zeroed via the to_zero entry below.
+                }
+                let i = cycle_freelist.pop().unwrap_or_else(|| {
                     let i = cycle_hwm;
                     cycle_hwm += 1;
                     i
-                })
-            } else {
-                scratch_freelist.pop().unwrap_or_else(|| {
-                    let i = scratch_hwm;
-                    scratch_hwm += 1;
-                    i
-                })
-            };
-            // Region-specific cap.
-            if want_cycle {
-                if idx >= CYCLE_CAPACITY {
+                });
+                if i >= CYCLE_CAPACITY {
                     return Err(PlanError::BufferPoolExhausted);
                 }
-            } else if idx >= pool_capacity {
-                return Err(PlanError::BufferPoolExhausted);
-            }
+                i
+            } else {
+                // Cycle → scratch flip: return the old cycle slot to its
+                // region's freelist so the cycle pool stays compact, and
+                // zero it (the cycle pair held last-tick feedback that is
+                // no longer meaningful).
+                if let Some(existing) = prev {
+                    if existing < CYCLE_CAPACITY {
+                        cycle_freelist.push(existing);
+                        cycle_already_freed.insert(existing);
+                        to_zero.push(existing);
+                    }
+                }
+                let i = scratch_hwm;
+                scratch_hwm += 1;
+                if i >= pool_capacity {
+                    return Err(PlanError::BufferPoolExhausted);
+                }
+                i
+            };
             to_zero.push(idx);
             output_buf.insert(key, idx);
         }
     }
 
-    // Deallocate ports present in the old alloc that are not in the new graph,
-    // returning them to the appropriate region's freelist.
-    for (key, &buf_idx) in &prev_alloc.output_buf {
-        if !output_buf.contains_key(key) {
-            to_zero.push(buf_idx);
-            if buf_idx < CYCLE_CAPACITY {
-                cycle_freelist.push(buf_idx);
-            } else {
-                scratch_freelist.push(buf_idx);
-            }
+    // Reconcile prev_alloc against the new layout. A previous slot is
+    // still in use when some entry of the new `output_buf` maps to the
+    // same index; otherwise the slot is vacated and must be zeroed
+    // (cycle slots additionally return to the freelist).
+    let new_indices: HashSet<usize> = output_buf.values().copied().collect();
+    for &old_idx in prev_alloc.output_buf.values() {
+        if new_indices.contains(&old_idx) {
+            continue;
         }
+        if old_idx < CYCLE_CAPACITY {
+            if !cycle_already_freed.insert(old_idx) {
+                // Already pushed by inline flip handler; do not re-push.
+                continue;
+            }
+            cycle_freelist.push(old_idx);
+        }
+        to_zero.push(old_idx);
     }
 
     Ok(BufferAllocation {
         output_buf,
         to_zero,
         cycle_freelist,
-        scratch_freelist,
         cycle_hwm,
         scratch_hwm,
     })

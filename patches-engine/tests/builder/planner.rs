@@ -1,9 +1,22 @@
 use super::*;
 
-// ── Acceptance criteria: stable allocation across replan ─────────────────
+// ── Acceptance criteria: scratch region is rebuilt fresh per plan ────────
+//
+// ADR 0072 phase 4 (ticket 0851) drops cross-replan stability for the
+// scratch region: scratch indices compact by topo order on every plan,
+// which delivers cache proximity at the cost of moving surviving fused
+// cables. Because scratch values are tick-local — every consumer reads
+// same-tick output — moving the index across a plan swap does not lose
+// audio state. The scratch invariants preserved are:
+//   1. Every fresh scratch index appears in `to_zero` so the engine
+//      starts from a defined value at plan adoption.
+//   2. Old scratch indices vacated by the new layout also appear in
+//      `to_zero`.
+// Cycle indices remain stable across replans (covered by
+// `stable_cycle_index_for_feedback_module_across_replan`).
 
 #[test]
-fn stable_buffer_index_for_unchanged_module_across_replan() {
+fn scratch_region_compacts_and_zeroes_on_replan() {
     let registry = default_registry();
     let env = default_env();
     let builder = default_builder();
@@ -29,7 +42,12 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
     let (_plan_a, state_a) =
         builder.build_patch(&graph_a, &registry, &env, &PlannerState::empty()).unwrap();
 
-    let buf_a = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
+    let buf_a_old = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
+    let freed_buf = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_b"), 0)];
+    assert!(
+        buf_a_old >= patches_core::cables::CYCLE_CAPACITY,
+        "sine_a output is fused, expected to live in the scratch region"
+    );
 
     // Graph B: only sine_a (sine_b removed)
     let mut graph_b = ModuleGraph::new();
@@ -47,10 +65,21 @@ fn stable_buffer_index_for_unchanged_module_across_replan() {
 
     let (plan_b, state_b) = builder.build_patch(&graph_b, &registry, &env, &state_a).unwrap();
 
-    let buf_b = state_b.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
-    assert_eq!(buf_a, buf_b, "sine_a output buffer must be identical across re-plan");
-
-    let freed_buf = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_b"), 0)];
+    let buf_a_new = state_b.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
+    assert!(
+        buf_a_new >= patches_core::cables::CYCLE_CAPACITY,
+        "sine_a remains fused; new index must still live in the scratch region"
+    );
+    assert!(
+        plan_b.to_zero.contains(&buf_a_new),
+        "freshly allocated scratch index {buf_a_new} must appear in plan_b.to_zero"
+    );
+    if buf_a_old != buf_a_new {
+        assert!(
+            plan_b.to_zero.contains(&buf_a_old),
+            "vacated scratch index {buf_a_old} must appear in plan_b.to_zero"
+        );
+    }
     assert!(
         plan_b.to_zero.contains(&freed_buf),
         "freed buffer index {freed_buf} must appear in plan_b.to_zero"

@@ -715,7 +715,6 @@ impl PatchBuilder {
                 buffer_alloc: BufferAllocState {
                     output_buf: buf_alloc.output_buf,
                     cycle_freelist: buf_alloc.cycle_freelist,
-                    scratch_freelist: buf_alloc.scratch_freelist,
                     cycle_hwm: buf_alloc.cycle_hwm,
                     scratch_hwm: buf_alloc.scratch_hwm,
                 },
