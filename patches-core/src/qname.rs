@@ -7,6 +7,13 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+/// Prefix used by the descriptor-bind pass to name synthesised
+/// auto-Sum modules (ticket 0852). Surfaces that present the module
+/// graph to users (SVG, LSP, profiler) treat any [`QName`] whose bare
+/// name starts with this prefix as a synthesised summing junction
+/// rather than a user-authored module — see ticket 0857.
+pub const AUTOSUM_PREFIX: &str = "__autosum_";
+
 /// A qualified identifier: an optional chain of namespace segments plus a
 /// final bare name.
 ///
@@ -37,6 +44,21 @@ impl QName {
     pub fn is_bare(&self) -> bool {
         self.path.is_empty()
     }
+
+    /// True iff this name was synthesised by the auto-Sum bind pass
+    /// (i.e. its bare name starts with [`AUTOSUM_PREFIX`]). Synthesised
+    /// names exist for engine-side correctness only and are elided
+    /// from user-facing graph views.
+    pub fn is_autosum(&self) -> bool {
+        is_autosum_name(&self.name)
+    }
+}
+
+/// True iff `name` follows the auto-Sum synthesis convention. Use when
+/// only a string is in hand (e.g. profiler's `&'static str` module
+/// names registered at runtime).
+pub fn is_autosum_name(name: &str) -> bool {
+    name.starts_with(AUTOSUM_PREFIX)
 }
 
 impl From<&str> for QName {

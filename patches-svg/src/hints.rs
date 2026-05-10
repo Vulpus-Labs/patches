@@ -8,7 +8,7 @@ use patches_manifest::Registry;
 use patches_dsl::{FlatConnection, FlatModule, FlatPatch};
 
 use crate::layout::{EdgeHint, LayoutEdge, LayoutNode, NodeHint};
-use crate::flat_to_layout::{find_port_cable_class, port_label, resolve_descriptor};
+use crate::flat_to_layout::{find_port_cable_class, port_label, resolve_descriptor, EdgeOrigin};
 
 pub(crate) fn enrich_node_hints(patch: &FlatPatch, source_map: &SourceMap, nodes: &mut [LayoutNode]) {
     let by_id: HashMap<String, &FlatModule> =
@@ -17,7 +17,11 @@ pub(crate) fn enrich_node_hints(patch: &FlatPatch, source_map: &SourceMap, nodes
         let Some(module) = by_id.get(&node.id) else {
             continue;
         };
-        node.hint = build_node_hint(module, source_map);
+        // Layered enrichment: `flat_to_layout_input` already populates
+        // `summed_input_ports` for collapsed auto-Sum targets (ticket
+        // 0857). Only fields this pass owns (tooltip, source-span data
+        // attrs) get overwritten — the synthesised marker survives.
+        apply_node_hint(&mut node.hint, module, source_map);
     }
 }
 
@@ -26,31 +30,32 @@ pub(crate) fn enrich_edge_hints(
     source_map: &SourceMap,
     registry: &Registry,
     edges: &mut [LayoutEdge],
+    origins: &[EdgeOrigin],
 ) {
     // Shape per module id, cached so we describe each module type at most once.
     let module_by_id: HashMap<String, &FlatModule> =
         patch.modules.iter().map(|m| (m.id.to_string(), m)).collect();
     let mut descriptor_cache: HashMap<String, Option<ModuleDescriptor>> = HashMap::new();
 
-    // Iterate connections in the same order as edges were pushed by
-    // `flat_to_layout_input` — both walk `patch.connections` once, so index
-    // alignment is safe.
-    debug_assert_eq!(edges.len(), patch.connections.len());
-    for (edge, conn) in edges.iter_mut().zip(patch.connections.iter()) {
+    // `origins[i].conn_idx` points at the user-authored connection each edge
+    // was derived from — for collapsed auto-Sum fan-ins this is the original
+    // `src → autosum.in[i]` (the synthesised `autosum.out → target` is not
+    // emitted as an edge; see `flat_to_layout::flat_to_layout_input`).
+    debug_assert_eq!(edges.len(), origins.len());
+    for (edge, origin) in edges.iter_mut().zip(origins.iter()) {
+        let conn = &patch.connections[origin.conn_idx];
         edge.hint = build_edge_hint(conn, &module_by_id, &mut descriptor_cache, registry, source_map);
     }
 }
 
-fn build_node_hint(module: &FlatModule, source_map: &SourceMap) -> NodeHint {
-    let mut hint = NodeHint::default();
+fn apply_node_hint(hint: &mut NodeHint, module: &FlatModule, source_map: &SourceMap) {
     let site = module.provenance.site;
     if site.source == SourceId::SYNTHETIC {
-        return hint;
+        return;
     }
     let label = format!("{} : {}", module.id, module.type_name);
     hint.tooltip = Some(format_tooltip(source_map, &module.provenance, &label));
     hint.data_attrs = span_data_attrs(site);
-    hint
 }
 
 fn build_edge_hint(

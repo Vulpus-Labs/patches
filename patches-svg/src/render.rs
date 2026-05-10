@@ -126,6 +126,7 @@ fn emit_style_block(s: &mut String, pal: &Palette) {
 .header-text{{fill:{ht};font:12px sans-serif;}}\
 .port-text{{fill:{pt};font:10px sans-serif;}}\
 .input-dot{{fill:{ind};}}\
+.input-sum{{stroke:{ind};stroke-width:1.5;stroke-linecap:round;fill:none;}}\
 .output-dot{{fill:{outd};}}\
 .cable{{fill:none;stroke:{cm};stroke-width:1.5;}}\
 .cable-mono{{stroke:{cm};}}\
@@ -283,14 +284,15 @@ fn emit_node(
 
     for (i, port) in n.input_ports.iter().enumerate() {
         let py = n.y + header_h + padding + i as f32 * row_h + row_h / 2.0;
-        emit_port(s, n.x + 6.0, py, port, true, n.x + 13.0, opts, pal);
+        let summed = n.is_summed_input(port);
+        emit_port(s, n.x + 6.0, py, port, true, n.x + 13.0, summed, opts, pal);
     }
     for (i, port) in n.output_ports.iter().enumerate() {
         let py = n.y + header_h + padding + i as f32 * row_h + row_h / 2.0;
         // Right-align text: approximate by assuming ~6px per char.
         let approx_w = port.chars().count() as f32 * 6.0;
         let text_x = n.x + n.width - 13.0 - approx_w;
-        emit_port(s, n.x + n.width - 6.0, py, port, false, text_x, opts, pal);
+        emit_port(s, n.x + n.width - 6.0, py, port, false, text_x, false, opts, pal);
     }
 
     s.push_str("</g>");
@@ -304,12 +306,43 @@ fn emit_port(
     label: &str,
     is_input: bool,
     text_x: f32,
+    summed: bool,
     opts: &SvgOptions,
     pal: &Palette,
 ) {
     let inline = !opts.embed_css;
     let color = if is_input { pal.input_dot } else { pal.output_dot };
-    if inline {
+    if summed {
+        // Summing-junction glyph: a `+` drawn in the input-dot colour
+        // marking ports that received N>1 fan-in via a collapsed
+        // auto-Sum module (ticket 0857). The `+` is centred on the
+        // port's hit point so the cable still terminates at (cx, cy).
+        let r: f32 = 4.0;
+        if inline {
+            let _ = write!(
+                s,
+                r#"<path d="M {x0} {cy} L {x1} {cy} M {cx} {y0} L {cx} {y1}" stroke="{stroke}" stroke-width="1.5" stroke-linecap="round"/>"#,
+                x0 = fmt_num(cx - r),
+                x1 = fmt_num(cx + r),
+                y0 = fmt_num(cy - r),
+                y1 = fmt_num(cy + r),
+                cx = fmt_num(cx),
+                cy = fmt_num(cy),
+                stroke = color,
+            );
+        } else {
+            let _ = write!(
+                s,
+                r#"<path class="input-sum" d="M {x0} {cy} L {x1} {cy} M {cx} {y0} L {cx} {y1}"/>"#,
+                x0 = fmt_num(cx - r),
+                x1 = fmt_num(cx + r),
+                y0 = fmt_num(cy - r),
+                y1 = fmt_num(cy + r),
+                cx = fmt_num(cx),
+                cy = fmt_num(cy),
+            );
+        }
+    } else if inline {
         let _ = write!(
             s,
             r#"<circle cx="{cx}" cy="{cy}" r="3" fill="{fill}"/>"#,

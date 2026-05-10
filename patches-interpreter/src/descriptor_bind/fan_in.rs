@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use patches_core::{
     cables::{CableKind, MonoLayout, PolyLayout},
-    ParameterMap, PortDescriptor, PortRef, QName, StructuralParams,
+    ParameterMap, PortDescriptor, PortRef, QName, StructuralParams, AUTOSUM_PREFIX,
 };
 use patches_dsl::flat::CableMap;
 use patches_registry::Registry;
@@ -247,9 +247,9 @@ fn generate_sum_id(
 ) -> QName {
     let target_disp = display_short(target_module);
     let base = if port_index == 0 {
-        format!("__autosum_{}_{}", target_disp, port_name)
+        format!("{}{}_{}", AUTOSUM_PREFIX, target_disp, port_name)
     } else {
-        format!("__autosum_{}_{}_{}", target_disp, port_name, port_index)
+        format!("{}{}_{}_{}", AUTOSUM_PREFIX, target_disp, port_name, port_index)
     };
     let mut candidate = QName::bare(base.clone());
     let mut suffix = 2;

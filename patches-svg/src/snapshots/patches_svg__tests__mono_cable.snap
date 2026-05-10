@@ -1,8 +1,9 @@
 ---
 source: patches-svg/src/lib.rs
+assertion_line: 277
 expression: svg
 ---
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 90" width="390" height="90"><style>.bg{fill:#1e2026;}.node-body{fill:#282c34;stroke:#505a6e;stroke-width:1;}.node-header{fill:#3c465a;}.header-text{fill:#e6e6f0;font:12px sans-serif;}.port-text{fill:#bebec8;font:10px sans-serif;}.input-dot{fill:#64c878;}.output-dot{fill:#c88c50;}.cable{fill:none;stroke:#78b4ff;stroke-width:1.5;}.cable-mono{stroke:#78b4ff;}.cable-poly-audio{stroke:#c878b4;stroke-width:2.5;}.cable-poly-transport{stroke:#c8b478;stroke-dasharray:4 2;}.cable-poly-midi{stroke:#78c8b4;stroke-dasharray:1 2;stroke-width:2;}</style><rect class="bg" x="0" y="0" width="390" height="90"/><path class="cable cable-mono" d="M 180 57 C 192 57, 198 57, 210 57" data-source-id="1" data-span-start="42" data-span-end="60"><title>osc.sine → vca.in
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 90" width="390" height="90"><style>.bg{fill:#1e2026;}.node-body{fill:#282c34;stroke:#505a6e;stroke-width:1;}.node-header{fill:#3c465a;}.header-text{fill:#e6e6f0;font:12px sans-serif;}.port-text{fill:#bebec8;font:10px sans-serif;}.input-dot{fill:#64c878;}.input-sum{stroke:#64c878;stroke-width:1.5;stroke-linecap:round;fill:none;}.output-dot{fill:#c88c50;}.cable{fill:none;stroke:#78b4ff;stroke-width:1.5;}.cable-mono{stroke:#78b4ff;}.cable-poly-audio{stroke:#c878b4;stroke-width:2.5;}.cable-poly-transport{stroke:#c8b478;stroke-dasharray:4 2;}.cable-poly-midi{stroke:#78c8b4;stroke-dasharray:1 2;stroke-width:2;}</style><rect class="bg" x="0" y="0" width="390" height="90"/><path class="cable cable-mono" d="M 180 57 C 192 57, 198 57, 210 57" data-source-id="1" data-span-start="42" data-span-end="60"><title>osc.sine → vca.in
 at master.patches:3:1
   osc.sine -&gt; vca.in</title></path><g class="node" data-source-id="1" data-span-start="15" data-span-end="24"><title>osc : Osc
 at master.patches:1:16

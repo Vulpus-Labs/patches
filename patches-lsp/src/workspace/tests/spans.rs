@@ -187,3 +187,41 @@ patch {
         "fan-in should be auto-summed, not diagnosed: {diags:?}",
     );
 }
+
+#[test]
+fn fan_in_hover_does_not_expose_autosum_synthetic_name() {
+    // Ticket 0857: synthesised `__autosum_*` modules are an internal
+    // bind-stage artifact. User-facing hover surfaces walk the
+    // pre-bind FlatPatch — they must name the user's modules, never
+    // the synthesised junction. This guards against any future change
+    // that inadvertently routes hover through `BoundPatch.modules`.
+    let src = "\
+patch {
+    module a : Osc
+    module b : Osc
+    module mix : Sum(1)
+    a.sine -> mix.in
+    b.sine -> mix.in
+}
+";
+    let tmp = TempDir::new("autosum_hover");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let _ = ws.analyse_flat(&uri, src.to_string());
+
+    // Hover on each authored connection's `mix` consumer.
+    for needle in ["a.sine -> mix", "b.sine -> mix"] {
+        let pos = position_at(src, needle, needle.len() - 3);
+        let h = ws.hover(&uri, pos).expect("hover on fan-in cable");
+        let text = hover_value(&h);
+        assert!(
+            !text.contains("__autosum"),
+            "hover on `{needle}` leaked synthesised name:\n{text}"
+        );
+        assert!(
+            text.contains("mix"),
+            "hover on `{needle}` should name user's `mix` consumer:\n{text}"
+        );
+    }
+}

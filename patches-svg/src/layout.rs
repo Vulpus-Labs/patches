@@ -48,6 +48,11 @@ pub struct NodeHint {
     pub tooltip: Option<String>,
     /// `(name, value)` pairs emitted as attributes on the node `<g>`.
     pub data_attrs: Vec<(&'static str, String)>,
+    /// Input port labels that received N>1 fan-in via a collapsed
+    /// auto-Sum module (ticket 0857). The renderer draws a `+`
+    /// summing-junction glyph at these port rows in place of the
+    /// usual input dot.
+    pub summed_input_ports: Vec<String>,
 }
 
 /// Renderer-directed metadata for a cable edge.
@@ -106,6 +111,14 @@ pub struct PositionedNode {
     pub input_ports: Vec<String>,
     pub output_ports: Vec<String>,
     pub hint: NodeHint,
+}
+
+impl PositionedNode {
+    /// True iff `port_name` is one of this node's summed input ports
+    /// (a collapsed auto-Sum target — see [`NodeHint::summed_input_ports`]).
+    pub fn is_summed_input(&self, port_name: &str) -> bool {
+        self.hint.summed_input_ports.iter().any(|p| p == port_name)
+    }
 }
 
 impl PositionedNode {

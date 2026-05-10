@@ -32,7 +32,7 @@ use patches_dsl::FlatPatch;
 
 use crate::layout::LayoutConfig;
 
-pub use flat_to_layout::{flat_to_layout_input, port_label};
+pub use flat_to_layout::{flat_to_layout_input, port_label, EdgeOrigin};
 
 // ── Options ────────────────────────────────────────────────────────────────
 
@@ -89,12 +89,12 @@ pub fn render_svg(
 ) -> String {
     let config = LayoutConfig::default();
     let width = opts.node_width.unwrap_or(NODE_WIDTH);
-    let (mut nodes, mut edges) = flat_to_layout::flat_to_layout_input(patch, &config);
+    let (mut nodes, mut edges, origins) = flat_to_layout::flat_to_layout_input(patch, &config);
     for n in &mut nodes {
         n.width = width;
     }
     hints::enrich_node_hints(patch, source_map, &mut nodes);
-    hints::enrich_edge_hints(patch, source_map, registry, &mut edges);
+    hints::enrich_edge_hints(patch, source_map, registry, &mut edges, &origins);
     let layout = layout::layout_graph(&nodes, &edges, &config);
     render::emit_svg(&layout, &config, opts)
 }
@@ -315,6 +315,83 @@ mod tests {
         let svg = render(&patch, &SvgOptions::default());
         assert!(svg.contains(r#"<path class="cable""#));
         assert!(!svg.contains(r#"<path class="cable cable-"#));
+    }
+
+    #[test]
+    fn autosum_module_collapses_to_summing_junction() {
+        // Mirror the post-bind shape of a multi-fan-in patch: two
+        // sources fan in to `mix.in` via a synthesised
+        // `__autosum_mix_in` Sum module with channels=2.
+        let mut patch = FlatPatch::default();
+        patch.graph.modules = vec![
+            FlatModule {
+                id: "a".into(),
+                type_name: "Osc".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
+            },
+            FlatModule {
+                id: "b".into(),
+                type_name: "Osc".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
+            },
+            FlatModule {
+                id: "mix".into(),
+                type_name: "Vca".into(),
+                shape: vec![],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
+            },
+            FlatModule {
+                id: "__autosum_mix_in".into(),
+                type_name: "Sum".into(),
+                shape: vec![("channels".into(), patches_dsl::Scalar::Int(2))],
+                params: vec![],
+                port_aliases: vec![],
+                provenance: Provenance::root(synthetic_span()),
+                param_block_span: None,
+            },
+        ];
+        let edge = |from: &str, fp: &str, to: &str, tp: &str, ti: u32| FlatConnection {
+            from_module: from.into(),
+            from_port: fp.into(),
+            from_index: 0,
+            to_module: to.into(),
+            to_port: tp.into(),
+            to_index: ti,
+            map: patches_dsl::CableMap::identity(),
+            provenance: Provenance::root(synthetic_span()),
+            from_provenance: Provenance::root(synthetic_span()),
+            to_provenance: Provenance::root(synthetic_span()),
+        };
+        patch.graph.connections = vec![
+            edge("a", "sine", "__autosum_mix_in", "in", 0),
+            edge("b", "sine", "__autosum_mix_in", "in", 1),
+            edge("__autosum_mix_in", "out", "mix", "in", 0),
+        ];
+
+        let svg = render(&patch, &SvgOptions::default());
+
+        // Synthesised module is not rendered as a node.
+        assert!(
+            !svg.contains("__autosum_mix_in"),
+            "autosum node leaked into SVG: {svg}"
+        );
+        // Summing-junction glyph drawn at the consumer's input.
+        assert!(
+            svg.contains("input-sum"),
+            "missing input-sum glyph: {svg}"
+        );
+        insta::assert_snapshot!("autosum_collapse", svg);
     }
 
     #[test]

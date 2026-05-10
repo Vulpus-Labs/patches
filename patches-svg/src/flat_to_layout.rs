@@ -7,47 +7,112 @@ use patches_dsl::{FlatPatch, QName};
 use crate::layout::{node_height, EdgeHint, LayoutConfig, LayoutEdge, LayoutNode, NodeHint};
 use crate::NODE_WIDTH;
 
+/// Per-edge metadata returned alongside [`LayoutEdge`] from
+/// [`flat_to_layout_input`]. Carries the index of the originating
+/// [`patches_dsl::FlatConnection`] so hint enrichment can resolve the
+/// edge's provenance even after auto-Sum collapse rewrites the edge
+/// list (see ticket 0857).
+#[derive(Debug, Clone, Copy)]
+pub struct EdgeOrigin {
+    /// Index into `flat.connections` for the user-authored connection
+    /// this edge represents. For collapsed auto-Sum fan-ins, this is
+    /// the original `source → autosum.in[i]` connection — the
+    /// synthesised `autosum.out → target` connection is dropped.
+    pub conn_idx: usize,
+}
+
 /// Build layout inputs from a `FlatPatch`.
 ///
 /// Only ports that appear in at least one connection are included. Port
 /// row order within a node follows first appearance across
 /// `flat.connections`. Nodes are listed in id-sorted order for stable
 /// output.
+///
+/// Synthesised auto-Sum modules (`__autosum_*`, ticket 0852) are
+/// collapsed: the synthesised module is omitted from `nodes`, its
+/// outgoing `out → target.port` connection is dropped, and each
+/// incoming `src → autosum.in[i]` is rewritten to land directly on
+/// `target.port`. The collapsed target port is recorded in the target
+/// node's [`NodeHint::summed_input_ports`] so the renderer can draw a
+/// `+` summing-junction glyph in place of the usual input dot. Edges
+/// returned in parallel with [`EdgeOrigin`] entries point back at the
+/// original user-authored connections so hint enrichment can resolve
+/// provenance after the rewrite.
 pub fn flat_to_layout_input(
     flat: &FlatPatch,
     config: &LayoutConfig,
-) -> (Vec<LayoutNode>, Vec<LayoutEdge>) {
+) -> (Vec<LayoutNode>, Vec<LayoutEdge>, Vec<EdgeOrigin>) {
+    // Map each autosum module id to its (target_module, target_port,
+    // target_index) — i.e. the downstream consumer the autosum's `out`
+    // edge feeds. If an autosum has zero or multiple outgoing edges
+    // (defensive: shouldn't happen for well-formed bind output), it is
+    // not collapsed.
+    let mut autosum_target: HashMap<QName, (QName, String, u32)> = HashMap::new();
+    let mut autosum_out_count: HashMap<QName, usize> = HashMap::new();
+    for c in &flat.connections {
+        if c.from_module.is_autosum() {
+            *autosum_out_count.entry(c.from_module.clone()).or_insert(0) += 1;
+            autosum_target.insert(
+                c.from_module.clone(),
+                (c.to_module.clone(), c.to_port.clone(), c.to_index),
+            );
+        }
+    }
+    autosum_target.retain(|id, _| autosum_out_count.get(id).copied().unwrap_or(0) == 1);
+
     let mut inputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
     let mut outputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
     let mut input_seen: HashSet<(QName, String)> = HashSet::new();
     let mut output_seen: HashSet<(QName, String)> = HashSet::new();
+    let mut summed_inputs: HashMap<QName, HashSet<String>> = HashMap::new();
 
     let mut edges = Vec::with_capacity(flat.connections.len());
-    for c in &flat.connections {
+    let mut origins = Vec::with_capacity(flat.connections.len());
+    for (idx, c) in flat.connections.iter().enumerate() {
+        // Drop the synthesised `autosum.out → target` edge: the
+        // collapsed fan-in edges below carry the target connection.
+        if c.from_module.is_autosum() && autosum_target.contains_key(&c.from_module) {
+            continue;
+        }
+        // Rewrite `src → autosum.in[i]` to `src → target.port`.
+        let (to_module, to_port_name, to_port_index) =
+            if c.to_module.is_autosum() && autosum_target.contains_key(&c.to_module) {
+                let (tm, tp, ti) = &autosum_target[&c.to_module];
+                summed_inputs
+                    .entry(tm.clone())
+                    .or_default()
+                    .insert(port_label(tp, *ti));
+                (tm.clone(), tp.clone(), *ti)
+            } else {
+                (c.to_module.clone(), c.to_port.clone(), c.to_index)
+            };
+
         let from_port = port_label(&c.from_port, c.from_index);
-        let to_port = port_label(&c.to_port, c.to_index);
+        let to_port = port_label(&to_port_name, to_port_index);
         if output_seen.insert((c.from_module.clone(), from_port.clone())) {
             outputs_by_node
                 .entry(c.from_module.clone())
                 .or_default()
                 .push(from_port.clone());
         }
-        if input_seen.insert((c.to_module.clone(), to_port.clone())) {
+        if input_seen.insert((to_module.clone(), to_port.clone())) {
             inputs_by_node
-                .entry(c.to_module.clone())
+                .entry(to_module.clone())
                 .or_default()
                 .push(to_port.clone());
         }
         edges.push(LayoutEdge {
             from_node: c.from_module.to_string(),
             from_port,
-            to_node: c.to_module.to_string(),
+            to_node: to_module.to_string(),
             to_port,
             hint: EdgeHint::default(),
         });
+        origins.push(EdgeOrigin { conn_idx: idx });
     }
 
-    let mut modules: Vec<&patches_dsl::FlatModule> = flat.modules.iter().collect();
+    let mut modules: Vec<&patches_dsl::FlatModule> =
+        flat.modules.iter().filter(|m| !m.id.is_autosum()).collect();
     modules.sort_by(|a, b| a.id.cmp(&b.id));
 
     let mut nodes = Vec::with_capacity(modules.len());
@@ -55,6 +120,12 @@ pub fn flat_to_layout_input(
         let inputs = inputs_by_node.remove(&m.id).unwrap_or_default();
         let outputs = outputs_by_node.remove(&m.id).unwrap_or_default();
         let port_rows = inputs.len().max(outputs.len());
+        let mut hint = NodeHint::default();
+        if let Some(set) = summed_inputs.remove(&m.id) {
+            let mut v: Vec<String> = set.into_iter().collect();
+            v.sort();
+            hint.summed_input_ports = v;
+        }
         nodes.push(LayoutNode {
             id: m.id.to_string(),
             width: NODE_WIDTH,
@@ -62,11 +133,11 @@ pub fn flat_to_layout_input(
             label: format!("{} : {}", m.id, m.type_name),
             input_ports: inputs,
             output_ports: outputs,
-            hint: NodeHint::default(),
+            hint,
         });
     }
 
-    (nodes, edges)
+    (nodes, edges, origins)
 }
 
 /// Format a port reference as `name` or `name/index` for display.

@@ -86,3 +86,39 @@ impl TimingCollector {
         records
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use patches_core::is_autosum_name;
+
+    /// Ticket 0857: synthesised auto-Sum modules must not surface in the
+    /// profiler under their `__autosum_*` instance id. The collector is
+    /// keyed by `(InstanceId, &'static str)` where the string is the
+    /// module's descriptor *type* name (e.g. `"Sum"`), set by
+    /// [`crate::timing_shim::TimingShim::new`] from
+    /// `Module::descriptor().module_name`. Per-instance rows therefore
+    /// carry the type name and a numeric `InstanceId`; the QName-based
+    /// `__autosum_*` id never reaches this layer. This test pins the
+    /// invariant — should that ever change, the report would start
+    /// leaking synthesised names and the profiler view would diverge
+    /// from the user's authored patch.
+    #[test]
+    fn autosum_synthesised_names_do_not_reach_collector() {
+        let collector = TimingCollector::new();
+        let id = InstanceId::next();
+        // The shim records the *type* name. An autosum module is an
+        // instance of `Sum` (or `PolySum`/`StereoSum`); its descriptor
+        // returns the type name, which is what gets recorded here.
+        collector.record_process(id, "Sum", 100);
+        collector.record_periodic(id, "Sum", 50);
+
+        for r in collector.report() {
+            assert!(
+                !is_autosum_name(r.module_name),
+                "synthesised autosum name leaked into TimingRecord: {}",
+                r.module_name
+            );
+        }
+    }
+}
