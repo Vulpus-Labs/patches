@@ -1,10 +1,28 @@
 ---
 id: E141
 title: Cycle-free subgraph fusion
-status: open
+status: closed
 created: 2026-05-09
+closed: 2026-05-10
 adr: 0072
 ---
+
+## Outcome
+
+All four phases shipped. Tickets 0848-0851 plus follow-ups 0857
+(auto-Sum view collapse), 0858 (reserved-slot scratch promotion), 0859
+(phase-3 benchmarks). Phase 1 landed inert planner machinery; phase 2
+turned on fused reads (audio-integrity gain — flam/phase-drift on
+cycle-free chains gone); phase 3 split the cable pool into cycle and
+scratch regions; phase 4 compacted the scratch region.
+
+Phase-3 benchmarks ([docs/perf/0859-fusion-phase-3.md](../../docs/perf/0859-fusion-phase-3.md))
+confirm the storage win (~70% used / ~48% allocated reduction across the
+four representative patches) with neutral tick latency. The branch
+dispatch on `cable_idx < CYCLE_CAPACITY` does not show up in p50 timing
+on the corpus; if a future patch ever pushes per-tick cable accesses
+into the four-digit range, the targeted fix (promote fused-cycle slots
+into scratch) is available without further ABI churn.
 
 ## Summary
 
