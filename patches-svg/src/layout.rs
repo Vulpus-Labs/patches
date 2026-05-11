@@ -25,8 +25,11 @@ pub struct LayoutNode {
     pub input_ports: Vec<String>,
     /// Port names drawn on the right side, in the order they should appear.
     pub output_ports: Vec<String>,
-    /// Optional rendering metadata carried opaquely through layout.
-    pub hint: NodeHint,
+    /// Graph-shape metadata derived during flat→layout conversion
+    /// (auto-Sum collapse, ticket 0857).
+    pub graph_hint: GraphShapeHint,
+    /// Source-map metadata derived during hint enrichment.
+    pub source_hint: SourceMapHint,
 }
 
 /// A directed edge between two nodes' ports.
@@ -40,19 +43,28 @@ pub struct LayoutEdge {
     pub hint: EdgeHint,
 }
 
-/// Renderer-directed metadata for a node. Layout does not interpret these
-/// fields; they pass through to the emitted SVG element.
+/// Graph-shape metadata for a node, produced during flat→layout
+/// conversion. Owned by `flat_to_layout::flat_to_layout_input` and
+/// never written by source-map enrichment, so phase ordering between
+/// the two passes is structurally enforced (ticket 0866).
 #[derive(Debug, Clone, Default)]
-pub struct NodeHint {
-    /// Multi-line tooltip text for a `<title>` child element.
-    pub tooltip: Option<String>,
-    /// `(name, value)` pairs emitted as attributes on the node `<g>`.
-    pub data_attrs: Vec<(&'static str, String)>,
+pub struct GraphShapeHint {
     /// Input port labels that received N>1 fan-in via a collapsed
     /// auto-Sum module (ticket 0857). The renderer draws a `+`
     /// summing-junction glyph at these port rows in place of the
     /// usual input dot.
     pub summed_input_ports: Vec<String>,
+}
+
+/// Source-map metadata for a node, produced during hint enrichment.
+/// Owned by `hints::apply_node_hint`; the SVG renderer emits the
+/// tooltip and data attributes unchanged.
+#[derive(Debug, Clone, Default)]
+pub struct SourceMapHint {
+    /// Multi-line tooltip text for a `<title>` child element.
+    pub tooltip: Option<String>,
+    /// `(name, value)` pairs emitted as attributes on the node `<g>`.
+    pub data_attrs: Vec<(&'static str, String)>,
 }
 
 /// Renderer-directed metadata for a cable edge.
@@ -110,18 +122,18 @@ pub struct PositionedNode {
     pub label: String,
     pub input_ports: Vec<String>,
     pub output_ports: Vec<String>,
-    pub hint: NodeHint,
+    pub graph_hint: GraphShapeHint,
+    pub source_hint: SourceMapHint,
 }
 
 impl PositionedNode {
     /// True iff `port_name` is one of this node's summed input ports
-    /// (a collapsed auto-Sum target — see [`NodeHint::summed_input_ports`]).
+    /// (a collapsed auto-Sum target — see
+    /// [`GraphShapeHint::summed_input_ports`]).
     pub fn is_summed_input(&self, port_name: &str) -> bool {
-        self.hint.summed_input_ports.iter().any(|p| p == port_name)
+        self.graph_hint.summed_input_ports.iter().any(|p| p == port_name)
     }
-}
 
-impl PositionedNode {
     /// Y coordinate of the centre of the named port row.
     ///
     /// Returns `None` if the port is not present on the given side.
@@ -267,7 +279,8 @@ pub fn layout_graph(
                 label: src.label.clone(),
                 input_ports: src.input_ports.clone(),
                 output_ports: src.output_ports.clone(),
-                hint: src.hint.clone(),
+                graph_hint: src.graph_hint.clone(),
+                source_hint: src.source_hint.clone(),
             });
         }
         if comp_min_y.is_finite() {
@@ -356,7 +369,8 @@ mod tests {
             label: id.into(),
             input_ports: inputs.iter().map(|s| (*s).to_string()).collect(),
             output_ports: outputs.iter().map(|s| (*s).to_string()).collect(),
-            hint: NodeHint::default(),
+            graph_hint: GraphShapeHint::default(),
+            source_hint: SourceMapHint::default(),
         }
     }
 

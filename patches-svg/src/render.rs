@@ -192,9 +192,9 @@ fn emit_node(
     pal: &Palette,
 ) {
     let inline = !opts.embed_css;
-    let data_attrs = render_data_attrs(&n.hint.data_attrs);
+    let data_attrs = render_data_attrs(&n.source_hint.data_attrs);
     let _ = write!(s, r#"<g class="node"{data_attrs}>"#);
-    if let Some(title) = &n.hint.tooltip {
+    if let Some(title) = &n.source_hint.tooltip {
         let _ = write!(s, "<title>{}</title>", xml_escape(title));
     }
 

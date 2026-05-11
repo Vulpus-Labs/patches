@@ -7,7 +7,7 @@ use patches_core::ModuleDescriptor;
 use patches_manifest::Registry;
 use patches_dsl::{FlatConnection, FlatModule, FlatPatch};
 
-use crate::layout::{EdgeHint, LayoutEdge, LayoutNode, NodeHint};
+use crate::layout::{EdgeHint, LayoutEdge, LayoutNode, SourceMapHint};
 use crate::flat_to_layout::{find_port_cable_class, port_label, resolve_descriptor, EdgeOrigin};
 
 pub(crate) fn enrich_node_hints(patch: &FlatPatch, source_map: &SourceMap, nodes: &mut [LayoutNode]) {
@@ -17,11 +17,7 @@ pub(crate) fn enrich_node_hints(patch: &FlatPatch, source_map: &SourceMap, nodes
         let Some(module) = by_id.get(&node.id) else {
             continue;
         };
-        // Layered enrichment: `flat_to_layout_input` already populates
-        // `summed_input_ports` for collapsed auto-Sum targets (ticket
-        // 0857). Only fields this pass owns (tooltip, source-span data
-        // attrs) get overwritten — the synthesised marker survives.
-        apply_node_hint(&mut node.hint, module, source_map);
+        apply_node_hint(&mut node.source_hint, module, source_map);
     }
 }
 
@@ -37,18 +33,18 @@ pub(crate) fn enrich_edge_hints(
         patch.modules.iter().map(|m| (m.id.to_string(), m)).collect();
     let mut descriptor_cache: HashMap<String, Option<ModuleDescriptor>> = HashMap::new();
 
-    // `origins[i].conn_idx` points at the user-authored connection each edge
+    // `origins[i].0` points at the user-authored connection each edge
     // was derived from — for collapsed auto-Sum fan-ins this is the original
     // `src → autosum.in[i]` (the synthesised `autosum.out → target` is not
     // emitted as an edge; see `flat_to_layout::flat_to_layout_input`).
     debug_assert_eq!(edges.len(), origins.len());
     for (edge, origin) in edges.iter_mut().zip(origins.iter()) {
-        let conn = &patch.connections[origin.conn_idx];
+        let conn = &patch.connections[origin.0];
         edge.hint = build_edge_hint(conn, &module_by_id, &mut descriptor_cache, registry, source_map);
     }
 }
 
-fn apply_node_hint(hint: &mut NodeHint, module: &FlatModule, source_map: &SourceMap) {
+fn apply_node_hint(hint: &mut SourceMapHint, module: &FlatModule, source_map: &SourceMap) {
     let site = module.provenance.site;
     if site.source == SourceId::SYNTHETIC {
         return;

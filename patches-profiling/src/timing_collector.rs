@@ -90,7 +90,7 @@ impl TimingCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::is_autosum_name;
+    use patches_core::AUTOSUM_PREFIX;
 
     /// Ticket 0857: synthesised auto-Sum modules must not surface in the
     /// profiler under their `__autosum_*` instance id. The collector is
@@ -115,7 +115,7 @@ mod tests {
 
         for r in collector.report() {
             assert!(
-                !is_autosum_name(r.module_name),
+                !r.module_name.starts_with(AUTOSUM_PREFIX),
                 "synthesised autosum name leaked into TimingRecord: {}",
                 r.module_name
             );

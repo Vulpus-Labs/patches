@@ -4,22 +4,24 @@ use patches_core::{ModuleDescriptor, ModuleShape};
 use patches_manifest::Registry;
 use patches_dsl::{FlatPatch, QName};
 
-use crate::layout::{node_height, EdgeHint, LayoutConfig, LayoutEdge, LayoutNode, NodeHint};
+use crate::layout::{node_height, EdgeHint, GraphShapeHint, LayoutConfig, LayoutEdge, LayoutNode, SourceMapHint};
 use crate::NODE_WIDTH;
 
 /// Per-edge metadata returned alongside [`LayoutEdge`] from
-/// [`flat_to_layout_input`]. Carries the index of the originating
-/// [`patches_dsl::FlatConnection`] so hint enrichment can resolve the
-/// edge's provenance even after auto-Sum collapse rewrites the edge
-/// list (see ticket 0857).
+/// [`flat_to_layout_input`]: the index of the originating
+/// [`patches_dsl::FlatConnection`] in `flat.connections`.
+///
+/// Threaded as a parallel `Vec` rather than a field on `LayoutEdge`
+/// because auto-Sum collapse rewrites the edge list: the synthesised
+/// `autosum.out → target` connection is dropped and each
+/// `src → autosum.in[i]` is rewritten to land on `target.port`, so the
+/// edge↔connection correspondence is no longer 1:1 in either direction
+/// (one source connection can spawn multiple edges; one consumer port
+/// can receive edges originating from several source connections).
+/// Hint enrichment (ticket 0857) follows the index back to the original
+/// user-authored connection for source-map provenance.
 #[derive(Debug, Clone, Copy)]
-pub struct EdgeOrigin {
-    /// Index into `flat.connections` for the user-authored connection
-    /// this edge represents. For collapsed auto-Sum fan-ins, this is
-    /// the original `source → autosum.in[i]` connection — the
-    /// synthesised `autosum.out → target` connection is dropped.
-    pub conn_idx: usize,
-}
+pub struct EdgeOrigin(pub usize);
 
 /// Build layout inputs from a `FlatPatch`.
 ///
@@ -33,7 +35,7 @@ pub struct EdgeOrigin {
 /// outgoing `out → target.port` connection is dropped, and each
 /// incoming `src → autosum.in[i]` is rewritten to land directly on
 /// `target.port`. The collapsed target port is recorded in the target
-/// node's [`NodeHint::summed_input_ports`] so the renderer can draw a
+/// node's [`GraphShapeHint::summed_input_ports`] so the renderer can draw a
 /// `+` summing-junction glyph in place of the usual input dot. Edges
 /// returned in parallel with [`EdgeOrigin`] entries point back at the
 /// original user-authored connections so hint enrichment can resolve
@@ -108,7 +110,7 @@ pub fn flat_to_layout_input(
             to_port,
             hint: EdgeHint::default(),
         });
-        origins.push(EdgeOrigin { conn_idx: idx });
+        origins.push(EdgeOrigin(idx));
     }
 
     let mut modules: Vec<&patches_dsl::FlatModule> =
@@ -120,11 +122,11 @@ pub fn flat_to_layout_input(
         let inputs = inputs_by_node.remove(&m.id).unwrap_or_default();
         let outputs = outputs_by_node.remove(&m.id).unwrap_or_default();
         let port_rows = inputs.len().max(outputs.len());
-        let mut hint = NodeHint::default();
+        let mut graph_hint = GraphShapeHint::default();
         if let Some(set) = summed_inputs.remove(&m.id) {
             let mut v: Vec<String> = set.into_iter().collect();
             v.sort();
-            hint.summed_input_ports = v;
+            graph_hint.summed_input_ports = v;
         }
         nodes.push(LayoutNode {
             id: m.id.to_string(),
@@ -133,7 +135,8 @@ pub fn flat_to_layout_input(
             label: format!("{} : {}", m.id, m.type_name),
             input_ports: inputs,
             output_ports: outputs,
-            hint,
+            graph_hint,
+            source_hint: SourceMapHint::default(),
         });
     }
 

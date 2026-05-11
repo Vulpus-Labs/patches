@@ -49,16 +49,13 @@ impl QName {
     /// (i.e. its bare name starts with [`AUTOSUM_PREFIX`]). Synthesised
     /// names exist for engine-side correctness only and are elided
     /// from user-facing graph views.
+    ///
+    /// Callers holding a `&str` rather than a `&QName` (e.g. the
+    /// profiler, where module-name strings are registered at runtime)
+    /// should test `name.starts_with(AUTOSUM_PREFIX)` directly.
     pub fn is_autosum(&self) -> bool {
-        is_autosum_name(&self.name)
+        self.name.starts_with(AUTOSUM_PREFIX)
     }
-}
-
-/// True iff `name` follows the auto-Sum synthesis convention. Use when
-/// only a string is in hand (e.g. profiler's `&'static str` module
-/// names registered at runtime).
-pub fn is_autosum_name(name: &str) -> bool {
-    name.starts_with(AUTOSUM_PREFIX)
 }
 
 impl From<&str> for QName {
