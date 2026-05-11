@@ -203,7 +203,9 @@ fn validate_host_control_fields(hc: &HostControlBlock) -> Result<(), ExpandError
     }
 
     let required: &[&str] = match hc.kind {
-        HostControlKind::Knob | HostControlKind::Slider => &["low", "high"],
+        // `low` / `high` are display-only metadata (ticket 0868); cable
+        // range operators (`-[bi(...)]->` etc.) carry the runtime mapping.
+        HostControlKind::Knob | HostControlKind::Slider => &[],
         HostControlKind::Toggle => &["default"],
         // `trigger` is a one-shot button: no host-side state to default.
         HostControlKind::Trigger => &[],

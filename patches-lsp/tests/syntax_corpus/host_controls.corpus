@@ -28,6 +28,15 @@ knob delay_amount { low: 50, high: 200 }
 module delay : Delay
 ~delay_amount -> delay.delay_cv, ~osc(delay_amount)
 
+=== ok empty knob block (ticket 0868, low/high optional)
+knob cutoff { }
+module filt : Svf
+~cutoff -[uni(500Hz, 2000Hz)]-> filt.cutoff
+
+=== ok implicit knob from bare ref (ticket 0868)
+module filt : Svf
+~cutoff -[uni(500Hz, 2000Hz)]-> filt.cutoff
+
 === both_error unknown control kind
 dial mystery { low: 0, high: 1 }
 

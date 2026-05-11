@@ -126,19 +126,29 @@ fn block_in_template_rejected_by_validate() {
 }
 
 #[test]
-fn knob_missing_high_rejected() {
-    let src = "patch { knob k { low: 21Hz } }";
-    let file = parse(src).expect("parse ok");
-    let err = patches_dsl::validate::validate(&file).expect_err("validate rejects");
-    assert_eq!(err.code, StructuralCode::HostControlMissingField);
+fn knob_low_high_optional() {
+    // Ticket 0868: `low` / `high` are display-only and need not appear
+    // in the declaration; the cable range operator carries the runtime
+    // mapping.
+    for src in [
+        "patch { knob k { } }",
+        "patch { knob k { low: 21Hz } }",
+        "patch { knob k { high: 1.0 } }",
+    ] {
+        let file = parse(src).expect("parse ok");
+        patches_dsl::validate::validate(&file).expect("validate ok");
+    }
 }
 
 #[test]
-fn slider_missing_low_rejected() {
-    let src = "patch { slider s { high: 1.0 } }";
-    let file = parse(src).expect("parse ok");
-    let err = patches_dsl::validate::validate(&file).expect_err("validate rejects");
-    assert_eq!(err.code, StructuralCode::HostControlMissingField);
+fn slider_low_high_optional() {
+    for src in [
+        "patch { slider s { } }",
+        "patch { slider s { high: 1.0 } }",
+    ] {
+        let file = parse(src).expect("parse ok");
+        patches_dsl::validate::validate(&file).expect("validate ok");
+    }
 }
 
 #[test]

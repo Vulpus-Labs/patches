@@ -20,11 +20,10 @@ commit *EXTRA:
     cargo clippy {{inner_crates}} {{EXTRA}} -- -D warnings
 
 # Pre-push: full workspace gate.
+# Phase wall times + per-crate cargo --timings, assembled into
+# target/cargo-timings/push-report.html.
 push:
-    cargo build --workspace
-    cargo test --workspace
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo run -q -p patches-forbidden-edges --bin forbidden-edges
+    ./tools/run-push.sh
 
 # Smoke: push + slow / integration / plugin scanner / LSP / CLAP suites.
 smoke: push

@@ -29,9 +29,10 @@ fn host_control_in_template_emits_st0032() {
 
 #[test]
 fn host_control_missing_required_field_emits_st0033() {
-    // Knob requires `low` *and* `high`; omitting both forces ST0033.
+    // Toggle requires `default`; omitting it forces ST0033. (Knob /
+    // slider no longer have any required fields — ticket 0868.)
     let tmp = TempDir::new("hc_missing");
-    tmp.write("a.patches", "patch { knob k { } }\n");
+    tmp.write("a.patches", "patch { toggle t { } }\n");
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");
     let src = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
@@ -115,30 +116,32 @@ fn hover_on_tilde_name_reference_resolves_to_declaration() {
 }
 
 #[test]
-fn hover_on_unresolved_tilde_name_reference_returns_explanatory_text() {
-    // `~cutoff` referenced but never declared. Hover still fires
-    // (explanatory message) so the editor can guide the user.
+fn hover_on_implicit_tilde_name_reference_renders_implicit_knob() {
+    // `~cutoff` referenced without a declaration: the desugarer
+    // synthesises an implicit `knob cutoff {}` block (ticket 0868), and
+    // hover reflects that.
     let src = "patch {\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n";
-    let tmp = TempDir::new("hover_ref_unresolved");
+    let tmp = TempDir::new("hover_ref_implicit");
     tmp.write("a.patches", src);
     let ws = DocumentWorkspace::new();
     let uri = tmp.uri("a.patches");
     let _ = ws.analyse_flat(&uri, src.to_string());
 
     let pos = position_at(src, "cutoff -> flt", 0);
-    let h = ws.hover(&uri, pos).expect("hover on unresolved ref");
+    let h = ws.hover(&uri, pos).expect("hover on implicit ref");
     let body = hover_value(&h);
     assert!(body.contains("cutoff"), "body: {body}");
     assert!(
-        body.to_lowercase().contains("no") || body.contains("declares"),
-        "expected explanatory text for unresolved ref: {body}",
+        body.contains("knob") && body.to_lowercase().contains("implicit"),
+        "expected implicit-knob hover text: {body}",
     );
 }
 
 #[test]
-fn tilde_name_reference_to_undeclared_host_control_emits_st0037() {
-    // `~cutoff` is referenced but never declared as a knob/slider/etc.
-    let tmp = TempDir::new("hc_unknown_ref");
+fn tilde_name_reference_without_declaration_does_not_diagnose() {
+    // Ticket 0868: `~cutoff` without a preceding declaration is no
+    // longer an error — the desugarer synthesises an implicit knob.
+    let tmp = TempDir::new("hc_implicit_ref");
     tmp.write(
         "a.patches",
         "patch {\n    module flt : Svf\n    ~cutoff -> flt.cv\n}\n",
@@ -148,8 +151,8 @@ fn tilde_name_reference_to_undeclared_host_control_emits_st0037() {
     let src = std::fs::read_to_string(uri.to_file_path().unwrap()).unwrap();
     let diags = ws.analyse_flat(&uri, src);
     assert!(
-        has_code(&diags, "ST0037"),
-        "expected ST0037 host-control unknown ref, got: {:?}",
+        !has_code(&diags, "ST0037"),
+        "implicit ~name should not emit ST0037, got: {:?}",
         code_codes(&diags)
     );
 }

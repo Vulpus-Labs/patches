@@ -13,7 +13,6 @@ use patches_dsl::host_control_desugar::{
     desugar_host_controls, AUDIO_OUT, SYNTH_HOST_CONTROL, TRIGGER_OUT,
 };
 use patches_dsl::parse;
-use patches_dsl::StructuralCode;
 
 fn rewritten(src: &str) -> patches_dsl::ast::File {
     let file = parse(src).expect("parse ok");
@@ -158,14 +157,71 @@ fn audio_and_trigger_share_one_synth_module_with_split_ports() {
 }
 
 #[test]
-fn undeclared_tilde_name_rejected() {
+fn undeclared_tilde_name_synthesises_implicit_knob() {
+    // Ticket 0868: a `~name` reference without a preceding declaration
+    // synthesises an empty `knob name {}` block transparently.
     let src = r#"patch {
         module flt : Filter()
         ~not_declared -> flt.voct
     }"#;
-    let file = parse(src).expect("parse ok");
-    let err = desugar_host_controls(file.clone()).map(|_| ()).expect_err("desugar rejects");
-    assert_eq!(err.code, StructuralCode::HostControlUnknownRef);
+    let r = rewritten(src);
+    let m = find_module(&r, SYNTH_HOST_CONTROL).expect("synth module");
+    assert_eq!(aliases(m), vec!["not_declared"]);
+    let conn = r
+        .patch
+        .body
+        .iter()
+        .find_map(|s| if let Statement::Connection(c) = s { Some(c) } else { None })
+        .expect("connection rewritten");
+    let CableEndpoint::Port(p) = &conn.lhs else {
+        panic!("expected port lhs after rewrite, got {:?}", conn.lhs);
+    };
+    assert_eq!(p.module, SYNTH_HOST_CONTROL);
+    assert!(matches!(&p.port, PortLabel::Literal(s) if s == AUDIO_OUT));
+}
+
+#[test]
+fn implicit_and_explicit_empty_knob_identical() {
+    // Ticket 0868: implicit `~name` (no decl) and explicit empty
+    // `knob name {}` must lower to the same body and manifest.
+    let implicit_src = r#"patch {
+        module flt : Filter()
+        ~cutoff -> flt.voct
+    }"#;
+    let explicit_src = r#"patch {
+        knob cutoff { }
+        module flt : Filter()
+        ~cutoff -> flt.voct
+    }"#;
+    let (implicit_file, implicit_manifest) =
+        desugar_host_controls(parse(implicit_src).expect("parse")).expect("desugar");
+    let (explicit_file, explicit_manifest) =
+        desugar_host_controls(parse(explicit_src).expect("parse")).expect("desugar");
+
+    let im = find_module(&implicit_file, SYNTH_HOST_CONTROL).expect("synth (implicit)");
+    let em = find_module(&explicit_file, SYNTH_HOST_CONTROL).expect("synth (explicit)");
+    assert_eq!(aliases(im), aliases(em));
+    assert_eq!(
+        at_block_pair(im, "cutoff")
+            .iter()
+            .map(|(k, _)| k.name.as_str())
+            .collect::<Vec<_>>(),
+        at_block_pair(em, "cutoff")
+            .iter()
+            .map(|(k, _)| k.name.as_str())
+            .collect::<Vec<_>>(),
+    );
+
+    // Manifest: names, slots, kinds, params must match (the explicit
+    // form's empty block carries no fields either, so `params` is empty
+    // both sides).
+    assert_eq!(implicit_manifest.len(), explicit_manifest.len());
+    for (a, b) in implicit_manifest.iter().zip(explicit_manifest.iter()) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.slot, b.slot);
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.params, b.params);
+    }
 }
 
 #[test]

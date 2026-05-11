@@ -104,11 +104,10 @@ fn find_block_by_name<'tree>(
     None
 }
 
-/// Hover for a bare-name reference (`cutoff -> flt.cv`). Renders the
-/// linked declaration's content, or falls back to a "no matching
-/// declaration" note for unresolved refs (rather than returning
-/// `None`, so the editor still gets a tooltip explaining the
-/// situation).
+/// Hover for a bare-name reference (`~cutoff -> flt.cv`). Renders the
+/// linked declaration's content; for an undeclared name the desugarer
+/// synthesises an implicit `knob name {}` block (ticket 0868) and
+/// hover reflects that implicit form.
 pub(crate) fn hover_for_ref(
     node: Node<'_>,
     source: &str,
@@ -131,7 +130,7 @@ pub(crate) fn hover_for_ref(
     let body = match find_block_by_name(root, name, source) {
         Some(block) => render_block(block, source, &format!("→ `{name}`\n\n")),
         None => format!(
-            "**`~{name}`**\n\nHost-control reference, but no `knob` / `slider` / `toggle` / `trigger` block declares `{name}`."
+            "→ `{name}`\n\n**`knob {name}`** _(implicit)_\n\nNo declaration; the desugarer synthesises an empty `knob {name} {{}}` block.",
         ),
     };
     Some(Hover {

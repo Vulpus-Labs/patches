@@ -18,6 +18,12 @@
 //! `trigger_out` by the declared kind. Declaration statements are
 //! consumed (not re-emitted).
 //!
+//! A `~name` reference without a matching declaration is not an error
+//! (ticket 0868): the desugarer synthesises an implicit `knob name {}`
+//! block at the first reference span. Implicit and explicit empty-knob
+//! forms travel the same downstream code path and produce identical
+//! [`FlatPatch`] output.
+//!
 //! The `~` reserved-prefix rule (ADR 0054 §2) is what guarantees the
 //! synthetic instance name cannot collide with user modules — pest
 //! rejects `~` inside identifiers.
@@ -31,7 +37,6 @@ use crate::host_control_manifest::{
     HostControlParamMap, HostControlParamValue,
 };
 use crate::provenance::Provenance;
-use crate::structural::StructuralCode as Code;
 
 /// Synthesised host-control module instance name.
 pub const SYNTH_HOST_CONTROL: &str = "~host_control";
@@ -55,13 +60,14 @@ fn out_port(kind: HostControlKind) -> &'static str {
 /// to a `PortRef` on the synth instance. Consumes `file`, mutating its
 /// body in place when host controls exist; returns it unchanged otherwise.
 ///
-/// If the patch contains no host-control declarations, returns the file
-/// unchanged (and rejects any stray bare-name reference).
+/// If the patch has no declarations and no bare-name references, returns
+/// the file unchanged.
 pub fn desugar_host_controls(
     mut file: File,
 ) -> Result<(File, HostControlManifest), ExpandError> {
-    // 1. Collect declarations from the patch body. Clone (cheap on the
-    //    declaration; rejected stmts disappear in step 4 either way).
+    // 1. Collect explicit declarations from the patch body. Clone (cheap
+    //    on the declaration; rejected stmts disappear in step 5 either
+    //    way).
     let mut decls: Vec<HostControlBlock> = file
         .patch
         .body
@@ -72,24 +78,52 @@ pub fn desugar_host_controls(
         })
         .collect();
 
+    // 2. Synthesise implicit `knob name {}` blocks for every bare-name
+    //    reference without a matching declaration (ticket 0868). The
+    //    span is the first reference site; field list is empty, so the
+    //    implicit form is byte-identical to an explicit `knob name {}`
+    //    downstream.
+    let explicit_names: std::collections::HashSet<&str> =
+        decls.iter().map(|hc| hc.name.name.as_str()).collect();
+    let mut implicit: Vec<(String, Span)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for stmt in &file.patch.body {
+        let Statement::Connection(c) = stmt else { continue };
+        for ep in [&c.lhs, &c.rhs] {
+            if let CableEndpoint::HostControlRef(id) = ep {
+                if !explicit_names.contains(id.name.as_str())
+                    && seen.insert(id.name.clone())
+                {
+                    implicit.push((id.name.clone(), id.span));
+                }
+            }
+        }
+    }
+    for (name, span) in implicit {
+        decls.push(HostControlBlock {
+            kind: HostControlKind::Knob,
+            kind_span: span,
+            name: Ident { name, span },
+            fields: Vec::new(),
+            span,
+        });
+    }
+
     if decls.is_empty() {
-        reject_unresolved_refs(&file, &HashMap::new())?;
         return Ok((file, Vec::new()));
     }
 
-    // 2. Sort alphabetically by control name (ADR 0057 §3). Slot offset
+    // 3. Sort alphabetically by control name (ADR 0057 §3). Slot offset
     //    is the post-sort index; kind dictates the output port.
     decls.sort_by(|a, b| a.name.name.cmp(&b.name.name));
 
-    // 3. Build name → kind lookup for endpoint rewriting.
+    // 4. Build name → kind lookup for endpoint rewriting.
     let lookup: HashMap<String, HostControlKind> = decls
         .iter()
         .map(|hc| (hc.name.name.clone(), hc.kind))
         .collect();
 
-    reject_unresolved_refs(&file, &lookup)?;
-
-    // 4. Build new body: synth module first, then the original body
+    // 5. Build new body: synth module first, then the original body
     //    minus consumed declarations and with bare-name refs rewritten.
     let original_body = std::mem::take(&mut file.patch.body);
     let mut new_body: Vec<Statement> = Vec::with_capacity(original_body.len() + 1);
@@ -131,32 +165,6 @@ fn build_manifest(decls: &[&HostControlBlock]) -> HostControlManifest {
             }
         })
         .collect()
-}
-
-fn reject_unresolved_refs(
-    file: &File,
-    lookup: &HashMap<String, HostControlKind>,
-) -> Result<(), ExpandError> {
-    for stmt in &file.patch.body {
-        let Statement::Connection(c) = stmt else { continue };
-        for ep in [&c.lhs, &c.rhs] {
-            if let CableEndpoint::HostControlRef(id) = ep {
-                if !lookup.contains_key(&id.name) {
-                    return Err(ExpandError::new(
-                        Code::HostControlUnknownRef,
-                        id.span,
-                        format!(
-                            "bare reference to undeclared host control {:?}; \
-                             declare a top-level `knob` / `slider` / `toggle` / \
-                             `trigger` block with this name first",
-                            id.name
-                        ),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn synth_module(decls: &[&HostControlBlock]) -> ModuleDecl {
@@ -222,8 +230,9 @@ fn rewrite_endpoint(
     match ep {
         CableEndpoint::Port(_) | CableEndpoint::Tap(_) => ep.clone(),
         CableEndpoint::HostControlRef(id) => {
-            // Unresolved refs were rejected up-front; lookup is total.
-            let kind = *lookup.get(&id.name).expect("ref already validated");
+            // Every bare ref has an explicit or synthesised implicit
+            // declaration by this point, so the lookup is total.
+            let kind = *lookup.get(&id.name).expect("ref resolved by decl synthesis");
             CableEndpoint::Port(PortRef {
                 module: SYNTH_HOST_CONTROL.to_owned(),
                 port: PortLabel::Literal(out_port(kind).to_owned()),

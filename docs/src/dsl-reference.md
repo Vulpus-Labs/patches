@@ -227,6 +227,70 @@ A mono Audio source feeding a stereo input is silently broadcast
 genuinely wants the two halves apart they go through `StereoSplitter`,
 and `StereoJoiner` assembles two monos back into one stereo cable.
 
+## Host controls
+
+A **host control** is a named source surfaced to the plugin host
+(CLAP parameter, knob row in the CLI). Four kinds, declared at the
+top of `patch { ... }`:
+
+```patches
+patch {
+    knob    cutoff   { displayName: "Cutoff" }
+    slider  mix      { default: 0.5 }
+    toggle  bypass   { default: false }
+    trigger fire     { }
+}
+```
+
+- `knob` / `slider` produce a smoothed audio-rate signal in
+  `[-1, 1]`.
+- `toggle` produces a stepped 0 / 1 signal; `default` is required.
+- `trigger` produces one-sample pulses fired by the host; no
+  required fields.
+
+### Fields
+
+| Field          | Kinds                  | Optional           | Notes                                                  |
+| -------------- | ---------------------- | ------------------ | ------------------------------------------------------ |
+| `displayName`  | all                    | yes                | Surface label for the host UI.                         |
+| `unit`         | knob / slider          | yes                | Hint for value formatting.                             |
+| `default`      | knob / slider / toggle | knob / slider only | Toggle requires `default`; others optional.            |
+| `low` / `high` | knob / slider          | yes                | Display-only metadata. Runtime mapping is the cable    |
+|                |                        |                    | range operator's job (see *Range-mapped connections*). |
+| `taper`        | knob / slider          | yes                | UI taper hint (`linear`, `exp`).                       |
+
+### References
+
+A `~name` reference on a cable endpoint connects the host control to
+a port:
+
+```patches
+patch {
+    knob cutoff { }
+    module filt : Svf
+    ~cutoff -[uni(20Hz, 8kHz)]-> filt.cutoff
+}
+```
+
+The cable carries the normalized `[-1, 1]` value; the range operator
+remaps it to the destination's musical units.
+
+### Implicit knob
+
+If a `~name` cable endpoint has no matching declaration, the
+desugarer synthesises an empty `knob name {}` block:
+
+```patches
+patch {
+    module filt : Svf
+    ~cutoff -[uni(20Hz, 8kHz)]-> filt.cutoff   # implicit knob `cutoff`
+}
+```
+
+Implicit and explicit empty-knob forms lower to the same patch. To
+surface a `slider`, `toggle`, or `trigger` instead, declare it
+explicitly — only `knob` is implicit.
+
 ## Templates
 
 Templates define reusable sub-graphs that are expanded at compile time with no runtime cost.
