@@ -6,6 +6,7 @@ use patches_core::{
     AudioEnvironment, CablePool, CableValue, InstanceId, Module, ModuleShape,
     PolyInput, PolyOutput, COEFF_UPDATE_INTERVAL, SCRATCH_CAPACITY,
 };
+use patches_core::test_support::reserved_scratch;
 
 /// Absolute `cable_idx` for cycle logical slot `i` (ADR 0072 phase 5).
 const fn cidx(i: usize) -> usize { SCRATCH_CAPACITY + i }
@@ -104,10 +105,11 @@ fn set_center_cv_ports(m: &mut Box<dyn Module>) {
 
 fn settle(m: &mut Box<dyn Module>, n: usize) {
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     for i in 0..n {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([0.0; 16]);
-        m.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        m.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
 }
 
@@ -119,12 +121,13 @@ fn measure_peak_all_voices(
     n: usize,
 ) -> [f32; 16] {
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     let mut peaks = [0.0f32; 16];
     for i in 0..n {
         let wi = i % 2;
         let x = (TAU * freq_hz * i as f32 / sr).sin();
         pool[0][1 - wi] = CableValue::poly([x; 16]);
-        m.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        m.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
         { let v = pool[4][wi].as_poly();
             for j in 0..16 {
                 peaks[j] = peaks[j].max(v[j].abs());
@@ -142,17 +145,18 @@ fn poly_lowpass_all_voices_pass_dc() {
     let mut f = make_lowpass_sr(6.0, 0.0, sr);
     set_static_ports(&mut f);
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     // 4096 silent samples
     for i in 0..4096 {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([0.0; 16]);
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
     // 4096 DC samples
     for i in 0..4096 {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([1.0; 16]);
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
     let v = pool[4][(4095) % 2].as_poly();
     for (i, &ch) in v.iter().enumerate() {
@@ -191,15 +195,16 @@ fn poly_lowpass_voices_are_independent_with_cv() {
     cv[15] = -2.0;
 
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     // Settle with CV applied
     for i in 0..4096 {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
     // Measure peaks with CV applied
     let mut peaks = [0.0f32; 16];
@@ -209,9 +214,9 @@ fn poly_lowpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::poly([x; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
         { let v = pool[4][wi].as_poly();
             for j in 0..16 {
                 peaks[j] = peaks[j].max(v[j].abs());
@@ -269,14 +274,15 @@ fn poly_highpass_voices_are_independent_with_cv() {
     cv[0] = 1.0; // voice 0: cutoff→C6≈1047 Hz, test_freq now in stop-band
 
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     for i in 0..4096 {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
     let mut peaks = [0.0f32; 16];
     for i in 0..4096usize {
@@ -285,9 +291,9 @@ fn poly_highpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::poly([x; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
         { let v = pool[4][wi].as_poly();
             for j in 0..16 {
                 peaks[j] = peaks[j].max(v[j].abs());
@@ -373,14 +379,15 @@ fn poly_bandpass_voices_are_independent_with_cv() {
     cv[0] = 1.0; // voice 0: centre→C7≈2093 Hz
 
     let mut pool = make_poly_pool(5);
+    let mut scratch = reserved_scratch();
     for i in 0..4096 {
         let wi = i % 2;
         pool[0][1 - wi] = CableValue::poly([0.0; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
     }
     let mut peaks = [0.0f32; 16];
     for i in 0..4096usize {
@@ -389,9 +396,9 @@ fn poly_bandpass_voices_are_independent_with_cv() {
         pool[0][1 - wi] = CableValue::poly([x; 16]);
         pool[1][1 - wi] = CableValue::poly(cv);
         if i % COEFF_UPDATE_INTERVAL as usize == 0 {
-            f.periodic_update(&CablePool::with_cycle_only(&mut pool, wi));
+            f.periodic_update(&CablePool::new(&mut scratch, &mut pool, wi));
         }
-        f.process(&mut CablePool::with_cycle_only(&mut pool, wi));
+        f.process(&mut CablePool::new(&mut scratch, &mut pool, wi));
         { let v = pool[4][wi].as_poly();
             for j in 0..16 {
                 peaks[j] = peaks[j].max(v[j].abs());

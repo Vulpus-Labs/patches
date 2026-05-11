@@ -43,28 +43,17 @@ impl<'a> CablePool<'a> {
     /// backing stores at write index `wi`.
     ///
     /// `scratch.len()` must cover every scratch-region `cable_idx` in
-    /// use (typically `SCRATCH_CAPACITY` in production). `cycle.len()`
-    /// must cover every cycle producer (typically `CYCLE_CAPACITY`).
-    /// Tests that don't exercise scratch may pass a short slice and
-    /// keep all cable_idx values in the cycle region (or use
-    /// [`with_cycle_only`](Self::with_cycle_only)).
+    /// use — at minimum `RESERVED_SLOTS` so the sink + backplane reads
+    /// stay in bounds. In production the engine sizes this at
+    /// `SCRATCH_CAPACITY`; tests use
+    /// [`patches_core::test_support::reserved_scratch`] for the
+    /// reserved-only minimum. `cycle.len()` must cover every cycle
+    /// producer (typically `CYCLE_CAPACITY`).
     pub fn new(
         scratch: &'a mut [CableValue],
         cycle: &'a mut [[CableValue; 2]],
         wi: usize,
     ) -> Self {
-        Self { scratch, cycle, wi }
-    }
-
-    /// Convenience constructor for callers that only exercise cycle
-    /// slots (predominantly tests and benches built before the
-    /// scratch region existed).
-    ///
-    /// The scratch slice is set to a static empty slice; any
-    /// `cable_idx < SCRATCH_CAPACITY` access will hit a debug bounds
-    /// check from the empty scratch.
-    pub fn with_cycle_only(cycle: &'a mut [[CableValue; 2]], wi: usize) -> Self {
-        let scratch: &'a mut [CableValue] = &mut [];
         Self { scratch, cycle, wi }
     }
 

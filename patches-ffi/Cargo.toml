@@ -15,4 +15,5 @@ libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+patches-core = { path = "../patches-core", features = ["test-support"] }
 test-gain-plugin = { path = "../test-plugins/gain" }

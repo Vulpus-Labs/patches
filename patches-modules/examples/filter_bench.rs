@@ -12,45 +12,52 @@ use std::time::Instant;
 
 use patches_core::{
     AudioEnvironment, CablePool, CableValue, InputPort, InstanceId, Module,
-    ModuleShape, OutputPort, PolyInput, PolyOutput, POLY_READ_SINK, POLY_WRITE_SINK,
+    ModuleShape, OutputPort, PolyInput, PolyOutput, POLY_READ_SINK,
+    RESERVED_SLOTS, SCRATCH_CAPACITY,
 };
 use patches_core::parameter_map::ParameterMap;
 use patches_modules::{PolyResonantLowpass, PolySvf};
 
 // ── Pool slot constants ────────────────────────────────────────────────────
+//
+// Bench uses cycle slots for the signal and outputs so we exercise the
+// ping-pong read path (matches the engine's behaviour for cables with
+// at least one delayed consumer). Absolute `cable_idx` is
+// `SCRATCH_CAPACITY + logical`. Disconnected CV inputs route to
+// `POLY_READ_SINK` (scratch[1]) via `PolyInput::default()`, which
+// flags `fused: true`.
 
-const POOL_SIZE: usize = 20;
+const CYCLE_POOL_SIZE: usize = 4;
 
-/// Slot holding the audio input signal (filled with a constant test value).
-const SIGNAL_SLOT: usize = 16;
-/// Slot for the first output.
-const OUT1_SLOT: usize = 17;
-/// Slot for the second output (used by PolySvf bandpass/highpass).
-const OUT2_SLOT: usize = 18;
-/// Slot for the third output (used by PolySvf).
-const OUT3_SLOT: usize = 19;
+const SIGNAL_LOGICAL: usize = 0;
+const OUT1_LOGICAL: usize = 1;
+const OUT2_LOGICAL: usize = 2;
+const OUT3_LOGICAL: usize = 3;
+
+const fn cidx(i: usize) -> usize { SCRATCH_CAPACITY + i }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn make_pool() -> Vec<[CableValue; 2]> {
-    let mono_zero = CableValue::mono(0.0);
+fn make_pool() -> (Vec<CableValue>, Vec<[CableValue; 2]>) {
     let poly_zero = CableValue::poly([0.0f32; 16]);
     let signal    = CableValue::poly([0.3f32; 16]);
 
-    let mut pool = vec![[mono_zero; 2]; POOL_SIZE];
-    // Reserved poly slots (MONO_READ_SINK=0 and MONO_WRITE_SINK=2 stay Mono(0.0))
-    pool[POLY_READ_SINK]  = [poly_zero; 2]; // 1
-    pool[POLY_WRITE_SINK] = [poly_zero; 2]; // 3
-    // Signal input: write into both ping-pong slots so both wi=0 and wi=1 see the signal
-    pool[SIGNAL_SLOT] = [signal; 2];
-    pool[OUT1_SLOT]   = [poly_zero; 2];
-    pool[OUT2_SLOT]   = [poly_zero; 2];
-    pool[OUT3_SLOT]   = [poly_zero; 2];
-    pool
+    let mut scratch = vec![CableValue::mono(0.0); RESERVED_SLOTS];
+    scratch[POLY_READ_SINK] = poly_zero;
+
+    let mut cycle = vec![[poly_zero; 2]; CYCLE_POOL_SIZE];
+    cycle[SIGNAL_LOGICAL] = [signal; 2];
+    (scratch, cycle)
 }
 
 fn poly_in(cable_idx: usize, connected: bool) -> InputPort {
-    InputPort::Poly(PolyInput { cable_idx, scale: 1.0, offset: 0.0, clip: None, connected, fused: false })
+    if connected {
+        InputPort::Poly(PolyInput {
+            cable_idx, scale: 1.0, offset: 0.0, clip: None, connected: true, fused: false,
+        })
+    } else {
+        InputPort::Poly(PolyInput::default())
+    }
 }
 
 fn poly_out(cable_idx: usize, connected: bool) -> OutputPort {
@@ -58,11 +65,16 @@ fn poly_out(cable_idx: usize, connected: bool) -> OutputPort {
 }
 
 /// Run the module for `n` samples, alternating wi, and return elapsed time.
-fn time_process(module: &mut dyn Module, pool: &mut [[CableValue; 2]], n: u64) -> std::time::Duration {
+fn time_process(
+    module: &mut dyn Module,
+    scratch: &mut [CableValue],
+    cycle: &mut [[CableValue; 2]],
+    n: u64,
+) -> std::time::Duration {
     let mut wi = 0usize;
     let t0 = Instant::now();
     for _ in 0..n {
-        let mut cp = CablePool::with_cycle_only(pool, wi);
+        let mut cp = CablePool::new(scratch, cycle, wi);
         module.process(&mut cp);
         wi = 1 - wi;
     }
@@ -86,24 +98,24 @@ fn bench_poly_lowpass(saturate: bool) {
         InstanceId::next(),
     ).expect("build failed");
 
-    // Wire: audio input → SIGNAL_SLOT (connected), all CV → disconnected, output → OUT1_SLOT
+    // Wire: audio input → SIGNAL cycle slot, all CV → disconnected, output → OUT1 cycle slot.
     let inputs = vec![
-        poly_in(SIGNAL_SLOT, true),  // in
+        poly_in(cidx(SIGNAL_LOGICAL), true),  // in
         poly_in(POLY_READ_SINK, false), // voct
         poly_in(POLY_READ_SINK, false), // fm
         poly_in(POLY_READ_SINK, false), // resonance_cv
     ];
-    let outputs = vec![poly_out(OUT1_SLOT, true)];
+    let outputs = vec![poly_out(cidx(OUT1_LOGICAL), true)];
     module.set_ports(&inputs, &outputs);
 
-    let mut pool = make_pool();
+    let (mut scratch, mut cycle) = make_pool();
 
     // Warmup
-    time_process(&mut module, &mut pool, 10_000);
+    time_process(&mut module, &mut scratch, &mut cycle, 10_000);
 
     // Measure
     const N: u64 = 2_000_000;
-    let elapsed = time_process(&mut module, &mut pool, N);
+    let elapsed = time_process(&mut module, &mut scratch, &mut cycle, N);
     let ns_per_sample = elapsed.as_nanos() as f64 / N as f64;
 
     let label = if saturate { "PolyLowpass (saturate)" } else { "PolyLowpass (no-sat) " };
@@ -128,26 +140,26 @@ fn bench_poly_svf() {
 
     // Wire: audio input connected, all CV disconnected, all 3 outputs connected
     let inputs = vec![
-        poly_in(SIGNAL_SLOT, true),
+        poly_in(cidx(SIGNAL_LOGICAL), true),
         poly_in(POLY_READ_SINK, false), // voct
         poly_in(POLY_READ_SINK, false), // fm
         poly_in(POLY_READ_SINK, false), // q_cv
     ];
     let outputs = vec![
-        poly_out(OUT1_SLOT, true),  // lowpass
-        poly_out(OUT2_SLOT, true),  // highpass
-        poly_out(OUT3_SLOT, true),  // bandpass
+        poly_out(cidx(OUT1_LOGICAL), true),  // lowpass
+        poly_out(cidx(OUT2_LOGICAL), true),  // highpass
+        poly_out(cidx(OUT3_LOGICAL), true),  // bandpass
     ];
     module.set_ports(&inputs, &outputs);
 
-    let mut pool = make_pool();
+    let (mut scratch, mut cycle) = make_pool();
 
     // Warmup
-    time_process(&mut module, &mut pool, 10_000);
+    time_process(&mut module, &mut scratch, &mut cycle, 10_000);
 
     // Measure
     const N: u64 = 2_000_000;
-    let elapsed = time_process(&mut module, &mut pool, N);
+    let elapsed = time_process(&mut module, &mut scratch, &mut cycle, N);
     let ns_per_sample = elapsed.as_nanos() as f64 / N as f64;
 
     println!("PolySvf              : {:6.1} ns/sample  ({:.3} ms total over {N} samples)", ns_per_sample, elapsed.as_secs_f64() * 1000.0);

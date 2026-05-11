@@ -100,6 +100,8 @@ const fn cycle_idx(i: usize) -> usize {
     super::SCRATCH_CAPACITY + i
 }
 
+use crate::test_support::reserved_scratch;
+
 // ── GateInput ────────────────────────────────────────────────────────
 
 #[test]
@@ -112,7 +114,8 @@ fn gate_rising_and_falling_edges() {
 
     // Low → no edges
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let e = g.tick(&cp);
         assert!(!e.rose);
         assert!(!e.fell);
@@ -122,7 +125,8 @@ fn gate_rising_and_falling_edges() {
     // Go high → rising edge
     pool[0] = [CableValue::mono(1.0); 2];
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let e = g.tick(&cp);
         assert!(e.rose);
         assert!(!e.fell);
@@ -131,7 +135,8 @@ fn gate_rising_and_falling_edges() {
 
     // Stay high → no edges, still high
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let e = g.tick(&cp);
         assert!(!e.rose);
         assert!(!e.fell);
@@ -141,7 +146,8 @@ fn gate_rising_and_falling_edges() {
     // Go low → falling edge
     pool[0] = [CableValue::mono(0.0); 2];
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let e = g.tick(&cp);
         assert!(!e.rose);
         assert!(e.fell);
@@ -154,7 +160,8 @@ fn gate_rising_and_falling_edges() {
 #[test]
 fn sub_trigger_zero_is_no_event() {
     let mut pool = make_cable_pool(&[CableValue::mono(0.0)]);
-    let cp = CablePool::with_cycle_only(&mut pool, 0);
+    let mut scratch = reserved_scratch();
+    let cp = CablePool::new(&mut scratch, &mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
@@ -164,7 +171,8 @@ fn sub_trigger_zero_is_no_event() {
 #[test]
 fn sub_trigger_positive_is_event_with_frac() {
     let mut pool = make_cable_pool(&[CableValue::mono(0.37)]);
-    let cp = CablePool::with_cycle_only(&mut pool, 0);
+    let mut scratch = reserved_scratch();
+    let cp = CablePool::new(&mut scratch, &mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
@@ -174,7 +182,8 @@ fn sub_trigger_positive_is_event_with_frac() {
 #[test]
 fn sub_trigger_one_is_boundary_event() {
     let mut pool = make_cable_pool(&[CableValue::mono(1.0)]);
-    let cp = CablePool::with_cycle_only(&mut pool, 0);
+    let mut scratch = reserved_scratch();
+    let cp = CablePool::new(&mut scratch, &mut pool, 0);
     let t = TriggerInput {
         inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
@@ -187,7 +196,8 @@ fn poly_sub_trigger_per_voice() {
     channels[0] = 0.25;
     channels[5] = 0.9;
     let mut pool = make_cable_pool(&[CableValue::poly(channels)]);
-    let cp = CablePool::with_cycle_only(&mut pool, 0);
+    let mut scratch = reserved_scratch();
+    let cp = CablePool::new(&mut scratch, &mut pool, 0);
     let t = PolyTriggerInput {
         inner: PolyInput::scalar(cycle_idx(0), 1.0),
     };
@@ -254,7 +264,8 @@ fn poly_gate_per_voice_edges() {
 
     // All low
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let _ = g.tick(&cp);
     }
 
@@ -263,7 +274,8 @@ fn poly_gate_per_voice_edges() {
     channels[2] = 1.0;
     pool[0] = [CableValue::poly(channels); 2];
     {
-        let cp = CablePool::with_cycle_only(&mut pool, 0);
+        let mut scratch = reserved_scratch();
+        let cp = CablePool::new(&mut scratch, &mut pool, 0);
         let result = g.tick(&cp);
         assert!(result[2].rose);
         assert!(result[2].is_high);

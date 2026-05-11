@@ -625,7 +625,8 @@ mod tests {
         let mut ready = stale.rebuild(&plan, 32);
 
         let mut bufs = make_buf_pool(1);
-        let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
+        let mut scratch = patches_core::test_support::reserved_scratch();
+        let mut cable_pool = CablePool::new(&mut scratch, &mut bufs, 0);
         ready.tick(&mut cable_pool);
         // No panic = success; empty plan with no modules just works.
     }
@@ -675,7 +676,8 @@ mod tests {
         let mut ready = stale.rebuild(&plan, 32);
 
         let mut bufs = make_buf_pool(1);
-        let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
+        let mut scratch = patches_core::test_support::reserved_scratch();
+        let mut cable_pool = CablePool::new(&mut scratch, &mut bufs, 0);
         ready.tick(&mut cable_pool);
 
         assert_eq!(count_a.load(Ordering::Relaxed), 1);
@@ -694,7 +696,8 @@ mod tests {
 
         let mut bufs = make_buf_pool(1);
         {
-            let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
+            let mut scratch = patches_core::test_support::reserved_scratch();
+        let mut cable_pool = CablePool::new(&mut scratch, &mut bufs, 0);
             ready.tick(&mut cable_pool);
         }
 
@@ -725,7 +728,8 @@ mod tests {
 
         let mut bufs = make_buf_pool(1);
         {
-            let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
+            let mut scratch = patches_core::test_support::reserved_scratch();
+        let mut cable_pool = CablePool::new(&mut scratch, &mut bufs, 0);
             ready2.tick(&mut cable_pool);
         }
 
