@@ -7,10 +7,12 @@ use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput, St
 /// ## Layout: scratch low, cycle high (ADR 0072 phase 5, ticket 0860)
 ///
 /// - **Scratch region** `[0, SCRATCH_CAPACITY)` —
-///   `scratch: &[CableValue]`. Sinks (`[0, SINK_SLOTS)`), backplane
-///   (`[SINK_SLOTS, RESERVED_SLOTS)`), and dyn cables whose every
-///   consumer is fused (`[RESERVED_SLOTS, SCRATCH_CAPACITY)`). One
-///   slot per cable — no read ever needs last tick's value.
+///   `scratch: &[CableValue]`. Backplane
+///   (`[0, RESERVED_SLOTS - SINK_SLOTS)`), sinks
+///   (`[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`), and dyn cables
+///   whose every consumer is fused
+///   (`[RESERVED_SLOTS, SCRATCH_CAPACITY)`). One slot per cable — no
+///   read ever needs last tick's value.
 /// - **Cycle region** `[SCRATCH_CAPACITY, SCRATCH_CAPACITY +
 ///   CYCLE_CAPACITY)` — `cycle: &[[CableValue; 2]]`. Backs cables
 ///   whose producer port has at least one delayed (non-fused)

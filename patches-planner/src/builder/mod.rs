@@ -36,6 +36,15 @@ pub enum BuildErrorKind {
     ModulePoolExhausted,
     /// Module creation failed (unknown module name or parameter validation error).
     ModuleCreationError(String),
+    /// A port on an FFI plugin module resolved to a backplane scratch
+    /// slot (ticket 0870). FFI plugins cannot address the backplane; the
+    /// user must wire through an in-tree module instead (e.g. `AudioOut`).
+    BackplaneBoundFfiPort {
+        module_name: &'static str,
+        port_kind: &'static str,
+        cable_idx: usize,
+        scratch_base_offset: usize,
+    },
 }
 
 /// An engine-builder error, optionally tagged with the DSL provenance of the
@@ -71,6 +80,14 @@ impl fmt::Display for BuildError {
             BuildErrorKind::PoolExhausted => write!(f, "buffer pool exhausted: too many output ports"),
             BuildErrorKind::ModulePoolExhausted => write!(f, "module pool exhausted: too many modules"),
             BuildErrorKind::ModuleCreationError(msg) => write!(f, "module creation failed: {msg}"),
+            BuildErrorKind::BackplaneBoundFfiPort {
+                module_name, port_kind, cable_idx, scratch_base_offset,
+            } => write!(
+                f,
+                "FFI plugin '{module_name}' has a {port_kind} bound to backplane \
+                 cable_idx {cable_idx} (< {scratch_base_offset}); FFI plugins cannot \
+                 address backplane slots — wire through an in-tree module instead",
+            ),
         }
     }
 }
@@ -335,6 +352,52 @@ fn partition_inputs(resolved: Vec<(usize, CableMap, bool)>) -> PartitionedInputs
         }
     }
     (unscaled, scaled)
+}
+
+/// Reject any input/output port whose resolved scratch `cable_idx` falls
+/// below the module's `scratch_base_offset` (ticket 0870). `offset == 0`
+/// (built-ins) is the fast path: skip the scan entirely. Cycle indices
+/// (`>= SCRATCH_CAPACITY`) are always allowed and ignored.
+pub(crate) fn check_ffi_port_offsets(
+    module_name: &'static str,
+    scratch_base_offset: usize,
+    inputs: &[InputPort],
+    outputs: &[OutputPort],
+) -> Result<(), BuildErrorKind> {
+    if scratch_base_offset == 0 {
+        return Ok(());
+    }
+    for ip in inputs {
+        let idx = match ip {
+            InputPort::Mono(m) => m.cable_idx,
+            InputPort::Poly(p) => p.cable_idx,
+            InputPort::Stereo(s) => s.cable_idx,
+        };
+        if idx < patches_core::cables::SCRATCH_CAPACITY && idx < scratch_base_offset {
+            return Err(BuildErrorKind::BackplaneBoundFfiPort {
+                module_name,
+                port_kind: "input",
+                cable_idx: idx,
+                scratch_base_offset,
+            });
+        }
+    }
+    for op in outputs {
+        let idx = match op {
+            OutputPort::Mono(m) => m.cable_idx,
+            OutputPort::Poly(p) => p.cable_idx,
+            OutputPort::Stereo(s) => s.cable_idx,
+        };
+        if idx < patches_core::cables::SCRATCH_CAPACITY && idx < scratch_base_offset {
+            return Err(BuildErrorKind::BackplaneBoundFfiPort {
+                module_name,
+                port_kind: "output",
+                cable_idx: idx,
+                scratch_base_offset,
+            });
+        }
+    }
+    Ok(())
 }
 
 // ── PatchBuilder ──────────────────────────────────────────────────────────────
@@ -615,7 +678,7 @@ impl PatchBuilder {
             // `Update` move directly into the corresponding diff collections
             // — matches the destructive-read convention used downstream by
             // `Module::update_validated_parameters(&mut ParameterMap)`.
-            let (is_periodic, node_layout, node_view_index, node_structural) = match decision {
+            let (is_periodic, scratch_base_offset, node_layout, node_view_index, node_structural) = match decision {
                 NodeDecision::Install { structural, .. } => {
                     let mut fresh = fresh_modules.remove(&id).ok_or_else(|| {
                         BuildErrorKind::InternalError(format!(
@@ -629,20 +692,33 @@ impl PatchBuilder {
                     })?;
                     let periodic = fresh.wants_periodic();
                     if periodic { periodic_indices.push(pool_index); }
+                    let offset = fresh.scratch_base_offset();
+                    check_ffi_port_offsets(desc.module_name, offset, &input_ports, &output_ports)
+                        .map_err(BuildError::new)?;
                     fresh.set_ports(&input_ports, &output_ports);
                     new_modules.push((pool_index, fresh));
                     let layout = param_state.layout.clone();
                     let view_index = param_state.view_index.clone();
                     new_module_param_state.push(param_state);
-                    (periodic, layout, view_index, structural)
+                    (periodic, offset, layout, view_index, structural)
                 }
                 NodeDecision::Update { param_diff, .. } => {
                     let prev_ns = &prev_state.nodes[&id];
                     let ports_changed = prev_ns.input_ports != input_ports
                         || prev_ns.output_ports != output_ports;
                     let is_periodic = prev_ns.is_periodic;
+                    let scratch_base_offset = prev_ns.scratch_base_offset;
                     let layout = prev_ns.layout.clone();
                     let view_index = prev_ns.view_index.clone();
+                    if ports_changed {
+                        check_ffi_port_offsets(
+                            desc.module_name,
+                            scratch_base_offset,
+                            &input_ports,
+                            &output_ports,
+                        )
+                        .map_err(BuildError::new)?;
+                    }
                     if !param_diff.is_empty() {
                         // Pack a fresh frame from the node's *full* current
                         // parameter state (node.parameter_map already reflects
@@ -668,7 +744,7 @@ impl PatchBuilder {
                         port_updates.push((pool_index, input_ports.clone(), output_ports.clone()));
                     }
                     if is_periodic { periodic_indices.push(pool_index); }
-                    (is_periodic, layout, view_index, prev_ns.structural.clone())
+                    (is_periodic, scratch_base_offset, layout, view_index, prev_ns.structural.clone())
                 }
             };
 
@@ -685,6 +761,7 @@ impl PatchBuilder {
                     input_ports,
                     output_ports,
                     is_periodic,
+                    scratch_base_offset,
                     layout: node_layout,
                     view_index: node_view_index,
                     structural: node_structural,

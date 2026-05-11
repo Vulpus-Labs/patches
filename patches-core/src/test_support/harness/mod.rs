@@ -34,8 +34,9 @@ pub struct ModuleHarness {
     /// satisfy [`CablePool::new`]'s signature. Tests that need cycle
     /// slots can use [`set_pool_slot`] at `cable_idx >= SCRATCH_CAPACITY`.
     pool: Vec<[CableValue; 2]>,
-    /// Scratch region. Backs sinks (`[0, SINK_SLOTS)`), the backplane
-    /// reserved range (`[SINK_SLOTS, RESERVED_SLOTS)`), and the
+    /// Scratch region. Backs the backplane reserved range
+    /// (`[0, RESERVED_SLOTS - SINK_SLOTS)`), the sinks
+    /// (`[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`), and the
     /// harness's user input/output cables at
     /// `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs + n_outputs)`.
     /// Addressed directly by `cable_idx` (no offset).
@@ -132,11 +133,12 @@ impl ModuleHarness {
             output_connected.push(true);
         }
 
-        // Scratch region: sinks at `[0, SINK_SLOTS)`, backplane at
-        // `[SINK_SLOTS, RESERVED_SLOTS)`, harness's user input/output
-        // cables at `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs +
-        // n_outputs)`. Cable_idx addresses scratch directly with no
-        // offset (ADR 0072 phase 5).
+        // Scratch region: backplane at `[0, RESERVED_SLOTS - SINK_SLOTS)`,
+        // sinks at `[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`,
+        // harness's user input/output cables at
+        // `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs + n_outputs)`.
+        // Cable_idx addresses scratch directly with no offset
+        // (ADR 0072 phase 5, phase 6 ticket 0869).
         let scratch_size = RESERVED_SLOTS + n_inputs + n_outputs;
         let mut scratch = vec![CableValue::mono(0.0); scratch_size];
 

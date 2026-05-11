@@ -4,6 +4,13 @@
 //! Deserialized `&'static str` fields are produced by leaking `String`s via
 //! `Box::leak`. This is intentional and bounded: one set of leaked strings per
 //! module type per library load.
+//!
+//! The normative schema for these blobs is documented in the manual's
+//! [Descriptor JSON schema] page. The Rust code here is the canonical
+//! implementation; external SDKs (including non-Rust SDKs) should target the
+//! schema page.
+//!
+//! [Descriptor JSON schema]: ../../../docs/src/abi/descriptor-schema.md
 
 mod ser;
 mod de;

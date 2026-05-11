@@ -77,6 +77,14 @@ pub struct NodeState {
     /// Cached at build time from `Module::wants_periodic()` so that `periodic_indices`
     /// can be populated by the builder without access to the live module pool.
     pub is_periodic: bool,
+    /// Scratch-region cable-index offset for this module (ticket 0870).
+    ///
+    /// `0` for built-ins. FFI plugins return `BACKPLANE_SIZE`: the planner
+    /// refuses to wire any of their ports to a scratch `cable_idx` below
+    /// this offset, hiding the backplane from the plugin SDK. Cached at
+    /// install time from `Module::scratch_base_offset()` so the Update
+    /// path can re-validate ports without re-creating the module.
+    pub scratch_base_offset: usize,
     /// Parameter-plane layout for this instance. Computed once from the
     /// descriptor at install and reused across subsequent plans (deterministic
     /// from the descriptor, so re-cloning here is cheap and matches the

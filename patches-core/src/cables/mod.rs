@@ -63,51 +63,28 @@ impl Default for CableMap {
     }
 }
 
-// ── Cable-pool index space (ADR 0072 phase 5) ────────────────────────────────
+// ── Cable-pool index space (ADR 0072 phase 5, phase 6 ticket 0869) ───────────
 // One virtual number space with a single cutoff: `cable_idx < SCRATCH_CAPACITY`
 // dispatches to the scratch region, otherwise to the cycle region offset by
 // SCRATCH_CAPACITY. The low end of scratch is fixed and stable:
 //
-//   [0, SINK_SLOTS)          sinks (mono/poly read/write)
-//   [SINK_SLOTS, RESERVED_SLOTS)  backplane (audio I/O, transport, drift, midi,
-//                                 tap, host-control)
-//   [RESERVED_SLOTS, SCRATCH_CAPACITY)  dyn scratch (planner-allocated)
-//   [SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)  dyn cycle producers
-
-/// Buffer pool index of the permanent mono read-null slot.
-///
-/// Disconnected [`MonoInput`] ports resolve to this slot. Always
-/// `CableValue::mono(0.0)`; never written by any module or the planner.
-pub const MONO_READ_SINK: usize = 0;
-
-/// Buffer pool index of the permanent poly read-null slot.
-///
-/// Disconnected [`PolyInput`] ports resolve to this slot. Always
-/// `CableValue::poly([0.0; 16])`; never written by any module or the planner.
-pub const POLY_READ_SINK: usize = 1;
-
-/// Buffer pool index of the mono write-sink slot.
-///
-/// Uninitialised and disconnected [`MonoOutput`] fields point here. Writes are
-/// harmless — no module reads from this slot. Kept as `CableValue::Mono` so
-/// the pool stays well-typed.
-pub const MONO_WRITE_SINK: usize = 2;
-
-/// Buffer pool index of the poly write-sink slot.
-///
-/// Uninitialised and disconnected [`PolyOutput`] fields point here. Writes are
-/// harmless — no module reads from this slot. Kept as `CableValue::Poly` so
-/// the pool stays well-typed.
-pub const POLY_WRITE_SINK: usize = 3;
-
-/// Number of scratch-region slots reserved for read/write sinks at the
-/// bottom of the index space. Sinks live in scratch (read sinks are
-/// never written, write sinks are never read — neither needs ping-pong
-/// storage). Backplane begins at this index.
-pub const SINK_SLOTS: usize = 4;
+//   [0, RESERVED_SLOTS - SINK_SLOTS)      backplane (audio I/O, transport,
+//                                         drift, midi, tap, host-control)
+//   [RESERVED_SLOTS - SINK_SLOTS,
+//        RESERVED_SLOTS)                  sinks (mono/poly read/write)
+//   [RESERVED_SLOTS, SCRATCH_CAPACITY)    dyn scratch (planner-allocated)
+//   [SCRATCH_CAPACITY,
+//        SCRATCH_CAPACITY + CYCLE_CAPACITY) dyn cycle producers
+//
+// The backplane sits at index 0 so that the FFI plugin loader (ticket 0870)
+// can shift plugin-visible scratch past it without disturbing sink wiring.
+// Sinks sit just below `RESERVED_SLOTS` so plugin-relative `[0, SINK_SLOTS)`
+// still resolves to sink slots after the shift. The unused range between
+// the last live backplane slot and the sinks is spare capacity for future
+// backplane growth without bumping `RESERVED_SLOTS`.
 
 // ── Backplane slots ───────────────────────────────────────────────────────────
-// The backplane occupies a fixed range `[SINK_SLOTS, RESERVED_SLOTS)` at the
+// The backplane occupies the range `[0, RESERVED_SLOTS - SINK_SLOTS)` at the
 // bottom of the scratch region. Slots are inherently single-slot-shaped: the
 // engine writes each one once per tick before any module runs, and every
 // consumer reads same-tick. The audio callback reads and writes these
@@ -119,19 +96,19 @@ pub const SINK_SLOTS: usize = 4;
 ///
 /// `AudioOut` writes the left channel here each tick; the audio callback reads
 /// from this slot directly instead of going through the [`Sink`] trait.
-pub const AUDIO_OUT_L: usize = 4;
+pub const AUDIO_OUT_L: usize = 0;
 
 /// Buffer pool index of the right audio output backplane slot.
-pub const AUDIO_OUT_R: usize = 5;
+pub const AUDIO_OUT_R: usize = 1;
 
 /// Buffer pool index of the left audio input backplane slot.
 ///
 /// Reserved for a future `AudioIn` module. The audio callback will write
 /// hardware input samples here before each `tick()`.
-pub const AUDIO_IN_L: usize = 6;
+pub const AUDIO_IN_L: usize = 2;
 
 /// Buffer pool index of the right audio input backplane slot.
-pub const AUDIO_IN_R: usize = 7;
+pub const AUDIO_IN_R: usize = 3;
 
 /// Buffer pool index of the global transport backplane slot.
 ///
@@ -139,14 +116,14 @@ pub const AUDIO_IN_R: usize = 7;
 /// is defined by [`TransportFrame`](crate::TransportFrame) (ADR 0033). In
 /// standalone mode only lane 0 (sample count) is populated; the rest default
 /// to 0.0.
-pub const GLOBAL_TRANSPORT: usize = 8;
+pub const GLOBAL_TRANSPORT: usize = 4;
 
 /// Buffer pool index of the global drift backplane slot.
 ///
 /// Written by the audio callback each tick with a slowly varying
 /// `CableValue::Mono` value in `[-1, 1]`. Oscillator modules can read this
 /// to implement globally correlated analogue pitch drift.
-pub const GLOBAL_DRIFT: usize = 9;
+pub const GLOBAL_DRIFT: usize = 5;
 
 /// Buffer pool index of the global MIDI backplane slot.
 ///
@@ -154,7 +131,7 @@ pub const GLOBAL_DRIFT: usize = 9;
 /// is defined by [`MidiFrame`](crate::MidiFrame) (ADR 0033). Carries up to 5
 /// packed MIDI events per sample. Cleared to zero (count = 0) at the start of
 /// each tick before writing.
-pub const GLOBAL_MIDI: usize = 10;
+pub const GLOBAL_MIDI: usize = 6;
 
 /// Buffer pool index of the first tap backplane slot (ADR 0053 §4,
 /// ticket 0814). Four consecutive `Poly` slots starting here pack
@@ -164,7 +141,7 @@ pub const GLOBAL_MIDI: usize = 10;
 /// Lane layout: lane `slot_offset % 16` of slot
 /// `TAP_BASE + slot_offset / 16`. Stereo tap channels claim two
 /// consecutive lanes (`L` at `slot_offset`, `R` at `slot_offset + 1`).
-pub const TAP_BASE: usize = 11;
+pub const TAP_BASE: usize = 7;
 
 /// Number of `Poly` slots reserved for tap values. Each slot holds 16
 /// f32 lanes; four slots gives [`crate::MAX_TAPS`] = 64.
@@ -197,20 +174,74 @@ pub const MAX_HOST_CONTROLS: usize = HOST_CONTROL_SLOTS * 16;
 pub const MAX_HOST_CONTROL_BLOCK: usize = 2048;
 
 /// Number of scratch-region buffer pool slots reserved at the bottom
-/// of the index space for sinks + backplane (audio I/O + global
-/// transport/drift/midi + tap + host-control + spare). Pinned at a
-/// power-of-two ceiling that leaves room for future backplanes without
-/// disturbing the dynamic-cable base index.
+/// of the index space for backplane + sinks (audio I/O + global
+/// transport/drift/midi + tap + host-control + spare + read/write
+/// sinks). Pinned at a power-of-two ceiling that leaves room for
+/// future backplanes without disturbing the dynamic-cable base index.
 ///
-/// Reserved slots occupy `[0, RESERVED_SLOTS)` in scratch
-/// (sinks at `[0, SINK_SLOTS)`, backplane at `[SINK_SLOTS,
-/// RESERVED_SLOTS)`). The scratch allocator starts its high-water mark
-/// at `RESERVED_SLOTS` so no dyn cable ever aliases a reserved slot.
+/// Reserved slots occupy `[0, RESERVED_SLOTS)` in scratch (backplane
+/// at `[0, RESERVED_SLOTS - SINK_SLOTS)`, sinks at
+/// `[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`). The scratch
+/// allocator starts its high-water mark at `RESERVED_SLOTS` so no dyn
+/// cable ever aliases a reserved slot.
 pub const RESERVED_SLOTS: usize = 32;
 
+// ── Sink slots ────────────────────────────────────────────────────────────────
+// Sinks live at the top of the reserved range so that FFI plugin loaders
+// (ticket 0870) can shift the plugin-visible scratch base past the backplane
+// and have plugin-relative `[0, SINK_SLOTS)` resolve to the sink slots
+// unchanged.
+
+/// Number of scratch-region slots reserved for read/write sinks. Sinks
+/// live in scratch (read sinks are never written, write sinks are
+/// never read — neither needs ping-pong storage).
+pub const SINK_SLOTS: usize = 4;
+
+/// Buffer pool index of the permanent mono read-null slot.
+///
+/// Disconnected [`MonoInput`] ports resolve to this slot. Always
+/// `CableValue::mono(0.0)`; never written by any module or the planner.
+pub const MONO_READ_SINK: usize = RESERVED_SLOTS - SINK_SLOTS;
+
+/// Buffer pool index of the permanent poly read-null slot.
+///
+/// Disconnected [`PolyInput`] ports resolve to this slot. Always
+/// `CableValue::poly([0.0; 16])`; never written by any module or the planner.
+pub const POLY_READ_SINK: usize = RESERVED_SLOTS - SINK_SLOTS + 1;
+
+/// Buffer pool index of the mono write-sink slot.
+///
+/// Uninitialised and disconnected [`MonoOutput`] fields point here. Writes are
+/// harmless — no module reads from this slot. Kept as `CableValue::Mono` so
+/// the pool stays well-typed.
+pub const MONO_WRITE_SINK: usize = RESERVED_SLOTS - SINK_SLOTS + 2;
+
+/// Buffer pool index of the poly write-sink slot.
+///
+/// Uninitialised and disconnected [`PolyOutput`] fields point here. Writes are
+/// harmless — no module reads from this slot. Kept as `CableValue::Poly` so
+/// the pool stays well-typed.
+pub const POLY_WRITE_SINK: usize = RESERVED_SLOTS - SINK_SLOTS + 3;
+
+// Guard the layout invariant: the live backplane region must end at or
+// before the first sink slot. Tripped if backplane growth exhausts the
+// spare capacity between `HOST_CONTROL_BASE + HOST_CONTROL_SLOTS` and
+// `RESERVED_SLOTS - SINK_SLOTS`; bumping `RESERVED_SLOTS` is the fix.
+const _: () = assert!(HOST_CONTROL_BASE + HOST_CONTROL_SLOTS <= RESERVED_SLOTS - SINK_SLOTS);
+
+/// Size of the backplane region in scratch slots (ticket 0870).
+///
+/// Equals `RESERVED_SLOTS - SINK_SLOTS` — the count of slots between
+/// scratch index 0 and the first sink slot. The FFI plugin loader
+/// shifts plugin-visible scratch by this amount so plugins cannot
+/// observe or address backplane slots. Sinks live at the top of the
+/// reserved range so plugin-relative `[0, SINK_SLOTS)` still resolves
+/// to sink slots after the shift.
+pub const BACKPLANE_SIZE: usize = RESERVED_SLOTS - SINK_SLOTS;
+
 /// Total capacity of the scratch region. Indices `[0, SCRATCH_CAPACITY)`
-/// dispatch to scratch (single-slot `CableValue`), with sinks +
-/// backplane at `[0, RESERVED_SLOTS)` and dyn-scratch above that.
+/// dispatch to scratch (single-slot `CableValue`), with backplane +
+/// sinks at `[0, RESERVED_SLOTS)` and dyn-scratch above that.
 ///
 /// Pinned at a generous compile-time constant so the scratch/cycle
 /// cutoff is stable across replans — every plan whose dyn-scratch

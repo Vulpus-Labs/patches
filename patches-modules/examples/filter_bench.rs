@@ -24,7 +24,7 @@ use patches_modules::{PolyResonantLowpass, PolySvf};
 // ping-pong read path (matches the engine's behaviour for cables with
 // at least one delayed consumer). Absolute `cable_idx` is
 // `SCRATCH_CAPACITY + logical`. Disconnected CV inputs route to
-// `POLY_READ_SINK` (scratch[1]) via `PolyInput::default()`, which
+// `POLY_READ_SINK` (a reserved scratch slot) via `PolyInput::default()`, which
 // flags `fused: true`.
 
 const CYCLE_POOL_SIZE: usize = 4;

@@ -494,6 +494,45 @@ drift, or MIDI advance one sample sooner than under the
 pre-fusion plan because backplane reads are now inherently
 same-tick. Goldens are auditioned, not silently regenerated.
 
+### Phase 6 — Backplane low, sinks high (ticket 0869, E145)
+
+Phase 5 placed sinks at scratch `[0, SINK_SLOTS)` and the backplane
+at `[SINK_SLOTS, RESERVED_SLOTS)`. That worked while the FFI plugin
+loader exposed the full scratch view, but it made every backplane
+addition or shift an externally-visible ABI change — already paid
+once in v11.
+
+Phase 6 swaps the two regions within the reserved range:
+
+| range                                                  | region   | content                              |
+|--------------------------------------------------------|----------|--------------------------------------|
+| `[0, RESERVED_SLOTS - SINK_SLOTS)`                     | scratch  | backplane (audio I/O, transport, …)  |
+| `[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`        | scratch  | sinks (mono/poly read/write)         |
+| `[RESERVED_SLOTS, SCRATCH_CAPACITY)`                   | scratch  | dyn scratch (planner-allocated)      |
+| `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)`| cycle    | dyn cycle producers                  |
+
+The structural change is internal: backplane/sink symbols keep their
+names, only their numeric values shift. The motivating value lands
+in ticket 0870, which shifts the plugin-visible scratch base past
+the backplane so plugin-relative `[0, SINK_SLOTS)` resolves to the
+sink slots unchanged. After 0870, future backplane reorgs no longer
+force ABI bumps.
+
+The spare capacity between the live backplane top
+(`HOST_CONTROL_BASE + HOST_CONTROL_SLOTS`) and the first sink slot
+(`RESERVED_SLOTS - SINK_SLOTS`) is room for new backplane slots
+without bumping `RESERVED_SLOTS`. A `const _: () = assert!(…)` in
+[patches-core/src/cables/mod.rs](../patches-core/src/cables/mod.rs)
+guards the invariant at compile time.
+
+**ABI bump**: FFI plugin ABI version moves from v11 to v12. Same
+client set as phase 5 — in-tree only, recompile against the new
+constants.
+
+**Audio churn**: none. The reorg is purely a relabelling of reserved
+slots; cable values, planner ordering, and module behaviour are
+unchanged.
+
 ## Alternatives considered
 
 **Always read from current write buffer (no fusion analysis).** Reject

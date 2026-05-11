@@ -30,7 +30,7 @@ pub use patches_core::cables::{
 ///   mark from the previous plan. This delivers ADR 0072 phase 4's
 ///   cache-proximity layout (consumers read producers' outputs from
 ///   monotonically increasing addresses). Indices `[0, RESERVED_SLOTS)`
-///   are reserved for sinks + backplane and never assigned dynamically.
+///   are reserved for backplane + sinks and never assigned dynamically.
 /// - **Cycle** `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)` —
 ///   producer ports with at least one delayed (non-fused) consumer.
 ///   Backed by `[CableValue; 2]` pair slots. Indices are **stable across
@@ -60,7 +60,7 @@ pub struct BufferAllocState {
     pub cycle_hwm: usize,
     /// High-water mark for the scratch region in the *most recent* plan.
     /// Reset to [`RESERVED_SLOTS`] at the start of every allocation pass
-    /// (skipping the sink + backplane range at the bottom of scratch)
+    /// (skipping the backplane + sink range at the bottom of scratch)
     /// and rises as the forward sweep emits scratch indices. Carried in
     /// state only as the post-build snapshot (used by tests and
     /// diagnostics); not consulted by the next allocation pass.
@@ -230,7 +230,7 @@ pub fn allocate_buffers(
     let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
     let mut cycle_hwm = prev_alloc.cycle_hwm;
     // Scratch is rebuilt fresh each plan; no carry-over of hwm. Skip
-    // the sink + backplane reserved range at the bottom of scratch.
+    // the backplane + sink reserved range at the bottom of scratch.
     let mut scratch_hwm: usize = RESERVED_SLOTS;
     let scratch_cap = pool_capacity.min(SCRATCH_CAPACITY);
     let mut to_zero = Vec::new();

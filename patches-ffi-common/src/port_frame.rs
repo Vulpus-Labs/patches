@@ -11,6 +11,7 @@
 
 use std::mem::{align_of, size_of};
 
+use patches_core::cables::SCRATCH_CAPACITY;
 use patches_core::{InputPort, OutputPort};
 
 use crate::types::{FfiInputPort, FfiOutputPort};
@@ -141,10 +142,20 @@ impl std::error::Error for PackPortsError {}
 /// Control-thread encoder: write `idx`, input port structs, and output port
 /// structs into `frame`. The frame is reshaped at `prepare`; this call
 /// never allocates.
+///
+/// `scratch_base_offset` is subtracted from every scratch-region
+/// `cable_idx` (`cable_idx < SCRATCH_CAPACITY`) before it is packed.
+/// Cycle indices (`cable_idx >= SCRATCH_CAPACITY`) pass through
+/// unchanged. Built-in modules pass `0`; FFI plugins pass
+/// [`patches_core::cables::BACKPLANE_SIZE`] to hide the backplane from
+/// the plugin (ticket 0870). The planner is responsible for refusing to
+/// wire any port whose resolved scratch `cable_idx` is below the
+/// module's offset, so subtraction never underflows.
 pub fn pack_ports_into(
     idx: u32,
     inputs: &[InputPort],
     outputs: &[OutputPort],
+    scratch_base_offset: usize,
     frame: &mut PortFrame,
 ) -> Result<(), PackPortsError> {
     let layout = frame.layout;
@@ -176,7 +187,8 @@ pub fn pack_ports_into(
 
     let in_off = layout.input_offset;
     for (i, ip) in inputs.iter().enumerate() {
-        let ffi = FfiInputPort::from(ip);
+        let mut ffi = FfiInputPort::from(ip);
+        ffi.cable_idx = translate_cable_idx(ffi.cable_idx, scratch_base_offset);
         let off = in_off + i * size_of::<FfiInputPort>();
         // SAFETY: off + size fits in total_size by PortLayout::new.
         unsafe {
@@ -186,7 +198,8 @@ pub fn pack_ports_into(
 
     let out_off = layout.output_offset;
     for (i, op) in outputs.iter().enumerate() {
-        let ffi = FfiOutputPort::from(op);
+        let mut ffi = FfiOutputPort::from(op);
+        ffi.cable_idx = translate_cable_idx(ffi.cable_idx, scratch_base_offset);
         let off = out_off + i * size_of::<FfiOutputPort>();
         // SAFETY: off + size fits in total_size by PortLayout::new.
         unsafe {
@@ -195,6 +208,22 @@ pub fn pack_ports_into(
     }
 
     Ok(())
+}
+
+/// Translate one cable index from host space to module space by subtracting
+/// `scratch_base_offset` from scratch-region indices. Cycle indices pass
+/// through. Underflow indicates a planner bug — the planner must refuse
+/// any port whose scratch `cable_idx` is below the module's offset before
+/// pack runs.
+#[inline]
+fn translate_cable_idx(cable_idx: usize, scratch_base_offset: usize) -> usize {
+    if cable_idx < SCRATCH_CAPACITY {
+        cable_idx
+            .checked_sub(scratch_base_offset)
+            .expect("pack_ports_into: scratch cable_idx below scratch_base_offset (planner bug)")
+    } else {
+        cable_idx
+    }
 }
 
 /// Borrowed view over a packed port frame. Audio-thread reader.
@@ -305,7 +334,7 @@ mod tests {
                 })
                 .collect();
 
-            pack_ports_into(42, &inputs, &outputs, &mut frame).unwrap();
+            pack_ports_into(42, &inputs, &outputs, 0, &mut frame).unwrap();
 
             let view = frame.view();
             let h = view.header();
@@ -349,7 +378,7 @@ mod tests {
             }),
             InputPort::Stereo(StereoInput::scalar(9, 0.5)),
         ];
-        pack_ports_into(7, &inputs, &[], &mut frame).unwrap();
+        pack_ports_into(7, &inputs, &[], 0, &mut frame).unwrap();
         let view = frame.view();
         let a = view.input(0);
         assert_eq!(a.tag, crate::types::PORT_TAG_STEREO);
@@ -371,7 +400,7 @@ mod tests {
     fn pack_rejects_count_mismatch() {
         let layout = PortLayout::new(2, 1);
         let mut frame = PortFrame::with_layout(layout);
-        let err = pack_ports_into(0, &[mono_in(0, 1.0, true)], &[mono_out(0, true)], &mut frame)
+        let err = pack_ports_into(0, &[mono_in(0, 1.0, true)], &[mono_out(0, true)], 0, &mut frame)
             .unwrap_err();
         assert_eq!(err, PackPortsError::InputCountMismatch { expected: 2, actual: 1 });
 
@@ -379,6 +408,7 @@ mod tests {
             0,
             &[mono_in(0, 1.0, true), mono_in(1, 1.0, true)],
             &[],
+            0,
             &mut frame,
         )
         .unwrap_err();
@@ -391,5 +421,44 @@ mod tests {
     fn layout_overflow_panics_not_ub_32bit() {
         // On 32-bit, u32::MAX * sizeof(FfiInputPort) blows past usize::MAX.
         let _ = PortLayout::new(u32::MAX, 0);
+    }
+
+    #[test]
+    fn pack_translates_scratch_indices_by_offset() {
+        use patches_core::cables::{BACKPLANE_SIZE, SCRATCH_CAPACITY};
+        let layout = PortLayout::new(2, 1);
+        let mut frame = PortFrame::with_layout(layout);
+        // Sink slot just past the backplane and a cycle slot — both must
+        // survive the round trip; scratch shifts down, cycle is unchanged.
+        let sink_idx = BACKPLANE_SIZE; // first plugin-visible slot
+        let cycle_idx = SCRATCH_CAPACITY + 7;
+        pack_ports_into(
+            0,
+            &[mono_in(sink_idx, 1.0, true), mono_in(cycle_idx, 1.0, true)],
+            &[mono_out(sink_idx + 1, true)],
+            BACKPLANE_SIZE,
+            &mut frame,
+        ).unwrap();
+        let v = frame.view();
+        assert_eq!(v.input(0).cable_idx, 0, "scratch index shifts by BACKPLANE_SIZE");
+        assert_eq!(v.input(1).cable_idx, cycle_idx, "cycle index unchanged");
+        assert_eq!(v.output(0).cable_idx, 1, "scratch output index shifts");
+    }
+
+    #[test]
+    #[should_panic(expected = "scratch cable_idx below scratch_base_offset")]
+    fn pack_panics_on_backplane_cable_idx() {
+        use patches_core::cables::BACKPLANE_SIZE;
+        let layout = PortLayout::new(1, 0);
+        let mut frame = PortFrame::with_layout(layout);
+        // cable_idx in the backplane region — planner must refuse this
+        // upstream; pack panics rather than wrap.
+        let _ = pack_ports_into(
+            0,
+            &[mono_in(0, 1.0, true)],
+            &[],
+            BACKPLANE_SIZE,
+            &mut frame,
+        );
     }
 }

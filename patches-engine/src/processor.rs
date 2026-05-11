@@ -73,11 +73,12 @@ pub struct PatchProcessor {
     /// dispatches here, indexed by `cable_idx - SCRATCH_CAPACITY`.
     cycle_pool: Box<[[CableValue; 2]]>,
     /// Single-slot scratch region (ADR 0072 phase 3, tickets 0850 +
-    /// 0858; phase 5 invert ticket 0860). Sized at
-    /// `min(SCRATCH_CAPACITY, buffer_capacity)`; backs sinks
-    /// (`[0, SINK_SLOTS)`), backplane (`[SINK_SLOTS, RESERVED_SLOTS)`)
-    /// and dyn cables whose every consumer is fused. `cable_idx <
-    /// SCRATCH_CAPACITY` dispatches here, indexed by `cable_idx`.
+    /// 0858; phase 5 invert ticket 0860; phase 6 ticket 0869). Sized
+    /// at `min(SCRATCH_CAPACITY, buffer_capacity)`; backs backplane
+    /// (`[0, RESERVED_SLOTS - SINK_SLOTS)`), sinks
+    /// (`[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)`) and dyn cables
+    /// whose every consumer is fused. `cable_idx < SCRATCH_CAPACITY`
+    /// dispatches here, indexed by `cable_idx`.
     scratch_pool: Box<[CableValue]>,
     previous_plan: Option<ExecutionPlan>,
     cleanup_tx: rtrb::Producer<CleanupAction>,

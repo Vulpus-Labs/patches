@@ -22,3 +22,5 @@
   - [Output](modules/output.md)
 - [Implementing modules](implementing-modules.md)
 - [Engine internals](engine-internals.md)
+- [Plugin ABI — descriptor schema](abi/descriptor-schema.md)
+- [Plugin ABI — wire formats](abi/wire-formats.md)

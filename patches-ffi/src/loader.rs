@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 
 use patches_core::build_error::BuildError;
 use patches_core::cable_pool::CablePool;
-use patches_core::cables::{InputPort, OutputPort};
+use patches_core::cables::{InputPort, OutputPort, BACKPLANE_SIZE, SCRATCH_CAPACITY};
 use patches_core::modules::{
     InstanceId, ModuleDescriptor, ModuleDescriptorTemplate, ModuleShape, ParameterMap,
     StructuralParams,
@@ -108,10 +108,19 @@ impl Module for DylibModule {
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
         let parts = pool.as_raw_parts_mut();
+        // Plugin scratch view starts past the backplane (ticket 0870).
+        // SAFETY: the planner refuses to size the scratch pool below
+        // RESERVED_SLOTS (kernel.rs::init_scratch_pool clamps at
+        // RESERVED_SLOTS), so parts.scratch_len >= RESERVED_SLOTS >
+        // BACKPLANE_SIZE.
+        debug_assert!(parts.scratch_len >= BACKPLANE_SIZE);
+        let (scratch_ptr, scratch_len) = unsafe {
+            (parts.scratch_ptr.add(BACKPLANE_SIZE), parts.scratch_len - BACKPLANE_SIZE)
+        };
         unsafe {
             (self.vtable.process)(
                 self.handle.as_ptr(),
-                parts.scratch_ptr, parts.scratch_len,
+                scratch_ptr, scratch_len,
                 parts.cycle_ptr, parts.cycle_len,
                 parts.wi,
             )
@@ -120,8 +129,10 @@ impl Module for DylibModule {
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
         // Pack into the preallocated per-instance `PortFrame` — no audio-
-        // thread allocation (E104 ticket 0613).
-        pack_ports_into(0, inputs, outputs, &mut self.port_frame)
+        // thread allocation (E104 ticket 0613). pack translates each
+        // scratch-region cable_idx by BACKPLANE_SIZE into plugin-relative
+        // space; cycle indices pass through (ticket 0870).
+        pack_ports_into(0, inputs, outputs, BACKPLANE_SIZE, &mut self.port_frame)
             .expect("DylibModule::set_ports: shape mismatch vs. prepared PortLayout");
         let bytes = self.port_frame.bytes();
         unsafe {
@@ -142,18 +153,30 @@ impl Module for DylibModule {
         self.vtable.supports_periodic != 0
     }
 
+    fn scratch_base_offset(&self) -> usize {
+        BACKPLANE_SIZE
+    }
+
     fn periodic_update(&mut self, pool: &CablePool<'_>) {
         let parts = pool.as_raw_parts();
+        debug_assert!(parts.scratch_len >= BACKPLANE_SIZE);
+        let (scratch_ptr, scratch_len) = unsafe {
+            (parts.scratch_ptr.add(BACKPLANE_SIZE), parts.scratch_len - BACKPLANE_SIZE)
+        };
         unsafe {
             (self.vtable.periodic_update)(
                 self.handle.as_ptr(),
-                parts.scratch_ptr, parts.scratch_len,
+                scratch_ptr, scratch_len,
                 parts.cycle_ptr, parts.cycle_len,
                 parts.wi,
             )
         };
     }
 }
+
+// Compile-time guard against degenerate constants — subtraction in `process`
+// and `periodic_update` must never underflow.
+const _: () = assert!(BACKPLANE_SIZE < SCRATCH_CAPACITY);
 
 // ── PrepareResult shim ───────────────────────────────────────────────────────
 

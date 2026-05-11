@@ -14,7 +14,16 @@ use patches_core::cables::CableValue;
 /// (`AUDIO_OUT_L`, `GLOBAL_TRANSPORT`, …) shifted from
 /// `CYCLE_CAPACITY + N` to small literals. Plugin SDKs that bake any
 /// backplane const need rebuild.
-pub const ABI_VERSION: u32 = 11;
+/// v12: scratch reserved range reorganised — backplane moved from
+/// `[SINK_SLOTS, RESERVED_SLOTS)` to `[0, RESERVED_SLOTS - SINK_SLOTS)`,
+/// sinks moved from `[0, SINK_SLOTS)` to
+/// `[RESERVED_SLOTS - SINK_SLOTS, RESERVED_SLOTS)` (ticket 0869,
+/// ADR 0072 phase 6). Backplane and sink symbols
+/// (`MONO_READ_SINK`, `AUDIO_OUT_L`, …) keep their names; their
+/// numeric values shift. Precondition for ticket 0870, which will
+/// cut the backplane out of the plugin-visible scratch view so
+/// future backplane reorgs no longer force ABI bumps.
+pub const ABI_VERSION: u32 = 12;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -332,12 +341,20 @@ pub struct FfiPluginVTable {
     /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
     pub update_validated_parameters: crate::abi::UpdateValidatedParametersFn,
 
-    /// Audio-thread per-tick processing. ABI v11 (ticket 0860): the
-    /// cable pool is split into a scratch region (single `CableValue`
-    /// per slot, at `cable_idx < SCRATCH_CAPACITY`) and a cycle region
-    /// (ping-pong `[CableValue; 2]` per slot, at `cable_idx >=
-    /// SCRATCH_CAPACITY`). The plugin reconstructs a `CablePool` via
+    /// Audio-thread per-tick processing. ABI v12 (tickets 0860, 0870):
+    /// the cable pool is split into a scratch region (single
+    /// `CableValue` per slot, at `cable_idx < SCRATCH_CAPACITY`) and a
+    /// cycle region (ping-pong `[CableValue; 2]` per slot, at
+    /// `cable_idx >= SCRATCH_CAPACITY`). The plugin reconstructs a
+    /// `CablePool` via
     /// `CablePool::new(scratch_slice, cycle_slice, write_index)`.
+    ///
+    /// The host shifts the plugin-visible scratch base past the
+    /// backplane: `scratch_ptr` points at host scratch index
+    /// `BACKPLANE_SIZE`, and `scratch_len` is the remaining length.
+    /// Scratch cable indices delivered via `set_ports` are pre-
+    /// translated into plugin-relative space (see [`crate::pack_ports_into`]);
+    /// cycle indices pass through unchanged.
     pub process: unsafe extern "C" fn(
         handle: *mut c_void,
         scratch_ptr: *mut CableValue,

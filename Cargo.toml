@@ -35,6 +35,7 @@ members = [
     "test-plugins/all-tags",
     "test-plugins/release-on-update",
     "test-plugins/structural-string",
+    "test-plugins/disc-ports",
 ]
 # Shelved WASM crates — excluded from build. See adr/0027-wasm-module-loading.md.
 # "patches-wasm-sdk",

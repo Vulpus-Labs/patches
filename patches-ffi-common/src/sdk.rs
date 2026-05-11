@@ -872,7 +872,7 @@ mod tests {
             cable_idx: 7,
             connected: true,
         })];
-        pack_ports_into(5, &inputs, &outputs, &mut frame).unwrap();
+        pack_ports_into(5, &inputs, &outputs, 0, &mut frame).unwrap();
         let view = decode_port_frame(frame.bytes(), &layout).unwrap();
         assert_eq!(view.header().idx, 5);
         assert_eq!(view.input(0).cable_idx, 3);
@@ -1056,7 +1056,7 @@ mod tests {
             cable_idx: 22,
             connected: true,
         })];
-        pack_ports_into(0, &inputs, &outputs, &mut port_frame).unwrap();
+        pack_ports_into(0, &inputs, &outputs, 0, &mut port_frame).unwrap();
         let pb = port_frame.bytes();
         unsafe { __patches_set_ports(handle as Handle, pb.as_ptr(), pb.len(), &env_v) };
         LAST_PORTS.with(|l| {

@@ -1,3 +1,17 @@
+//! Patches FFI common types and SDK helpers.
+//!
+//! The binary wire formats that cross this boundary —
+//! [`param_frame`] scalars, [`port_frame::PortFrame`],
+//! [`structural_frame`], and the [`patches_core::cables::CableValue`] cable
+//! slot — are specified normatively in the manual at
+//! `docs/src/abi/wire-formats.md`. External SDKs implementing the plugin
+//! side of the contract should treat that page (not this crate's source)
+//! as the spec; the Rust code here is the canonical *implementation*.
+//!
+//! The descriptor JSON shape that names the parameters and ports
+//! referenced from the wire formats is at
+//! `docs/src/abi/descriptor-schema.md`.
+
 pub mod abi;
 pub mod arc_table;
 pub mod json;

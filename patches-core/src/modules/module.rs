@@ -403,6 +403,17 @@ pub trait Module: Send {
     /// [`periodic_update`]: Module::periodic_update
     fn wants_periodic(&self) -> bool { false }
 
+    /// Offset by which scratch-region cable indices are translated between
+    /// the host's index space and the module's. Default `0`: the module
+    /// addresses scratch directly, including the backplane region (ticket
+    /// 0870).
+    ///
+    /// FFI plugins override this to [`crate::cables::BACKPLANE_SIZE`]: the
+    /// loader hides the backplane region from their scratch slice and the
+    /// planner refuses to wire any of their ports to a `cable_idx` below
+    /// the offset. This isolates plugin SDKs from backplane-layout churn.
+    fn scratch_base_offset(&self) -> usize { 0 }
+
     /// Called every `periodic_update_interval` samples for modules that
     /// returned `true` from [`wants_periodic`](Module::wants_periodic).
     ///

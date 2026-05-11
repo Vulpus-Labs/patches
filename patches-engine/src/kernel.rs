@@ -22,13 +22,14 @@ pub fn init_cycle_pool() -> Box<[[CableValue; 2]]> {
 /// Allocate and initialise the scratch region of the cable buffer pool
 /// (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert ticket 0860).
 /// Sized at `min(SCRATCH_CAPACITY, max(RESERVED_SLOTS, buffer_capacity))`
-/// single-slot `CableValue` entries. Slots `[0, SINK_SLOTS)` are the
-/// permanent read/write sinks, `[SINK_SLOTS, RESERVED_SLOTS)` carry the
-/// backplane (written by the engine each tick), and the remainder backs
-/// dyn producer ports whose every consumer is fused. The
-/// `RESERVED_SLOTS` floor guarantees the engine can always write the
-/// backplane even when callers pass a tiny `buffer_capacity` (typical
-/// in unit tests).
+/// single-slot `CableValue` entries. Slots
+/// `[0, RESERVED_SLOTS - SINK_SLOTS)` carry the backplane (written by
+/// the engine each tick), `[RESERVED_SLOTS - SINK_SLOTS,
+/// RESERVED_SLOTS)` are the permanent read/write sinks, and the
+/// remainder backs dyn producer ports whose every consumer is fused.
+/// The `RESERVED_SLOTS` floor guarantees the engine can always write
+/// the backplane even when callers pass a tiny `buffer_capacity`
+/// (typical in unit tests).
 ///
 /// `POLY_READ_SINK` and `POLY_WRITE_SINK` are initialised as
 /// `Poly([0.0; 16])` for cosmetic clarity (per ADR 0068 storage is

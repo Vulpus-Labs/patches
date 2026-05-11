@@ -226,7 +226,7 @@ mod tests {
 
     use super::*;
     use super::super::PlanError;
-    use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
+    use patches_core::cables::{CableKind, MonoLayout, PolyLayout, MONO_READ_SINK};
     use patches_core::modules::{ModuleDescriptor, ModuleShape, PortDescriptor};
     use patches_core::parameter_map::ParameterMap;
     use patches_core::ModuleGraph;
@@ -286,7 +286,7 @@ mod tests {
         let result = resolved.resolve_input_buffers(dst_desc, &dst_id);
         assert_eq!(
             result,
-            vec![(0, CableMap::identity(), false)],
+            vec![(MONO_READ_SINK, CableMap::identity(), false)],
             "unconnected port must map to identity-mapped null slot"
         );
     }

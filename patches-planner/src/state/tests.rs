@@ -63,6 +63,7 @@ fn prev_with_node(
             input_ports: Vec::new(),
             output_ports: Vec::new(),
             is_periodic: false,
+            scratch_base_offset: 0,
             layout: patches_ffi_common::param_layout::ParamLayout {
                 scalar_size: 0,
                 scalars: Vec::new(),
