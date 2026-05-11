@@ -16,7 +16,7 @@ use patches_core::cables::{
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, StructuralParams};
 use patches_core::AudioEnvironment;
 use patches_ffi::loader::load_plugin;
-use patches_registry::ModuleBuilder;
+use patches_core::registry::ModuleBuilder;
 
 fn disc_ports_dylib_path() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

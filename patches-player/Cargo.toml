@@ -15,7 +15,6 @@ patches-engine      = { path = "../patches-engine" }
 patches-planner     = { path = "../patches-planner" }
 patches-dsl         = { path = "../patches-dsl" }
 patches-modules     = { path = "../patches-modules" }
-patches-registry    = { path = "../patches-registry" }
 patches-core        = { path = "../patches-core" }
 patches-diagnostics = { path = "../patches-diagnostics" }
 patches-ffi         = { path = "../patches-ffi" }

@@ -207,7 +207,7 @@ fn current_git_rev() -> String {
         .unwrap_or_default()
 }
 
-fn emit_json(registry: &patches_registry::Registry, deterministic: bool, output: Option<PathBuf>) {
+fn emit_json(registry: &patches_core::registry::Registry, deterministic: bool, output: Option<PathBuf>) {
     let generator = if deterministic {
         patches_tools::deterministic_generator()
     } else {

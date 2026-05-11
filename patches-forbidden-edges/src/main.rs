@@ -5,7 +5,7 @@
 //!
 //! Two rule kinds today:
 //!
-//! 1. Specific `from -> to` bans (e.g. `patches-svg -> patches-registry`).
+//! 1. Specific `from -> to` bans.
 //! 2. Leaf-binary bans: a "leaf" crate must not appear as a direct dep
 //!    of any other workspace crate.
 
@@ -16,7 +16,6 @@ use serde_json::Value;
 /// Direct-dep bans. Format: (from-crate, to-crate, reason).
 const FORBIDDEN: &[(&str, &str, &str)] = &[
     ("patches-svg", "patches-modules", "renderer must stay manifest-only"),
-    ("patches-svg", "patches-registry", "renderer routes registry via patches-manifest"),
     ("patches-lsp", "patches-modules", "LSP must stay shape-only via patches-manifest"),
 ];
 

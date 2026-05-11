@@ -10,7 +10,7 @@ use patches_core::test_support::reserved_scratch;
 
 /// Absolute `cable_idx` for cycle logical slot `i` (ADR 0072 phase 5).
 const fn cidx(i: usize) -> usize { SCRATCH_CAPACITY + i }
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::test_support::{assert_attenuated, assert_passes};
 

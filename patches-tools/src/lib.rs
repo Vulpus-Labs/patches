@@ -3,7 +3,7 @@
 use patches_manifest::{
     GeneratorInfo, ModuleManifest, ModuleManifestEntry, OwnedTemplate, SCHEMA_VERSION,
 };
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 /// Build a [`ModuleManifest`] from every registered module in `registry`.
 /// Modules are emitted in deterministic (sorted-name) order so the JSON

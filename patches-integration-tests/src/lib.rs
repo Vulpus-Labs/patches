@@ -5,7 +5,7 @@ use patches_core::{
     Module, ModuleDescriptor, ModuleGraph, MonoOutput, PortRef,
 };
 use patches_core::{StructuralParams, BuildError};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::param_frame::ParamView;
 use patches_core::params::FloatParamName;

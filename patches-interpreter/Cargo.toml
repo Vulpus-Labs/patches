@@ -10,7 +10,6 @@ doctest = false
 
 [dependencies]
 patches-core = { path = "../patches-core" }
-patches-registry = { path = "../patches-registry" }
 patches-dsl  = { path = "../patches-dsl" }
 
 [dev-dependencies]

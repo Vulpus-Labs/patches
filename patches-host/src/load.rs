@@ -12,7 +12,7 @@ use patches_dsl::host_control_manifest::HostControlManifest;
 use patches_dsl::manifest::Manifest;
 use patches_dsl::pipeline::{LayeringWarning, PipelineAudit};
 use patches_interpreter::BuildResult;
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use crate::{CompileError, CompileErrorKind, HostFileSource};
 

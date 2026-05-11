@@ -104,7 +104,7 @@ struct CommonSetup {
     sound: SoundEngine,
     runtime: patches_host::HostRuntime,
     source: PathSource,
-    registry: patches_registry::Registry,
+    registry: patches_core::registry::Registry,
     sample_rate: f32,
 }
 

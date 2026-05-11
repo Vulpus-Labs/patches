@@ -44,7 +44,7 @@ pub use vladder::VLadder;
 /// Still used by in-process consumers (e.g. `patches_modules::default_registry`)
 /// during the ADR 0045 Spike 8 migration. Ticket 0570 removes this call from
 /// the default registry once Phase D (bundle-load integration test) is green.
-pub fn register(r: &mut patches_registry::Registry) {
+pub fn register(r: &mut patches_core::registry::Registry) {
     r.register::<VChorus>();
     r.register::<VBbd>();
     r.register::<VStereoBbd>();

@@ -26,7 +26,7 @@
 use patches_ffi::scanner::PluginScanner;
 use patches_integration_tests::{build_engine, dylib_path, env, HeadlessEngine};
 use patches_modules::default_registry;
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use patches_core::{AudioEnvironment, InstanceId, ModuleGraph, NodeId};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use crate::builder::{BuildError, ExecutionPlan, PatchBuilder, MonitorMeta};
 use crate::state::PlannerState;

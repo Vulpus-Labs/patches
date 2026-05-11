@@ -48,7 +48,7 @@ pub use bundled::bundled_manifest;
 /// need a direct path dep on `patches-registry`. ADR 0067 forbids
 /// `patches-svg`/`patches-lsp` → `patches-registry`; routing through
 /// `patches-manifest` keeps that edge clean.
-pub use patches_registry::Registry;
+pub use patches_core::registry::Registry;
 
 /// Bumped on any breaking change to the on-disk manifest schema.
 pub const SCHEMA_VERSION: u32 = 1;

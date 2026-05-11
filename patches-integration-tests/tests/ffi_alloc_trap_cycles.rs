@@ -14,7 +14,7 @@ use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
 use patches_core::AudioEnvironment;
 use patches_ffi::loader::load_plugin;
 use patches_integration_tests::dylib_path;
-use patches_registry::ModuleBuilder;
+use patches_core::registry::ModuleBuilder;
 
 fn env() -> AudioEnvironment {
     AudioEnvironment {

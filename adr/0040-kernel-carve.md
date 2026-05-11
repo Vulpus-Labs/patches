@@ -1,7 +1,9 @@
 # ADR 0040 — Carve a stable kernel: registry, planner, cpal, host
 
 **Date:** 2026-04-17
-**Status:** proposed
+**Status:** registry portion superseded by
+[ADR 0073](0073-monorepo-split-into-successor-repos.md); the planner /
+cpal / host carves still apply.
 
 ## Context
 

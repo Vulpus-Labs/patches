@@ -11,7 +11,7 @@ use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValu
 use patches_core::param_frame::{ParamView, ParamViewIndex};
 use patches_core::param_layout::compute_layout;
 use patches_core::{validate_and_pack, AudioEnvironment};
-use patches_registry::ModuleBuilder;
+use patches_core::registry::ModuleBuilder;
 use patches_ffi::loader::load_plugin;
 
 fn gain_dylib_path() -> PathBuf {

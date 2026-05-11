@@ -25,7 +25,7 @@ fn env() -> AudioEnvironment {
     }
 }
 
-fn registry() -> patches_registry::Registry {
+fn registry() -> patches_core::registry::Registry {
     patches_modules::default_registry()
 }
 

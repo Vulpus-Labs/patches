@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use patches_core::ModuleShape;
-use patches_registry::{ModuleBuilder, RegisterOutcome, Registry};
+use patches_core::registry::{ModuleBuilder, RegisterOutcome, Registry};
 use serde::{Deserialize, Serialize};
 
 use crate::loader::{load_plugin, DylibModuleBuilder};

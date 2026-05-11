@@ -117,6 +117,7 @@ pub mod modules;
 pub mod module_params;
 pub mod params;
 pub mod provenance;
+pub mod registry;
 pub mod qname;
 pub mod tracker;
 pub mod random_walk;

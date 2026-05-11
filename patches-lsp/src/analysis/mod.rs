@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use crate::ast;
 use crate::ast_builder::Diagnostic;

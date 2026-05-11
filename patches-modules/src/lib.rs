@@ -140,8 +140,8 @@ pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
 pub use tap::{Tap, TapKind};
 pub use host_control::{HostControl, HostControlKind};
 
-pub fn default_registry() -> patches_registry::Registry {
-    let mut r = patches_registry::Registry::new();
+pub fn default_registry() -> patches_core::registry::Registry {
+    let mut r = patches_core::registry::Registry::new();
     r.register::<Oscillator>();
     r.register::<Sum>();
     r.register::<Vca>();

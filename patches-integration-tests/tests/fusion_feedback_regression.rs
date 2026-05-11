@@ -18,7 +18,7 @@ use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::{ModuleGraph, ModuleShape, NodeId};
 use patches_integration_tests::{build_engine, p, pi, ConstSource, ImpulseSource, SineSource};
 use patches_modules::{AudioOut, Sum, Tuner, Vca};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 fn registry_feedback() -> Registry {
     let mut r = Registry::new();

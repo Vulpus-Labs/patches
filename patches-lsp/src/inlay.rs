@@ -9,7 +9,7 @@
 //! policy; diverging-shape rendering can ship as a follow-up.)
 
 use patches_core::{ModuleShape, SourceId, Span as CoreSpan};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_dsl::flat::FlatPatch;
 use patches_dsl::SourceMap;
 use tower_lsp::lsp_types::*;

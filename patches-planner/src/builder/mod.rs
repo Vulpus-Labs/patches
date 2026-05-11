@@ -7,7 +7,7 @@ use patches_core::{
     MonoInput, MonoOutput, Module, ModuleGraph, NodeId,
     OutputPort, PolyInput, PolyOutput, StereoInput, StereoOutput, TrackerData,
 };
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::parameter_map::ParameterMap;
 use patches_ffi_common::param_frame::{pack_into, ParamFrame, ParamViewIndex};
 use patches_ffi_common::param_layout::{compute_layout, defaults_from_descriptor, ParamLayout};

@@ -25,7 +25,7 @@ use patches_integration_tests::{
     dylib_path, env, HeadlessEngine, MODULE_CAP, POOL_CAP,
 };
 use patches_modules::default_registry;
-use patches_registry::{ModuleBuilder, Registry};
+use patches_core::registry::{ModuleBuilder, Registry};
 use patches_core::ModuleShape;
 
 const SRC_TEMPLATE: &str = "patch {

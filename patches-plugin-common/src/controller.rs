@@ -8,7 +8,7 @@ use std::sync::Arc;
 use patches_diagnostics::RenderedDiagnostic;
 use patches_dsl::host_control_manifest::HostControlManifest;
 use patches_engine::HaltInfoSnapshot;
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use serde::{Deserialize, Serialize};
 
 use crate::gui::{

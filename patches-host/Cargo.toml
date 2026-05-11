@@ -8,7 +8,6 @@ publish = false
 patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }
 patches-interpreter = { path = "../patches-interpreter" }
-patches-registry = { path = "../patches-registry" }
 patches-planner = { path = "../patches-planner" }
 patches-engine = { path = "../patches-engine" }
 patches-observation = { path = "../patches-observation" }

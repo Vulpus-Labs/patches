@@ -1,6 +1,6 @@
 //! Module-type completions: registered module names + template names.
 
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use tower_lsp::lsp_types::*;
 
 use crate::analysis::SemanticModel;

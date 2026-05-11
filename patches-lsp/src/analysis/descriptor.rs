@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use patches_core::{ModuleDescriptor, ModuleShape};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use super::scan::{make_key, ScopeKey};
 use super::types::{DeclarationMap, ShapeValue};

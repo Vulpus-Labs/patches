@@ -41,7 +41,7 @@ use patches_core::{
 };
 use patches_observation::{spawn_observer, tap_ring, ObserverHandle};
 use patches_observation::subscribers::{DiagnosticReader, SubscribersHandle};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_host::AdoptionMessage;
 use patches_engine::PatchProcessor;
 use patches_host::{HostBuilder, HostRuntime, InMemorySource};
@@ -1047,7 +1047,7 @@ mod activate_scan_tests {
     use std::ffi::c_void;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
-    use patches_registry::Registry;
+    use patches_core::registry::Registry;
     use patches_modules::default_registry;
     use crate::extensions::get_extension;
     use clap_sys::plugin::clap_plugin;

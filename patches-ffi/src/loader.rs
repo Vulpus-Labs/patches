@@ -25,7 +25,7 @@ use patches_core::param_layout::{compute_layout, ParamLayout};
 use patches_core::{AudioEnvironment, Module, ValidatedParamFrame};
 use patches_ffi_common::abi::{Handle, HostEnv};
 use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
-use patches_registry::ModuleBuilder;
+use patches_core::registry::ModuleBuilder;
 
 use crate::json;
 use crate::types::{

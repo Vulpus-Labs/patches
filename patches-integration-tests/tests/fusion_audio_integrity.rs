@@ -17,7 +17,7 @@ use patches_integration_tests::{
     build_engine, p, pi, ConstSource, ImpulseSource, SineSource,
 };
 use patches_modules::{AudioOut, Sum, Tuner, Vca};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 fn registry_audio_integrity() -> Registry {
     let mut r = Registry::new();

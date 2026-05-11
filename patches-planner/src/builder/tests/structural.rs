@@ -14,7 +14,7 @@ use patches_core::{
     AudioEnvironment, InstanceId, Module, ModuleDescriptor, ModuleGraph, ModuleShape, NodeId,
     ParameterMap, StructuralParams, StructuralValue,
 };
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use crate::builder::PatchBuilder;
 use crate::state::PlannerState;

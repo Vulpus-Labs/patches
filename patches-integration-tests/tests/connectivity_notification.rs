@@ -1,5 +1,5 @@
 use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_engine::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator, Tuner};

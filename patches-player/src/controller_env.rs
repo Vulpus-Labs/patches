@@ -20,7 +20,7 @@ use patches_plugin_common::{
     CompileSuccess, DiagnosticView, Env, PersistedSettings, RescanProbe, ScanDetails,
     SidecarEnvelope, TapSummary, SIDECAR_SCHEMA_VERSION,
 };
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 /// Side-channel data the controller's `Env` trait does not surface but
 /// the player's outer loop needs (for the file watcher and the rich

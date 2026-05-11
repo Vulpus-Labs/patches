@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
-use patches_core::modules::ModuleDescriptorTemplate;
-use patches_core::{
+use crate::modules::ModuleDescriptorTemplate;
+use crate::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleShape, ParameterMap,
     StructuralParams,
 };
@@ -47,7 +47,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{InstanceId, ModuleDescriptor};
+    use crate::{InstanceId, ModuleDescriptor};
 
     struct TestModule {
         instance_id: InstanceId,
@@ -56,7 +56,7 @@ mod tests {
 
     impl Module for TestModule {
         fn template() -> ModuleDescriptorTemplate {
-            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            use crate::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
             ModuleDescriptorTemplate {
                 name: "TestModule",
                 axes: &[CountAxis::CHANNELS],
@@ -82,7 +82,7 @@ mod tests {
             }
         })}
 
-        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {
+        fn update_validated_parameters(&mut self, _params: &crate::param_frame::ParamView<'_>) {
         }
 
         fn descriptor(&self) -> &ModuleDescriptor {
@@ -93,7 +93,7 @@ mod tests {
             self.instance_id
         }
 
-        fn process(&mut self, _pool: &mut patches_core::CablePool<'_>) {}
+        fn process(&mut self, _pool: &mut crate::CablePool<'_>) {}
 
         fn as_any(&self) -> &dyn std::any::Any {
             self

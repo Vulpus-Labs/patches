@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use patches_core::modules::ModuleDescriptorTemplate;
-use patches_core::{
+use crate::modules::ModuleDescriptorTemplate;
+use crate::{
     AudioEnvironment, BuildError, InstanceId, Module, ModuleDescriptor, ModuleShape, ParameterMap,
     StructuralParams,
 };
-use crate::module_builder::{Builder, ModuleBuilder};
+use super::module_builder::{Builder, ModuleBuilder};
 
 pub struct Registry {
     builders: HashMap<String, Box<dyn ModuleBuilder>>,
@@ -165,7 +165,7 @@ fn validate_shape(name: &str, shape: &ModuleShape) -> Result<(), BuildError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{InstanceId, ModuleDescriptor};
+    use crate::{InstanceId, ModuleDescriptor};
 
     struct TestModule {
         instance_id: InstanceId,
@@ -174,7 +174,7 @@ mod tests {
 
     impl Module for TestModule {
         fn template() -> ModuleDescriptorTemplate {
-            use patches_core::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
+            use crate::modules::descriptor_template::{CountAxis, ModuleDescriptorTemplate};
             ModuleDescriptorTemplate {
                 name: "TestModule",
                 axes: &[CountAxis::CHANNELS],
@@ -200,7 +200,7 @@ mod tests {
             }
         })}
 
-        fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {
+        fn update_validated_parameters(&mut self, _params: &crate::param_frame::ParamView<'_>) {
         }
 
         fn descriptor(&self) -> &ModuleDescriptor {
@@ -211,7 +211,7 @@ mod tests {
             self.instance_id
         }
 
-        fn process(&mut self, _pool: &mut patches_core::CablePool<'_>) {}
+        fn process(&mut self, _pool: &mut crate::CablePool<'_>) {}
 
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -224,10 +224,10 @@ mod tests {
             <TestModule as Module>::template()
         }
         fn prepare(_e: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok(Self { instance_id, descriptor })}
-        fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
+        fn update_validated_parameters(&mut self, _p: &crate::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
         fn instance_id(&self) -> InstanceId { self.instance_id }
-        fn process(&mut self, _p: &mut patches_core::CablePool<'_>) {}
+        fn process(&mut self, _p: &mut crate::CablePool<'_>) {}
         fn as_any(&self) -> &dyn std::any::Any { self }
     }
 

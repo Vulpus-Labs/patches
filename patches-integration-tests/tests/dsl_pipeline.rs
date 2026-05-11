@@ -14,7 +14,7 @@ fn env() -> AudioEnvironment {
     AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
-fn registry() -> patches_registry::Registry {
+fn registry() -> patches_core::registry::Registry {
     patches_modules::default_registry()
 }
 

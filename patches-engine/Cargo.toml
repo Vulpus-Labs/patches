@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 patches-core = { path = "../patches-core" }
-patches-registry = { path = "../patches-registry" }
 patches-planner = { path = "../patches-planner" }
 patches-ffi-common = { path = "../patches-ffi-common" }
 patches-dsp = { path = "../patches-dsp" }

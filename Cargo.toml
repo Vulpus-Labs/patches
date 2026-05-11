@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "patches-core",
-    "patches-registry",
     "patches-diagnostics",
     "patches-dsl",
     "patches-dsp",

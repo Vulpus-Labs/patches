@@ -8,6 +8,6 @@ pub use patches_manifest::bundled_manifest;
 pub use patches_manifest::static_registry::registry_from_manifest;
 
 #[cfg(test)]
-pub(crate) fn manifest_registry() -> patches_registry::Registry {
+pub(crate) fn manifest_registry() -> patches_core::registry::Registry {
     registry_from_manifest(bundled_manifest())
 }

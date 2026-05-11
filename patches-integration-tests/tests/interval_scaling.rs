@@ -15,7 +15,7 @@ use patches_core::{
     ModuleDescriptor, ModuleGraph, ModuleShape,
 };
 use patches_core::{StructuralParams, BuildError};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::parameter_map::ParameterMap;
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
 use patches_integration_tests::{HeadlessEngine, POOL_CAP, MODULE_CAP};

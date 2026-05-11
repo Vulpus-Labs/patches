@@ -19,7 +19,7 @@ use patches_core::{
     AudioEnvironment, AxisId, BuildError, CountAxis, InstanceId, Module, ModuleShape,
     ParameterKind, ParameterMap, ParameterTemplate, PortTemplate, StructuralParams,
 };
-use patches_registry::{ModuleBuilder, Registry};
+use patches_core::registry::{ModuleBuilder, Registry};
 
 use crate::{
     ModuleManifest, OwnedAxisId, OwnedCableKind, OwnedMonoLayout, OwnedParam, OwnedParamKind,

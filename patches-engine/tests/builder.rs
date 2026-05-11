@@ -19,7 +19,7 @@ mod builder {
         BuildError, BuildErrorKind, ExecutionPlan, ModuleAllocState, PatchBuilder, PlanError,
         PlannerState,
     };
-    use patches_registry::Registry;
+    use patches_core::registry::Registry;
     use patches_engine::ModulePool;
     pub(crate) use std::collections::HashSet;
 

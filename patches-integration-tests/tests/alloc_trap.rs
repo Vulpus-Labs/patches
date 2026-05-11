@@ -21,7 +21,7 @@ use patches_modules::default_registry;
 /// Registry that also carries the `patches-vintage` bundle when the dylib is
 /// available. Used by example patches that reference vintage modules
 /// (ADR 0045 Spike 8 Phase C moved vintage out of `default_registry()`).
-fn registry_with_vintage() -> patches_registry::Registry {
+fn registry_with_vintage() -> patches_core::registry::Registry {
     let mut registry = default_registry();
     let dylib = dylib_path("patches-vintage");
     if dylib.exists() {

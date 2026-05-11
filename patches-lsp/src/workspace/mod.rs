@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use patches_ffi::{PluginScanner, ScanReport};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use crate::manifest_source::{bundled_manifest, registry_from_manifest};
 use tower_lsp::lsp_types::*;
 use tree_sitter::Parser;

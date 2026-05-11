@@ -26,7 +26,7 @@ use patches_core::{
     ParameterMap, PortDescriptor, PortRef, QName, StructuralParams, AUTOSUM_PREFIX,
 };
 use patches_dsl::flat::CableMap;
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 
 use super::connections::{BoundConnection, ResolvedConnection};
 use super::errors::{BindError, BindErrorCode};

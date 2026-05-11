@@ -48,7 +48,7 @@ pub use modules::{BoundModule, ResolvedModule, UnresolvedModule};
 use std::collections::HashMap;
 
 use patches_core::QName;
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_dsl::flat::{FlatPatch, SongData};
 
 use connections::{bind_connection, bind_port_ref};

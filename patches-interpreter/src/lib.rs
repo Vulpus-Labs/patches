@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use patches_core::{AudioEnvironment, ModuleGraph, TrackerData};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::FlatPatch;
 

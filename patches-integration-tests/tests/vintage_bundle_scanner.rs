@@ -18,7 +18,7 @@ use patches_core::{
 };
 use patches_ffi::{load_plugin, scanner::PluginScanner};
 use patches_integration_tests::dylib_path;
-use patches_registry::{ModuleBuilder, Registry};
+use patches_core::registry::{ModuleBuilder, Registry};
 use std::sync::Arc;
 
 const EXPECTED_MODULES: &[&str] = &[

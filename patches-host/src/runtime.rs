@@ -14,7 +14,7 @@ use patches_dsl::host_control_manifest::{HostControlKind, HostControlManifest};
 use patches_engine::{HaltHandle, PatchProcessor, Planner};
 use patches_observation::{ManifestPublication, ReplanProducer};
 use patches_planner::{ExecutionPlan, MonitorMeta};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use rtrb::{Consumer, Producer};
 
 use crate::{load_patch, CompileError, HostFileSource, LoadedPatch};

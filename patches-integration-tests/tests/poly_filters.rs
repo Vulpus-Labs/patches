@@ -12,7 +12,7 @@ use patches_core::{
     PolyOutput,
 };
 use patches_core::{StructuralParams, BuildError};
-use patches_registry::Registry;
+use patches_core::registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::param_frame::ParamView;
