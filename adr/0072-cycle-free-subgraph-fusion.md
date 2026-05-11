@@ -438,6 +438,62 @@ Optimisations enabled:
 Cancellable: phases 1–3 stand on their own if phase 4
 benchmarks do not motivate it.
 
+### Phase 5 — Scratch-first layout invert (ticket 0860, E143)
+
+Phase 3 placed cycle at `[0, CYCLE_CAPACITY)` and scratch at
+`[CYCLE_CAPACITY, …)`, with the backplane embedded inside scratch
+at `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)`. That
+layout left `- CYCLE_CAPACITY` arithmetic scattered across the
+engine, harness, and tests every time a backplane slot was read
+or written, and pinned disconnected-input defaults at
+`fused: false` despite their constant-zero read semantics being
+inherently same-tick.
+
+Phase 5 inverts the index space:
+
+| range                                                   | region   | content                                |
+|---------------------------------------------------------|----------|----------------------------------------|
+| `[0, SINK_SLOTS)`                                       | scratch  | sinks (mono/poly read/write)           |
+| `[SINK_SLOTS, RESERVED_SLOTS)`                          | scratch  | backplane (audio I/O, transport, …)    |
+| `[RESERVED_SLOTS, SCRATCH_CAPACITY)`                    | scratch  | dyn scratch (planner-allocated)        |
+| `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)` | cycle    | dyn cycle producers                    |
+
+Three load-bearing decisions:
+
+1. **Scratch is low, cycle is high.** Inverts the phase-3
+   framing. Backplane is the most-trafficked reserved region
+   and is naturally single-slot; making it the bottom of the
+   index space gives small const literals
+   (`AUDIO_OUT_L = 4`, `GLOBAL_TRANSPORT = 8`, …) and zero
+   arithmetic at engine write sites.
+2. **Sinks move to scratch.** Read sinks are never written;
+   write sinks are never read. Neither needs ping-pong
+   storage. Falling out of (1): sinks at scratch `[0, 4)`,
+   backplane at scratch `[4, 32)`. `init_cycle_pool` no
+   longer special-cases sink slots.
+3. **`fused: true` is the default for disconnected inputs.**
+   Disconnected ports route to a sink in scratch (constant
+   zero, same-tick). The only transition out of `fused: true`
+   is being wired to a delayed-consumer cycle producer, which
+   the planner sets explicitly.
+
+`CablePool` dispatch becomes a single cutoff:
+`cable_idx < SCRATCH_CAPACITY → scratch[cable_idx]`, else
+`cycle[cable_idx - SCRATCH_CAPACITY]`. The planner's logical
+cycle hwm lives in `[0, CYCLE_CAPACITY)`; absolute `cable_idx`
+emitted into modules is `SCRATCH_CAPACITY + logical`.
+
+**ABI bump**: FFI plugin ABI version moves from v10 to v11. No
+external plugin clients today; the in-tree consumers
+(patches-vintage, test plugins, host loader) recompile against
+the new constants. Plugin SDKs that bake any of the backplane
+literals need rebuild.
+
+**Audio churn**: same as phase 3 — patches that read transport,
+drift, or MIDI advance one sample sooner than under the
+pre-fusion plan because backplane reads are now inherently
+same-tick. Goldens are auditioned, not silently regenerated.
+
 ## Alternatives considered
 
 **Always read from current write buffer (no fusion analysis).** Reject

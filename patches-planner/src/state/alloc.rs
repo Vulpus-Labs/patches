@@ -9,7 +9,7 @@ use super::PlanError;
 // cables directly.
 pub use patches_core::cables::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
-    SINK_SLOTS, CYCLE_CAPACITY,
+    SINK_SLOTS, CYCLE_CAPACITY, SCRATCH_CAPACITY,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
 
@@ -17,44 +17,53 @@ pub use patches_core::cables::{
 
 /// Stable buffer index allocation state threaded across successive plan builds.
 ///
-/// Two index regions (ADR 0072 phases 3–4, tickets 0850 + 0851):
+/// Two index regions (ADR 0072 phases 3–4, tickets 0850 + 0851; phase 5
+/// invert ticket 0860):
 ///
-/// - **Cycle** `[SINK_SLOTS, CYCLE_CAPACITY)` — producer ports with at
-///   least one delayed (non-fused) consumer. Backed by `[CableValue; 2]` pair
-///   slots. Indices are **stable across replans**: a surviving
-///   `(NodeId, output_port_index)` keeps the same cycle slot so the audio
-///   thread's in-flight feedback state is preserved on plan swap. Stability
-///   is delivered by [`cycle_freelist`](Self::cycle_freelist) +
+/// - **Scratch** `[RESERVED_SLOTS, SCRATCH_CAPACITY)` — producer ports
+///   whose every consumer is fused. Backed by single `CableValue` slots
+///   at the bottom of the index space. Values are tick-local: every
+///   consumer reads same-tick output, so prior contents never reach the
+///   read path. The scratch region is therefore **rebuilt fresh on every
+///   plan**: a forward sweep over `order` packs indices densely in
+///   topological order, with no freelist and no carry-over of high-water
+///   mark from the previous plan. This delivers ADR 0072 phase 4's
+///   cache-proximity layout (consumers read producers' outputs from
+///   monotonically increasing addresses). Indices `[0, RESERVED_SLOTS)`
+///   are reserved for sinks + backplane and never assigned dynamically.
+/// - **Cycle** `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)` —
+///   producer ports with at least one delayed (non-fused) consumer.
+///   Backed by `[CableValue; 2]` pair slots. Indices are **stable across
+///   replans**: a surviving `(NodeId, output_port_index)` keeps the same
+///   cycle slot so the audio thread's in-flight feedback state is
+///   preserved on plan swap. Stability is delivered by
+///   [`cycle_freelist`](Self::cycle_freelist) +
 ///   [`cycle_hwm`](Self::cycle_hwm).
-/// - **Scratch** `[CYCLE_CAPACITY + RESERVED_SLOTS, pool_capacity)` — producer ports whose
-///   every consumer is fused. Backed by single `CableValue` slots. Values
-///   are tick-local: every consumer reads same-tick output, so prior
-///   contents never reach the read path. The scratch region is therefore
-///   **rebuilt fresh on every plan**: a forward sweep over `order` packs
-///   indices densely in topological order, with no freelist and no
-///   carry-over of high-water mark from the previous plan. This delivers
-///   ADR 0072 phase 4's cache-proximity layout (consumers read producers'
-///   outputs from monotonically increasing addresses).
+///
+/// `cycle_hwm` and `cycle_freelist` are kept as *logical* cycle indices
+/// in `[0, CYCLE_CAPACITY)`; the absolute `cable_idx` emitted into
+/// `output_buf` is `SCRATCH_CAPACITY + logical`.
 pub struct BufferAllocState {
-    /// Maps `(NodeId, output_port_index)` to its current buffer pool index.
-    /// Cycle entries persist across replans; scratch entries are recomputed
-    /// each plan and may move freely.
+    /// Maps `(NodeId, output_port_index)` to its current buffer pool
+    /// `cable_idx`. Cycle entries (`cable_idx >= SCRATCH_CAPACITY`)
+    /// persist across replans; scratch entries (`cable_idx <
+    /// SCRATCH_CAPACITY`) are recomputed each plan and may move freely.
     pub output_buf: HashMap<(NodeId, usize), usize>,
-    /// Recycled cycle-region indices available for reuse (LIFO via [`Vec::pop`]).
-    /// Populated when a cycle producer port disappears or flips to scratch;
-    /// drained when a new cycle producer port appears or a scratch port
-    /// flips to cycle.
+    /// Recycled cycle-region *logical* indices in `[0, CYCLE_CAPACITY)`,
+    /// available for reuse (LIFO via [`Vec::pop`]). Populated when a
+    /// cycle producer port disappears or flips to scratch; drained when
+    /// a new cycle producer port appears or a scratch port flips to
+    /// cycle.
     pub cycle_freelist: Vec<usize>,
-    /// High-water mark for the cycle region. Starts at [`SINK_SLOTS`] so
-    /// that the read/write sink slots are never aliased by a dynamic
-    /// cycle cable. Capped at [`CYCLE_CAPACITY`].
+    /// Logical high-water mark for the cycle region in `[0, CYCLE_CAPACITY]`.
+    /// Starts at `0` (no sinks in cycle under the phase-5 layout).
     pub cycle_hwm: usize,
     /// High-water mark for the scratch region in the *most recent* plan.
-    /// Reset to `CYCLE_CAPACITY + RESERVED_SLOTS` at the start of every
-    /// allocation pass (skipping the backplane reserved range) and rises
-    /// as the forward sweep emits scratch indices. Carried in state only
-    /// as the post-build snapshot (used by tests and diagnostics); not
-    /// consulted by the next allocation pass.
+    /// Reset to [`RESERVED_SLOTS`] at the start of every allocation pass
+    /// (skipping the sink + backplane range at the bottom of scratch)
+    /// and rises as the forward sweep emits scratch indices. Carried in
+    /// state only as the post-build snapshot (used by tests and
+    /// diagnostics); not consulted by the next allocation pass.
     pub scratch_hwm: usize,
 }
 
@@ -63,8 +72,8 @@ impl Default for BufferAllocState {
         Self {
             output_buf: HashMap::new(),
             cycle_freelist: Vec::new(),
-            cycle_hwm: SINK_SLOTS,
-            scratch_hwm: CYCLE_CAPACITY + RESERVED_SLOTS,
+            cycle_hwm: 0,
+            scratch_hwm: RESERVED_SLOTS,
         }
     }
 }
@@ -169,22 +178,24 @@ pub struct BufferAllocation {
 
 /// Assign cable buffer pool indices for `order`, dispatching each producer
 /// port to either the cycle or scratch region based on `producer_port_cycle`
-/// (ADR 0072 phases 3–4, tickets 0850 + 0851).
+/// (ADR 0072 phases 3–4, tickets 0850 + 0851; phase 5 invert ticket 0860).
 ///
-/// **Cycle region.** Indices are stable across replans: a surviving
-/// `(NodeId, port_idx)` whose previous slot lived in cycle space and remains
-/// classified as cycle keeps that slot, preserving the audio thread's
-/// in-flight feedback values on plan swap. Vacated slots return to
-/// `cycle_freelist` (LIFO).
+/// **Scratch region** `[RESERVED_SLOTS, SCRATCH_CAPACITY)`. Indices are
+/// recomputed every plan via a single forward sweep over `order`. Scratch
+/// values are tick-local — the consumer reads same-tick producer output, so
+/// prior contents never reach the read path — which means scratch indices
+/// may compact freely without breaking audio. The forward sweep emits
+/// dense, topologically-ordered scratch indices starting at
+/// `RESERVED_SLOTS`; consumers therefore read producers' outputs from
+/// monotonically increasing addresses, which is the cache-proximity goal
+/// of ADR 0072 phase 4.
 ///
-/// **Scratch region.** Indices are recomputed every plan via a single
-/// forward sweep over `order`. Scratch values are tick-local — the consumer
-/// reads same-tick producer output, so prior contents never reach the read
-/// path — which means scratch indices may compact freely without breaking
-/// audio. The forward sweep emits dense, topologically-ordered scratch
-/// indices starting at `CYCLE_CAPACITY`; consumers therefore read
-/// producers' outputs from monotonically increasing addresses, which is
-/// the cache-proximity goal of ADR 0072 phase 4.
+/// **Cycle region** `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)`.
+/// Indices are stable across replans: a surviving `(NodeId, port_idx)`
+/// whose previous slot lived in cycle space and remains classified as
+/// cycle keeps that slot, preserving the audio thread's in-flight
+/// feedback values on plan swap. Vacated slots return to `cycle_freelist`
+/// (LIFO) as logical indices in `[0, CYCLE_CAPACITY)`.
 ///
 /// **Region flips.** A port that previously occupied a cycle slot but is
 /// now classified as scratch returns its old cycle slot to the freelist
@@ -205,9 +216,10 @@ pub struct BufferAllocation {
 /// line size.
 ///
 /// Returns [`PlanError::BufferPoolExhausted`] if either region exhausts
-/// its capacity. Cycle exhaustion fires when the next cycle index would
-/// reach [`CYCLE_CAPACITY`]; scratch exhaustion fires when the next
-/// scratch index would reach `pool_capacity`.
+/// its capacity. Scratch exhaustion fires when the next scratch index
+/// would reach `min(pool_capacity, SCRATCH_CAPACITY)`; cycle exhaustion
+/// fires when the next cycle logical index would reach
+/// [`CYCLE_CAPACITY`].
 pub fn allocate_buffers(
     index: &GraphIndex<'_>,
     order: &[NodeId],
@@ -218,8 +230,9 @@ pub fn allocate_buffers(
     let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
     let mut cycle_hwm = prev_alloc.cycle_hwm;
     // Scratch is rebuilt fresh each plan; no carry-over of hwm. Skip
-    // the backplane reserved range at the bottom of scratch.
-    let mut scratch_hwm: usize = CYCLE_CAPACITY + RESERVED_SLOTS;
+    // the sink + backplane reserved range at the bottom of scratch.
+    let mut scratch_hwm: usize = RESERVED_SLOTS;
+    let scratch_cap = pool_capacity.min(SCRATCH_CAPACITY);
     let mut to_zero = Vec::new();
     let mut output_buf: HashMap<(NodeId, usize), usize> = HashMap::new();
 
@@ -227,9 +240,9 @@ pub fn allocate_buffers(
         producer_port_cycle.get(key).copied().unwrap_or(false)
     };
 
-    // Track cycle slots already returned to the freelist by inline
-    // region-flip handling so the post-pass reconciliation does not
-    // double-free them.
+    // Track cycle logical slots already returned to the freelist by
+    // inline region-flip handling so the post-pass reconciliation does
+    // not double-free them.
     let mut cycle_already_freed: HashSet<usize> = HashSet::new();
 
     for id in order {
@@ -247,7 +260,7 @@ pub fn allocate_buffers(
                 // Cycle survivor: keep the old cycle slot to preserve
                 // in-flight feedback state across plan swap.
                 if let Some(existing) = prev {
-                    if existing < CYCLE_CAPACITY {
+                    if existing >= SCRATCH_CAPACITY {
                         output_buf.insert(key, existing);
                         continue;
                     }
@@ -256,30 +269,31 @@ pub fn allocate_buffers(
                     // will zero it if nothing else reuses it). The new
                     // cycle slot is zeroed via the to_zero entry below.
                 }
-                let i = cycle_freelist.pop().unwrap_or_else(|| {
+                let logical = cycle_freelist.pop().unwrap_or_else(|| {
                     let i = cycle_hwm;
                     cycle_hwm += 1;
                     i
                 });
-                if i >= CYCLE_CAPACITY {
+                if logical >= CYCLE_CAPACITY {
                     return Err(PlanError::BufferPoolExhausted);
                 }
-                i
+                SCRATCH_CAPACITY + logical
             } else {
                 // Cycle → scratch flip: return the old cycle slot to its
                 // region's freelist so the cycle pool stays compact, and
                 // zero it (the cycle pair held last-tick feedback that is
                 // no longer meaningful).
                 if let Some(existing) = prev {
-                    if existing < CYCLE_CAPACITY {
-                        cycle_freelist.push(existing);
-                        cycle_already_freed.insert(existing);
+                    if existing >= SCRATCH_CAPACITY {
+                        let logical = existing - SCRATCH_CAPACITY;
+                        cycle_freelist.push(logical);
+                        cycle_already_freed.insert(logical);
                         to_zero.push(existing);
                     }
                 }
                 let i = scratch_hwm;
                 scratch_hwm += 1;
-                if i >= pool_capacity {
+                if i >= scratch_cap {
                     return Err(PlanError::BufferPoolExhausted);
                 }
                 i
@@ -298,12 +312,13 @@ pub fn allocate_buffers(
         if new_indices.contains(&old_idx) {
             continue;
         }
-        if old_idx < CYCLE_CAPACITY {
-            if !cycle_already_freed.insert(old_idx) {
+        if old_idx >= SCRATCH_CAPACITY {
+            let logical = old_idx - SCRATCH_CAPACITY;
+            if !cycle_already_freed.insert(logical) {
                 // Already pushed by inline flip handler; do not re-push.
                 continue;
             }
-            cycle_freelist.push(old_idx);
+            cycle_freelist.push(logical);
         }
         to_zero.push(old_idx);
     }

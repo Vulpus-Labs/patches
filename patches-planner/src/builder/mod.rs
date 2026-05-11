@@ -259,12 +259,12 @@ pub struct ExecutionPlan {
     /// applied directly to each `InputPort.fused` (phase 2); the
     /// engine's read path branches on that flag.
     pub fas_size: usize,
-    /// Diagnostic high-water mark of the cycle region in this plan
-    /// (ADR 0072 phase 3, tickets 0850 + 0858). The actual cycle/
-    /// scratch cutoff is the per-pool constant [`patches_core::CYCLE_CAPACITY`];
-    /// the backplane lives in the bottom `RESERVED_SLOTS` of scratch.
+    /// Diagnostic logical high-water mark of the cycle region in this
+    /// plan (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert
+    /// ticket 0860). Logical index in `[0, CYCLE_CAPACITY)`; absolute
+    /// `cable_idx` for cycle producers is `SCRATCH_CAPACITY + logical`.
     /// Carried for tests and diagnostics only — the engine does not
-    /// consume this field.
+    /// consume this field. Slated for removal in ticket 0862.
     pub cycle_slot_start: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
@@ -555,10 +555,19 @@ impl PatchBuilder {
                     let scale = map.scale;
                     let offset = map.offset;
                     let clip = map.clip;
-                    let fused = connected
-                        && *fused_by_input
+                    // Disconnected ports resolve to a sink in scratch
+                    // (constant zero, same-tick) — fused by definition.
+                    // Connected ports take their fusion classification
+                    // from the cycle-detection analysis; an absent entry
+                    // means no consumer needed delay, so fused holds
+                    // (ADR 0072 phase 5).
+                    let fused = if connected {
+                        *fused_by_input
                             .get(&(id.clone(), port_desc.name, port_desc.index))
-                            .unwrap_or(&false);
+                            .unwrap_or(&true)
+                    } else {
+                        true
+                    };
                     match port_desc.kind {
                         CableKind::Mono => InputPort::Mono(MonoInput {
                             cable_idx: buf_idx, scale, offset, clip, connected, fused,

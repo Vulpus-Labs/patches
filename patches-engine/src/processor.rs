@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use patches_core::{
     BoundedRandomWalk, CablePool, CableValue, HostControlEvent, MidiEvent, MidiFrame,
     TapBlockFrame, TapFrame, TransportFrame,
-    AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R, CYCLE_CAPACITY,
+    AUDIO_IN_L, AUDIO_IN_R, AUDIO_OUT_L, AUDIO_OUT_R, SCRATCH_CAPACITY,
     GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_DRIFT_STEP, GLOBAL_MIDI,
     HOST_CONTROL_BASE, HOST_CONTROL_SLOTS, MAX_TAPS,
     TAP_BASE, TAP_SLOTS,
@@ -33,7 +33,7 @@ use crate::midi_scratch::MidiScratch;
 fn snapshot_tap_lanes(scratch_pool: &[CableValue]) -> TapFrame {
     let mut out = [0.0_f32; MAX_TAPS];
     for i in 0..TAP_SLOTS {
-        let lanes = scratch_pool[TAP_BASE + i - CYCLE_CAPACITY].as_poly();
+        let lanes = scratch_pool[TAP_BASE + i].as_poly();
         out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
     }
     out
@@ -67,16 +67,17 @@ const CLOCK_WRAP_MASK: usize = (1 << 16) - 1;
 /// - Spawning and joining the cleanup thread (holds the `Consumer` end).
 pub struct PatchProcessor {
     state: ReadyState,
-    /// Ping-pong cycle region (ADR 0072 phase 3, tickets 0850 + 0858).
-    /// Sized at [`CYCLE_CAPACITY`] entries; backs read/write sinks and
-    /// dynamic cycle producer ports. `cable_idx < CYCLE_CAPACITY`
-    /// dispatches here.
+    /// Ping-pong cycle region (ADR 0072 phase 3, tickets 0850 + 0858;
+    /// phase 5 invert ticket 0860). Sized at [`CYCLE_CAPACITY`] entries;
+    /// backs dyn cycle producer ports. `cable_idx >= SCRATCH_CAPACITY`
+    /// dispatches here, indexed by `cable_idx - SCRATCH_CAPACITY`.
     cycle_pool: Box<[[CableValue; 2]]>,
     /// Single-slot scratch region (ADR 0072 phase 3, tickets 0850 +
-    /// 0858). Sized at `buffer_capacity - CYCLE_CAPACITY`; backs the
-    /// backplane (bottom `RESERVED_SLOTS`) plus producer ports whose
-    /// every consumer is fused (above). `cable_idx >= CYCLE_CAPACITY`
-    /// dispatches here, indexed by `cable_idx - CYCLE_CAPACITY`.
+    /// 0858; phase 5 invert ticket 0860). Sized at
+    /// `min(SCRATCH_CAPACITY, buffer_capacity)`; backs sinks
+    /// (`[0, SINK_SLOTS)`), backplane (`[SINK_SLOTS, RESERVED_SLOTS)`)
+    /// and dyn cables whose every consumer is fused. `cable_idx <
+    /// SCRATCH_CAPACITY` dispatches here, indexed by `cable_idx`.
     scratch_pool: Box<[CableValue]>,
     previous_plan: Option<ExecutionPlan>,
     cleanup_tx: rtrb::Producer<CleanupAction>,
@@ -354,17 +355,17 @@ impl PatchProcessor {
             }
         }
         for &i in &plan.to_zero {
-            if i < CYCLE_CAPACITY {
-                self.cycle_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
+            if i < SCRATCH_CAPACITY {
+                self.scratch_pool[i] = CableValue::mono(0.0);
             } else {
-                self.scratch_pool[i - CYCLE_CAPACITY] = CableValue::mono(0.0);
+                self.cycle_pool[i - SCRATCH_CAPACITY] = [CableValue::mono(0.0), CableValue::mono(0.0)];
             }
         }
         for &i in &plan.to_zero_poly {
-            if i < CYCLE_CAPACITY {
-                self.cycle_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+            if i < SCRATCH_CAPACITY {
+                self.scratch_pool[i] = CableValue::poly([0.0; 16]);
             } else {
-                self.scratch_pool[i - CYCLE_CAPACITY] = CableValue::poly([0.0; 16]);
+                self.cycle_pool[i - SCRATCH_CAPACITY] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
             }
         }
 
@@ -453,8 +454,8 @@ impl PatchProcessor {
     /// backplane is single-slot scratch with no ping-pong delay).
     #[inline]
     pub fn write_input(&mut self, left: f32, right: f32) {
-        self.scratch_pool[AUDIO_IN_L - CYCLE_CAPACITY] = CableValue::mono(left);
-        self.scratch_pool[AUDIO_IN_R - CYCLE_CAPACITY] = CableValue::mono(right);
+        self.scratch_pool[AUDIO_IN_L] = CableValue::mono(left);
+        self.scratch_pool[AUDIO_IN_R] = CableValue::mono(right);
     }
 
     /// Advance the patch by one sample.
@@ -568,8 +569,8 @@ impl PatchProcessor {
         // the write index so the cycle ping-pong buffer stays coherent for
         // dyn-cycle reads.
         if self.halt.is_halted() {
-            self.scratch_pool[AUDIO_OUT_L - CYCLE_CAPACITY] = CableValue::mono(0.0);
-            self.scratch_pool[AUDIO_OUT_R - CYCLE_CAPACITY] = CableValue::mono(0.0);
+            self.scratch_pool[AUDIO_OUT_L] = CableValue::mono(0.0);
+            self.scratch_pool[AUDIO_OUT_R] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -577,11 +578,9 @@ impl PatchProcessor {
         let wi = self.wi;
 
         TransportFrame::set_sample_count(&mut self.transport_poly, self.sample_count as f32);
-        self.scratch_pool[GLOBAL_TRANSPORT - CYCLE_CAPACITY] =
-            CableValue::poly(self.transport_poly);
+        self.scratch_pool[GLOBAL_TRANSPORT] = CableValue::poly(self.transport_poly);
         self.sample_count = (self.sample_count + 1) & CLOCK_WRAP_MASK;
-        self.scratch_pool[GLOBAL_DRIFT - CYCLE_CAPACITY] =
-            CableValue::mono(self.global_drift_walk.advance());
+        self.scratch_pool[GLOBAL_DRIFT] = CableValue::mono(self.global_drift_walk.advance());
 
         // Flush the host-control AoS frame row into the four contiguous
         // backplane poly slots (ADR 0068 §2 amended). When no
@@ -593,14 +592,12 @@ impl PatchProcessor {
                 for i in 0..HOST_CONTROL_SLOTS {
                     let mut chunk = [0.0_f32; 16];
                     chunk.copy_from_slice(&row[i * 16..(i + 1) * 16]);
-                    self.scratch_pool[HOST_CONTROL_BASE + i - CYCLE_CAPACITY] =
-                        CableValue::poly(chunk);
+                    self.scratch_pool[HOST_CONTROL_BASE + i] = CableValue::poly(chunk);
                 }
             }
             None => {
                 for i in 0..HOST_CONTROL_SLOTS {
-                    self.scratch_pool[HOST_CONTROL_BASE + i - CYCLE_CAPACITY] =
-                        CableValue::poly([0.0; 16]);
+                    self.scratch_pool[HOST_CONTROL_BASE + i] = CableValue::poly([0.0; 16]);
                 }
             }
         }
@@ -617,7 +614,7 @@ impl PatchProcessor {
             }
             MidiFrame::set_event_count(&mut self.midi_poly, count);
         }
-        self.scratch_pool[GLOBAL_MIDI - CYCLE_CAPACITY] = CableValue::poly(self.midi_poly);
+        self.scratch_pool[GLOBAL_MIDI] = CableValue::poly(self.midi_poly);
 
         // ADR 0051: wrap the tick in catch_unwind so a module panic becomes a
         // sticky halt rather than an unwind through FFI into the host.
@@ -641,8 +638,8 @@ impl PatchProcessor {
             let slot = self.halt.current_module_slot.load(Ordering::Relaxed);
             let name = self.state.slot_module_name(slot).unwrap_or("<unknown>");
             self.halt.record(slot, name, payload_summary(payload));
-            self.scratch_pool[AUDIO_OUT_L - CYCLE_CAPACITY] = CableValue::mono(0.0);
-            self.scratch_pool[AUDIO_OUT_R - CYCLE_CAPACITY] = CableValue::mono(0.0);
+            self.scratch_pool[AUDIO_OUT_L] = CableValue::mono(0.0);
+            self.scratch_pool[AUDIO_OUT_R] = CableValue::mono(0.0);
             self.wi = 1 - self.wi;
             return (0.0, 0.0);
         }
@@ -663,8 +660,8 @@ impl PatchProcessor {
             self.tap_block_idx = 0;
         }
 
-        let out_l = self.scratch_pool[AUDIO_OUT_L - CYCLE_CAPACITY].as_mono();
-        let out_r = self.scratch_pool[AUDIO_OUT_R - CYCLE_CAPACITY].as_mono();
+        let out_l = self.scratch_pool[AUDIO_OUT_L].as_mono();
+        let out_r = self.scratch_pool[AUDIO_OUT_R].as_mono();
 
         self.wi = 1 - self.wi;
 
@@ -677,11 +674,11 @@ impl PatchProcessor {
     /// pattern-match `[CableValue; 2]` keep working without dispatch
     /// branches).
     pub fn pool_slot(&self, idx: usize) -> [CableValue; 2] {
-        if idx < CYCLE_CAPACITY {
-            self.cycle_pool[idx]
-        } else {
-            let v = self.scratch_pool[idx - CYCLE_CAPACITY];
+        if idx < SCRATCH_CAPACITY {
+            let v = self.scratch_pool[idx];
             [v, v]
+        } else {
+            self.cycle_pool[idx - SCRATCH_CAPACITY]
         }
     }
 

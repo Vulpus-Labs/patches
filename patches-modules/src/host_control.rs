@@ -176,7 +176,7 @@ impl Module for HostControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::{CableValue, CYCLE_CAPACITY, ParameterValue, RESERVED_SLOTS};
+    use patches_core::{CableValue, ParameterValue, RESERVED_SLOTS};
     use patches_core::modules::ParameterMap;
     use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
     use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
@@ -212,16 +212,19 @@ mod tests {
         hc.update_validated_parameters(&view);
     }
 
-    /// Build a minimal two-region cable pool for `hc`. Cycle covers
-    /// the user input/output cables (which test fixtures place starting
-    /// at `RESERVED_SLOTS`); scratch covers the backplane reserved
-    /// range. Backplane lives in scratch (ticket 0858).
+    /// Build a minimal two-region cable pool for `hc`. Scratch covers
+    /// the backplane reserved range plus user input/output cables
+    /// (which test fixtures place at `RESERVED_SLOTS + i` in scratch
+    /// under ADR 0072 phase 5); cycle is empty.
     fn make_pool(hc: &HostControl) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
         let n_inputs = hc.descriptor.inputs.len();
         let n_outputs = hc.descriptor.outputs.len();
-        let cycle_size = RESERVED_SLOTS + n_inputs + n_outputs;
-        let cycle = vec![[CableValue::mono(0.0); 2]; cycle_size];
-        let scratch = vec![CableValue::poly([0.0; 16]); RESERVED_SLOTS];
+        let scratch_size = RESERVED_SLOTS + n_inputs + n_outputs;
+        let mut scratch = vec![CableValue::mono(0.0); scratch_size];
+        for s in &mut scratch[..RESERVED_SLOTS] {
+            *s = CableValue::poly([0.0; 16]);
+        }
+        let cycle: Vec<[CableValue; 2]> = Vec::new();
         (cycle, scratch)
     }
 
@@ -263,13 +266,13 @@ mod tests {
         // ping-pong half. The module reads same-tick (`fused: true`).
         let mut row = [0.0_f32; 16];
         row[5] = 0.42;
-        scratch[HOST_CONTROL_BASE - CYCLE_CAPACITY] = CableValue::poly(row);
+        scratch[HOST_CONTROL_BASE] = CableValue::poly(row);
 
         let wi = 0;
         let mut cp = CablePool::new(&mut scratch, &mut cycle, wi);
         hc.process(&mut cp);
 
-        assert_eq!(cycle[audio_out_slot][wi].as_mono(), 0.42);
+        assert_eq!(scratch[audio_out_slot].as_mono(), 0.42);
     }
 
     /// `process` routes a trigger-kind channel's value to `trigger_out`.
@@ -287,13 +290,13 @@ mod tests {
 
         let mut row = [0.0_f32; 16];
         row[0] = 1.0;
-        scratch[HOST_CONTROL_BASE - CYCLE_CAPACITY] = CableValue::poly(row);
+        scratch[HOST_CONTROL_BASE] = CableValue::poly(row);
 
         let wi = 0;
         let mut cp = CablePool::new(&mut scratch, &mut cycle, wi);
         hc.process(&mut cp);
 
-        assert_eq!(cycle[trigger_out_slot][wi].as_mono(), 1.0);
+        assert_eq!(scratch[trigger_out_slot].as_mono(), 1.0);
     }
 
     /// Out-of-range `slot_offset` degrades to 0.0 rather than panicking.
@@ -317,6 +320,6 @@ mod tests {
         let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
         hc.process(&mut cp);
 
-        assert_eq!(cycle[audio_out_slot][0].as_mono(), 0.0);
+        assert_eq!(scratch[audio_out_slot].as_mono(), 0.0);
     }
 }

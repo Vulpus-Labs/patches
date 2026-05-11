@@ -95,13 +95,18 @@ fn make_cable_pool(values: &[CableValue]) -> Vec<[CableValue; 2]> {
     values.iter().map(|&v| [v, v]).collect()
 }
 
+/// Absolute `cable_idx` for cycle logical slot `i` (ADR 0072 phase 5).
+const fn cycle_idx(i: usize) -> usize {
+    super::SCRATCH_CAPACITY + i
+}
+
 // ── GateInput ────────────────────────────────────────────────────────
 
 #[test]
 fn gate_rising_and_falling_edges() {
     let mut pool = make_cable_pool(&[CableValue::mono(0.0)]);
     let mut g = GateInput {
-        inner: MonoInput::scalar(0, 1.0),
+        inner: MonoInput::scalar(cycle_idx(0), 1.0),
         ..Default::default()
     };
 
@@ -151,7 +156,7 @@ fn sub_trigger_zero_is_no_event() {
     let mut pool = make_cable_pool(&[CableValue::mono(0.0)]);
     let cp = CablePool::with_cycle_only(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput::scalar(0, 1.0),
+        inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
     assert_eq!(t.tick(&cp), None);
 }
@@ -161,7 +166,7 @@ fn sub_trigger_positive_is_event_with_frac() {
     let mut pool = make_cable_pool(&[CableValue::mono(0.37)]);
     let cp = CablePool::with_cycle_only(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput::scalar(0, 1.0),
+        inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
     assert_eq!(t.tick(&cp), Some(0.37));
 }
@@ -171,7 +176,7 @@ fn sub_trigger_one_is_boundary_event() {
     let mut pool = make_cable_pool(&[CableValue::mono(1.0)]);
     let cp = CablePool::with_cycle_only(&mut pool, 0);
     let t = TriggerInput {
-        inner: MonoInput::scalar(0, 1.0),
+        inner: MonoInput::scalar(cycle_idx(0), 1.0),
     };
     assert_eq!(t.tick(&cp), Some(1.0));
 }
@@ -184,7 +189,7 @@ fn poly_sub_trigger_per_voice() {
     let mut pool = make_cable_pool(&[CableValue::poly(channels)]);
     let cp = CablePool::with_cycle_only(&mut pool, 0);
     let t = PolyTriggerInput {
-        inner: PolyInput::scalar(0, 1.0),
+        inner: PolyInput::scalar(cycle_idx(0), 1.0),
     };
     let out = t.tick(&cp);
     assert_eq!(out[0], Some(0.25));
@@ -243,7 +248,7 @@ fn stereo_input_round_trip_through_output() {
 fn poly_gate_per_voice_edges() {
     let mut pool = make_cable_pool(&[CableValue::poly([0.0; 16])]);
     let mut g = PolyGateInput {
-        inner: PolyInput::scalar(0, 1.0),
+        inner: PolyInput::scalar(cycle_idx(0), 1.0),
         ..Default::default()
     };
 

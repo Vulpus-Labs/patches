@@ -95,12 +95,12 @@ fn counter_graph() -> ModuleGraph {
 }
 
 /// Cycle + scratch pools sized for the planner's two-region layout
-/// (ADR 0072 phase 3, tickets 0850 + 0858).
+/// (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert ticket 0860).
 fn make_split_pool(capacity: usize) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
     let cycle = (0..patches_core::CYCLE_CAPACITY)
         .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
         .collect();
-    let scratch_len = capacity.saturating_sub(patches_core::CYCLE_CAPACITY);
+    let scratch_len = capacity.clamp(patches_core::RESERVED_SLOTS, patches_core::SCRATCH_CAPACITY);
     let scratch = vec![CableValue::mono(0.0); scratch_len];
     (cycle, scratch)
 }

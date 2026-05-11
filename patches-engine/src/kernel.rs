@@ -2,43 +2,43 @@ use std::thread;
 use std::time::Duration;
 
 use patches_core::{
-    CableValue, CYCLE_CAPACITY, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+    CableValue, CYCLE_CAPACITY, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS, SCRATCH_CAPACITY,
 };
 
 use crate::cleanup::CleanupAction;
 
 /// Allocate and initialise the cycle region of the cable buffer pool
-/// (ADR 0072 phase 3, tickets 0850 + 0858). Sized at [`CYCLE_CAPACITY`]
-/// entries — the boundary between cycle pairs (low) and scratch slots
-/// (high). The backplane lives in scratch (ticket 0858); only the
-/// read/write sinks remain at the bottom of cycle.
-///
-/// All slots default to `Mono(0.0)` except `POLY_READ_SINK` and
-/// `POLY_WRITE_SINK`, which are `Poly([0.0; 16])` so poly reads of
-/// disconnected ports never see a kind mismatch. (Storage is the same
-/// `[f32; 16]` either way per ADR 0068; the distinction is cosmetic.)
+/// (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert ticket 0860).
+/// Sized at [`CYCLE_CAPACITY`] entries. Cycle slots live at absolute
+/// `cable_idx` in `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)`
+/// and back dyn feedback producers — sinks and backplane both live in
+/// scratch now, so there are no special low-index slots here. All slots
+/// default to `Mono(0.0)`; storage is `[f32; 16]` per ADR 0068 so poly
+/// readers see the same lane layout.
 pub fn init_cycle_pool() -> Box<[[CableValue; 2]]> {
-    let mut pool = vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; CYCLE_CAPACITY]
-        .into_boxed_slice();
-    pool[POLY_READ_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
-    pool
+    vec![[CableValue::mono(0.0), CableValue::mono(0.0)]; CYCLE_CAPACITY].into_boxed_slice()
 }
 
 /// Allocate and initialise the scratch region of the cable buffer pool
-/// (ADR 0072 phase 3, tickets 0850 + 0858). Sized at
-/// `max(RESERVED_SLOTS, buffer_capacity - CYCLE_CAPACITY)` single-slot
-/// `CableValue` entries. Backs the backplane (bottom `RESERVED_SLOTS`
-/// slots, written by the engine each tick) plus producer ports whose
-/// every consumer is fused (above). The minimum guarantees the engine
-/// can always write the backplane, even when callers pass a tiny
-/// `buffer_capacity` (typical in unit tests). All slots default to
-/// `Mono(0.0)`; `CableValue` is a `[f32; 16]` per ADR 0068, so the
-/// storage is identical for poly readers regardless of the constructor.
+/// (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert ticket 0860).
+/// Sized at `min(SCRATCH_CAPACITY, max(RESERVED_SLOTS, buffer_capacity))`
+/// single-slot `CableValue` entries. Slots `[0, SINK_SLOTS)` are the
+/// permanent read/write sinks, `[SINK_SLOTS, RESERVED_SLOTS)` carry the
+/// backplane (written by the engine each tick), and the remainder backs
+/// dyn producer ports whose every consumer is fused. The
+/// `RESERVED_SLOTS` floor guarantees the engine can always write the
+/// backplane even when callers pass a tiny `buffer_capacity` (typical
+/// in unit tests).
+///
+/// `POLY_READ_SINK` and `POLY_WRITE_SINK` are initialised as
+/// `Poly([0.0; 16])` for cosmetic clarity (per ADR 0068 storage is
+/// identical regardless of constructor).
 pub fn init_scratch_pool(buffer_capacity: usize) -> Box<[CableValue]> {
-    let dyn_scratch = buffer_capacity.saturating_sub(CYCLE_CAPACITY + RESERVED_SLOTS);
-    let scratch_capacity = RESERVED_SLOTS + dyn_scratch;
-    vec![CableValue::mono(0.0); scratch_capacity].into_boxed_slice()
+    let capacity = buffer_capacity.clamp(RESERVED_SLOTS, SCRATCH_CAPACITY);
+    let mut pool = vec![CableValue::mono(0.0); capacity].into_boxed_slice();
+    pool[POLY_READ_SINK] = CableValue::poly([0.0; 16]);
+    pool[POLY_WRITE_SINK] = CableValue::poly([0.0; 16]);
+    pool
 }
 
 /// Spawn the `"patches-cleanup"` background thread that drains and drops
@@ -126,12 +126,12 @@ fn apply_plan(
     // Tests fixture only zeroes cycle-region indices; scratch dispatch
     // is exercised by the production `adopt_plan_with_meta` path.
     for &i in &plan.to_zero {
-        debug_assert!(i < CYCLE_CAPACITY, "kernel test fixture only handles cycle slots");
-        buffer_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
+        debug_assert!(i >= SCRATCH_CAPACITY, "kernel test fixture only handles cycle slots");
+        buffer_pool[i - SCRATCH_CAPACITY] = [CableValue::mono(0.0), CableValue::mono(0.0)];
     }
     for &i in &plan.to_zero_poly {
-        debug_assert!(i < CYCLE_CAPACITY, "kernel test fixture only handles cycle slots");
-        buffer_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+        debug_assert!(i >= SCRATCH_CAPACITY, "kernel test fixture only handles cycle slots");
+        buffer_pool[i - SCRATCH_CAPACITY] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
     }
     let ready = stale.rebuild(&plan, periodic_update_interval);
     let old_plan = previous_plan.replace(plan);
@@ -152,7 +152,7 @@ mod tests {
 
     use patches_core::{
         AudioEnvironment, BuildError, CablePool, CableValue, InstanceId, Module, ModuleDescriptor,
-        ModuleShape, StructuralParams, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+        ModuleShape, StructuralParams, SCRATCH_CAPACITY,
     };
     use patches_core::parameter_map::ParameterMap;
 
@@ -260,9 +260,9 @@ mod tests {
     }
 
     #[test]
-    fn buffer_pool_general_slots_are_zero() {
+    fn buffer_pool_all_slots_zero() {
         let pool = init_cycle_pool();
-        for i in [0, 2, 4, RESERVED_SLOTS, RESERVED_SLOTS + 1] {
+        for i in [0, 2, 4, 16, 32, 64] {
             for frame in 0..2 {
                 assert_eq!(
                     pool[i][frame].as_mono(),
@@ -270,15 +270,6 @@ mod tests {
                     "slot {i} frame {frame} lane 0 should be 0.0"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn buffer_pool_poly_sink_slots_are_zero() {
-        let pool = init_cycle_pool();
-        for frame in 0..2 {
-            assert_eq!(pool[POLY_READ_SINK][frame].as_poly(), [0.0; 16]);
-            assert_eq!(pool[POLY_WRITE_SINK][frame].as_poly(), [0.0; 16]);
         }
     }
 
@@ -298,7 +289,7 @@ mod tests {
     /// New modules are installed at the pool indices listed in `new_modules`.
     #[test]
     fn apply_plan_installs_new_modules() {
-        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS, 4);
+        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(0, 4);
         let mut plan = ExecutionPlan::empty();
         plan.new_modules.push((2, Box::new(Stub::new())));
         plan.new_module_param_state.push(empty_param_state());
@@ -314,7 +305,7 @@ mod tests {
     /// Tombstoned modules are removed from the pool and sent to the cleanup ring buffer.
     #[test]
     fn apply_plan_tombstones_remove_from_pool_and_push_to_cleanup() {
-        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
+        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(0, 4);
 
         // First install a module via a plan.
         let mut install_plan = ExecutionPlan::empty();
@@ -343,7 +334,7 @@ mod tests {
     /// Tombstoning an already-empty slot is a no-op — nothing is pushed to the ring buffer.
     #[test]
     fn apply_plan_tombstone_of_empty_slot_is_noop() {
-        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
+        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(0, 4);
         let mut plan = ExecutionPlan::empty();
         plan.tombstones.push(0); // slot 0 was never installed
 
@@ -359,9 +350,10 @@ mod tests {
     /// `to_zero` slots are cleared to `Mono(0.0)` in both ping-pong frames.
     #[test]
     fn apply_plan_zeros_mono_slots() {
-        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS + 4, 4);
-        let slot = RESERVED_SLOTS + 2;
-        buf[slot] = [CableValue::mono(99.0), CableValue::mono(99.0)];
+        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(0, 4);
+        let logical = 2;
+        let slot = SCRATCH_CAPACITY + logical;
+        buf[logical] = [CableValue::mono(99.0), CableValue::mono(99.0)];
 
         let mut plan = ExecutionPlan::empty();
         plan.to_zero.push(slot);
@@ -370,7 +362,7 @@ mod tests {
 
         for frame in 0..2 {
             assert_eq!(
-                buf[slot][frame].as_mono(),
+                buf[logical][frame].as_mono(),
                 0.0,
                 "to_zero slot lane 0 should be 0.0 in frame {frame}"
             );
@@ -380,9 +372,10 @@ mod tests {
     /// `to_zero_poly` slots are cleared to all-zero lanes in both ping-pong frames.
     #[test]
     fn apply_plan_zeros_poly_slots() {
-        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(RESERVED_SLOTS + 4, 4);
-        let slot = RESERVED_SLOTS + 3;
-        buf[slot] = [CableValue::mono(1.0), CableValue::mono(1.0)];
+        let (mut buf, state, mut prev, mut tx, _rx) = fixtures(0, 4);
+        let logical = 3;
+        let slot = SCRATCH_CAPACITY + logical;
+        buf[logical] = [CableValue::mono(1.0), CableValue::mono(1.0)];
 
         let mut plan = ExecutionPlan::empty();
         plan.to_zero_poly.push(slot);
@@ -391,7 +384,7 @@ mod tests {
 
         for frame in 0..2 {
             assert_eq!(
-                buf[slot][frame].as_poly(),
+                buf[logical][frame].as_poly(),
                 [0.0; 16],
                 "to_zero_poly slot should be all zeros in frame {frame}"
             );
@@ -401,7 +394,7 @@ mod tests {
     /// After the first call `previous_plan` is `Some`; no `DropPlan` is sent (there was no previous plan).
     #[test]
     fn apply_plan_first_adoption_stores_plan_no_drop() {
-        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
+        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(0, 4);
         assert!(prev.is_none());
 
         let _ready = apply_plan(ExecutionPlan::empty(), state, &mut buf, &mut prev, &mut tx, 32);
@@ -413,7 +406,7 @@ mod tests {
     /// On the second call the replaced plan is pushed to the cleanup ring buffer as `DropPlan`.
     #[test]
     fn apply_plan_second_adoption_pushes_drop_plan() {
-        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(RESERVED_SLOTS, 4);
+        let (mut buf, state, mut prev, mut tx, mut rx) = fixtures(0, 4);
 
         let state = apply_plan(ExecutionPlan::empty(), state, &mut buf, &mut prev, &mut tx, 32);
         let _ = rx.pop(); // ignore any first-adoption items

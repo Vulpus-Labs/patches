@@ -104,7 +104,7 @@ fn cycle_index_is_stable_across_replan_for_self_loop() {
     let state_a = build(&PlannerState::empty());
     let cycle_idx_a = state_a.buffer_alloc.output_buf[&(NodeId::from("sum"), 0)];
     assert!(
-        cycle_idx_a < patches_core::cables::CYCLE_CAPACITY,
+        cycle_idx_a >= patches_core::cables::SCRATCH_CAPACITY,
         "sum.out must live in the cycle region (it has a back-edge consumer); got {cycle_idx_a}"
     );
 
@@ -149,20 +149,21 @@ fn scratch_indices_are_topo_ordered_and_dense() {
 
     let a_out = state.buffer_alloc.output_buf[&(NodeId::from("a_osc"), 0)];
     let b_out = state.buffer_alloc.output_buf[&(NodeId::from("b_sum"), 0)];
-    let cap = patches_core::cables::CYCLE_CAPACITY;
-    let dyn_start = cap + patches_core::cables::RESERVED_SLOTS;
-    assert!(a_out >= dyn_start && b_out >= dyn_start, "all outputs are fused → scratch");
+    let scratch_cap = patches_core::cables::SCRATCH_CAPACITY;
+    let dyn_start = patches_core::cables::RESERVED_SLOTS;
+    assert!(a_out >= dyn_start && a_out < scratch_cap, "a.out fused → scratch");
+    assert!(b_out >= dyn_start && b_out < scratch_cap, "b.out fused → scratch");
     assert!(a_out < b_out, "a precedes b in topo order → a.out < b.out");
-    // Dense: dyn-scratch starts above the reserved backplane range
-    // (`CYCLE_CAPACITY + RESERVED_SLOTS`, ticket 0858) and the sweep
-    // emits every Output port of every node. Collect every scratch
-    // index and verify they form a contiguous run from `dyn_start`.
+    // Dense: dyn-scratch starts at `RESERVED_SLOTS` (sinks + backplane
+    // sit at `[0, RESERVED_SLOTS)`) and the sweep emits every Output
+    // port of every node. Collect every scratch index and verify they
+    // form a contiguous run from `dyn_start`.
     let mut scratch_indices: Vec<usize> = state
         .buffer_alloc
         .output_buf
         .values()
         .copied()
-        .filter(|&i| i >= cap)
+        .filter(|&i| i < scratch_cap)
         .collect();
     scratch_indices.sort_unstable();
     let expected: Vec<usize> = (dyn_start..dyn_start + scratch_indices.len()).collect();

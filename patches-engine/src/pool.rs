@@ -152,7 +152,7 @@ mod tests {
     use patches_core::{
         AudioEnvironment, BuildError, CableKind, CablePool, CableValue, InstanceId, Module,
         ModuleDescriptor, ModuleShape, MonoOutput, MonoLayout, PolyLayout, PortDescriptor,
-        StructuralParams, RESERVED_SLOTS,
+        StructuralParams, SCRATCH_CAPACITY,
     };
     use patches_core::parameter_map::ParameterMap;
     use patches_core::param_frame::ParamView;
@@ -182,7 +182,7 @@ mod tests {
                     realtime_params: vec![],
                     structural_params: vec![],
                 },
-                out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true },
+                out: MonoOutput { cable_idx: SCRATCH_CAPACITY, connected: true },
             }
         }
     }
@@ -207,7 +207,7 @@ mod tests {
             T
         }
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
-            Self { id: instance_id, value: 0.0, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true } }
+            Self { id: instance_id, value: 0.0, desc: descriptor, out: MonoOutput { cable_idx: SCRATCH_CAPACITY, connected: true } }
         })}
         fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
@@ -240,12 +240,12 @@ mod tests {
     fn process_writes_to_cable_pool() {
         let mut pool = ModulePool::new(4);
         pool.install(2, Box::new(ConstSource::new(0.75)), empty_param_state());
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         {
             let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
             pool.process(2, &mut cp);
         }
-        assert!((bufs[RESERVED_SLOTS][0].as_mono() - 0.75).abs() < 1e-12);
+        assert!((bufs[0][0].as_mono() - 0.75).abs() < 1e-12);
     }
 
     #[test]
@@ -253,12 +253,12 @@ mod tests {
         let mut pool = ModulePool::new(4);
         pool.install(0, Box::new(ConstSource::new(1.0)), empty_param_state());
         pool.install(0, Box::new(ConstSource::new(2.0)), empty_param_state());
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         {
             let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
             pool.process(0, &mut cp);
         }
-        assert!((bufs[RESERVED_SLOTS][0].as_mono() - 2.0).abs() < 1e-12,
+        assert!((bufs[0][0].as_mono() - 2.0).abs() < 1e-12,
             "slot should hold the most recently installed module");
     }
 
@@ -276,7 +276,7 @@ mod tests {
     #[should_panic]
     fn process_on_empty_slot_panics_in_debug() {
         let mut pool = ModulePool::new(4);
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
         pool.process(0, &mut cp);
     }
@@ -286,10 +286,10 @@ mod tests {
     #[test]
     fn process_on_empty_slot_is_noop_in_release() {
         let mut pool = ModulePool::new(4);
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         let mut cp = CablePool::with_cycle_only(&mut bufs, 0);
         pool.process(0, &mut cp);
         drop(cp);
-        assert_eq!(bufs[RESERVED_SLOTS][0].as_mono(), 0.0);
+        assert_eq!(bufs[0][0].as_mono(), 0.0);
     }
 }

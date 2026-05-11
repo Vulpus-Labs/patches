@@ -52,7 +52,10 @@ impl Default for PolyInput {
             offset: 0.0,
             clip: None,
             connected: false,
-            fused: false,
+            // Disconnected → POLY_READ_SINK (scratch slot 1, constant zero,
+            // same-tick) — fused by definition. The planner flips this to
+            // false only when wired to a delayed-consumer cycle producer.
+            fused: true,
         }
     }
 }

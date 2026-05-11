@@ -61,12 +61,12 @@ fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
 }
 
 /// Cycle + scratch pools for the planner's two-region layout
-/// (ADR 0072 phase 3, ticket 0850).
+/// (ADR 0072 phase 3, ticket 0850; phase 5 invert ticket 0860).
 fn make_split_pool() -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
     let cycle = (0..patches_core::CYCLE_CAPACITY)
         .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
         .collect();
-    let scratch_len = POOL_CAP.saturating_sub(patches_core::CYCLE_CAPACITY);
+    let scratch_len = POOL_CAP.min(patches_core::SCRATCH_CAPACITY);
     let scratch = vec![CableValue::mono(0.0); scratch_len];
     (cycle, scratch)
 }
@@ -358,7 +358,7 @@ fn oscillator_phase_continuous_across_parameter_replan() {
         let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, i % 2);
         state.tick(&mut cable_pool);
     }
-    let pre_replan = scratch_bufs[AUDIO_OUT_L - patches_core::CYCLE_CAPACITY].as_mono();
+    let pre_replan = scratch_bufs[AUDIO_OUT_L].as_mono();
     assert!(
         pre_replan.abs() > 0.1,
         "test premise: pre-replan sample should be well above zero, got {pre_replan}"
@@ -378,7 +378,7 @@ fn oscillator_phase_continuous_across_parameter_replan() {
         let mut cable_pool = CablePool::new(&mut scratch_bufs, &mut cycle_bufs, TICKS % 2);
         state.tick(&mut cable_pool);
     }
-    let post_replan = scratch_bufs[AUDIO_OUT_L - patches_core::CYCLE_CAPACITY].as_mono();
+    let post_replan = scratch_bufs[AUDIO_OUT_L].as_mono();
     // Phase continuity: the jump must be small relative to the pre-replan
     // magnitude. A reset would land near 0, producing a large jump.
     let jump = (post_replan - pre_replan).abs();
@@ -415,7 +415,7 @@ fn initial_plan_uses_provided_sample_rate() {
 
     // Last tick was i=2; AudioOut wrote AUDIO_OUT_L in scratch
     // (single-slot, no ping-pong) — ticket 0858.
-    let out_val = scratch_bufs[AUDIO_OUT_L - patches_core::CYCLE_CAPACITY].as_mono();
+    let out_val = scratch_bufs[AUDIO_OUT_L].as_mono();
     assert!(out_val.is_finite(), "audio output must be finite");
     assert!(out_val.abs() <= 1.0, "audio output must be bounded");
 }

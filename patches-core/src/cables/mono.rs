@@ -55,7 +55,11 @@ impl Default for MonoInput {
             offset: 0.0,
             clip: None,
             connected: false,
-            fused: false,
+            // Disconnected → MONO_READ_SINK (scratch slot 0, constant zero,
+            // same-tick) — fused by definition. The only transition out of
+            // fused: true is being wired to a delayed-consumer cycle
+            // producer, which the planner sets explicitly.
+            fused: true,
         }
     }
 }

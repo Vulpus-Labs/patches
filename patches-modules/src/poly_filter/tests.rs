@@ -4,8 +4,11 @@ use super::*;
 use crate::common::frequency::C0_FREQ;
 use patches_core::{
     AudioEnvironment, CablePool, CableValue, InstanceId, Module, ModuleShape,
-    PolyInput, PolyOutput, COEFF_UPDATE_INTERVAL,
+    PolyInput, PolyOutput, COEFF_UPDATE_INTERVAL, SCRATCH_CAPACITY,
 };
+
+/// Absolute `cable_idx` for cycle logical slot `i` (ADR 0072 phase 5).
+const fn cidx(i: usize) -> usize { SCRATCH_CAPACITY + i }
 use patches_registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::test_support::{assert_attenuated, assert_passes};
@@ -72,12 +75,12 @@ fn make_bandpass_sr(center_voct: f32, bandwidth_q: f32, sr: f32) -> Box<dyn Modu
 fn set_static_ports(m: &mut Box<dyn Module>) {
     m.set_ports(
         &[
-            InputPort::Poly(PolyInput::scalar(0, 1.0)),
-            InputPort::Poly(PolyInput { cable_idx: 1, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput::scalar(cidx(0), 1.0)),
+            InputPort::Poly(PolyInput { cable_idx: cidx(1), scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: cidx(2), scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: cidx(3), scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
         ],
-        &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
+        &[OutputPort::Poly(PolyOutput { cable_idx: cidx(4), connected: true })],
     );
 }
 
@@ -85,12 +88,12 @@ fn set_static_ports(m: &mut Box<dyn Module>) {
 fn set_cutoff_cv_ports(m: &mut Box<dyn Module>) {
     m.set_ports(
         &[
-            InputPort::Poly(PolyInput::scalar(0, 1.0)),
-            InputPort::Poly(PolyInput::scalar(1, 1.0)),
-            InputPort::Poly(PolyInput { cable_idx: 2, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
-            InputPort::Poly(PolyInput { cable_idx: 3, scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput::scalar(cidx(0), 1.0)),
+            InputPort::Poly(PolyInput::scalar(cidx(1), 1.0)),
+            InputPort::Poly(PolyInput { cable_idx: cidx(2), scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
+            InputPort::Poly(PolyInput { cable_idx: cidx(3), scale: 1.0, offset: 0.0, clip: None, connected: false, fused: false }),
         ],
-        &[OutputPort::Poly(PolyOutput { cable_idx: 4, connected: true })],
+        &[OutputPort::Poly(PolyOutput { cable_idx: cidx(4), connected: true })],
     );
 }
 

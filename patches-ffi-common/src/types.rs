@@ -8,7 +8,13 @@ use patches_core::cables::CableValue;
 ///
 /// v10: process / periodic_update split the cable pool into separate
 /// scratch and cycle pointers (ADR 0072 phase 3, ticket 0850).
-pub const ABI_VERSION: u32 = 10;
+/// v11: cable-pool index space inverted — scratch lives at `[0,
+/// SCRATCH_CAPACITY)` and cycle at `[SCRATCH_CAPACITY, +CYCLE_CAPACITY)`
+/// (ADR 0072 phase 5, ticket 0860). Backplane constants
+/// (`AUDIO_OUT_L`, `GLOBAL_TRANSPORT`, …) shifted from
+/// `CYCLE_CAPACITY + N` to small literals. Plugin SDKs that bake any
+/// backplane const need rebuild.
+pub const ABI_VERSION: u32 = 11;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -326,12 +332,12 @@ pub struct FfiPluginVTable {
     /// Audio-thread: packed `ParamFrame` wire bytes (see ADR 0045 §6).
     pub update_validated_parameters: crate::abi::UpdateValidatedParametersFn,
 
-    /// Audio-thread per-tick processing. ABI v10 (ticket 0850): the
+    /// Audio-thread per-tick processing. ABI v11 (ticket 0860): the
     /// cable pool is split into a scratch region (single `CableValue`
-    /// per slot) and a cycle region (ping-pong `[CableValue; 2]` per
-    /// slot). The plugin reconstructs a `CablePool` via
-    /// `CablePool::new(scratch_slice, cycle_slice, write_index)` and
-    /// dispatches reads/writes on `cable_idx < CYCLE_CAPACITY`.
+    /// per slot, at `cable_idx < SCRATCH_CAPACITY`) and a cycle region
+    /// (ping-pong `[CableValue; 2]` per slot, at `cable_idx >=
+    /// SCRATCH_CAPACITY`). The plugin reconstructs a `CablePool` via
+    /// `CablePool::new(scratch_slice, cycle_slice, write_index)`.
     pub process: unsafe extern "C" fn(
         handle: *mut c_void,
         scratch_ptr: *mut CableValue,

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use patches_core::cable_pool::CablePool;
-use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort};
+use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort, SCRATCH_CAPACITY};
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue, StructuralParams};
 use patches_core::param_frame::{ParamView, ParamViewIndex};
 use patches_core::param_layout::compute_layout;
@@ -65,9 +65,10 @@ fn build_and_process_with_default_gain() {
     let mut module = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build failed");
 
-    // Set up ports: input at cable 0, output at cable 1
-    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
-    let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: 1, connected: true })];
+    // Set up ports in the cycle region: input at cycle slot 0, output
+    // at cycle slot 1 (absolute cable_idx = SCRATCH_CAPACITY + N).
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(SCRATCH_CAPACITY, 1.0))];
+    let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: SCRATCH_CAPACITY + 1, connected: true })];
     module.set_ports(&inputs, &outputs);
 
     // Seed input cable with 0.5
@@ -98,9 +99,9 @@ fn update_parameters_changes_gain() {
     let mut module = builder.build(&env, &shape, &params, &StructuralParams::new(), InstanceId::next())
         .expect("build failed");
 
-    // Set ports
-    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
-    let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: 1, connected: true })];
+    // Set ports in the cycle region.
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(SCRATCH_CAPACITY, 1.0))];
+    let outputs = vec![OutputPort::Mono(MonoOutput { cable_idx: SCRATCH_CAPACITY + 1, connected: true })];
     module.set_ports(&inputs, &outputs);
 
     // Update gain to 0.5

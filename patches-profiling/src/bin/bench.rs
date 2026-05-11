@@ -13,7 +13,7 @@ use std::process;
 use std::time::Instant;
 
 use patches_core::{
-    AudioEnvironment, CablePool, CableValue, CYCLE_CAPACITY, RESERVED_SLOTS,
+    AudioEnvironment, CablePool, CableValue, CYCLE_CAPACITY, RESERVED_SLOTS, SCRATCH_CAPACITY,
 };
 use patches_engine::{kernel, ModulePool, ReadyState};
 use patches_planner::{build_patch, ExecutionPlan, PlannerState};
@@ -68,17 +68,21 @@ fn load_plan(path: &str) -> ExecutionPlan {
 
 /// Compute the actual cable index high-water mark from the plan's port
 /// assignments. Reports the maximum cable_idx referenced by any module's
-/// inputs or outputs (plus one), per region.
+/// inputs or outputs (plus one), per region. Cycle hwm is returned as a
+/// *logical* count in `[0, CYCLE_CAPACITY)`.
 fn watermarks(plan: &ExecutionPlan) -> (usize, usize) {
-    let mut max_cycle = 0;
+    let mut max_cycle_logical = 0;
     let mut max_scratch = 0;
     let mut bump = |idx: usize| {
-        if idx < CYCLE_CAPACITY {
-            if idx + 1 > max_cycle {
-                max_cycle = idx + 1;
+        if idx < SCRATCH_CAPACITY {
+            if idx + 1 > max_scratch {
+                max_scratch = idx + 1;
             }
-        } else if idx + 1 > max_scratch {
-            max_scratch = idx + 1;
+        } else {
+            let logical = idx - SCRATCH_CAPACITY + 1;
+            if logical > max_cycle_logical {
+                max_cycle_logical = logical;
+            }
         }
     };
     for slot in &plan.slots {
@@ -92,9 +96,7 @@ fn watermarks(plan: &ExecutionPlan) -> (usize, usize) {
             bump(idx);
         }
     }
-    // Scratch high-water reported relative to scratch base (0 means none).
-    let scratch_used = max_scratch.saturating_sub(CYCLE_CAPACITY);
-    (max_cycle, scratch_used)
+    (max_cycle_logical, max_scratch)
 }
 
 fn run_ticks(
@@ -157,17 +159,17 @@ fn bench_patch(path: &str) {
     }
     // Apply zero lists that the engine would normally apply on plan adoption.
     for &i in &plan.to_zero {
-        if i < CYCLE_CAPACITY {
-            cycle_pool[i] = [CableValue::mono(0.0), CableValue::mono(0.0)];
+        if i < SCRATCH_CAPACITY {
+            scratch_pool[i] = CableValue::mono(0.0);
         } else {
-            scratch_pool[i - CYCLE_CAPACITY] = CableValue::mono(0.0);
+            cycle_pool[i - SCRATCH_CAPACITY] = [CableValue::mono(0.0), CableValue::mono(0.0)];
         }
     }
     for &i in &plan.to_zero_poly {
-        if i < CYCLE_CAPACITY {
-            cycle_pool[i] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
+        if i < SCRATCH_CAPACITY {
+            scratch_pool[i] = CableValue::poly([0.0; 16]);
         } else {
-            scratch_pool[i - CYCLE_CAPACITY] = CableValue::poly([0.0; 16]);
+            cycle_pool[i - SCRATCH_CAPACITY] = [CableValue::poly([0.0; 16]), CableValue::poly([0.0; 16])];
         }
     }
 
@@ -231,7 +233,7 @@ fn main() {
     };
 
     println!(
-        "phase-3 bench (CYCLE_CAPACITY={CYCLE_CAPACITY}, RESERVED_SLOTS={RESERVED_SLOTS}, POOL_CAPACITY={POOL_CAPACITY})"
+        "phase-5 bench (SCRATCH_CAPACITY={SCRATCH_CAPACITY}, CYCLE_CAPACITY={CYCLE_CAPACITY}, RESERVED_SLOTS={RESERVED_SLOTS}, POOL_CAPACITY={POOL_CAPACITY})"
     );
     println!();
 

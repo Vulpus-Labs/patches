@@ -7,7 +7,7 @@ static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAl
 
 use patches_alloc_trap::{trap_hits, NoAllocGuard};
 use patches_core::cable_pool::CablePool;
-use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort};
+use patches_core::cables::{CableValue, InputPort, MonoInput, MonoOutput, OutputPort, SCRATCH_CAPACITY};
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, ParameterValue};
 use patches_core::param_frame::{pack_into, ParamFrame, ParamView, ParamViewIndex};
 use patches_core::param_layout::{compute_layout, defaults_from_descriptor};
@@ -35,9 +35,9 @@ fn gain_ffi_ten_thousand_cycles_no_alloc() {
     let mut module = builder
         .build(&env(), &shape, &ParameterMap::new(), &patches_core::StructuralParams::new(), InstanceId::next())
         .expect("build");
-    let inputs = vec![InputPort::Mono(MonoInput::scalar(0, 1.0))];
+    let inputs = vec![InputPort::Mono(MonoInput::scalar(SCRATCH_CAPACITY, 1.0))];
     let outputs = vec![OutputPort::Mono(MonoOutput {
-        cable_idx: 1,
+        cable_idx: SCRATCH_CAPACITY + 1,
         connected: true,
     })];
     module.set_ports(&inputs, &outputs);

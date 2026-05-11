@@ -3,7 +3,7 @@ use crate::audio_environment::AudioEnvironment;
 use crate::cable_pool::CablePool;
 use crate::cables::{
     CableKind, CableValue, InputPort, MonoInput, MonoOutput, OutputPort, PolyInput, PolyOutput,
-    CYCLE_CAPACITY, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+    POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS, SCRATCH_CAPACITY,
 };
 use crate::modules::{InstanceId, Module, ModuleShape, ParameterValue, StructuralParams};
 use crate::COEFF_UPDATE_INTERVAL;
@@ -29,11 +29,16 @@ use crate::modules::parameter_map::ParameterMap;
 /// to mark specific ports as disconnected before the first tick.
 pub struct ModuleHarness {
     module: Box<dyn Module>,
-    /// Cycle region. Backs read/write sinks (`[0, SINK_SLOTS)`) and
-    /// the harness's user input/output cables (`[RESERVED_SLOTS, ...)`).
+    /// Cycle region. Empty by default — the single-module harness does
+    /// not exercise dyn cycle producers; the cycle pool exists only to
+    /// satisfy [`CablePool::new`]'s signature. Tests that need cycle
+    /// slots can use [`set_pool_slot`] at `cable_idx >= SCRATCH_CAPACITY`.
     pool: Vec<[CableValue; 2]>,
-    /// Scratch region. Backs the backplane reserved range
-    /// (ticket 0858), addressed at `slot - CYCLE_CAPACITY`.
+    /// Scratch region. Backs sinks (`[0, SINK_SLOTS)`), the backplane
+    /// reserved range (`[SINK_SLOTS, RESERVED_SLOTS)`), and the
+    /// harness's user input/output cables at
+    /// `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs + n_outputs)`.
+    /// Addressed directly by `cable_idx` (no offset).
     scratch: Vec<CableValue>,
     /// (name, index) → descriptor position for input ports.
     /// Cable slot for input at position i = i.
@@ -127,38 +132,37 @@ impl ModuleHarness {
             output_connected.push(true);
         }
 
-        // Cycle region: read/write sinks at `[0, SINK_SLOTS)` plus the
-        // harness's user input/output cables placed at
-        // `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs + n_outputs)`.
-        // The slot offsets mirror the real planner's reservation so
-        // modules built against the same convention stay in-bounds.
-        let cycle_size = RESERVED_SLOTS + n_inputs + n_outputs;
-        let mut pool = vec![[CableValue::mono(0.0); 2]; cycle_size];
+        // Scratch region: sinks at `[0, SINK_SLOTS)`, backplane at
+        // `[SINK_SLOTS, RESERVED_SLOTS)`, harness's user input/output
+        // cables at `[RESERVED_SLOTS, RESERVED_SLOTS + n_inputs +
+        // n_outputs)`. Cable_idx addresses scratch directly with no
+        // offset (ADR 0072 phase 5).
+        let scratch_size = RESERVED_SLOTS + n_inputs + n_outputs;
+        let mut scratch = vec![CableValue::mono(0.0); scratch_size];
 
         // Poly sink slots hold poly values for cosmetic well-typedness.
         // (CableValue is `[f32; 16]` per ADR 0068, so the storage is
         // identical regardless of the constructor.)
-        pool[POLY_READ_SINK]  = [CableValue::poly([0.0; 16]); 2];
-        pool[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]); 2];
+        scratch[POLY_READ_SINK]  = CableValue::poly([0.0; 16]);
+        scratch[POLY_WRITE_SINK] = CableValue::poly([0.0; 16]);
 
         // Initialise user poly slots to Poly([0.0; 16]) rather than Mono(0.0).
         for (i, kind) in input_kinds.iter().enumerate() {
             if kind.uses_poly_storage() {
-                pool[RESERVED_SLOTS + i] = [CableValue::poly([0.0; 16]); 2];
+                scratch[RESERVED_SLOTS + i] = CableValue::poly([0.0; 16]);
             }
         }
         for (j, kind) in output_kinds.iter().enumerate() {
             if kind.uses_poly_storage() {
-                pool[RESERVED_SLOTS + n_inputs + j] = [CableValue::poly([0.0; 16]); 2];
+                scratch[RESERVED_SLOTS + n_inputs + j] = CableValue::poly([0.0; 16]);
             }
         }
 
-        // Scratch region: backs the backplane reserved range (ticket
-        // 0858). Sized at `RESERVED_SLOTS` so any backplane const
-        // (`AUDIO_OUT_L`, `GLOBAL_TRANSPORT`, etc., all in
-        // `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)`) is in
-        // bounds at `slot - CYCLE_CAPACITY`.
-        let scratch = vec![CableValue::poly([0.0; 16]); RESERVED_SLOTS];
+        // Cycle region: empty — single-module harness has no dyn cycle
+        // producers. Tests that need cycle slots use `set_pool_slot`
+        // with `cable_idx >= SCRATCH_CAPACITY` which grows the pool on
+        // demand.
+        let pool: Vec<[CableValue; 2]> = Vec::new();
 
         let mut harness = Self {
             module,
@@ -268,16 +272,16 @@ impl ModuleHarness {
 
     // ── Pool initialisation ───────────────────────────────────────────────────
 
-    /// Fill all pool slots with `value` (cycle and scratch).
+    /// Fill all pool slots with `value` (scratch + cycle if non-empty).
     ///
     /// Useful for sentinel-value tests (e.g. verifying that a disconnected output
     /// is never written by seeding it with a known non-zero value).
     pub fn init_pool(&mut self, value: CableValue) {
-        for slot in &mut self.pool {
-            *slot = [value; 2];
-        }
         for slot in &mut self.scratch {
             *slot = value;
+        }
+        for slot in &mut self.pool {
+            *slot = [value; 2];
         }
     }
 
@@ -291,12 +295,9 @@ impl ModuleHarness {
     }
 
     /// Write `value` to the read slot for input `(name, index)`.
-    ///
-    /// Writes to both ping-pong slots so the value persists across multiple ticks
-    /// until `set_mono_at` is called again.
     pub fn set_mono_at(&mut self, name: &str, index: usize, value: f32) {
         let cable = self.input_cable(name, index);
-        self.pool[cable] = [CableValue::mono(value); 2];
+        self.scratch[cable] = CableValue::mono(value);
     }
 
     // ── Poly inputs ──────────────────────────────────────────────────────────
@@ -307,11 +308,9 @@ impl ModuleHarness {
     }
 
     /// Write `value` to the read slot for poly input `(name, index)`.
-    ///
-    /// Writes to both ping-pong slots so the value persists across multiple ticks.
     pub fn set_poly_at(&mut self, name: &str, index: usize, value: [f32; 16]) {
         let cable = self.input_cable(name, index);
-        self.pool[cable] = [CableValue::poly(value); 2];
+        self.scratch[cable] = CableValue::poly(value);
     }
 
     // ── Stereo inputs ────────────────────────────────────────────────────────
@@ -328,7 +327,7 @@ impl ModuleHarness {
         let mut frame = [0.0_f32; 16];
         frame[0] = left;
         frame[1] = right;
-        self.pool[cable] = [CableValue::poly(frame); 2];
+        self.scratch[cable] = CableValue::poly(frame);
     }
 
     // ── Tick ─────────────────────────────────────────────────────────────────
@@ -360,24 +359,24 @@ impl ModuleHarness {
 
     /// Read a raw `CableValue` from `(slot, ping)` of the pool. Used
     /// by tests that need to stage backplane slots before ticking.
-    /// Cycle slots dispatch on `ping`; scratch slots ignore it
-    /// (single-slot, no ping-pong).
+    /// Scratch slots (`< SCRATCH_CAPACITY`) ignore `ping`; cycle slots
+    /// dispatch on it.
     pub fn pool_value(&self, slot: usize, ping: usize) -> CableValue {
-        if slot < CYCLE_CAPACITY {
-            self.pool[slot][ping]
+        if slot < SCRATCH_CAPACITY {
+            self.scratch[slot]
         } else {
-            self.scratch[slot - CYCLE_CAPACITY]
+            self.pool[slot - SCRATCH_CAPACITY][ping]
         }
     }
 
     /// Write a raw `CableValue` into `(slot, ping)` of the pool. Used
     /// by tests that need to stage backplane slots before ticking.
-    /// Cycle slots dispatch on `ping`; scratch slots ignore it.
+    /// Scratch slots ignore `ping`; cycle slots dispatch on it.
     pub fn set_pool_value(&mut self, slot: usize, ping: usize, value: CableValue) {
-        if slot < CYCLE_CAPACITY {
-            self.pool[slot][ping] = value;
+        if slot < SCRATCH_CAPACITY {
+            self.scratch[slot] = value;
         } else {
-            self.scratch[slot - CYCLE_CAPACITY] = value;
+            self.pool[slot - SCRATCH_CAPACITY][ping] = value;
         }
     }
 
@@ -387,8 +386,7 @@ impl ModuleHarness {
     pub fn tap_backplane(&self) -> [f32; crate::MAX_TAPS] {
         let mut out = [0.0_f32; crate::MAX_TAPS];
         for i in 0..crate::cables::TAP_SLOTS {
-            let lanes =
-                self.scratch[crate::cables::TAP_BASE + i - CYCLE_CAPACITY].as_poly();
+            let lanes = self.scratch[crate::cables::TAP_BASE + i].as_poly();
             out[i * 16..(i + 1) * 16].copy_from_slice(&lanes);
         }
         out
@@ -407,7 +405,7 @@ impl ModuleHarness {
     /// Read the mono output `(name, index)` from the most recently completed tick.
     pub fn read_mono_at(&self, name: &str, index: usize) -> f32 {
         let cable = self.output_cable(name, index);
-        self.pool[cable][1 - self.wi].as_mono()
+        self.scratch[cable].as_mono()
     }
 
     /// Run `ticks` samples and collect the named mono output into a `Vec<f32>`.
@@ -444,7 +442,7 @@ impl ModuleHarness {
 
     pub fn read_stereo_at(&self, name: &str, index: usize) -> (f32, f32) {
         let cable = self.output_cable(name, index);
-        self.pool[cable][1 - self.wi].as_stereo()
+        self.scratch[cable].as_stereo()
     }
 
     // ── Poly outputs ─────────────────────────────────────────────────────────
@@ -460,7 +458,7 @@ impl ModuleHarness {
     /// Read the poly output `(name, index)` from the most recently completed tick.
     pub fn read_poly_at(&self, name: &str, index: usize) -> [f32; 16] {
         let cable = self.output_cable(name, index);
-        self.pool[cable][1 - self.wi].as_poly()
+        self.scratch[cable].as_poly()
     }
 
     /// Read a single voice from the poly output `(name, 0)`.
@@ -662,28 +660,32 @@ impl ModuleHarness {
     /// Read the most-recently-written value at a raw pool index.
     ///
     /// Useful for verifying writes to backplane slots (e.g. `AUDIO_OUT_L`)
-    /// that are not exposed as named output ports. Cycle slots return
-    /// the read-side ping-pong half (`1 - wi`); scratch slots return
-    /// their single value.
+    /// that are not exposed as named output ports. Scratch slots return
+    /// their single value; cycle slots return the read-side ping-pong
+    /// half (`1 - wi`).
     pub fn pool_slot(&self, idx: usize) -> CableValue {
-        if idx < CYCLE_CAPACITY {
-            self.pool[idx][1 - self.wi]
+        if idx < SCRATCH_CAPACITY {
+            self.scratch[idx]
         } else {
-            self.scratch[idx - CYCLE_CAPACITY]
+            self.pool[idx - SCRATCH_CAPACITY][1 - self.wi]
         }
     }
 
-    /// Write `value` at a raw pool index. Cycle slots write both
-    /// ping-pong halves so the value persists across ticks; scratch
-    /// slots are single-slot.
+    /// Write `value` at a raw pool index. Scratch slots are single-slot;
+    /// cycle slots write both ping-pong halves so the value persists
+    /// across ticks.
     ///
     /// Useful for seeding backplane slots (e.g. `AUDIO_IN_L`) that are
     /// not exposed as named input ports.
     pub fn set_pool_slot(&mut self, idx: usize, value: CableValue) {
-        if idx < CYCLE_CAPACITY {
-            self.pool[idx] = [value; 2];
+        if idx < SCRATCH_CAPACITY {
+            self.scratch[idx] = value;
         } else {
-            self.scratch[idx - CYCLE_CAPACITY] = value;
+            let cycle_idx = idx - SCRATCH_CAPACITY;
+            if cycle_idx >= self.pool.len() {
+                self.pool.resize(cycle_idx + 1, [CableValue::mono(0.0); 2]);
+            }
+            self.pool[cycle_idx] = [value; 2];
         }
     }
 
@@ -699,7 +701,9 @@ impl ModuleHarness {
                     offset: 0.0,
                     clip: None,
                     connected,
-                    fused: false,
+                    // User cables live in scratch under ADR 0072 phase 5:
+                    // reads are same-tick.
+                    fused: true,
                 };
                 let poly = PolyInput {
                     cable_idx: RESERVED_SLOTS + i,
@@ -707,7 +711,7 @@ impl ModuleHarness {
                     offset: 0.0,
                     clip: None,
                     connected,
-                    fused: false,
+                    fused: true,
                 };
                 let stereo = crate::cables::StereoInput {
                     cable_idx: RESERVED_SLOTS + i,
@@ -716,7 +720,7 @@ impl ModuleHarness {
                     clip: None,
                     connected,
                     broadcast_from_mono: false,
-                    fused: false,
+                    fused: true,
                 };
                 match kind {
                     CableKind::Mono => InputPort::Mono(mono),

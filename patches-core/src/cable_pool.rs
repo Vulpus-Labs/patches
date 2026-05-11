@@ -1,25 +1,25 @@
-use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput, StereoInput, StereoOutput, StereoSample, CYCLE_CAPACITY};
+use crate::cables::{CableValue, MonoInput, MonoOutput, PolyInput, PolyOutput, StereoInput, StereoOutput, StereoSample, SCRATCH_CAPACITY};
 
 /// Encapsulates the two-region cable buffer pool and the current write
 /// index, providing typed read/write accessors for use in
 /// [`Module::process`].
 ///
-/// ## Two-region layout (ADR 0072 phase 3, ticket 0850)
+/// ## Layout: scratch low, cycle high (ADR 0072 phase 5, ticket 0860)
 ///
-/// - **Cycle region** `[0, CYCLE_CAPACITY)` — `cycle: &[[CableValue; 2]]`.
-///   Backs cables whose producer port has at least one delayed
-///   (non-fused) consumer. Each slot stores a ping-pong pair: writes
-///   land at `[wi]`, delayed reads see `[1 - wi]`. Reserved
-///   infrastructure slots `[0, RESERVED_SLOTS)` live here too.
-/// - **Scratch region** `[CYCLE_CAPACITY, ...)` —
-///   `scratch: &[CableValue]`. Backs cables whose every consumer is
-///   fused — no read ever needs last tick's value, so a single slot
-///   suffices. Halves the storage cost of the common-case forward
-///   DAG cable.
+/// - **Scratch region** `[0, SCRATCH_CAPACITY)` —
+///   `scratch: &[CableValue]`. Sinks (`[0, SINK_SLOTS)`), backplane
+///   (`[SINK_SLOTS, RESERVED_SLOTS)`), and dyn cables whose every
+///   consumer is fused (`[RESERVED_SLOTS, SCRATCH_CAPACITY)`). One
+///   slot per cable — no read ever needs last tick's value.
+/// - **Cycle region** `[SCRATCH_CAPACITY, SCRATCH_CAPACITY +
+///   CYCLE_CAPACITY)` — `cycle: &[[CableValue; 2]]`. Backs cables
+///   whose producer port has at least one delayed (non-fused)
+///   consumer. Each slot stores a ping-pong pair: writes land at
+///   `[wi]`, delayed reads see `[1 - wi]`.
 ///
-/// `cable_idx` indexes into a single virtual number space; values
-/// `< CYCLE_CAPACITY` dispatch to the cycle region, values `>=` to
-/// scratch (offset by `CYCLE_CAPACITY`).
+/// `cable_idx` indexes into a single virtual number space with a
+/// single cutoff: `cable_idx < SCRATCH_CAPACITY` dispatches to
+/// scratch, otherwise to cycle offset by `SCRATCH_CAPACITY`.
 ///
 /// ## Why the `'a` lifetime is load-bearing
 ///
@@ -42,11 +42,11 @@ impl<'a> CablePool<'a> {
     /// Create a new `CablePool` from separate scratch and cycle
     /// backing stores at write index `wi`.
     ///
-    /// `cycle.len()` must cover every cycle-region `cable_idx` in use
-    /// (typically `CYCLE_CAPACITY` in production, but tests with small
-    /// graphs can use shorter slices). `scratch` may be any length up
-    /// to `pool_capacity - CYCLE_CAPACITY`. Tests that don't exercise
-    /// scratch slots may pass an empty `scratch` slice (or use
+    /// `scratch.len()` must cover every scratch-region `cable_idx` in
+    /// use (typically `SCRATCH_CAPACITY` in production). `cycle.len()`
+    /// must cover every cycle producer (typically `CYCLE_CAPACITY`).
+    /// Tests that don't exercise scratch may pass a short slice and
+    /// keep all cable_idx values in the cycle region (or use
     /// [`with_cycle_only`](Self::with_cycle_only)).
     pub fn new(
         scratch: &'a mut [CableValue],
@@ -61,7 +61,7 @@ impl<'a> CablePool<'a> {
     /// scratch region existed).
     ///
     /// The scratch slice is set to a static empty slice; any
-    /// `cable_idx >= CYCLE_CAPACITY` access will hit a debug bounds
+    /// `cable_idx < SCRATCH_CAPACITY` access will hit a debug bounds
     /// check from the empty scratch.
     pub fn with_cycle_only(cycle: &'a mut [[CableValue; 2]], wi: usize) -> Self {
         let scratch: &'a mut [CableValue] = &mut [];
@@ -104,33 +104,34 @@ impl<'a> CablePool<'a> {
     /// scratch slots (which are inherently same-tick).
     #[inline(always)]
     fn read_raw(&self, cable_idx: usize, fused: bool) -> CableValue {
-        if cable_idx < CYCLE_CAPACITY {
-            let si = if fused { self.wi } else { 1 - self.wi };
-            self.cycle[cable_idx][si]
-        } else {
+        if cable_idx < SCRATCH_CAPACITY {
             debug_assert!(
                 fused,
                 "scratch slot read with fused=false (cable_idx={cable_idx}); \
-                 scratch implies all consumers fused (ADR 0072 phase 3)"
+                 scratch implies all consumers fused (ADR 0072 phase 5)"
             );
-            self.scratch[cable_idx - CYCLE_CAPACITY]
+            self.scratch[cable_idx]
+        } else {
+            let cycle_idx = cable_idx - SCRATCH_CAPACITY;
+            let si = if fused { self.wi } else { 1 - self.wi };
+            self.cycle[cycle_idx][si]
         }
     }
 
     /// Write raw `CableValue` at `cable_idx`. Dispatches on region.
     #[inline(always)]
     fn write_raw(&mut self, cable_idx: usize, value: CableValue) {
-        if cable_idx < CYCLE_CAPACITY {
-            self.cycle[cable_idx][self.wi] = value;
+        if cable_idx < SCRATCH_CAPACITY {
+            self.scratch[cable_idx] = value;
         } else {
-            self.scratch[cable_idx - CYCLE_CAPACITY] = value;
+            self.cycle[cable_idx - SCRATCH_CAPACITY][self.wi] = value;
         }
     }
 
     #[inline(always)]
     /// Read a mono value from `input`, applying `input.scale`.
     ///
-    /// Dispatches on `input.cable_idx` vs [`CYCLE_CAPACITY`] (region)
+    /// Dispatches on `input.cable_idx` vs [`SCRATCH_CAPACITY`] (region)
     /// and, for cycle slots, on `input.fused` (ping-pong half).
     /// Lanes outside lane 0 are unspecified for a Mono cable per ADR 0068.
     pub fn read_mono(&self, input: &MonoInput) -> f32 {
@@ -215,7 +216,7 @@ impl<'a> CablePool<'a> {
     }
 }
 
-/// Mutable raw-parts view of a [`CablePool`] for FFI plugins. ABI v10.
+/// Mutable raw-parts view of a [`CablePool`] for FFI plugins. ABI v11.
 #[repr(C)]
 pub struct CablePoolRawPartsMut {
     pub scratch_ptr: *mut CableValue,
@@ -226,7 +227,7 @@ pub struct CablePoolRawPartsMut {
 }
 
 /// Const raw-parts view of a [`CablePool`] for FFI plugins'
-/// `periodic_update` path. ABI v10.
+/// `periodic_update` path. ABI v11.
 #[repr(C)]
 pub struct CablePoolRawParts {
     pub scratch_ptr: *const CableValue,
@@ -239,6 +240,7 @@ pub struct CablePoolRawParts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cables::CYCLE_CAPACITY;
 
     /// Build a uniform pair pool of `n` cycle slots, all initialised to `value`.
     fn cycle_pool(value: CableValue, n: usize) -> Vec<[CableValue; 2]> {
@@ -249,12 +251,17 @@ mod tests {
         Vec::new()
     }
 
+    /// Cycle producer at logical cycle slot `i`.
+    const fn cycle_idx(i: usize) -> usize {
+        SCRATCH_CAPACITY + i
+    }
+
     #[test]
     fn read_mono_applies_scale() {
         let mut cycle = cycle_pool(CableValue::mono(4.0), 1);
         let mut scratch = empty_scratch();
         let cp = CablePool::new(&mut scratch, &mut cycle, 0);
-        let input = MonoInput::scalar(0, 0.5);
+        let input = MonoInput::scalar(cycle_idx(0), 0.5);
         // wi=0, fused=false → reads [1] which seeds 4.0
         assert_eq!(cp.read_mono(&input), 2.0);
     }
@@ -265,7 +272,7 @@ mod tests {
         let mut cycle = cycle_pool(CableValue::poly(channels), 1);
         let mut scratch = empty_scratch();
         let cp = CablePool::new(&mut scratch, &mut cycle, 0);
-        let input = PolyInput::scalar(0, 2.0);
+        let input = PolyInput::scalar(cycle_idx(0), 2.0);
         let result = cp.read_poly(&input);
         for (i, &v) in result.iter().enumerate() {
             assert_eq!(v, i as f32 * 2.0, "channel {i} mismatch");
@@ -278,7 +285,7 @@ mod tests {
         let mut scratch = empty_scratch();
         {
             let mut cp = CablePool::new(&mut scratch, &mut cycle, 1);
-            let output = MonoOutput { cable_idx: 0, connected: true };
+            let output = MonoOutput { cable_idx: cycle_idx(0), connected: true };
             cp.write_mono(&output, 2.5);
         }
         assert_eq!(cycle[0][1].as_mono(), 2.5);
@@ -291,7 +298,7 @@ mod tests {
         let data: [f32; 16] = std::array::from_fn(|i| i as f32 * 0.1);
         {
             let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
-            let output = PolyOutput { cable_idx: 0, connected: true };
+            let output = PolyOutput { cable_idx: cycle_idx(0), connected: true };
             cp.write_poly(&output, data);
         }
         assert_eq!(cycle[0][0].as_poly(), data);
@@ -303,8 +310,8 @@ mod tests {
     fn ping_pong_one_sample_delay_mono() {
         let mut cycle = vec![[CableValue::mono(0.0); 2]];
         let mut scratch = empty_scratch();
-        let output = MonoOutput { cable_idx: 0, connected: true };
-        let input = MonoInput::scalar(0, 1.0);
+        let output = MonoOutput { cable_idx: cycle_idx(0), connected: true };
+        let input = MonoInput::scalar(cycle_idx(0), 1.0);
 
         // Tick 0: wi=0, fused=false → reads slot [1] (previous value).
         {
@@ -323,8 +330,8 @@ mod tests {
     fn ping_pong_within_tick_isolation() {
         let mut cycle = vec![[CableValue::mono(0.0), CableValue::mono(10.0)]];
         let mut scratch = empty_scratch();
-        let output = MonoOutput { cable_idx: 0, connected: true };
-        let input = MonoInput::scalar(0, 1.0);
+        let output = MonoOutput { cable_idx: cycle_idx(0), connected: true };
+        let input = MonoInput::scalar(cycle_idx(0), 1.0);
 
         // wi=0, fused=false → reads slot [1] = 10.0; ignores this-tick write to [0].
         let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
@@ -336,7 +343,7 @@ mod tests {
     fn scale_applied_at_read_time() {
         let mut cycle = vec![[CableValue::mono(0.0), CableValue::mono(8.0)]];
         let mut scratch = empty_scratch();
-        let input_scaled = MonoInput::scalar(0, 0.25);
+        let input_scaled = MonoInput::scalar(cycle_idx(0), 0.25);
 
         let cp = CablePool::new(&mut scratch, &mut cycle, 0);
         assert_eq!(cp.read_mono(&input_scaled), 2.0);
@@ -348,8 +355,8 @@ mod tests {
         let mut cycle = vec![[CableValue::poly([0.0; 16]), CableValue::poly(channels)]];
         let mut scratch = empty_scratch();
 
-        let input_unit = PolyInput::scalar(0, 1.0);
-        let input_general = PolyInput::scalar(0, 1.0000001);
+        let input_unit = PolyInput::scalar(cycle_idx(0), 1.0);
+        let input_general = PolyInput::scalar(cycle_idx(0), 1.0000001);
 
         let cp = CablePool::new(&mut scratch, &mut cycle, 0);
         let result_fast = cp.read_poly(&input_unit);
@@ -369,8 +376,8 @@ mod tests {
         let data: [f32; 16] = std::array::from_fn(|i| i as f32);
         let mut cycle = vec![[CableValue::poly([0.0; 16]); 2]];
         let mut scratch = empty_scratch();
-        let output = PolyOutput { cable_idx: 0, connected: true };
-        let input = PolyInput::scalar(0, 0.5);
+        let output = PolyOutput { cable_idx: cycle_idx(0), connected: true };
+        let input = PolyInput::scalar(cycle_idx(0), 0.5);
 
         {
             let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
@@ -386,18 +393,18 @@ mod tests {
         }
     }
 
-    // ── Scratch region tests (ticket 0850) ───────────────────────────────────
+    // ── Scratch region tests (ticket 0850, ADR 0072 phase 5 invert) ─────────
 
     /// A scratch slot read with `fused=true` returns the same-tick
     /// write — there is no delay.
     #[test]
     fn scratch_read_returns_same_tick_write() {
         let mut cycle = cycle_pool(CableValue::mono(0.0), CYCLE_CAPACITY);
-        let mut scratch = vec![CableValue::mono(0.0); 1];
-        let scratch_idx = CYCLE_CAPACITY;
+        let scratch_slot = crate::cables::RESERVED_SLOTS;
+        let mut scratch = vec![CableValue::mono(0.0); scratch_slot + 1];
 
-        let output = MonoOutput { cable_idx: scratch_idx, connected: true };
-        let mut input = MonoInput::scalar(scratch_idx, 1.0);
+        let output = MonoOutput { cable_idx: scratch_slot, connected: true };
+        let mut input = MonoInput::scalar(scratch_slot, 1.0);
         input.fused = true;
 
         let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
@@ -409,18 +416,17 @@ mod tests {
     #[test]
     fn scratch_and_cycle_isolated() {
         let mut cycle = cycle_pool(CableValue::mono(0.0), CYCLE_CAPACITY);
-        let mut scratch = vec![CableValue::mono(0.0); 1];
-        let scratch_idx = CYCLE_CAPACITY;
-        let cycle_idx = 5;
+        let scratch_slot = crate::cables::RESERVED_SLOTS;
+        let mut scratch = vec![CableValue::mono(0.0); scratch_slot + 1];
+        let cycle_slot = cycle_idx(5);
 
         {
             let mut cp = CablePool::new(&mut scratch, &mut cycle, 0);
-            cp.write_mono(&MonoOutput { cable_idx: scratch_idx, connected: true }, 11.0);
-            cp.write_mono(&MonoOutput { cable_idx: cycle_idx, connected: true }, 22.0);
+            cp.write_mono(&MonoOutput { cable_idx: scratch_slot, connected: true }, 11.0);
+            cp.write_mono(&MonoOutput { cable_idx: cycle_slot, connected: true }, 22.0);
         }
-        assert_eq!(scratch[0].as_mono(), 11.0);
-        assert_eq!(cycle[cycle_idx][0].as_mono(), 22.0);
-        // The other regions stay untouched.
-        assert_eq!(cycle[cycle_idx][1].as_mono(), 0.0);
+        assert_eq!(scratch[scratch_slot].as_mono(), 11.0);
+        assert_eq!(cycle[5][0].as_mono(), 22.0);
+        assert_eq!(cycle[5][1].as_mono(), 0.0);
     }
 }

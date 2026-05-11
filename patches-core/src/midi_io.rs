@@ -191,7 +191,7 @@ impl MidiOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CableValue, CYCLE_CAPACITY, GLOBAL_MIDI};
+    use crate::{CableValue, GLOBAL_MIDI};
 
     fn note_on(note: u8, vel: u8) -> MidiEvent {
         MidiEvent { bytes: [0x90, note, vel] }
@@ -213,9 +213,9 @@ mod tests {
     }
 
     /// Write a MIDI frame to the GLOBAL_MIDI backplane slot. Backplane
-    /// lives in scratch (ticket 0858); single-slot, no ping-pong half.
+    /// lives in scratch (ADR 0072 phase 5); single-slot, no ping-pong half.
     fn set_midi_frame(scratch: &mut [CableValue], frame: [f32; 16]) {
-        scratch[GLOBAL_MIDI - CYCLE_CAPACITY] = CableValue::poly(frame);
+        scratch[GLOBAL_MIDI] = CableValue::poly(frame);
     }
 
     /// Minimal cycle pool for testing — sized so disconnected sink reads

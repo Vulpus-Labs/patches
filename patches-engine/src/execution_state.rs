@@ -428,7 +428,7 @@ mod tests {
     use patches_core::{
         AudioEnvironment, BuildError, CableKind, CablePool, CableValue, InstanceId, Module,
         ModuleDescriptor, ModuleShape, MonoOutput, MonoLayout, PolyLayout, PortDescriptor,
-        StructuralParams, RESERVED_SLOTS,
+        StructuralParams, SCRATCH_CAPACITY,
     };
     use patches_core::parameter_map::ParameterMap;
 
@@ -599,7 +599,7 @@ mod tests {
             T
         }
         fn prepare(_env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
-            Self { id: instance_id, desc: descriptor, out: MonoOutput { cable_idx: RESERVED_SLOTS, connected: true }, value: 0.0 }
+            Self { id: instance_id, desc: descriptor, out: MonoOutput { cable_idx: SCRATCH_CAPACITY, connected: true }, value: 0.0 }
         })}
         fn update_validated_parameters(&mut self, _params: &patches_core::param_frame::ParamView<'_>) {}
         fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
@@ -624,7 +624,7 @@ mod tests {
         let plan = ExecutionPlan::empty();
         let mut ready = stale.rebuild(&plan, 32);
 
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
         ready.tick(&mut cable_pool);
         // No panic = success; empty plan with no modules just works.
@@ -674,7 +674,7 @@ mod tests {
         plan.active_indices = vec![0, 1];
         let mut ready = stale.rebuild(&plan, 32);
 
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
         ready.tick(&mut cable_pool);
 
@@ -685,21 +685,21 @@ mod tests {
     #[test]
     fn pointer_arrays_populated_after_rebuild() {
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(WriterModule::new(0.5, RESERVED_SLOTS)), empty_param_state());
+        pool.install(0, Box::new(WriterModule::new(0.5, SCRATCH_CAPACITY)), empty_param_state());
 
         let stale = ReadyState::new_stale(pool);
         let mut plan = ExecutionPlan::empty();
         plan.active_indices = vec![0];
         let mut ready = stale.rebuild(&plan, 32);
 
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         {
             let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
             ready.tick(&mut cable_pool);
         }
 
         assert!(
-            (bufs[RESERVED_SLOTS][0].as_mono() - 0.5).abs() < 1e-12,
+            (bufs[0][0].as_mono() - 0.5).abs() < 1e-12,
             "module should have written 0.5 to the cable slot"
         );
     }
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn tombstone_install_through_typestate() {
         let mut pool = ModulePool::new(4);
-        pool.install(0, Box::new(WriterModule::new(1.0, RESERVED_SLOTS)), empty_param_state());
+        pool.install(0, Box::new(WriterModule::new(1.0, SCRATCH_CAPACITY)), empty_param_state());
 
         let stale = ReadyState::new_stale(pool);
         let mut plan = ExecutionPlan::empty();
@@ -717,20 +717,20 @@ mod tests {
         // Transition to stale, tombstone old module, install new one.
         let mut stale = ready.make_stale();
         let _old = stale.module_pool_mut().tombstone(0);
-        stale.module_pool_mut().install(0, Box::new(WriterModule::new(2.0, RESERVED_SLOTS)), empty_param_state());
+        stale.module_pool_mut().install(0, Box::new(WriterModule::new(2.0, SCRATCH_CAPACITY)), empty_param_state());
 
         let mut plan2 = ExecutionPlan::empty();
         plan2.active_indices = vec![0];
         let mut ready2 = stale.rebuild(&plan2, 32);
 
-        let mut bufs = make_buf_pool(RESERVED_SLOTS + 1);
+        let mut bufs = make_buf_pool(1);
         {
             let mut cable_pool = CablePool::with_cycle_only(&mut bufs, 0);
             ready2.tick(&mut cable_pool);
         }
 
         assert!(
-            (bufs[RESERVED_SLOTS][0].as_mono() - 2.0).abs() < 1e-12,
+            (bufs[0][0].as_mono() - 2.0).abs() < 1e-12,
             "new module should have written 2.0"
         );
     }

@@ -63,6 +63,17 @@ impl Default for CableMap {
     }
 }
 
+// ── Cable-pool index space (ADR 0072 phase 5) ────────────────────────────────
+// One virtual number space with a single cutoff: `cable_idx < SCRATCH_CAPACITY`
+// dispatches to the scratch region, otherwise to the cycle region offset by
+// SCRATCH_CAPACITY. The low end of scratch is fixed and stable:
+//
+//   [0, SINK_SLOTS)          sinks (mono/poly read/write)
+//   [SINK_SLOTS, RESERVED_SLOTS)  backplane (audio I/O, transport, drift, midi,
+//                                 tap, host-control)
+//   [RESERVED_SLOTS, SCRATCH_CAPACITY)  dyn scratch (planner-allocated)
+//   [SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)  dyn cycle producers
+
 /// Buffer pool index of the permanent mono read-null slot.
 ///
 /// Disconnected [`MonoInput`] ports resolve to this slot. Always
@@ -89,40 +100,38 @@ pub const MONO_WRITE_SINK: usize = 2;
 /// the pool stays well-typed.
 pub const POLY_WRITE_SINK: usize = 3;
 
-/// Number of cycle-region slots reserved for read/write sinks. Sinks
-/// stay in the cycle region (constant zero, never written by modules)
-/// while the backplane lives in scratch (ADR 0072 phase 3, ticket
-/// 0858). Cycle dyn allocation starts at this index.
+/// Number of scratch-region slots reserved for read/write sinks at the
+/// bottom of the index space. Sinks live in scratch (read sinks are
+/// never written, write sinks are never read — neither needs ping-pong
+/// storage). Backplane begins at this index.
 pub const SINK_SLOTS: usize = 4;
 
 // ── Backplane slots ───────────────────────────────────────────────────────────
-// The backplane bus lives in the scratch region of the cable pool
-// (ticket 0858). Backplane slots are inherently single-slot-shaped:
-// the engine writes each one once per tick before any module runs,
-// and every consumer reads same-tick. They occupy a fixed range
-// `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)` in scratch so
-// the constants are stable across replans. The audio callback reads
-// and writes these directly each tick; modules access them via
-// `CablePool` using the `cable_idx` constants below. All slots carry
-// `CableValue::Mono` unless noted.
+// The backplane occupies a fixed range `[SINK_SLOTS, RESERVED_SLOTS)` at the
+// bottom of the scratch region. Slots are inherently single-slot-shaped: the
+// engine writes each one once per tick before any module runs, and every
+// consumer reads same-tick. The audio callback reads and writes these
+// directly each tick; modules access them via `CablePool` using the
+// `cable_idx` constants below. All slots carry `CableValue::Mono` unless
+// noted.
 
 /// Buffer pool index of the left audio output backplane slot.
 ///
 /// `AudioOut` writes the left channel here each tick; the audio callback reads
 /// from this slot directly instead of going through the [`Sink`] trait.
-pub const AUDIO_OUT_L: usize = CYCLE_CAPACITY;
+pub const AUDIO_OUT_L: usize = 4;
 
 /// Buffer pool index of the right audio output backplane slot.
-pub const AUDIO_OUT_R: usize = CYCLE_CAPACITY + 1;
+pub const AUDIO_OUT_R: usize = 5;
 
 /// Buffer pool index of the left audio input backplane slot.
 ///
 /// Reserved for a future `AudioIn` module. The audio callback will write
 /// hardware input samples here before each `tick()`.
-pub const AUDIO_IN_L: usize = CYCLE_CAPACITY + 2;
+pub const AUDIO_IN_L: usize = 6;
 
 /// Buffer pool index of the right audio input backplane slot.
-pub const AUDIO_IN_R: usize = CYCLE_CAPACITY + 3;
+pub const AUDIO_IN_R: usize = 7;
 
 /// Buffer pool index of the global transport backplane slot.
 ///
@@ -130,14 +139,14 @@ pub const AUDIO_IN_R: usize = CYCLE_CAPACITY + 3;
 /// is defined by [`TransportFrame`](crate::TransportFrame) (ADR 0033). In
 /// standalone mode only lane 0 (sample count) is populated; the rest default
 /// to 0.0.
-pub const GLOBAL_TRANSPORT: usize = CYCLE_CAPACITY + 4;
+pub const GLOBAL_TRANSPORT: usize = 8;
 
 /// Buffer pool index of the global drift backplane slot.
 ///
 /// Written by the audio callback each tick with a slowly varying
 /// `CableValue::Mono` value in `[-1, 1]`. Oscillator modules can read this
 /// to implement globally correlated analogue pitch drift.
-pub const GLOBAL_DRIFT: usize = CYCLE_CAPACITY + 5;
+pub const GLOBAL_DRIFT: usize = 9;
 
 /// Buffer pool index of the global MIDI backplane slot.
 ///
@@ -145,7 +154,7 @@ pub const GLOBAL_DRIFT: usize = CYCLE_CAPACITY + 5;
 /// is defined by [`MidiFrame`](crate::MidiFrame) (ADR 0033). Carries up to 5
 /// packed MIDI events per sample. Cleared to zero (count = 0) at the start of
 /// each tick before writing.
-pub const GLOBAL_MIDI: usize = CYCLE_CAPACITY + 6;
+pub const GLOBAL_MIDI: usize = 10;
 
 /// Buffer pool index of the first tap backplane slot (ADR 0053 §4,
 /// ticket 0814). Four consecutive `Poly` slots starting here pack
@@ -155,7 +164,7 @@ pub const GLOBAL_MIDI: usize = CYCLE_CAPACITY + 6;
 /// Lane layout: lane `slot_offset % 16` of slot
 /// `TAP_BASE + slot_offset / 16`. Stereo tap channels claim two
 /// consecutive lanes (`L` at `slot_offset`, `R` at `slot_offset + 1`).
-pub const TAP_BASE: usize = CYCLE_CAPACITY + 7;
+pub const TAP_BASE: usize = 11;
 
 /// Number of `Poly` slots reserved for tap values. Each slot holds 16
 /// f32 lanes; four slots gives [`crate::MAX_TAPS`] = 64.
@@ -187,35 +196,36 @@ pub const MAX_HOST_CONTROLS: usize = HOST_CONTROL_SLOTS * 16;
 /// 2048 is well above typical CLAP host buffer sizes (commonly 64–512).
 pub const MAX_HOST_CONTROL_BLOCK: usize = 2048;
 
-/// Number of scratch-region buffer pool slots reserved for the
-/// backplane bus (audio I/O + global transport/drift/midi + tap +
-/// host-control + spare). Pinned at a power-of-two ceiling that
-/// leaves room for future backplanes without disturbing the
-/// dynamic-cable base index.
+/// Number of scratch-region buffer pool slots reserved at the bottom
+/// of the index space for sinks + backplane (audio I/O + global
+/// transport/drift/midi + tap + host-control + spare). Pinned at a
+/// power-of-two ceiling that leaves room for future backplanes without
+/// disturbing the dynamic-cable base index.
 ///
-/// Backplane slots occupy `[CYCLE_CAPACITY, CYCLE_CAPACITY + RESERVED_SLOTS)`
-/// in the scratch region (ticket 0858). The scratch allocator starts
-/// its high-water mark at `CYCLE_CAPACITY + RESERVED_SLOTS` so no
-/// dynamically allocated cable ever aliases a backplane slot.
+/// Reserved slots occupy `[0, RESERVED_SLOTS)` in scratch
+/// (sinks at `[0, SINK_SLOTS)`, backplane at `[SINK_SLOTS,
+/// RESERVED_SLOTS)`). The scratch allocator starts its high-water mark
+/// at `RESERVED_SLOTS` so no dyn cable ever aliases a reserved slot.
 pub const RESERVED_SLOTS: usize = 32;
 
-/// Total capacity of the cycle region in the two-region cable pool
-/// (ADR 0072 phase 3, tickets 0850 + 0858). Indices `[0, CYCLE_CAPACITY)`
-/// are cycle pairs (`[CableValue; 2]`), backing read/write sinks
-/// (`[0, SINK_SLOTS)`) and dynamic feedback producers
-/// (`[SINK_SLOTS, CYCLE_CAPACITY)`). Indices `>= CYCLE_CAPACITY` are
-/// scratch single slots, with the backplane occupying the first
-/// `RESERVED_SLOTS` of scratch and dyn-scratch above that.
+/// Total capacity of the scratch region. Indices `[0, SCRATCH_CAPACITY)`
+/// dispatch to scratch (single-slot `CableValue`), with sinks +
+/// backplane at `[0, RESERVED_SLOTS)` and dyn-scratch above that.
 ///
-/// Pinned at a generous compile-time constant so the cutoff is stable
-/// across replans — any plan whose cycle allocations stay below this
-/// cap keeps surviving scratch indices fixed regardless of feedback
-/// topology growth in subsequent plans.
+/// Pinned at a generous compile-time constant so the scratch/cycle
+/// cutoff is stable across replans — every plan whose dyn-scratch
+/// demand stays below this cap sees identical backplane and sink
+/// indices regardless of fusion topology growth.
+pub const SCRATCH_CAPACITY: usize = 2048;
+
+/// Total capacity of the cycle region (ADR 0072 phase 3, tickets 0850
+/// + 0858, phase 5 invert ticket 0860).
 ///
-/// Sized for typical patches: 124 dyn cycle slots (`CYCLE_CAPACITY -
-/// SINK_SLOTS`) cover the feedback arc set of all in-tree examples.
-/// Patches whose cycle count exceeds this raise `BufferPoolExhausted`
-/// at plan-build time.
+/// Cycle slots live at `cable_idx` in `[SCRATCH_CAPACITY,
+/// SCRATCH_CAPACITY + CYCLE_CAPACITY)` and are `[CableValue; 2]`
+/// ping-pong pairs backing delayed feedback producers. Patches whose
+/// cycle count exceeds `CYCLE_CAPACITY` raise `BufferPoolExhausted` at
+/// plan-build time.
 pub const CYCLE_CAPACITY: usize = 128;
 
 /// Threshold used by gate input types (and legacy producers that still emit

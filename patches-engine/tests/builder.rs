@@ -51,14 +51,14 @@ mod builder {
     }
 
     /// Build cycle and scratch pools sized for the planner's two-region
-    /// layout (ADR 0072 phase 3, tickets 0850 + 0858). `capacity` is
-    /// the total pool capacity passed to `PatchBuilder` — the scratch
-    /// pool gets `capacity - CYCLE_CAPACITY` slots.
+    /// layout (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert
+    /// ticket 0860). `capacity` is the dyn-scratch budget; scratch is
+    /// sized at `min(SCRATCH_CAPACITY, max(RESERVED_SLOTS, capacity))`.
     pub(crate) fn make_split_pool(capacity: usize) -> (Vec<[CableValue; 2]>, Vec<CableValue>) {
         let cycle = (0..patches_core::CYCLE_CAPACITY)
             .map(|_| [CableValue::mono(0.0), CableValue::mono(0.0)])
             .collect();
-        let scratch_len = capacity.saturating_sub(patches_core::CYCLE_CAPACITY);
+        let scratch_len = capacity.clamp(patches_core::RESERVED_SLOTS, patches_core::SCRATCH_CAPACITY);
         let scratch = vec![CableValue::mono(0.0); scratch_len];
         (cycle, scratch)
     }

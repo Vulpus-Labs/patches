@@ -45,7 +45,7 @@ fn scratch_region_compacts_and_zeroes_on_replan() {
     let buf_a_old = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
     let freed_buf = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_b"), 0)];
     assert!(
-        buf_a_old >= patches_core::cables::CYCLE_CAPACITY,
+        buf_a_old < patches_core::cables::SCRATCH_CAPACITY,
         "sine_a output is fused, expected to live in the scratch region"
     );
 
@@ -67,7 +67,7 @@ fn scratch_region_compacts_and_zeroes_on_replan() {
 
     let buf_a_new = state_b.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
     assert!(
-        buf_a_new >= patches_core::cables::CYCLE_CAPACITY,
+        buf_a_new < patches_core::cables::SCRATCH_CAPACITY,
         "sine_a remains fused; new index must still live in the scratch region"
     );
     assert!(

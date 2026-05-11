@@ -314,8 +314,9 @@ fn assert_steady_state_bounded_fails_for_alternating() {
 fn init_pool_sets_all_slots() {
     let mut h = ModuleHarness::build::<Doubler>(&[]);
     h.init_pool(CableValue::mono(99.0));
-    // All pool slots should now be 99.0; read before any tick returns 99.0
-    // (ri = 1 - wi = 1 when wi = 0).
-    let cable = h.n_inputs; // first output cable
-    assert_eq!(h.pool[cable][1].as_mono(), 99.0);
+    // All scratch slots should now be 99.0 (user cables live in scratch
+    // at `RESERVED_SLOTS + i` under ADR 0072 phase 5). Sample one slot
+    // via the public pool accessor.
+    let cable = crate::cables::RESERVED_SLOTS; // first user input cable
+    assert_eq!(h.pool_value(cable, 0).as_mono(), 99.0);
 }

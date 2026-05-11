@@ -38,10 +38,10 @@ fn repeat_step(cv1: f32, repeat: u8) -> TrackerStep {
 #[test]
 fn repeat_via_process_produces_triggers_and_gate_cycles() {
     use patches_core::cables::{
-        CableValue, InputPort, OutputPort, PolyInput, MonoOutput,
-        POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
+        CableValue, InputPort, OutputPort, PolyInput, MonoOutput, SCRATCH_CAPACITY,
     };
     use patches_core::cable_pool::CablePool;
+    let cidx = |i: usize| SCRATCH_CAPACITY + i;
 
     let data = Arc::new(TrackerData {
         patterns: PatternBank {
@@ -73,23 +73,21 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     }
     player.receive_tracker_data(data);
 
-    // Pool layout: reserved(16) + 1 poly input (clock) + 4 mono outputs
-    let clock_slot = RESERVED_SLOTS;
-    let trigger_slot = RESERVED_SLOTS + 1 + 2;
-    let gate_slot = RESERVED_SLOTS + 1 + 3;
-    let pool_size = RESERVED_SLOTS + 1 + 4;
+    // Cycle pool layout: logical slot 0 = clock (poly), 1..4 = mono outputs.
+    let clock_logical = 0;
+    let trigger_logical = 3;
+    let gate_logical = 4;
+    let pool_size = 5;
 
     let mut pool_buf = vec![[CableValue::mono(0.0); 2]; pool_size];
-    pool_buf[POLY_READ_SINK] = [CableValue::poly([0.0; 16]); 2];
-    pool_buf[POLY_WRITE_SINK] = [CableValue::poly([0.0; 16]); 2];
-    pool_buf[clock_slot] = [CableValue::poly([0.0; 16]); 2];
+    pool_buf[clock_logical] = [CableValue::poly([0.0; 16]); 2];
 
-    let inputs = vec![InputPort::Poly(PolyInput::scalar(clock_slot, 1.0))];
+    let inputs = vec![InputPort::Poly(PolyInput::scalar(cidx(clock_logical), 1.0))];
     let outputs = vec![
-        OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 1, connected: true }),
-        OutputPort::Mono(MonoOutput { cable_idx: RESERVED_SLOTS + 2, connected: true }),
-        OutputPort::Mono(MonoOutput { cable_idx: trigger_slot, connected: true }),
-        OutputPort::Mono(MonoOutput { cable_idx: gate_slot, connected: true }),
+        OutputPort::Mono(MonoOutput { cable_idx: cidx(1), connected: true }),
+        OutputPort::Mono(MonoOutput { cable_idx: cidx(2), connected: true }),
+        OutputPort::Mono(MonoOutput { cable_idx: cidx(trigger_logical), connected: true }),
+        OutputPort::Mono(MonoOutput { cable_idx: cidx(gate_logical), connected: true }),
     ];
     player.set_ports(&inputs, &outputs);
 
@@ -103,7 +101,7 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     clock_bus[3] = tick_duration_secs;
 
     let mut wi = 0;
-    pool_buf[clock_slot] = [CableValue::poly(clock_bus); 2];
+    pool_buf[clock_logical] = [CableValue::poly(clock_bus); 2];
 
     {
         let mut cp = CablePool::with_cycle_only(&mut pool_buf, wi);
@@ -115,8 +113,8 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
         buf[slot][write_idx].as_mono()
     };
 
-    let t0_trigger = read_mono(&pool_buf, trigger_slot, 1 - wi);
-    let t0_gate = read_mono(&pool_buf, gate_slot, 1 - wi);
+    let t0_trigger = read_mono(&pool_buf, trigger_logical, 1 - wi);
+    let t0_gate = read_mono(&pool_buf, gate_logical, 1 - wi);
     assert_eq!(t0_trigger, 1.0);
     assert_eq!(t0_gate, 1.0);
 
@@ -129,15 +127,15 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     let mut prev_gate = t0_gate;
 
     for _sample in 1..tick_samples {
-        pool_buf[clock_slot] = [CableValue::poly(silent_clock); 2];
+        pool_buf[clock_logical] = [CableValue::poly(silent_clock); 2];
         {
             let mut cp = CablePool::with_cycle_only(&mut pool_buf, wi);
             player.process(&mut cp);
         }
         wi = 1 - wi;
 
-        let trigger = read_mono(&pool_buf, trigger_slot, 1 - wi);
-        let gate = read_mono(&pool_buf, gate_slot, 1 - wi);
+        let trigger = read_mono(&pool_buf, trigger_logical, 1 - wi);
+        let gate = read_mono(&pool_buf, gate_logical, 1 - wi);
 
         if trigger >= 0.5 && prev_trigger < 0.5 {
             trigger_rising_edges += 1;

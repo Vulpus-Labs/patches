@@ -33,7 +33,9 @@ impl Default for StereoInput {
             clip: None,
             connected: false,
             broadcast_from_mono: false,
-            fused: false,
+            // Disconnected → POLY_READ_SINK (scratch slot 1, constant zero,
+            // same-tick) — fused by definition.
+            fused: true,
         }
     }
 }
