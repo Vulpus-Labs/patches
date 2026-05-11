@@ -32,7 +32,7 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
-use patches_dsp::drum::DecayEnvelope;
+use crate::primitives::DecayEnvelope;
 use patches_dsp::{SvfKernel, svf_f, q_to_damp};
 
 module_params! {

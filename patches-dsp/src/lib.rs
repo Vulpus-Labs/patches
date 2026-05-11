@@ -82,9 +82,6 @@ pub use coef_ramp::{CoefRamp, CoefTargets, PolyCoefRamp, PolyCoefTargets};
 pub mod time_utils;
 pub use time_utils::{ms_to_samples, compute_time_coeff};
 
-pub mod drum;
-pub use drum::{DecayEnvelope, PitchSweep, MetallicTone, BurstGenerator, saturate};
-
 /// Enable hardware flush-to-zero / denormals-as-zero on the calling thread.
 ///
 /// Subnormal floats trigger microcode fallback paths that cost 10–100× a

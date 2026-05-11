@@ -29,8 +29,12 @@
 /// | `decay`      | float | 0.01–2.0 s  | 0.5     | Amplitude decay time              |
 /// | `drive`      | float | 0.0–1.0     | 0.0     | Saturation amount                 |
 /// | `click`      | float | 0.0–1.0     | 0.3     | Transient click intensity         |
-use crate::common::approximate::fast_exp2;
-use crate::common::frequency::C0_FREQ;
+use patches_dsp::fast_exp2;
+
+/// C0 reference frequency for 1V/oct pitch input. Mirrors
+/// `patches_modules::common::frequency::C0_FREQ` (kept local so this
+/// crate does not pull patches-modules).
+const C0_FREQ: f32 = 16.351_598;
 
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -41,7 +45,7 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::param_frame::ParamView;
 use patches_core::module_params;
-use patches_dsp::drum::{DecayEnvelope, PitchSweep, saturate};
+use crate::primitives::{DecayEnvelope, PitchSweep, saturate};
 use patches_dsp::{MonoPhaseAccumulator, fast_sine};
 
 module_params! {

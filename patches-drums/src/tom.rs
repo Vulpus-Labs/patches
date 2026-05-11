@@ -35,7 +35,7 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
-use patches_dsp::drum::{DecayEnvelope, PitchSweep};
+use crate::primitives::{DecayEnvelope, PitchSweep};
 
 module_params! {
     Tom {

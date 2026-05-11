@@ -55,7 +55,7 @@ impl MetallicTone {
     /// Process one sample with per-partial frequency modulation (for cymbal shimmer).
     /// `mod_depth` is in Hz, `mod_phase` is a slow LFO phase in [0, 1).
     pub fn tick_with_modulation(&mut self, mod_depth: f32, mod_phase: f32) -> f32 {
-        let mod_base = crate::fast_sine(mod_phase) * mod_depth * self.sr_recip;
+        let mod_base = patches_dsp::fast_sine(mod_phase) * mod_depth * self.sr_recip;
         let mut sum = 0.0f32;
         for (i, (phase, &base_inc)) in self.phases.iter_mut().zip(&self.increments).enumerate() {
             let sq = if *phase < 0.5 { 1.0 } else { -1.0 };

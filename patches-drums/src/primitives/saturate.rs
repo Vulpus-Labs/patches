@@ -12,7 +12,7 @@ pub fn saturate(sample: f32, drive: f32) -> f32 {
     let gain = 1.0 + drive * 4.0;
     let x = sample * gain;
     // Fast tanh approximation
-    crate::fast_tanh(x)
+    patches_dsp::fast_tanh(x)
 }
 
 #[cfg(test)]

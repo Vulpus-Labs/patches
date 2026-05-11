@@ -1,0 +1,18 @@
+[package]
+name = "patches-drums"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsp = { path = "../patches-dsp" }
+patches-ffi-common = { path = "../patches-ffi-common" }
+
+[dev-dependencies]
+patches-core = { path = "../patches-core", features = ["test-support"] }
+
+[lib]
+name = "patches_drums"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+doctest = false

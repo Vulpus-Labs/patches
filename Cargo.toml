@@ -26,6 +26,7 @@ members = [
     "patches-io-ring",
     "patches-tracker-core",
     "patches-vintage",
+    "patches-drums",
     "patches-ffi",
     "patches-ffi-common",
     "patches-alloc-trap",

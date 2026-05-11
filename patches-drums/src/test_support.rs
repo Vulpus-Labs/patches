@@ -1,10 +1,38 @@
-//! Shared test utilities for drum/percussion modules.
-//!
-//! Exposes spectral helpers built on `patches_dsp::RealPackedFft` for
-//! assertions about drum output shape (HF vs LF energy, fundamental bin,
-//! envelope profile).
+//! Test utilities for drum modules: `assert_within!` parity with
+//! patches-dsp / patches-core, plus spectral helpers built on
+//! `patches_dsp::RealPackedFft` for asserting drum output shape.
 
 use patches_dsp::RealPackedFft;
+
+/// Assert that `actual` is within an absolute `delta` of `expected`.
+///
+/// Mirror of the `assert_within!` macro in `patches-dsp` /
+/// `patches-core`, kept local so this crate stays dep-light.
+macro_rules! assert_within {
+    ($expected:expr, $actual:expr, $delta:expr) => {{
+        let expected: f32 = $expected;
+        let actual: f32 = $actual;
+        let delta: f32 = $delta;
+        assert!(
+            (expected - actual).abs() < delta,
+            "assert_within failed: expected {}, actual {}, delta {}",
+            expected,
+            actual,
+            delta
+        );
+    }};
+    ($expected:expr, $actual:expr, $delta:expr, $($arg:tt)+) => {{
+        let expected: f32 = $expected;
+        let actual: f32 = $actual;
+        let delta: f32 = $delta;
+        assert!(
+            (expected - actual).abs() < delta,
+            $($arg)+
+        );
+    }};
+}
+
+pub(crate) use assert_within;
 
 fn bin_magnitude(packed: &[f32], bin: usize) -> f32 {
     let n = packed.len();

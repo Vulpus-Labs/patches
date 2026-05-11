@@ -30,9 +30,6 @@ pub mod tuner;
 pub mod common;
 pub mod noise;
 
-#[cfg(test)]
-mod test_support;
-
 pub mod ring_mod;
 pub mod svf;
 pub mod poly_svf;
@@ -52,13 +49,6 @@ pub mod pitch_shift;
 pub mod convolution_reverb;
 pub mod master_sequencer;
 pub mod pattern_player;
-pub mod kick;
-pub mod snare;
-pub mod clap_drum;
-pub mod hihat;
-pub mod tom;
-pub mod claves;
-pub mod cymbal;
 pub mod midi_drumset;
 pub mod bitcrusher;
 pub mod drive;
@@ -122,13 +112,6 @@ pub use convolution_reverb::ConvolutionReverb;
 pub use convolution_reverb::StereoConvReverb;
 pub use master_sequencer::MasterSequencer;
 pub use pattern_player::PatternPlayer;
-pub use kick::Kick;
-pub use snare::Snare;
-pub use clap_drum::ClapDrum;
-pub use hihat::{ClosedHiHat, OpenHiHat};
-pub use tom::Tom;
-pub use claves::Claves;
-pub use cymbal::Cymbal;
 pub use midi_drumset::MidiDrumset;
 pub use bitcrusher::Bitcrusher;
 pub use drive::Drive;
@@ -200,14 +183,6 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<StereoConvReverb>();
     r.register::<MasterSequencer>();
     r.register::<PatternPlayer>();
-    r.register::<Kick>();
-    r.register::<Snare>();
-    r.register::<ClapDrum>();
-    r.register::<ClosedHiHat>();
-    r.register::<OpenHiHat>();
-    r.register::<Tom>();
-    r.register::<Claves>();
-    r.register::<Cymbal>();
     r.register::<MidiDrumset>();
     r.register::<Bitcrusher>();
     r.register::<Drive>();
@@ -286,14 +261,6 @@ mod tests {
             "StereoConvReverb",
             "MasterSequencer",
             "PatternPlayer",
-            "Kick",
-            "Snare",
-            "Clap",
-            "ClosedHiHat",
-            "OpenHiHat",
-            "Tom",
-            "Claves",
-            "Cymbal",
             "MidiDrumset",
             "MidiSplit",
             "MidiTranspose",

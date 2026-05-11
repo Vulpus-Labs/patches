@@ -49,7 +49,7 @@ module_params! {
         snap:        Float,
     }
 }
-use patches_dsp::drum::{DecayEnvelope, PitchSweep};
+use crate::primitives::{DecayEnvelope, PitchSweep};
 use patches_dsp::{MonoPhaseAccumulator, SvfKernel, svf_f, q_to_damp, xorshift64};
 
 pub struct Snare {
