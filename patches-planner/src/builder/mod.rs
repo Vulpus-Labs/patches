@@ -259,13 +259,14 @@ pub struct ExecutionPlan {
     /// applied directly to each `InputPort.fused` (phase 2); the
     /// engine's read path branches on that flag.
     pub fas_size: usize,
-    /// Diagnostic logical high-water mark of the cycle region in this
-    /// plan (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert
-    /// ticket 0860). Logical index in `[0, CYCLE_CAPACITY)`; absolute
-    /// `cable_idx` for cycle producers is `SCRATCH_CAPACITY + logical`.
-    /// Carried for tests and diagnostics only — the engine does not
-    /// consume this field. Slated for removal in ticket 0862.
-    pub cycle_slot_start: usize,
+    /// High-water mark of the cycle region (count of distinct cycle
+    /// producer ports in this plan), in `[0, CYCLE_CAPACITY]`.
+    /// Diagnostic — engine does not consume this field.
+    pub cycle_hwm: usize,
+    /// High-water mark of the scratch region (count of distinct
+    /// scratch slots in use, including reserved sinks + backplane), in
+    /// `[0, SCRATCH_CAPACITY]`. Diagnostic only.
+    pub scratch_hwm: usize,
     /// Shared tracker data (patterns and songs) for this plan.
     ///
     /// `None` for patches that don't use pattern/song blocks — zero overhead
@@ -302,7 +303,8 @@ impl ExecutionPlan {
             active_indices: vec![],
             port_updates: vec![],
             fas_size: 0,
-            cycle_slot_start: patches_core::cables::SINK_SLOTS,
+            cycle_hwm: 0,
+            scratch_hwm: patches_core::cables::RESERVED_SLOTS,
             tracker_data: None,
             tracker_receiver_indices: vec![],
             tap_manifest_generation: 0,
@@ -409,9 +411,10 @@ impl PatchBuilder {
             // in C3 will consume this; the storage split in C4 lifts it
             // into the engine's CablePool dispatch.
             producer_port_cycle: _,
-            cycle_slot_start,
             fas_size,
         } = make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
+        let cycle_hwm = buf_alloc.cycle_hwm;
+        let scratch_hwm = buf_alloc.scratch_hwm;
 
         // ── Action phase ─────────────────────────────────────────────────────
 
@@ -713,7 +716,8 @@ impl PatchBuilder {
                 active_indices,
                 port_updates,
                 fas_size,
-                cycle_slot_start,
+                cycle_hwm,
+                scratch_hwm,
                 tracker_data: None,
                 tracker_receiver_indices: Vec::new(),
                 tap_manifest_generation: 0,

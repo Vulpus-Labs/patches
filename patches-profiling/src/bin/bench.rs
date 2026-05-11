@@ -66,39 +66,6 @@ fn load_plan(path: &str) -> ExecutionPlan {
     plan
 }
 
-/// Compute the actual cable index high-water mark from the plan's port
-/// assignments. Reports the maximum cable_idx referenced by any module's
-/// inputs or outputs (plus one), per region. Cycle hwm is returned as a
-/// *logical* count in `[0, CYCLE_CAPACITY)`.
-fn watermarks(plan: &ExecutionPlan) -> (usize, usize) {
-    let mut max_cycle_logical = 0;
-    let mut max_scratch = 0;
-    let mut bump = |idx: usize| {
-        if idx < SCRATCH_CAPACITY {
-            if idx + 1 > max_scratch {
-                max_scratch = idx + 1;
-            }
-        } else {
-            let logical = idx - SCRATCH_CAPACITY + 1;
-            if logical > max_cycle_logical {
-                max_cycle_logical = logical;
-            }
-        }
-    };
-    for slot in &plan.slots {
-        for &(_, idx) in &slot.unscaled_inputs {
-            bump(idx);
-        }
-        for &(_, idx, _) in &slot.scaled_inputs {
-            bump(idx);
-        }
-        for &idx in &slot.output_buffers {
-            bump(idx);
-        }
-    }
-    (max_cycle_logical, max_scratch)
-}
-
 fn run_ticks(
     state: &mut ReadyState,
     cycle_pool: &mut [[CableValue; 2]],
@@ -147,7 +114,8 @@ fn bench_patch(path: &str) {
     println!("─── {path} ─────────────────────────────────────────────");
 
     let mut plan = load_plan(path);
-    let (cycle_hwm, scratch_hwm) = watermarks(&plan);
+    let cycle_hwm = plan.cycle_hwm;
+    let scratch_hwm = plan.scratch_hwm;
 
     let mut cycle_pool: Box<[[CableValue; 2]]> = kernel::init_cycle_pool();
     let mut scratch_pool: Box<[CableValue]> = kernel::init_scratch_pool(POOL_CAPACITY);

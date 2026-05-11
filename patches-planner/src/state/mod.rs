@@ -176,14 +176,6 @@ pub struct PlanDecisions<'a> {
     /// Producer ports with no consumers default to `false` (scratch),
     /// since there is no read path that needs the delay.
     pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
-    /// Diagnostic logical high-water mark of the cycle region in this
-    /// plan (ADR 0072 phase 3, tickets 0850 + 0858; phase 5 invert
-    /// ticket 0860). Equal to the count of cycle producer ports — i.e.
-    /// the logical index past the last cycle slot in use, in
-    /// `[0, CYCLE_CAPACITY)`. Absolute `cable_idx` for cycle producers
-    /// is `SCRATCH_CAPACITY + logical`. Carried here for tests and
-    /// diagnostics (slated for removal in ticket 0862).
-    pub cycle_slot_start: usize,
     /// Size of the feedback arc set: number of cables internal to a
     /// non-trivial SCC. Reported on plan build to validate the
     /// assumption that typical patches have very few cyclic cables.
@@ -292,10 +284,6 @@ pub fn make_decisions<'a>(
     let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
     validate_fused_invariant(&order, &index.edges, &cable_fused);
     let producer_port_cycle = classify_producer_ports(&index.edges, &cable_fused);
-    // Logical cycle hwm = count of cycle producer ports. Absolute
-    // `cable_idx` for cycle producers is `SCRATCH_CAPACITY + logical`
-    // under the phase-5 layout.
-    let cycle_slot_start = producer_port_cycle.values().filter(|&&v| v).count();
     let buf_alloc = allocate_buffers(
         &index,
         &order,
@@ -311,7 +299,6 @@ pub fn make_decisions<'a>(
         decisions,
         cable_fused,
         producer_port_cycle,
-        cycle_slot_start,
         fas_size,
     })
 }
