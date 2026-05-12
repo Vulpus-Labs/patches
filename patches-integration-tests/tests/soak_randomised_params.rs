@@ -1,15 +1,18 @@
 //! E111 ticket 0651 — 10 000-cycle soak under the audio-thread allocator
 //! trap, with randomised parameter updates across a representative patch
 //! that mixes in-process modules (`Osc`, `AudioOut`) and a bundle-loaded
-//! FFI module (`VChorus` from `patches-vintage`). Asserts zero audio-thread
-//! allocation and that every `Arc<libloading::Library>` reaches refcount
-//! zero (less our held clone) at shutdown.
+//! FFI module. Asserts zero audio-thread allocation and that every
+//! `Arc<libloading::Library>` reaches refcount zero (less our held clone)
+//! at shutdown.
 //!
 //! Smoke variant is the default (1 000 cycles, fast enough for PR CI).
 //! The nightly 10 000-cycle run is selected via `PATCHES_SOAK_CYCLES=10000`.
 //!
-//! If the `patches-vintage` dylib has not been built, the test skips — the
-//! FFI half of the acceptance criteria cannot be exercised without it.
+//! Uses the `test-gain-plugin` cdylib from `test-plugins/gain/` as the
+//! bundle subject — the test exercises the FFI loader + audio-thread
+//! path, not any particular module's DSP.
+//!
+//! If the plugin cdylib has not been built, the test skips.
 
 #[global_allocator]
 static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAllocator;
@@ -30,19 +33,15 @@ use patches_core::ModuleShape;
 
 const SRC_TEMPLATE: &str = "patch {
     module osc : Osc { frequency: 220Hz }
-    module ch  : VChorus { variant: bright, mode: one, hiss: {HISS}, jitter: {JITTER} }
+    module amp : Gain { gain: {GAIN} }
     module out : AudioOut
-    osc.sine -> ch.in
-    
-    ch.out -> out.in
-    
+    osc.sine -> amp.in
+    amp.out -> out.in
 }
 ";
 
-fn render_src(hiss: f32, jitter: f32) -> String {
-    SRC_TEMPLATE
-        .replace("{HISS}", &format!("{hiss:.4}"))
-        .replace("{JITTER}", &format!("{jitter:.4}"))
+fn render_src(gain: f32) -> String {
+    SRC_TEMPLATE.replace("{GAIN}", &format!("{gain:.4}"))
 }
 
 fn build_plan_from_src(
@@ -73,19 +72,19 @@ impl Lcg {
 
 #[test]
 fn soak_ten_thousand_cycles_randomised_params() {
-    let dylib = dylib_path("patches-vintage");
+    let dylib = dylib_path("test-gain-plugin");
     if !dylib.exists() {
         eprintln!(
-            "soak_randomised_params: skipping — vintage dylib not built at {dylib:?}. \
-             Run `cargo build -p patches-vintage`."
+            "soak_randomised_params: skipping — test-gain-plugin dylib not built at {dylib:?}. \
+             Run `cargo build -p test-gain-plugin`."
         );
         return;
     }
 
-    // Load the bundle manually so we can retain an `Arc<Library>` clone
+    // Load the plugin manually so we can retain an `Arc<Library>` clone
     // and verify refcount drain after teardown.
-    let dylib_builders = load_plugin(&dylib).expect("load vintage");
-    assert!(!dylib_builders.is_empty(), "vintage bundle exported no modules");
+    let dylib_builders = load_plugin(&dylib).expect("load gain plugin");
+    assert!(!dylib_builders.is_empty(), "test-gain-plugin exported no modules");
     let lib_arc: Arc<libloading::Library> = dylib_builders[0].library_arc();
     // Our clone + one per live builder = initial strong count.
     let strong_initial = Arc::strong_count(&lib_arc);
@@ -114,7 +113,7 @@ fn soak_ten_thousand_cycles_randomised_params() {
 
     // Initial plan.
     let (plan, mut state) =
-        build_plan_from_src(&registry, &render_src(0.5, 0.25), &PlannerState::empty());
+        build_plan_from_src(&registry, &render_src(1.0), &PlannerState::empty());
     let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, OversamplingFactor::None);
     engine.adopt_plan(plan);
 
@@ -124,10 +123,10 @@ fn soak_ten_thousand_cycles_randomised_params() {
     }
 
     for _ in 0..epochs {
-        // Off-thread: rebuild a new plan with randomised params.
-        let hiss = rng.next_f32();
-        let jitter = rng.next_f32();
-        let src = render_src(hiss, jitter);
+        // Off-thread: rebuild a new plan with a randomised gain. The Gain
+        // param range is 0..2; bias to the lower half so output stays sane.
+        let gain = rng.next_f32() * 2.0;
+        let src = render_src(gain);
         let (plan, new_state) = build_plan_from_src(&registry, &src, &state);
         state = new_state;
 

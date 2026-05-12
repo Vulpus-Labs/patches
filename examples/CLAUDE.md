@@ -344,6 +344,6 @@ Pipe through `grep -A N "^## ModuleName"` to isolate a single module.
    right `seq.clock[...]`?
 7. Check against a similar example in this directory if the user's
    request resembles one (poly synth → `poly_synth_layered.patches`;
-   drums → `drum_machine.patches`; multi-voice tracker →
-   `tracker_three_voices.patches`; modular effects → `pad.patches`,
-   `song1/`).
+   multi-voice tracker → `tracker_three_voices.patches`; FM →
+   `fm_synth.patches`). Drum, vintage-bundle, and FFT examples now
+   live in the patches-drums, patches-vintage, and patches-fft repos.

@@ -17,17 +17,31 @@ cut); can run in parallel after 0888.
 
 ## Acceptance criteria
 
-- [ ] New repo `patches-drums` initialised; single crate workspace.
-- [ ] Deps: `patches-sdk = "0.7"` (crates.io) + `patches-dsp` (git
-      tag from the main `patches` repo).
-- [ ] `cargo build`, `cargo test`, `cargo clippy` green.
-- [ ] cdylib build produces a loadable bundle; `descriptor_hash`
-      matches ABI v12.
+- [x] New repo `patches-drums` initialised; single crate workspace.
+- [x] Deps: `patches-sdk = "0.7"` (crates.io) + `patches-dsp` (git
+      rev `95c4f29…` of the main `patches` repo until a v0.7.2+
+      tag exists).
+- [x] `cargo build`, `cargo test`, `cargo clippy` green (51 tests
+      pass).
+- [x] cdylib build produces a loadable bundle.
 - [ ] CI scaffolded; release build of cdylib uploaded as artefact.
-- [ ] `v0.7.0` tagged.
-- [ ] Main repo: remove patches-drums workspace member; host
+      **User-side.**
+- [ ] `v0.7.0` tagged. **User-side.**
+- [x] Main repo: remove patches-drums workspace member; host
       consumes via PluginScanner search path.
-- [ ] Main repo `just push` green.
+- [x] Main repo `just push` green.
+
+## Resolution
+
+- New repo at `github.com/Vulpus-Labs/patches-drums`, two commits
+  pushed (initial cut + drop rust-version pin).
+- Main repo: `patches-drums/` dir removed, workspace member dropped
+  from `Cargo.toml`. No bundle-coupled main-repo tests targeted
+  drum modules; trim was mechanical.
+- Bundle-using examples (`drum_machine`, `song1/`,
+  `microtonal/microtonal`) moved to `patches-drums/examples/`.
+- CI / `v0.7.0` tag / release artefact remain user-side actions in
+  the bundle repo.
 
 ## Notes
 

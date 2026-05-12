@@ -1,8 +1,0 @@
-patch {
-    module osc : Osc { frequency: 220Hz }
-    module ch  : VChorus { variant: bright, mode: one, hiss: 0.0 }
-    module out : AudioOut
-
-    osc.sine -> ch.in
-    ch.out -> out.in
-}

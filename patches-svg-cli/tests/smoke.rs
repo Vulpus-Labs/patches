@@ -15,7 +15,7 @@ fn workspace_root() -> std::path::PathBuf {
 
 #[test]
 fn renders_example_patch_to_stdout() {
-    let input = workspace_root().join("examples/pad.patches");
+    let input = workspace_root().join("examples/fm_synth.patches");
     assert!(input.exists(), "example patch missing: {input:?}");
 
     let out = Command::new(bin())

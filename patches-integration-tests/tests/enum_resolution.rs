@@ -26,9 +26,7 @@ fn env() -> AudioEnvironment {
 }
 
 fn registry() -> patches_core::registry::Registry {
-    let mut r = patches_modules::default_registry();
-    patches_fft_bundle::register(&mut r);
-    r
+    patches_modules::default_registry()
 }
 
 /// Build a trivial patch that instantiates one module and sets one enum
@@ -141,18 +139,6 @@ fn fdn_reverb_character() {
     assert_eq!(
         resolve_enum("FdnReverb", "character", "hall"),
         ParameterValue::Enum(3)
-    );
-}
-
-#[test]
-fn convolution_reverb_ir() {
-    assert_eq!(
-        resolve_enum("ConvReverb", "ir", "room"),
-        ParameterValue::Enum(0)
-    );
-    assert_eq!(
-        resolve_enum("ConvReverb", "ir", "plate"),
-        ParameterValue::Enum(2)
     );
 }
 

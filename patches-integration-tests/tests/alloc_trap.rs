@@ -14,30 +14,8 @@
 static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAllocator;
 
 use patches_alloc_trap::{trap_hits, NoAllocGuard};
-use patches_ffi::scanner::PluginScanner;
-use patches_integration_tests::{build_engine, dylib_path, env, run_n_stereo};
+use patches_integration_tests::{build_engine, env, run_n_stereo};
 use patches_modules::default_registry;
-
-/// Registry that also carries the `patches-vintage` and `patches-drums`
-/// bundles when the dylibs are available. Used by example patches that
-/// reference vintage or drum modules (ADR 0045 Spike 8 Phase C moved
-/// vintage out of `default_registry()`; E146 phase A moved drums out via
-/// the patches-drums extraction).
-fn registry_with_bundles() -> patches_core::registry::Registry {
-    let mut registry = default_registry();
-    for crate_name in ["patches-vintage", "patches-drums", "patches-fft-bundle"] {
-        let dylib = dylib_path(crate_name);
-        if dylib.exists() {
-            let report = PluginScanner::new([dylib]).scan(&mut registry);
-            assert!(
-                report.errors.is_empty(),
-                "{crate_name} bundle scan errors: {:?}",
-                report.errors
-            );
-        }
-    }
-    registry
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +29,7 @@ fn build_engine_from(path_rel: &str) -> patches_integration_tests::HeadlessEngin
     let src = load(path_rel);
     let file = patches_dsl::parse(&src).expect("parse failed");
     let result = patches_dsl::expand(&file).expect("expand failed");
-    let registry = registry_with_bundles();
+    let registry = default_registry();
     let graph = patches_interpreter::build(&result.patch, &registry, &env())
         .expect("build failed")
         .graph;
@@ -129,33 +107,13 @@ fn sweep(path_rel: &str, warmup: usize, iters: usize) {
 }
 
 #[test]
-fn audio_tick_no_alloc_poly_synth() {
-    sweep("examples/poly_synth.patches", 128, 4096);
-}
-
-#[test]
 fn audio_tick_no_alloc_fm_synth() {
     sweep("examples/fm_synth.patches", 128, 4096);
 }
 
 #[test]
-fn audio_tick_no_alloc_fdn_reverb_synth() {
-    sweep("examples/fdn_reverb_synth.patches", 128, 4096);
-}
-
-#[test]
-fn audio_tick_no_alloc_pad() {
-    sweep("examples/pad.patches", 128, 4096);
-}
-
-#[test]
 fn audio_tick_no_alloc_pentatonic_sah() {
     sweep("examples/pentatonic_sah.patches", 128, 4096);
-}
-
-#[test]
-fn audio_tick_no_alloc_drum_machine() {
-    sweep("examples/drum_machine.patches", 128, 4096);
 }
 
 #[test]

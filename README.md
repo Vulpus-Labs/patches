@@ -39,7 +39,7 @@ connected before the process starts. While it is running, edit and save
 `hello.patches` to hot-reload the patch without interrupting audio.
 
 Larger patches render as signal-flow diagrams via `patches-svg`. Here is the
-[`pad`](examples/pad.patches) example:
+[`fm_synth`](examples/fm_synth.patches) example:
 
 <a href="docs/pad.svg"><img src="docs/pad.svg" alt="pad patch graph" width="100%"></a>
 
@@ -69,7 +69,7 @@ Examples:
 
 ```bash
 # Play a patch with hot-reload (press Enter to stop):
-cargo run -p patches-player -- examples/poly_synth.patches
+cargo run -p patches-player -- examples/poly_synth_layered.patches
 
 # Record to WAV:
 cargo run -p patches-player -- --record out.wav examples/fm_synth.patches
@@ -247,7 +247,6 @@ patches-plugin-common/     GUI-toolkit-agnostic plugin state/helpers
 patches-lsp/               Language server for .patches files
 patches-svg/               SVG rendering of patch graphs
 patches-tracker-core/      Pure tracker/pattern-player logic
-patches-vintage/           Legacy modules (loaded via FFI, not in default registry)
 patches-ffi/               FFI bindings for native module plugins
 patches-ffi-common/        Shared types for FFI plugin interface
 patches-profiling/         Profiling utilities
@@ -270,7 +269,7 @@ cargo test
 cargo clippy
 
 # Run the player with a patch file (hot-reloads on save):
-cargo run -p patches-player -- examples/poly_synth.patches
+cargo run -p patches-player -- examples/poly_synth_layered.patches
 cargo run -p patches-player -- examples/fm_synth.patches
 cargo run -p patches-player -- examples/radigue_drone.patches
 ```
