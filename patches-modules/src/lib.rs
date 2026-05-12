@@ -45,8 +45,6 @@ pub mod quant;
 pub mod poly_quant;
 pub mod limiter;
 pub mod stereo_limiter;
-pub mod pitch_shift;
-pub mod convolution_reverb;
 pub mod master_sequencer;
 pub mod pattern_player;
 pub mod midi_drumset;
@@ -107,9 +105,6 @@ pub use quant::Quant;
 pub use poly_quant::PolyQuant;
 pub use limiter::Limiter;
 pub use stereo_limiter::StereoLimiter;
-pub use pitch_shift::PitchShift;
-pub use convolution_reverb::ConvolutionReverb;
-pub use convolution_reverb::StereoConvReverb;
 pub use master_sequencer::MasterSequencer;
 pub use pattern_player::PatternPlayer;
 pub use midi_drumset::MidiDrumset;
@@ -178,9 +173,6 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<PolyQuant>();
     r.register::<Limiter>();
     r.register::<StereoLimiter>();
-    r.register::<PitchShift>();
-    r.register::<ConvolutionReverb>();
-    r.register::<StereoConvReverb>();
     r.register::<MasterSequencer>();
     r.register::<PatternPlayer>();
     r.register::<MidiDrumset>();
@@ -256,9 +248,6 @@ mod tests {
             "Quant",
             "PolyQuant",
             "Limiter",
-            "PitchShift",
-            "ConvReverb",
-            "StereoConvReverb",
             "MasterSequencer",
             "PatternPlayer",
             "MidiDrumset",

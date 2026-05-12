@@ -1,7 +1,7 @@
 //! Startup silence, identity round-trips (inline + threaded), and
 //! late-frame discard.
 
-use patches_dsp::slot_deck::{FilledSlot, OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::slot_deck::{FilledSlot, OverlapBuffer, SlotDeckConfig};
 
 #[test]
 fn startup_silence() {

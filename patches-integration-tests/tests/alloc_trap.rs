@@ -25,7 +25,7 @@ use patches_modules::default_registry;
 /// the patches-drums extraction).
 fn registry_with_bundles() -> patches_core::registry::Registry {
     let mut registry = default_registry();
-    for crate_name in ["patches-vintage", "patches-drums"] {
+    for crate_name in ["patches-vintage", "patches-drums", "patches-fft-bundle"] {
         let dylib = dylib_path(crate_name);
         if dylib.exists() {
             let report = PluginScanner::new([dylib]).scan(&mut registry);

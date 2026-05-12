@@ -6,7 +6,7 @@
 #![allow(unused_imports)]
 
 pub(super) use super::*;
-pub(super) use crate::fft::RealPackedFft;
+pub(super) use patches_dsp::fft::RealPackedFft;
 
 /// Naive time-domain convolution for reference.
 pub(super) fn naive_convolve(signal: &[f32], ir: &[f32]) -> Vec<f32> {

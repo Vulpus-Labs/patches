@@ -1,7 +1,7 @@
 //! Pool exhaustion recovery and edge cases: starvation recovery, slow
 //! processor, return-channel full, buffer recycling.
 
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
 
 #[test]
 fn pool_starvation_recovery() {

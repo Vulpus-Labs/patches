@@ -27,6 +27,8 @@ members = [
     "patches-tracker-core",
     "patches-vintage",
     "patches-drums",
+    "patches-fft/patches-fft-harness",
+    "patches-fft/patches-fft-bundle",
     "patches-ffi",
     "patches-ffi-common",
     "patches-alloc-trap",

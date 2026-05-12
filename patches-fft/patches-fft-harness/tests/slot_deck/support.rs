@@ -1,7 +1,8 @@
 //! Shared helpers for SlotDeck integration tests.
 
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
-use patches_dsp::{RealPackedFft, SpectralPitchShifter, WindowBuffer};
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::{SpectralPitchShifter, WindowBuffer};
+use patches_dsp::RealPackedFft;
 
 /// Run plain OLA: constant-1 input, processor applies `window` once.
 #[allow(dead_code)]

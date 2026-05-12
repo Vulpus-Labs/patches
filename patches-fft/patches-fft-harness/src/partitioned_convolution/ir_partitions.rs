@@ -1,4 +1,4 @@
-use crate::fft::RealPackedFft;
+use patches_dsp::fft::RealPackedFft;
 
 /// Pre-FFT'd impulse response partitions.
 pub struct IrPartitions {

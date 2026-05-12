@@ -1,7 +1,7 @@
 //! OLA with Hann applied once (COLA property, no normalisation needed).
 
-use patches_dsp::slot_deck::SlotDeckConfig;
-use patches_dsp::WindowBuffer;
+use patches_fft_harness::slot_deck::SlotDeckConfig;
+use patches_fft_harness::WindowBuffer;
 
 use super::support::run_ola;
 

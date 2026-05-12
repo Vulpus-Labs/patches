@@ -26,7 +26,9 @@ fn env() -> AudioEnvironment {
 }
 
 fn registry() -> patches_core::registry::Registry {
-    patches_modules::default_registry()
+    let mut r = patches_modules::default_registry();
+    patches_fft_bundle::register(&mut r);
+    r
 }
 
 /// Build a trivial patch that instantiates one module and sets one enum

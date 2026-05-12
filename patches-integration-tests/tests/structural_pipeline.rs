@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use patches_core::{AudioEnvironment, NodeId};
-use patches_modules::convolution_reverb::ConvolutionReverb;
+use patches_fft_bundle::ConvolutionReverb;
 use patches_planner::Planner;
 
 fn env() -> AudioEnvironment {
@@ -22,7 +22,9 @@ fn env() -> AudioEnvironment {
 }
 
 fn registry() -> patches_core::registry::Registry {
-    patches_modules::default_registry()
+    let mut r = patches_modules::default_registry();
+    patches_fft_bundle::register(&mut r);
+    r
 }
 
 fn write_ir_wav(dir: &Path, name: &str, len: usize) -> std::path::PathBuf {

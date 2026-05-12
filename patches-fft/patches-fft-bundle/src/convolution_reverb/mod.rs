@@ -59,7 +59,7 @@ use patches_core::{
 use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams};
 
-use patches_dsp::partitioned_convolution::NonUniformConvolver;
+use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
 
 mod core;
 mod ir_loader;

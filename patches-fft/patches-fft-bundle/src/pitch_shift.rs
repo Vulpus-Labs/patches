@@ -52,9 +52,9 @@ module_params! {
 
 use patches_dsp::AtomicF32;
 use patches_dsp::fft::RealPackedFft;
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
-use patches_dsp::spectral_pitch_shift::SpectralPitchShifter;
-use patches_dsp::WindowBuffer;
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::spectral_pitch_shift::SpectralPitchShifter;
+use patches_fft_harness::WindowBuffer;
 
 // ---------------------------------------------------------------------------
 // Shared parameters (audio thread → processing thread via atomics)
@@ -103,7 +103,7 @@ fn hann(n: f32) -> f32 {
 // ---------------------------------------------------------------------------
 
 fn run_processor(
-    mut handle: patches_dsp::slot_deck::ProcessorHandle,
+    mut handle: patches_fft_harness::slot_deck::ProcessorHandle,
     shared: Arc<SharedParams>,
     analysis_window: WindowBuffer,
     synthesis_window: WindowBuffer,

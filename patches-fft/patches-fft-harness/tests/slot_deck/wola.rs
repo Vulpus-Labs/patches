@@ -1,8 +1,8 @@
 //! WOLA with Hann applied twice (analysis + synthesis window, normalisation
 //! required).
 
-use patches_dsp::slot_deck::SlotDeckConfig;
-use patches_dsp::WindowBuffer;
+use patches_fft_harness::slot_deck::SlotDeckConfig;
+use patches_fft_harness::WindowBuffer;
 
 use super::support::run_wola;
 

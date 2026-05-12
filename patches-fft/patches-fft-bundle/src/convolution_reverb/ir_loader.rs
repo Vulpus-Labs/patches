@@ -3,8 +3,8 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
 
-use patches_dsp::partitioned_convolution::NonUniformConvolver;
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
 
 use super::params::{
     SharedParams, BLOCK_SIZE, IR_VARIANTS, MAX_TIER_BLOCK_SIZE,
@@ -16,7 +16,7 @@ use super::params::{
 // ---------------------------------------------------------------------------
 
 pub(super) fn run_processor(
-    mut handle: patches_dsp::slot_deck::ProcessorHandle,
+    mut handle: patches_fft_harness::slot_deck::ProcessorHandle,
     shared: Arc<SharedParams>,
     mut convolver: NonUniformConvolver,
     block_size: usize,

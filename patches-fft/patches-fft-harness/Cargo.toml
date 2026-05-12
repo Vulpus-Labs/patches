@@ -1,0 +1,14 @@
+[package]
+name = "patches-fft-harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+patches-core = { path = "../../patches-core" }
+patches-dsp = { path = "../../patches-dsp" }
+rtrb = "0.3"
+
+[lib]
+name = "patches_fft_harness"
+path = "src/lib.rs"
+doctest = false

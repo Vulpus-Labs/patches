@@ -1,6 +1,6 @@
 //! Overload and starvation: writes must drop silently rather than block or panic.
 
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
 
 #[test]
 fn write_overload_does_not_block() {

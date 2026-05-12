@@ -186,7 +186,7 @@ fn pitch_shift_audio(
     semitones: f32,
     mix: f32,
 ) -> Vec<f32> {
-    use crate::fft::RealPackedFft;
+    use patches_dsp::fft::RealPackedFft;
 
     let hop = window_size / overlap;
     let fft = RealPackedFft::new(window_size);
@@ -245,7 +245,7 @@ fn pitch_shift_audio(
 /// 440 Hz sine shifted +12 semitones should produce ~880 Hz.
 #[test]
 fn pitch_shift_octave_up_audio() {
-    use crate::fft::RealPackedFft;
+    use patches_dsp::fft::RealPackedFft;
     use crate::test_support::dominant_bin;
 
     let sample_rate = 48_000.0;
@@ -414,7 +414,7 @@ fn pitch_shift_audio_ext(
     mono: bool,
     preserve_formants: bool,
 ) -> Vec<f32> {
-    use crate::fft::RealPackedFft;
+    use patches_dsp::fft::RealPackedFft;
 
     let hop = window_size / overlap;
     let fft = RealPackedFft::new(window_size);
@@ -556,7 +556,7 @@ fn xorshift_noise(n: usize, seed: u64) -> Vec<f32> {
 /// Smoothed magnitude envelope of a signal segment. Returns the bin index of
 /// the envelope peak in the steady-state FFT.
 fn envelope_peak_bin(signal: &[f32], fft_size: usize) -> usize {
-    use crate::fft::RealPackedFft;
+    use patches_dsp::fft::RealPackedFft;
     let fft = RealPackedFft::new(fft_size);
     let mut buf = vec![0.0_f32; fft_size];
     let len = signal.len().min(fft_size);
@@ -669,7 +669,7 @@ fn formant_preservation_anchors_envelope_peak() {
 /// peak should land in the same bin after one grain of settling.
 #[test]
 fn mono_poly_parity_on_stationary_tone() {
-    use crate::fft::RealPackedFft;
+    use patches_dsp::fft::RealPackedFft;
     use crate::test_support::dominant_bin;
 
     let sr = 48_000.0_f32;

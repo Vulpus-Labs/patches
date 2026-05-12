@@ -1,4 +1,4 @@
-use crate::fft::RealPackedFft;
+use patches_dsp::fft::RealPackedFft;
 
 use super::complex::{complex_multiply_accumulate_packed, complex_multiply_packed};
 use super::ir_partitions::IrPartitions;

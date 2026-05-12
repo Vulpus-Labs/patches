@@ -9,8 +9,8 @@ use patches_core::module_params;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::param_frame::ParamView;
 
-use patches_dsp::partitioned_convolution::NonUniformConvolver;
-use patches_dsp::slot_deck::OverlapBuffer;
+use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
+use patches_fft_harness::slot_deck::OverlapBuffer;
 
 use super::ir_loader::{
     build_mono_ready, build_stereo_ready, cleanup_processor_ready, IrLoadRequest, IrLoader,

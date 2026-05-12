@@ -11,7 +11,7 @@ use patches_core::{
 use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
 use patches_core::{StructuralParams};
 
-use patches_dsp::partitioned_convolution::NonUniformConvolver;
+use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
 
 use super::params::{BLOCK_SIZE, IR_FILE_EXTENSIONS, IrVariant, MAX_TIER_BLOCK_SIZE};
 use super::core::params as core_params;

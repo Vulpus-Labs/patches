@@ -21,8 +21,8 @@
 
 use std::f32::consts::PI;
 use patches_dsp::fft::RealPackedFft;
-use patches_dsp::slot_deck::{OverlapBuffer, SlotDeckConfig};
-use patches_dsp::WindowBuffer;
+use patches_fft_harness::slot_deck::{OverlapBuffer, SlotDeckConfig};
+use patches_fft_harness::WindowBuffer;
 
 const WINDOW_SIZE: usize = 256;
 const OVERLAP_FACTOR: usize = 4;

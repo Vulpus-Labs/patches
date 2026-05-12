@@ -47,17 +47,6 @@ pub use noise::{xorshift64, PinkFilter, BrownFilter};
 pub mod fft;
 pub use fft::RealPackedFft;
 
-mod window_buffer;
-pub use window_buffer::WindowBuffer;
-
-pub mod slot_deck;
-
-pub mod spectral_pitch_shift;
-pub use spectral_pitch_shift::SpectralPitchShifter;
-
-pub mod partitioned_convolution;
-pub use partitioned_convolution::{PartitionedConvolver, IrPartitions, NonUniformConvolver};
-
 pub mod sinc_resample;
 pub use sinc_resample::resample;
 
