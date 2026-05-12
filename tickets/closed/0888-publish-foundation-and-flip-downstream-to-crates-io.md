@@ -22,20 +22,38 @@ bundle repo cuts (0882-0884) so bundle Cargo.toml can reference
 
 ## Acceptance criteria
 
-- [ ] Pre-publish checks complete (tickets 0877 + 0878 closed):
-  - [ ] `cargo publish --dry-run -p patches-core` succeeds.
-  - [ ] `cargo publish --dry-run -p patches-ffi-common` succeeds.
-  - [ ] `cargo publish --dry-run -p patches-sdk` succeeds.
-  - [ ] All `pub` items documented per `#![warn(missing_docs)]`.
-  - [ ] LICENSE present; Cargo.toml metadata complete.
-- [ ] Publish in dep order:
+- [x] Pre-publish checks complete (tickets 0877 + 0878 closed):
+  - [x] `cargo publish --dry-run -p patches-core` succeeds.
+  - [x] `cargo publish --dry-run -p patches-ffi-common` succeeds.
+  - [x] `cargo publish --dry-run -p patches-sdk` succeeds.
+  - [x] All `pub` items documented per `#![warn(missing_docs)]`.
+  - [x] LICENSE present; Cargo.toml metadata complete.
+- [x] Publish in dep order:
   1. `patches-core` 0.7.0 (post-0889 registry merge).
-  2. `patches-ffi-common` 0.7.0.
+  2. `patches-ffi-common` 0.1.0 (kept on its own version line; no
+     registry-merge breakage to signal, so the 0.7.0 jump from the
+     original plan was dropped).
   3. `patches-sdk` 0.7.0.
-- [ ] docs.rs builds successfully for all three.
-- [ ] `cargo install --dry-run` test from a fresh directory:
+- [x] docs.rs builds successfully for all three.
+- [x] `cargo install --dry-run` test from a fresh directory:
       `cargo new test-mod --lib && cargo add patches-sdk` succeeds
       and a minimal module compiles.
+
+## Resolution
+
+All three crates uploaded from commit 95c4f29 ("Close 0878"):
+
+- `patches-core@0.7.0` — registry-merged content.
+- `patches-ffi-common@0.1.0` — published on the existing 0.1 line.
+  `patches-sdk@0.7.0` pins `patches-ffi-common = "0.1"`.
+- `patches-sdk@0.7.0` — re-exports patches-core + ffi-common.
+
+docs.rs renders all three (HTML for `Module`, `patches_sdk`, and
+`patches_ffi_common` confirmed). Smoke test in `/tmp/sdk-smoke`:
+`cargo new sdk-smoke --lib && cargo add patches-sdk` then a
+passthrough `Gain` module (the seven SDK imports the gain
+test-plugin uses) compiles clean against crates.io versions with
+no path overrides.
 
 ## Notes
 
