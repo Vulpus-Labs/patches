@@ -186,8 +186,11 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<SyncToTrigger>();
     r.register::<Tap>();
     r.register::<HostControl>();
-    // `patches-vintage` is no longer in the default registry (ADR 0045 Spike 8
-    // Phase C / ticket 0570). Load its cdylib via `PluginScanner`.
+    // The three stdlib bundles (patches-vintage, patches-drums,
+    // patches-fft-bundle) are not in the default registry. Hosts load
+    // their cdylibs via `PluginScanner` — see
+    // `patches_ffi::scanner::stdlib_scanner` (ticket 0876 /
+    // ADR 0073) for the default search-path policy.
     r
 }
 

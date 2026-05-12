@@ -204,6 +204,63 @@ fn load_one(path: &Path, registry: &mut Registry, report: &mut ScanReport) {
     }
 }
 
+// ── Stdlib bundle discovery ──────────────────────────────────────────────────
+
+/// Build a [`PluginScanner`] populated with the default search path for
+/// the three stdlib bundles (patches-vintage, patches-drums,
+/// patches-fft-bundle). Ticket 0876 / [ADR 0073](../../adr/0073-monorepo-split-into-successor-repos.md).
+///
+/// Resolution order (first non-empty wins):
+///
+/// 1. `PATCHES_PLUGIN_PATH` env var, colon-separated. Honoured verbatim.
+/// 2. `$EXE_DIR/plugins/` — the layout the release tarball / CLAP
+///    bundle resources directory ships.
+/// 3. Cargo dev paths: `$CWD/target/debug/` and
+///    `$CWD/target/release/`. Either may be absent; existing ones
+///    are added. Useful for `cargo run -p patches-player` from the
+///    workspace root.
+///
+/// The returned scanner may have zero paths if none of the candidates
+/// exist; callers should check [`PluginScanner::paths`] and decide
+/// whether the absence is an error (see the player's `--no-stdlib`
+/// flag).
+pub fn stdlib_scanner() -> PluginScanner {
+    if let Ok(env_paths) = std::env::var("PATCHES_PLUGIN_PATH") {
+        let split: Vec<PathBuf> = env_paths
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        if !split.is_empty() {
+            return PluginScanner::new(split);
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("plugins"));
+            // `cargo test` puts the test binary in target/<profile>/deps;
+            // the cdylibs land alongside it in target/<profile>. Walk up
+            // one level so dev test runs find them.
+            if let Some(parent) = dir.parent() {
+                candidates.push(parent.to_path_buf());
+            }
+            candidates.push(dir.to_path_buf());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("target").join("debug"));
+        candidates.push(cwd.join("target").join("release"));
+    }
+
+    let existing: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect();
+    PluginScanner::new(existing)
+}
+
 // ── Legacy shim ──────────────────────────────────────────────────────────────
 
 /// Scan a directory for plugin shared libraries (legacy flat-list API).
