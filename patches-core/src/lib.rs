@@ -1,3 +1,5 @@
+#![warn(unreachable_pub)]
+
 /// Base number of samples between periodic coefficient recalculations (at 1× oversampling).
 ///
 /// Used by [`ExecutionPlan::tick`] to trigger [`Module::periodic_update`] calls,

@@ -39,6 +39,7 @@
 //! - `test_support` re-exported under the `test-support` feature.
 
 #![warn(missing_docs)]
+#![warn(unreachable_pub)]
 
 // ── patches-core re-exports ──────────────────────────────────────────────────
 

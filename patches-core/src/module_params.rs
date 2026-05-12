@@ -31,7 +31,7 @@ macro_rules! module_params {
         }
     ) => {
         pub mod params {
-            #![allow(non_upper_case_globals, unused_imports)]
+            #![allow(non_upper_case_globals, unused_imports, unreachable_pub)]
             use super::*;
             use $crate::params::*;
 
