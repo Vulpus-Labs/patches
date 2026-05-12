@@ -2,6 +2,13 @@
 name = "patches-core"
 version = "0.7.0"
 edition = "2021"
+rust-version = "1.80"
+description = "Module trait, descriptors, ports, cables, parameters, and registry for the Patches modular audio framework."
+license = "MIT"
+repository = "https://github.com/Vulpus-Labs/patches"
+readme = "README.md"
+keywords = ["audio", "modular", "dsp", "synthesizer", "music"]
+categories = ["multimedia::audio"]
 
 [lib]
 name = "patches_core"

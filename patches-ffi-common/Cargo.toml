@@ -2,6 +2,13 @@
 name = "patches-ffi-common"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80"
+description = "Patches FFI ABI wire-format types, JSON descriptor schema, and the export_modules! plugin macro."
+license = "MIT"
+repository = "https://github.com/Vulpus-Labs/patches"
+readme = "README.md"
+keywords = ["audio", "plugin", "ffi", "modular", "abi"]
+categories = ["api-bindings", "multimedia::audio"]
 
 [lib]
 name = "patches_ffi_common"
@@ -12,7 +19,7 @@ name = "descriptor-hash-probe"
 path = "src/bin/descriptor_hash_probe.rs"
 
 [dependencies]
-patches-core = { path = "../patches-core" }
+patches-core = { path = "../patches-core", version = "0.7" }
 rtrb = "0.3"
 tracing = "0.1"
 
