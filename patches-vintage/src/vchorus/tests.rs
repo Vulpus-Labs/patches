@@ -1,7 +1,7 @@
 use super::*;
 use crate::vchorus::core::{Mode, Variant};
-use patches_core::test_support::{params, ModuleHarness};
-use patches_core::{AudioEnvironment, ModuleShape};
+use patches_sdk::test_support::{params, ModuleHarness};
+use patches_sdk::{AudioEnvironment, ModuleShape};
 
 const SR: f32 = 48_000.0;
 const ENV: AudioEnvironment = AudioEnvironment {

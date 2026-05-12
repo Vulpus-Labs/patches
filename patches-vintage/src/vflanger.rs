@@ -44,14 +44,14 @@
 //! | `mix` | float | 0.0--1.0 | `0.5` | Dry/wet balance on the HF path; `0.5` is the classic flanger comb |
 //! | `lf_bypass` | bool | on/off | `on` | BF-2B low-frequency bypass (BBD path is always HPF'd at 150 Hz) |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, ParameterKind,
     ParameterTemplate, PortTemplate,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 
 mod core;
 

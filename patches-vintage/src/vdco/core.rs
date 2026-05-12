@@ -17,7 +17,7 @@
 //! below the saw and usually inaudible. A BLAMP refinement can be added
 //! later if needed.
 
-use patches_core::params_enum;
+use patches_sdk::params_enum;
 use patches_dsp::{fast_exp2, polyblep, xorshift64};
 
 params_enum! {

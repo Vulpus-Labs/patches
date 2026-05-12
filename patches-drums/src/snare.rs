@@ -28,15 +28,15 @@
 /// | `noise_freq` | float | 500–10000 Hz | 3000    | Noise bandpass centre frequency  |
 /// | `noise_q`    | float | 0.0–1.0      | 0.3     | Noise bandpass resonance         |
 /// | `snap`       | float | 0.0–1.0      | 0.5     | Transient snap intensity         |
-use patches_core::{
+use patches_sdk::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams, BuildError};
-use patches_core::cables::TriggerInput;
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams, BuildError};
+use patches_sdk::cables::TriggerInput;
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
 
 module_params! {
     Snare {
@@ -235,9 +235,9 @@ impl Module for Snare {
 
 #[cfg(test)]
 mod tests {
-    use patches_core::ParameterValue;
+    use patches_sdk::ParameterValue;
     use super::*;
-    use patches_core::test_support::ModuleHarness;
+    use patches_sdk::test_support::ModuleHarness;
 
     fn make_snare() -> ModuleHarness {
         let mut h = ModuleHarness::build::<Snare>(&[]);

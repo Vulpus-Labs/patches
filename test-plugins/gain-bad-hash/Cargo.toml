@@ -8,5 +8,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-patches-core = { path = "../../patches-core" }
-patches-ffi-common = { path = "../../patches-ffi-common" }
+patches-sdk = { path = "../../patches-sdk" }

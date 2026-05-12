@@ -201,7 +201,7 @@ pub(super) fn build_stereo_ready(
 /// Runs a background thread that generates synthetic IRs, builds convolvers,
 /// and spawns processing threads — all off the audio thread. Results are
 /// delivered via a lock-free ring buffer polled in
-/// [`patches_core::modules::module::PeriodicUpdate::periodic_update`].
+/// [`patches_sdk::modules::module::PeriodicUpdate::periodic_update`].
 pub(super) struct IrLoader {
     pub(super) request_tx: rtrb::Producer<IrLoadRequest>,
     pub(super) teardown_tx: rtrb::Producer<ProcessorTeardown>,

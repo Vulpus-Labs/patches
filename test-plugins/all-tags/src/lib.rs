@@ -4,17 +4,17 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
-use patches_core::cable_pool::CablePool;
-use patches_core::cables::{InputPort, OutputPort};
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::cables::{InputPort, OutputPort};
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, ParameterTemplate,
 };
-use patches_core::modules::{InstanceId, ModuleDescriptor};
-use patches_core::param_frame::ParamView;
-use patches_core::ParameterKind;
-use patches_core::params_enum;
-use patches_core::{AudioEnvironment, Module};
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::modules::{InstanceId, ModuleDescriptor};
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::ParameterKind;
+use patches_sdk::params_enum;
+use patches_sdk::{AudioEnvironment, Module};
+use patches_sdk::{StructuralParams, BuildError};
 
 params_enum! {
     pub enum Mode {
@@ -122,4 +122,4 @@ impl Module for AllTags {
     }
 }
 
-patches_ffi_common::export_plugin!(AllTags, "AllTags");
+patches_sdk::export_plugin!(AllTags, "AllTags");

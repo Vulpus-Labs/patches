@@ -1,14 +1,14 @@
-use patches_core::cable_pool::CablePool;
-use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
-use patches_core::module_params;
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
+use patches_sdk::module_params;
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
 };
-use patches_core::modules::{InstanceId, ModuleDescriptor};
-use patches_core::param_frame::ParamView;
-use patches_core::ParameterKind;
-use patches_core::{AudioEnvironment, Module};
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::modules::{InstanceId, ModuleDescriptor};
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::ParameterKind;
+use patches_sdk::{AudioEnvironment, Module};
+use patches_sdk::{StructuralParams, BuildError};
 
 module_params! {
     Gain {
@@ -85,4 +85,4 @@ impl Module for Gain {
     }
 }
 
-patches_ffi_common::export_plugin!(Gain, "Gain");
+patches_sdk::export_plugin!(Gain, "Gain");

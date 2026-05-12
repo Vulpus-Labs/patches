@@ -26,14 +26,14 @@
 //! | `resonance` | float | 0.0 -- 1.0       | `0.0`     | Feedback amount; self-osc near 1 |
 //! | `drive`     | float | 0.0 -- 4.0       | `1.0`     | Input gain into the tanh stage   |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     params_enum, AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module,
     ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
     ParameterKind, ParameterTemplate, PortTemplate,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 use patches_dsp::{LadderCoeffs, LadderKernel, LadderVariant};
 
 params_enum! {
@@ -187,7 +187,7 @@ impl Module for VLadder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::test_support::{params, ModuleHarness};
+    use patches_sdk::test_support::{params, ModuleHarness};
 
     #[test]
     fn descriptor_shape() {

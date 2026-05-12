@@ -44,7 +44,7 @@ pub use vladder::VLadder;
 /// Still used by in-process consumers (e.g. `patches_modules::default_registry`)
 /// during the ADR 0045 Spike 8 migration. Ticket 0570 removes this call from
 /// the default registry once Phase D (bundle-load integration test) is green.
-pub fn register(r: &mut patches_core::registry::Registry) {
+pub fn register(r: &mut patches_sdk::registry::Registry) {
     r.register::<VChorus>();
     r.register::<VBbd>();
     r.register::<VStereoBbd>();
@@ -64,7 +64,7 @@ pub fn register(r: &mut patches_core::registry::Registry) {
 // Single `export_modules!` invocation emits the eight ABI entry points per
 // module, a combined vtable array, one `patches_plugin_init`, and a
 // `patches_plugin_descriptor_hash_<Name>` symbol per module. ADR 0039 / 0045.
-patches_ffi_common::export_modules! {
+patches_sdk::export_modules! {
     (ffi_vchorus,         VChorus,        "VChorus",        1),
     (ffi_vbbd,            VBbd,           "VBbd",           1),
     (ffi_vstereobbd,      VStereoBbd,     "VStereoBbd",     1),
@@ -86,7 +86,7 @@ mod ffi_bundle_tests {
     //! (ticket 0571 / Phase D).
 
     use super::*;
-    use patches_ffi_common::types::ABI_VERSION;
+    use patches_sdk::types::ABI_VERSION;
 
     const EXPECTED_NAMES: &[&str] = &[
         "VChorus",
@@ -119,7 +119,7 @@ mod ffi_bundle_tests {
             // SAFETY: FFI fn ptr is an extern "C" entry point emitted by the
             // macro; module_template is safe to call.
             let bytes = unsafe { (vtable.module_template)() };
-            let template = patches_ffi_common::json::deserialize_module_descriptor_template(
+            let template = patches_sdk::json::deserialize_module_descriptor_template(
                 unsafe { bytes.as_slice() },
             )
             .expect("module_template returned invalid JSON");

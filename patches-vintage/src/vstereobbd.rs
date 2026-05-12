@@ -39,14 +39,14 @@
 //! | `feedback[i]` | float | 0.0--0.95 | `0.0` | Self-feedback (or cross-feedback if `pingpong[i]`) |
 //! | `pingpong[i]` | bool | -- | `false` | Cross-route tap feedback L↔R |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, AxisId, CablePool, CountAxis, InputPort, InstanceId, Module,
     ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
     ParameterTemplate, PortTemplate, StereoInput, StereoOutput,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 use patches_dsp::approximate::fast_tanh;
 
 use crate::vbbd::{Tap, DELAY_MS_MAX, DELAY_MS_MIN, FEEDBACK_MAX};
@@ -262,9 +262,9 @@ impl Module for VStereoBbd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::parameter_map::{ParameterMap, ParameterValue};
-    use patches_core::test_support::{params, ModuleHarness};
-    use patches_core::{AudioEnvironment, ModuleShape};
+    use patches_sdk::parameter_map::{ParameterMap, ParameterValue};
+    use patches_sdk::test_support::{params, ModuleHarness};
+    use patches_sdk::{AudioEnvironment, ModuleShape};
 
     const SR: f32 = 48_000.0;
     const ENV: AudioEnvironment = AudioEnvironment {

@@ -27,6 +27,14 @@ pub mod types;
 // signature without a crate cycle.
 pub use patches_core::param_frame;
 pub use patches_core::param_layout;
+
+// Re-exports used by `export_modules!`. The macro reaches every
+// patches-core item it needs via `$crate::...` so a bundle can depend
+// on this crate transitively (through `patches-sdk`) without listing
+// `patches-core` directly in its Cargo.toml.
+pub use patches_core::{Module, ModuleShape};
+pub use patches_core::cable_pool;
+pub use patches_core::cables;
 pub use types::*;
 
 /// Deterministic 64-bit hash over a [`patches_core::ModuleDescriptor`]'s

@@ -218,7 +218,7 @@ macro_rules! export_plugin {
     ($module:ty, $name:literal) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
-            let template = <$module as ::patches_core::Module>::template();
+            let template = <$module as $crate::Module>::template();
             $crate::types::FfiBytes::from_vec(
                 $crate::json::serialize_module_descriptor_template(&template),
             )
@@ -266,7 +266,7 @@ macro_rules! export_plugin {
             if let ::std::result::Result::Ok(view) =
                 $crate::sdk::decode_param_frame(slice, &inst.param_index)
             {
-                ::patches_core::Module::update_validated_parameters(
+                $crate::Module::update_validated_parameters(
                     &mut inst.module,
                     &view,
                 );
@@ -299,7 +299,7 @@ macro_rules! export_plugin {
             for i in 0..view.output_count() {
                 inst.output_buf.push(view.output(i).into());
             }
-            ::patches_core::Module::set_ports(
+            $crate::Module::set_ports(
                 &mut inst.module,
                 &inst.input_buf,
                 &inst.output_buf,
@@ -309,9 +309,9 @@ macro_rules! export_plugin {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_process(
             handle: *mut ::std::ffi::c_void,
-            scratch_ptr: *mut ::patches_core::cables::CableValue,
+            scratch_ptr: *mut $crate::cables::CableValue,
             scratch_len: usize,
-            cycle_ptr: *mut [::patches_core::cables::CableValue; 2],
+            cycle_ptr: *mut [$crate::cables::CableValue; 2],
             cycle_len: usize,
             write_index: usize,
         ) {
@@ -328,16 +328,16 @@ macro_rules! export_plugin {
                 ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
             };
             let mut pool =
-                ::patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
-            ::patches_core::Module::process(&mut inst.module, &mut pool);
+                $crate::cable_pool::CablePool::new(scratch, cycle, write_index);
+            $crate::Module::process(&mut inst.module, &mut pool);
         }
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_periodic_update(
             handle: *mut ::std::ffi::c_void,
-            scratch_ptr: *const ::patches_core::cables::CableValue,
+            scratch_ptr: *const $crate::cables::CableValue,
             scratch_len: usize,
-            cycle_ptr: *const [::patches_core::cables::CableValue; 2],
+            cycle_ptr: *const [$crate::cables::CableValue; 2],
             cycle_len: usize,
             write_index: usize,
         ) -> i32 {
@@ -349,20 +349,20 @@ macro_rules! export_plugin {
             };
             let scratch = unsafe {
                 ::std::slice::from_raw_parts_mut(
-                    scratch_ptr as *mut ::patches_core::cables::CableValue,
+                    scratch_ptr as *mut $crate::cables::CableValue,
                     scratch_len,
                 )
             };
             let cycle = unsafe {
                 ::std::slice::from_raw_parts_mut(
-                    cycle_ptr as *mut [::patches_core::cables::CableValue; 2],
+                    cycle_ptr as *mut [$crate::cables::CableValue; 2],
                     cycle_len,
                 )
             };
             let pool =
-                ::patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
-            if ::patches_core::Module::wants_periodic(&inst.module) {
-                ::patches_core::Module::periodic_update(&mut inst.module, &pool);
+                $crate::cable_pool::CablePool::new(scratch, cycle, write_index);
+            if $crate::Module::wants_periodic(&inst.module) {
+                $crate::Module::periodic_update(&mut inst.module, &pool);
                 1
             } else {
                 0
@@ -422,8 +422,8 @@ macro_rules! export_plugin {
 
         #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
         pub extern "C" fn __patches_plugin_descriptor_hash() -> u64 {
-            let template = <$module as ::patches_core::Module>::template();
-            let desc = template.build_channels(::patches_core::ModuleShape::default().channels as u32);
+            let template = <$module as $crate::Module>::template();
+            let desc = template.build_channels($crate::ModuleShape::default().channels as u32);
             $crate::descriptor_hash(&desc)
         }
     };
@@ -438,7 +438,7 @@ macro_rules! export_plugin_with_hash_override {
     ($module:ty, $name:literal, $hash:expr) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
-            let template = <$module as ::patches_core::Module>::template();
+            let template = <$module as $crate::Module>::template();
             $crate::types::FfiBytes::from_vec(
                 $crate::json::serialize_module_descriptor_template(&template),
             )
@@ -487,9 +487,9 @@ macro_rules! export_plugin_with_hash_override {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_process(
             _h: *mut ::std::ffi::c_void,
-            _sp: *mut ::patches_core::cables::CableValue,
+            _sp: *mut $crate::cables::CableValue,
             _sl: usize,
-            _cp: *mut [::patches_core::cables::CableValue; 2],
+            _cp: *mut [$crate::cables::CableValue; 2],
             _cl: usize,
             _w: usize,
         ) {
@@ -498,9 +498,9 @@ macro_rules! export_plugin_with_hash_override {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_periodic_update(
             _h: *mut ::std::ffi::c_void,
-            _sp: *const ::patches_core::cables::CableValue,
+            _sp: *const $crate::cables::CableValue,
             _sl: usize,
-            _cp: *const [::patches_core::cables::CableValue; 2],
+            _cp: *const [$crate::cables::CableValue; 2],
             _cl: usize,
             _w: usize,
         ) -> i32 {
@@ -586,7 +586,7 @@ macro_rules! export_modules {
                 use super::*;
 
                 pub extern "C" fn module_template() -> $crate::types::FfiBytes {
-                    let template = <$module as ::patches_core::Module>::template();
+                    let template = <$module as $crate::Module>::template();
                     $crate::types::FfiBytes::from_vec(
                         $crate::json::serialize_module_descriptor_template(&template),
                     )
@@ -631,7 +631,7 @@ macro_rules! export_modules {
                     if let ::std::result::Result::Ok(view) =
                         $crate::sdk::decode_param_frame(slice, &inst.param_index)
                     {
-                        ::patches_core::Module::update_validated_parameters(
+                        $crate::Module::update_validated_parameters(
                             &mut inst.module,
                             &view,
                         );
@@ -663,7 +663,7 @@ macro_rules! export_modules {
                     for i in 0..view.output_count() {
                         inst.output_buf.push(view.output(i).into());
                     }
-                    ::patches_core::Module::set_ports(
+                    $crate::Module::set_ports(
                         &mut inst.module,
                         &inst.input_buf,
                         &inst.output_buf,
@@ -672,9 +672,9 @@ macro_rules! export_modules {
 
                 pub unsafe extern "C" fn process(
                     handle: *mut ::std::ffi::c_void,
-                    scratch_ptr: *mut ::patches_core::cables::CableValue,
+                    scratch_ptr: *mut $crate::cables::CableValue,
                     scratch_len: usize,
-                    cycle_ptr: *mut [::patches_core::cables::CableValue; 2],
+                    cycle_ptr: *mut [$crate::cables::CableValue; 2],
                     cycle_len: usize,
                     write_index: usize,
                 ) {
@@ -689,17 +689,17 @@ macro_rules! export_modules {
                     let cycle = unsafe {
                         ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
                     };
-                    let mut pool = ::patches_core::cable_pool::CablePool::new(
+                    let mut pool = $crate::cable_pool::CablePool::new(
                         scratch, cycle, write_index,
                     );
-                    ::patches_core::Module::process(&mut inst.module, &mut pool);
+                    $crate::Module::process(&mut inst.module, &mut pool);
                 }
 
                 pub unsafe extern "C" fn periodic_update(
                     handle: *mut ::std::ffi::c_void,
-                    scratch_ptr: *const ::patches_core::cables::CableValue,
+                    scratch_ptr: *const $crate::cables::CableValue,
                     scratch_len: usize,
-                    cycle_ptr: *const [::patches_core::cables::CableValue; 2],
+                    cycle_ptr: *const [$crate::cables::CableValue; 2],
                     cycle_len: usize,
                     write_index: usize,
                 ) -> i32 {
@@ -709,21 +709,21 @@ macro_rules! export_modules {
                     };
                     let scratch = unsafe {
                         ::std::slice::from_raw_parts_mut(
-                            scratch_ptr as *mut ::patches_core::cables::CableValue,
+                            scratch_ptr as *mut $crate::cables::CableValue,
                             scratch_len,
                         )
                     };
                     let cycle = unsafe {
                         ::std::slice::from_raw_parts_mut(
-                            cycle_ptr as *mut [::patches_core::cables::CableValue; 2],
+                            cycle_ptr as *mut [$crate::cables::CableValue; 2],
                             cycle_len,
                         )
                     };
-                    let pool = ::patches_core::cable_pool::CablePool::new(
+                    let pool = $crate::cable_pool::CablePool::new(
                         scratch, cycle, write_index,
                     );
-                    if ::patches_core::Module::wants_periodic(&inst.module) {
-                        ::patches_core::Module::periodic_update(&mut inst.module, &pool);
+                    if $crate::Module::wants_periodic(&inst.module) {
+                        $crate::Module::periodic_update(&mut inst.module, &pool);
                         1
                     } else {
                         0
@@ -770,8 +770,8 @@ macro_rules! export_modules {
 
                 #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
                 pub extern "C" fn descriptor_hash() -> u64 {
-                    let template = <$module as ::patches_core::Module>::template();
-                    let desc = template.build_channels(::patches_core::ModuleShape::default().channels as u32);
+                    let template = <$module as $crate::Module>::template();
+                    let desc = template.build_channels($crate::ModuleShape::default().channels as u32);
                     $crate::descriptor_hash(&desc)
                 }
             }

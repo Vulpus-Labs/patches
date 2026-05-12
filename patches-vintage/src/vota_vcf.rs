@@ -37,14 +37,14 @@
 //! | `drive`        | float | 0.0 -- 4.0       | `1.0`    | Input gain before stage tanh     |
 //! | `drift_amount` | float | 0.0 -- 1.0       | `0.0`    | Scales `GLOBAL_DRIFT` into cutoff |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     params_enum, AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module,
     ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort,
     ParameterKind, ParameterTemplate, PortTemplate, GLOBAL_DRIFT,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 use patches_dsp::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles};
 
 params_enum! {
@@ -227,7 +227,7 @@ impl Module for VOtaVcf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::test_support::{params, ModuleHarness};
+    use patches_sdk::test_support::{params, ModuleHarness};
 
     #[test]
     fn descriptor_shape() {

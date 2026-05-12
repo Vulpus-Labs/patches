@@ -1,0 +1,16 @@
+[package]
+name = "patches-sdk"
+version = "0.7.0"
+edition = "2021"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-ffi-common = { path = "../patches-ffi-common" }
+
+[features]
+test-support = ["patches-core/test-support"]
+
+[lib]
+name = "patches_sdk"
+path = "src/lib.rs"
+doctest = false

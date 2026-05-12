@@ -4,15 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-patches-core = { path = "../../patches-core" }
+patches-sdk = { path = "../../patches-sdk" }
 patches-dsp = { path = "../../patches-dsp" }
 patches-fft-harness = { path = "../patches-fft-harness" }
-patches-ffi-common = { path = "../../patches-ffi-common" }
 patches-io = { path = "../../patches-io" }
 rtrb = "0.3"
 
 [dev-dependencies]
-patches-core = { path = "../../patches-core", features = ["test-support"] }
+patches-sdk = { path = "../../patches-sdk", features = ["test-support"] }
 
 [lib]
 name = "patches_fft_bundle"

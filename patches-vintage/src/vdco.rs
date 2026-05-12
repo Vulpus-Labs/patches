@@ -41,15 +41,15 @@
 //! | `curve` | float | 0.0--1.0 | `0.1` | Analog cap-charge curvature applied to the phase read (always-on vintage colour) |
 //! | `sync_softness` | float | 0.0--1.0 | `0.0` | 0 = instant hard sync (PolyBLEP path). >0 slews the phase toward the reset target with time constant τ = softness²·3 samples (Jupiter-8 RC-discharge model); BLEP residual is skipped since the slew is already C⁰-continuous. |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::cables::TriggerInput;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::cables::TriggerInput;
+use patches_sdk::{
     AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleDescriptorTemplate, MonoInput, MonoOutput, OutputPort, ParameterKind,
     ParameterTemplate, PortTemplate,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 
 mod core;
 pub mod poly;

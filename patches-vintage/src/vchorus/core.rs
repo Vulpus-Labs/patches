@@ -1,7 +1,7 @@
 //! Pure DSP core for [`VChorus`](super::VChorus): no module protocol,
 //! no ports, no parameter map. Testable in isolation.
 
-use patches_core::params_enum;
+use patches_sdk::params_enum;
 use patches_dsp::noise::xorshift64;
 
 use crate::bbd::{Bbd, BbdDevice};

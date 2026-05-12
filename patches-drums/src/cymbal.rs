@@ -26,15 +26,15 @@
 /// | `tone`    | float | 0.0–1.0       | 0.5     | Metallic vs noise mix              |
 /// | `filter`  | float | 2000–16000 Hz | 6000    | Noise highpass cutoff              |
 /// | `shimmer` | float | 0.0–1.0       | 0.2     | Partial frequency modulation depth |
-use patches_core::{
+use patches_sdk::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams, BuildError};
-use patches_core::cables::TriggerInput;
-use patches_core::param_frame::ParamView;
-use patches_core::module_params;
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams, BuildError};
+use patches_sdk::cables::TriggerInput;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::module_params;
 use crate::primitives::{DecayEnvelope, MetallicTone};
 use patches_dsp::{SvfKernel, svf_f, q_to_damp, xorshift64};
 
@@ -211,9 +211,9 @@ impl Module for Cymbal {
 
 #[cfg(test)]
 mod tests {
-    use patches_core::ParameterValue;
+    use patches_sdk::ParameterValue;
     use super::*;
-    use patches_core::test_support::ModuleHarness;
+    use patches_sdk::test_support::ModuleHarness;
 
     #[test]
     fn trigger_produces_output() {

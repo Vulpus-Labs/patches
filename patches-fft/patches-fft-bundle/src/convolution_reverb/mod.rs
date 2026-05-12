@@ -48,16 +48,16 @@
 //! thread handles the heavy work. The audio thread only stashes a request
 //! and polls for results in [`periodic_update`].
 
-use patches_core::build_error::BuildError;
-use patches_core::cable_pool::CablePool;
-use patches_core::parameter_map::ParameterMap;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::build_error::BuildError;
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::parameter_map::ParameterMap;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams};
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams};
 
 use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
 
@@ -112,7 +112,7 @@ impl ConvolutionReverb {
     }
 }
 
-impl patches_core::Module for ConvolutionReverb {
+impl patches_sdk::Module for ConvolutionReverb {
     fn template() -> ModuleDescriptorTemplate {
         const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
             name: "ConvReverb",

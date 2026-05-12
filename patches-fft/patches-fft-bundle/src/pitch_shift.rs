@@ -31,15 +31,15 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
 
-use patches_core::module_params;
-use patches_core::cable_pool::CablePool;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, InputPort, InstanceId, ModuleDescriptor, MonoInput, MonoOutput,
     OutputPort, ParameterKind,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams, BuildError};
 
 module_params! {
     PitchShift {
@@ -173,7 +173,7 @@ impl Drop for PitchShift {
     }
 }
 
-impl patches_core::Module for PitchShift {
+impl patches_sdk::Module for PitchShift {
     fn template() -> ModuleDescriptorTemplate {
         const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
             name: "PitchShift",

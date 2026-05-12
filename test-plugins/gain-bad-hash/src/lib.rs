@@ -1,14 +1,14 @@
 //! Gain fixture that reports a deliberately wrong descriptor hash.
 //! E107 ticket 0622.
 
-use patches_core::cable_pool::CablePool;
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
 };
-use patches_core::modules::{InstanceId, ModuleDescriptor};
-use patches_core::param_frame::ParamView;
-use patches_core::ParameterKind;
-use patches_core::{AudioEnvironment, BuildError, Module, StructuralParams};
+use patches_sdk::modules::{InstanceId, ModuleDescriptor};
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::ParameterKind;
+use patches_sdk::{AudioEnvironment, BuildError, Module, StructuralParams};
 
 pub struct Gain;
 
@@ -47,7 +47,7 @@ impl Module for Gain {
     fn as_any(&self) -> &dyn std::any::Any { self }
 }
 
-patches_ffi_common::export_plugin_with_hash_override!(
+patches_sdk::export_plugin_with_hash_override!(
     Gain,
     "Gain",
     0xDEAD_BEEF_DEAD_BEEFu64

@@ -1,5 +1,5 @@
 use super::*;
-use patches_core::test_support::{ModuleHarness, params};
+use patches_sdk::test_support::{ModuleHarness, params};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 

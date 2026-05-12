@@ -6,15 +6,15 @@
 //! confirms that disconnected reads return zero and disconnected
 //! writes do not corrupt non-sink slots.
 
-use patches_core::cable_pool::CablePool;
-use patches_core::cables::{InputPort, MonoInput, OutputPort, PolyOutput};
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::cables::{InputPort, MonoInput, OutputPort, PolyOutput};
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, PortTemplate,
 };
-use patches_core::modules::{InstanceId, ModuleDescriptor};
-use patches_core::param_frame::ParamView;
-use patches_core::{AudioEnvironment, Module};
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::modules::{InstanceId, ModuleDescriptor};
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{AudioEnvironment, Module};
+use patches_sdk::{StructuralParams, BuildError};
 
 pub struct DiscPorts {
     descriptor: ModuleDescriptor,
@@ -96,4 +96,4 @@ impl Module for DiscPorts {
     }
 }
 
-patches_ffi_common::export_plugin!(DiscPorts, "DiscPorts");
+patches_sdk::export_plugin!(DiscPorts, "DiscPorts");

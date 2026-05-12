@@ -1,15 +1,15 @@
 //! Stereo convolution reverb module.
 
-use patches_core::build_error::BuildError;
-use patches_core::cable_pool::CablePool;
-use patches_core::parameter_map::ParameterMap;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::build_error::BuildError;
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::parameter_map::ParameterMap;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, InputPort, InstanceId,
     ModuleDescriptor, MonoInput, OutputPort, ParameterKind, StereoInput, StereoOutput,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams};
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams};
 
 use patches_fft_harness::partitioned_convolution::NonUniformConvolver;
 
@@ -39,7 +39,7 @@ pub struct StereoConvReverb {
 
 unsafe impl Send for StereoConvReverb {}
 
-impl patches_core::Module for StereoConvReverb {
+impl patches_sdk::Module for StereoConvReverb {
     fn template() -> ModuleDescriptorTemplate {
         const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
             name: "StereoConvReverb",

@@ -22,7 +22,7 @@
 
 use crate::bbd_clock::{BbdClock, TickPhase};
 use crate::bbd_filter_proto::{Complex32, ConjPairPoleBankSoa, ContinuousPoleBank};
-use patches_core::BoundedRandomWalk;
+use patches_sdk::BoundedRandomWalk;
 
 /// Max multiplicative swing applied to `bbd_ts` at `jitter_amount = 1.0`.
 /// Matches ≈ ±17 cents of pitch wobble on the delayed signal.

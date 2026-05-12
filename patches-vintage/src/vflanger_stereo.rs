@@ -34,14 +34,14 @@
 //! | `mix` | float | 0.0--1.0 | `0.5` | Dry/wet on the HF path |
 //! | `lf_bypass` | bool | on/off | `on` | 150 Hz bass bypass |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind, ParameterTemplate,
     PortTemplate, StereoInput, StereoOutput,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 
 mod core;
 
@@ -172,8 +172,8 @@ impl Module for VFlangerStereo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::test_support::{params, ModuleHarness};
-    use patches_core::{AudioEnvironment, ModuleShape};
+    use patches_sdk::test_support::{params, ModuleHarness};
+    use patches_sdk::{AudioEnvironment, ModuleShape};
 
     const SR: f32 = 48_000.0;
     const ENV: AudioEnvironment = AudioEnvironment {

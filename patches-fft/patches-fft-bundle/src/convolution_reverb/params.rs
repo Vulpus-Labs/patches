@@ -37,7 +37,7 @@ pub(super) const PROCESSING_BUDGET: usize = 1024;
 /// Tiers double from BLOCK_SIZE up to this cap.
 pub(super) const MAX_TIER_BLOCK_SIZE: usize = 32768;
 
-patches_core::params_enum! {
+patches_sdk::params_enum! {
     pub enum IrVariant {
         Room => "room",
         Hall => "hall",

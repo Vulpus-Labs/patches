@@ -4,12 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-patches-core = { path = "../patches-core" }
+patches-sdk = { path = "../patches-sdk" }
 patches-dsp = { path = "../patches-dsp" }
-patches-ffi-common = { path = "../patches-ffi-common" }
 
 [dev-dependencies]
-patches-core = { path = "../patches-core", features = ["test-support"] }
+patches-sdk = { path = "../patches-sdk", features = ["test-support"] }
 
 [lib]
 name = "patches_drums"

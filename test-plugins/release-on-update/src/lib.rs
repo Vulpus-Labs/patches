@@ -5,23 +5,23 @@
 
 use std::ffi::c_void;
 
-use patches_core::cables::CableValue;
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cables::CableValue;
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, ParameterTemplate,
 };
-use patches_core::modules::{ModuleDescriptor};
-use patches_core::param_frame::ParamViewIndex;
-use patches_core::param_layout::compute_layout;
-use patches_core::ParameterKind;
-use patches_ffi_common::abi::{Handle, HostEnv};
-use patches_ffi_common::port_frame::PortLayout;
-use patches_ffi_common::sdk::{decode_param_frame, PluginInstance};
-use patches_ffi_common::types::{
+use patches_sdk::modules::{ModuleDescriptor};
+use patches_sdk::param_frame::ParamViewIndex;
+use patches_sdk::param_layout::compute_layout;
+use patches_sdk::ParameterKind;
+use patches_sdk::abi::{Handle, HostEnv};
+use patches_sdk::port_frame::PortLayout;
+use patches_sdk::sdk::{decode_param_frame, PluginInstance};
+use patches_sdk::types::{
     FfiAudioEnvironment, FfiBytes, FfiPluginManifest, FfiPluginVTable,
     ABI_VERSION,
 };
-use patches_core::{StructuralParams, BuildError};
-use patches_ffi_common::{descriptor_hash, json};
+use patches_sdk::{StructuralParams, BuildError};
+use patches_sdk::{descriptor_hash, json};
 
 pub struct Stub;
 
@@ -41,24 +41,24 @@ const TEMPLATE: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
     per_axis_structural_params: &[],
 };
 
-impl patches_core::Module for Stub {
+impl patches_sdk::Module for Stub {
     fn template() -> ModuleDescriptorTemplate { TEMPLATE }
     fn prepare(
-        _env: &patches_core::AudioEnvironment,
+        _env: &patches_sdk::AudioEnvironment,
         _d: ModuleDescriptor,
-        _id: patches_core::modules::InstanceId, _structural: &StructuralParams,
+        _id: patches_sdk::modules::InstanceId, _structural: &StructuralParams,
     ) -> Result<Self, BuildError> { Ok({
         Stub
     })}
-    fn update_validated_parameters(&mut self, _p: &patches_core::param_frame::ParamView<'_>) {}
+    fn update_validated_parameters(&mut self, _p: &patches_sdk::param_frame::ParamView<'_>) {}
     fn descriptor(&self) -> &ModuleDescriptor {
         unreachable!()
     }
-    fn instance_id(&self) -> patches_core::modules::InstanceId {
-        patches_core::modules::InstanceId::from_raw(0)
+    fn instance_id(&self) -> patches_sdk::modules::InstanceId {
+        patches_sdk::modules::InstanceId::from_raw(0)
     }
-    fn process(&mut self, _: &mut patches_core::cable_pool::CablePool<'_>) {}
-    fn set_ports(&mut self, _: &[patches_core::InputPort], _: &[patches_core::OutputPort]) {}
+    fn process(&mut self, _: &mut patches_sdk::cable_pool::CablePool<'_>) {}
+    fn set_ports(&mut self, _: &[patches_sdk::InputPort], _: &[patches_sdk::OutputPort]) {}
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn __rop_prepare(
         unsafe { std::slice::from_raw_parts(descriptor_json, descriptor_json_len) };
     let descriptor = match json::deserialize_module_descriptor(slice) {
         Ok(d) => d,
-        Err(_) => return patches_ffi_common::types::PREPARE_ERR_DESCRIPTOR_JSON,
+        Err(_) => return patches_sdk::types::PREPARE_ERR_DESCRIPTOR_JSON,
     };
     let layout = compute_layout(&descriptor);
     let param_index = ParamViewIndex::from_layout(&layout);
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn __rop_prepare(
     unsafe {
         *out_handle = Box::into_raw(inst) as *mut c_void;
     }
-    patches_ffi_common::types::PREPARE_OK
+    patches_sdk::types::PREPARE_OK
 }
 
 /// # Safety
@@ -205,5 +205,5 @@ pub extern "C" fn patches_plugin_init() -> FfiPluginManifest {
 
 #[unsafe(export_name = "patches_plugin_descriptor_hash_ReleaseOnUpdate")]
 pub extern "C" fn __hash() -> u64 {
-    descriptor_hash(&TEMPLATE.build_channels(patches_core::ModuleShape::default().channels as u32))
+    descriptor_hash(&TEMPLATE.build_channels(patches_sdk::ModuleShape::default().channels as u32))
 }

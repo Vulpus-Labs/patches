@@ -26,15 +26,15 @@
 /// | `sweep_time` | float | 0.001–0.3 s | 0.03    | Pitch sweep duration     |
 /// | `decay`      | float | 0.05–2.0 s  | 0.3     | Amplitude decay time     |
 /// | `noise`      | float | 0.0–1.0     | 0.15    | Noise layer amount       |
-use patches_core::{
+use patches_sdk::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
     MonoInput, MonoOutput, OutputPort, ParameterKind,
 };
-use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
-use patches_core::{StructuralParams, BuildError};
-use patches_core::cables::TriggerInput;
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
+use patches_sdk::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate};
+use patches_sdk::{StructuralParams, BuildError};
+use patches_sdk::cables::TriggerInput;
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
 use crate::primitives::{DecayEnvelope, PitchSweep};
 
 module_params! {
@@ -198,9 +198,9 @@ impl Module for Tom {
 
 #[cfg(test)]
 mod tests {
-    use patches_core::ParameterValue;
+    use patches_sdk::ParameterValue;
     use super::*;
-    use patches_core::test_support::ModuleHarness;
+    use patches_sdk::test_support::ModuleHarness;
 
     #[test]
     fn trigger_produces_output() {

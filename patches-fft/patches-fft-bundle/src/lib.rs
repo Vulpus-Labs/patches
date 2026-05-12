@@ -20,14 +20,14 @@ pub use convolution_reverb::{ConvolutionReverb, StereoConvReverb};
 /// `patches_drums::register`: in-process consumers use this until
 /// 0876 lands the `PluginScanner` stdlib path and the bundle cdylib
 /// is loaded the same way third-party bundles are.
-pub fn register(r: &mut patches_core::registry::Registry) {
+pub fn register(r: &mut patches_sdk::registry::Registry) {
     r.register::<PitchShift>();
     r.register::<ConvolutionReverb>();
     r.register::<StereoConvReverb>();
 }
 
 // ── FFI bundle export ────────────────────────────────────────────────────────
-patches_ffi_common::export_modules! {
+patches_sdk::export_modules! {
     (ffi_pitch_shift,       PitchShift,       "PitchShift",       1),
     (ffi_conv_reverb,       ConvolutionReverb, "ConvReverb",      1),
     (ffi_stereo_conv_reverb, StereoConvReverb, "StereoConvReverb", 1),
@@ -36,7 +36,7 @@ patches_ffi_common::export_modules! {
 #[cfg(test)]
 mod ffi_bundle_tests {
     use super::*;
-    use patches_ffi_common::types::ABI_VERSION;
+    use patches_sdk::types::ABI_VERSION;
 
     const EXPECTED_NAMES: &[&str] = &[
         "PitchShift",
@@ -59,7 +59,7 @@ mod ffi_bundle_tests {
             assert_eq!(vtable.abi_version, ABI_VERSION, "abi drift in {expected_name}");
             // SAFETY: FFI fn ptr emitted by the macro; safe to call.
             let bytes = unsafe { (vtable.module_template)() };
-            let template = patches_ffi_common::json::deserialize_module_descriptor_template(
+            let template = patches_sdk::json::deserialize_module_descriptor_template(
                 unsafe { bytes.as_slice() },
             )
             .expect("module_template returned invalid JSON");

@@ -13,15 +13,15 @@
 
 use std::sync::Mutex;
 
-use patches_core::cable_pool::CablePool;
-use patches_core::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
-use patches_core::modules::descriptor_template::{
+use patches_sdk::cable_pool::CablePool;
+use patches_sdk::cables::{InputPort, MonoInput, MonoOutput, OutputPort};
+use patches_sdk::modules::descriptor_template::{
     CountAxis, ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
 };
-use patches_core::modules::{InstanceId, ModuleDescriptor};
-use patches_core::param_frame::ParamView;
-use patches_core::ParameterKind;
-use patches_core::{AudioEnvironment, BuildError, Module, StructuralParams};
+use patches_sdk::modules::{InstanceId, ModuleDescriptor};
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::ParameterKind;
+use patches_sdk::{AudioEnvironment, BuildError, Module, StructuralParams};
 
 static LAST_PATH: Mutex<Option<String>> = Mutex::new(None);
 static LAST_GAIN: Mutex<f32> = Mutex::new(f32::NAN);
@@ -126,7 +126,7 @@ impl Module for StructuralStringGain {
     }
 }
 
-patches_ffi_common::export_plugin!(StructuralStringGain, "StructuralStringGain");
+patches_sdk::export_plugin!(StructuralStringGain, "StructuralStringGain");
 
 // ── Debug accessors for the integration test ────────────────────────────────
 
@@ -139,12 +139,12 @@ pub extern "C" fn structural_string_last_gain() -> f32 {
 /// caller is expected to free via the plugin's `free_bytes` (or
 /// `__patches_free_bytes`).
 #[unsafe(no_mangle)]
-pub extern "C" fn structural_string_last_path() -> patches_ffi_common::types::FfiBytes {
+pub extern "C" fn structural_string_last_path() -> patches_sdk::types::FfiBytes {
     let v = LAST_PATH
         .lock()
         .unwrap()
         .clone()
         .unwrap_or_default()
         .into_bytes();
-    patches_ffi_common::types::FfiBytes::from_vec(v)
+    patches_sdk::types::FfiBytes::from_vec(v)
 }

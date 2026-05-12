@@ -36,14 +36,14 @@
 //! | `mode` | enum | `off`/`one`/`two`/`both` | `one` | Chorus mode (`both` only valid on `bright`) |
 //! | `hiss` | float | 0.0--1.0 | `1.0` | Wet-path hiss amount |
 
-use patches_core::module_params;
-use patches_core::param_frame::ParamView;
-use patches_core::{
+use patches_sdk::module_params;
+use patches_sdk::param_frame::ParamView;
+use patches_sdk::{
     AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, Module, ModuleDescriptor,
     ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
     ParameterTemplate, PortTemplate, StereoInput, StereoOutput,
 };
-use patches_core::{StructuralParams, BuildError};
+use patches_sdk::{StructuralParams, BuildError};
 
 mod core;
 
