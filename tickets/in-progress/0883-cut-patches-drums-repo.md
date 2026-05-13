@@ -33,15 +33,19 @@ cut); can run in parallel after 0888.
 
 ## Resolution
 
-- New repo at `github.com/Vulpus-Labs/patches-drums`, two commits
-  pushed (initial cut + drop rust-version pin).
+- Initial cut into `github.com/Vulpus-Labs/patches-drums`;
+  subsequently consolidated alongside vintage + fft into
+  `github.com/Vulpus-Labs/patches-bundles` as the `patches-drums/`
+  member of a four-crate Cargo workspace. The dedicated
+  single-bundle repo is being retired.
 - Main repo: `patches-drums/` dir removed, workspace member dropped
   from `Cargo.toml`. No bundle-coupled main-repo tests targeted
   drum modules; trim was mechanical.
 - Bundle-using examples (`drum_machine`, `song1/`,
-  `microtonal/microtonal`) moved to `patches-drums/examples/`.
+  `microtonal/microtonal`) moved to
+  `patches-bundles/patches-drums/examples/`.
 - CI / `v0.7.0` tag / release artefact remain user-side actions in
-  the bundle repo.
+  the patches-bundles repo.
 
 ## Notes
 

@@ -42,9 +42,13 @@ cut); can run in parallel after 0888.
 
 ## Resolution
 
-- New repo at `github.com/Vulpus-Labs/patches-fft`, two-crate
-  workspace pushed. patches-io added as a git dep on the bundle —
-  ticket originally omitted it, but the bundle's IR loader uses it.
+- Initial cut into `github.com/Vulpus-Labs/patches-fft` as a
+  two-crate workspace (harness + bundle); patches-io added as a git
+  dep on the bundle since the IR loader uses it. Subsequently
+  consolidated alongside vintage + drums into
+  `github.com/Vulpus-Labs/patches-bundles`, where harness and bundle
+  sit as two of four workspace members. The dedicated patches-fft
+  repo is being retired.
 - Main repo: `patches-fft/` dir removed, both workspace members
   dropped from `Cargo.toml`. Bundle-coupled main-repo tests:
   `structural_pipeline` rewritten to use `test-plugins/structural-
@@ -53,10 +57,10 @@ cut); can run in parallel after 0888.
   `convolution_reverb_ir` test deleted; `patches_fft_bundle::
   register` call removed from registry init.
 - Bundle-using examples (`pitch_shift_fifth`, `pad`) moved to
-  `patches-fft/examples/`. `shimmer.patches` deleted from main
-  (mixed vintage+fft — doesn't fit one bundle).
+  `patches-bundles/patches-fft-bundle/examples/`. `shimmer.patches`
+  deleted from main (mixed vintage+fft — doesn't fit one bundle).
 - CI / `v0.7.0` tag / release artefact remain user-side actions in
-  the bundle repo.
+  the patches-bundles repo.
 
 ## Notes
 

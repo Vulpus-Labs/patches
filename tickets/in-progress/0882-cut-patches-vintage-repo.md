@@ -34,17 +34,21 @@ published to crates.io at 0.7.0). Bundle Cargo.toml uses
 
 ## Resolution
 
-- New repo at `github.com/Vulpus-Labs/patches-vintage`, two commits
-  pushed (initial cut + drop rust-version pin).
+- Initial cut into `github.com/Vulpus-Labs/patches-vintage`;
+  subsequently consolidated alongside drums + fft into
+  `github.com/Vulpus-Labs/patches-bundles` as the
+  `patches-vintage/` member of a four-crate Cargo workspace. The
+  dedicated single-bundle repo is being retired.
 - Main repo: `patches-vintage/` dir removed, workspace member
   dropped from `Cargo.toml`. Bundle-coupled main-repo tests
   (`vintage_baseline`, `vintage_synth_check`,
   `vintage_bundle_scanner`) deleted. `soak_randomised_params`
   rewritten to use `test-plugins/gain` as its FFI subject.
 - Bundle-using examples (`poly_synth`, `soft_pad`,
-  `fdn_reverb_synth`) moved to `patches-vintage/examples/`.
+  `fdn_reverb_synth`) moved to
+  `patches-bundles/patches-vintage/examples/`.
 - CI / `v0.7.0` tag / release artefact remain user-side actions in
-  the bundle repo.
+  the patches-bundles repo.
 
 ## Notes
 

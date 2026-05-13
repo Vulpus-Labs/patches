@@ -9,11 +9,13 @@ created: 2026-05-11
 
 Per [ADR 0073](../../adr/0073-monorepo-split-into-successor-repos.md):
 
-- **Main repo** (`patches`) stays as-is, minus the three bundle
+- **Main repo** (`patches`) stays as-is, minus the bundle
   extractions. Single Cargo workspace covering foundation + host +
   tools.
-- **Three bundles** (vintage, drums, fft) move to their own repos as
-  cdylib artefact distributors.
+- **Bundle repo** (`patches-bundles`) holds vintage, drums, and fft
+  as a four-crate workspace shipping cdylib artefacts. Originally
+  planned as three separate repos; consolidated after the cut
+  proved the per-bundle isolation wasn't earning its keep.
 - **Three crates** (patches-sdk, patches-core, patches-ffi-common)
   publish to crates.io. Everything else stays workspace-internal or
   git-only.
@@ -90,16 +92,14 @@ created yet.
   crates.io as 0.7.x. patches-core 0.6 → 0.7 marks the registry
   merge.
 
-- **0882** — Cut patches-vintage into its own repo. Bundle depends on
-  `patches-sdk = "0.7"` (crates.io). Already a cdylib+rlib; cut is
-  mechanical.
-
-- **0883** — Cut patches-drums into its own repo. Same pattern.
-
-- **0884** — Cut patches-fft into its own repo (two-crate workspace:
-  harness + bundle). Bundle depends on patches-sdk via crates.io;
-  harness depends on patches-dsp via git+tag from the main repo (for
-  RealPackedFft).
+- **0882 / 0883 / 0884** — Cut patches-vintage, patches-drums, and
+  patches-fft out of the main workspace. After an initial split into
+  three repos, the bundles were consolidated into a single
+  `patches-bundles` repo as a four-crate Cargo workspace
+  (patches-vintage, patches-drums, patches-fft-harness,
+  patches-fft-bundle). Shared CI / licence / release cadence; the
+  three-repo split added overhead without compensating decoupling.
+  Bundle repo at `github.com/Vulpus-Labs/patches-bundles`.
 
 ## Tickets removed from the original 16-ticket plan
 
@@ -122,18 +122,23 @@ Phase A linear:
 Phase B:
 
 ```text
-0888 (publish to crates.io) → 0882 (vintage), 0883 (drums), 0884 (fft)
-                                  [all three parallel]
+0888 (publish to crates.io) → 0882 + 0883 + 0884 (bundle cuts)
+                              → consolidate into patches-bundles
 ```
 
 0888 can technically happen before bundle cuts; bundle Cargo.toml
 becomes simpler if it can `patches-sdk = "0.7"` from crates.io rather
 than git tag of the main repo.
 
+The bundle cuts initially landed as three separate repos
+(patches-vintage, patches-drums, patches-fft) before being merged
+into a single patches-bundles workspace.
+
 ## Out of scope
 
 - Splitting other module families. The drum/fft cut establishes the
-  template; future families follow it.
+  template; future families either join `patches-bundles` or carve
+  out their own repo if the coupling really is independent.
 - C++ SDK (E145 deliverable).
 - ABI v13 or beyond (E145 owns).
 - mdBook docs sync. **Explicit decision:** docs cut loose during

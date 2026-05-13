@@ -186,9 +186,10 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<SyncToTrigger>();
     r.register::<Tap>();
     r.register::<HostControl>();
-    // The three stdlib bundles (patches-vintage, patches-drums,
-    // patches-fft-bundle) are not in the default registry. Hosts load
-    // their cdylibs via `PluginScanner` — see
+    // The stdlib bundles (patches-vintage, patches-drums,
+    // patches-fft-bundle — all shipped from the patches-bundles
+    // repo) are not in the default registry. Hosts load their
+    // cdylibs via `PluginScanner` — see
     // `patches_ffi::scanner::stdlib_scanner` (ticket 0876 /
     // ADR 0073) for the default search-path policy.
     r

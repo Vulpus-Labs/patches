@@ -207,8 +207,9 @@ fn load_one(path: &Path, registry: &mut Registry, report: &mut ScanReport) {
 // ── Stdlib bundle discovery ──────────────────────────────────────────────────
 
 /// Build a [`PluginScanner`] populated with the default search path for
-/// the three stdlib bundles (patches-vintage, patches-drums,
-/// patches-fft-bundle). Ticket 0876 / [ADR 0073](../../adr/0073-monorepo-split-into-successor-repos.md).
+/// the stdlib bundles (patches-vintage, patches-drums,
+/// patches-fft-bundle — all shipped from the `patches-bundles`
+/// repo). Ticket 0876 / [ADR 0073](../../adr/0073-monorepo-split-into-successor-repos.md).
 ///
 /// Resolution order (first non-empty wins):
 ///
