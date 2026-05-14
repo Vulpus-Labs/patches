@@ -33,9 +33,9 @@ cut); can run in parallel after 0888.
 - [x] `cargo build --workspace`, `cargo test --workspace`,
       `cargo clippy --workspace` green (59 tests pass).
 - [x] Bundle cdylib produced.
-- [ ] CI scaffolded; release build uploaded as artefact.
-      **User-side.**
-- [ ] `v0.7.0` tagged. **User-side.**
+- [-] CI scaffolded; release build uploaded as artefact.
+      **Deferred** — tracked bundle-repo-side in `patches-bundles`.
+- [-] `v0.7.0` tagged. **Deferred** — tracked bundle-repo-side.
 - [x] Main repo: remove both crate members; host consumes the
       bundle cdylib via PluginScanner search path.
 - [x] Main repo `just push` green.

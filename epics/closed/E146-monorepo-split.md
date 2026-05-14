@@ -1,8 +1,9 @@
 ---
 id: E146
 title: Externalise bundles; publish 3-crate SDK from main repo
-status: open
+status: closed
 created: 2026-05-11
+closed: 2026-05-14
 ---
 
 ## Summary

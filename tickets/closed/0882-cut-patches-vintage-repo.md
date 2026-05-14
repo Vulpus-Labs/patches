@@ -25,9 +25,11 @@ published to crates.io at 0.7.0). Bundle Cargo.toml uses
 - [x] `cargo build`, `cargo test`, `cargo clippy` green (99 tests
       pass).
 - [x] cdylib build produces a loadable bundle.
-- [ ] CI scaffolded; release build of cdylib uploaded as a release
-      artefact (Linux + macOS at minimum). **User-side.**
-- [ ] `v0.7.0` tagged. **User-side.**
+- [-] CI scaffolded; release build of cdylib uploaded as a release
+      artefact (Linux + macOS at minimum). **Deferred** — tracked
+      bundle-repo-side in `patches-bundles`, not blocking this
+      ticket's close.
+- [-] `v0.7.0` tagged. **Deferred** — tracked bundle-repo-side.
 - [x] Main repo: remove patches-vintage workspace member; host
       consumes the cdylib artefact via PluginScanner search path.
 - [x] Main repo `just push` green.
