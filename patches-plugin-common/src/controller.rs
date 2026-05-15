@@ -11,6 +11,7 @@ use patches_engine::HaltInfoSnapshot;
 use patches_core::registry::Registry;
 use serde::{Deserialize, Serialize};
 
+use crate::global_config::GlobalConfig;
 use crate::gui::{
     DiagnosticView, GuiSnapshot, ScopeMode, SpectrumRender, TapDisplayOpts, TapSummary,
     STATUS_LOG_CAPACITY,
@@ -185,6 +186,26 @@ pub trait Env {
         _path: &Path,
         _settings: &PersistedSettings,
     ) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    /// Resolve the host-scoped `settings.toml` location (ADR 0075).
+    /// `None` means the env cannot determine a config dir on this
+    /// platform — analogous to `sidecar_path`. Default: none.
+    fn global_config_path(&self) -> Option<PathBuf> {
+        None
+    }
+    /// Read the global config at `global_config_path()`. `Ok(None)`
+    /// when the file is missing — the common first-run case — and is
+    /// never an error. Default: not supported.
+    fn load_global_config(&mut self) -> std::io::Result<Option<GlobalConfig>> {
+        Ok(None)
+    }
+    /// Persist `cfg` to `global_config_path()`. Implementers should
+    /// write to a sibling `settings.toml.tmp` and atomically `rename`
+    /// over the target, to prevent corruption on concurrent edits or
+    /// crashes. Default: no-op.
+    fn save_global_config(&mut self, _cfg: &GlobalConfig) -> std::io::Result<()> {
         Ok(())
     }
 
