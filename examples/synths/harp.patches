@@ -1,0 +1,47 @@
+# harp.patches — plucked harp
+#
+# Sine fundamental + sine octave (lower mix), each with their own
+# fast-decay envelope (octave decays faster than the fundamental).
+# Long room reverb gives the strings space.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module tune_8   : PolyTuner { octave: 1 }
+
+    module o_fund   : PolyOsc
+    module o_oct    : PolyOsc
+
+    module env_fund : PolyAdsr  { attack: 0.001, decay: 1.6, sustain: 0.0, release: 1.2 }
+    module env_oct  : PolyAdsr  { attack: 0.001, decay: 0.45, sustain: 0.0, release: 0.4 }
+
+    module vca_fund : PolyVca
+    module vca_oct  : PolyVca
+    module mix      : PolySum([f, o])
+
+    module filt     : PolyLowpass { cutoff: 2.5kHz, resonance: 0.1 }
+    module verb     : FdnReverb { character: hall, size: 0.6, mix: 0.32 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> o_fund.voct
+    kbd.voct        -> tune_8.in
+    tune_8.out      -> o_oct.voct
+
+    kbd.trigger     -> env_fund.trigger
+    kbd.gate        -> env_fund.gate
+    kbd.trigger     -> env_oct.trigger
+    kbd.gate        -> env_oct.gate
+
+    o_fund.sine     -> vca_fund.in
+    env_fund.out    -> vca_fund.cv
+    o_oct.sine      -> vca_oct.in
+    env_oct.out     -> vca_oct.cv
+
+    vca_fund.out -[0.8]-> mix.in[f]
+    vca_oct.out  -[0.35]-> mix.in[o]
+
+    mix.out         -> filt.in
+    filt.out     -[0.18]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

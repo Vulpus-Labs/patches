@@ -1,0 +1,35 @@
+# pluck.patches — short percussive pluck
+#
+# Triangle + sine with a very fast decay envelope and a quick filter
+# pluck. No sustain — note dies the moment it's struck.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyOsc
+    module mix      : PolySum([tri, sin])
+    module amp_env  : PolyAdsr  { attack: 0.001, decay: 0.22, sustain: 0.0, release: 0.18 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.001, decay: 0.12, sustain: 0.0, release: 0.1 }
+    module filt     : PolyLowpass { cutoff: 700.0Hz, resonance: 0.3 }
+    module verb     : FdnReverb { character: room, size: 0.3, mix: 0.18 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.triangle -[0.7]-> mix.in[tri]
+    osc.sine     -[0.4]-> mix.in[sin]
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt_env.out -[1.6]-> filt.voct
+
+    filt.out     -[0.14]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

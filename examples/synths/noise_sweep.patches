@@ -1,0 +1,31 @@
+# noise_sweep.patches — pitched-noise sweep
+#
+# White noise through a very-high-Q bandpass that tracks V/oct. With Q
+# near unity the bandpass rings at the played note, turning broadband
+# noise into a pitched, airy tone.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module noise    : PolyNoise
+    # Base cutoff at C0 so the connected voct alone determines the
+    # bandpass centre; otherwise base + voct rapidly exceeds Nyquist
+    # and the high-Q SVF blows up.
+    module filt     : PolySvf { cutoff: 0.0, q: 0.97 }
+    module amp_env  : PolyAdsr  { attack: 0.05, decay: 0.4, sustain: 0.4, release: 0.5 }
+    module vca      : PolyVca
+    module verb     : FdnReverb { character: chamber, size: 0.55, mix: 0.3 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> filt.voct
+    noise.white     -> filt.in
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    filt.bandpass   -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out      -[0.18]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

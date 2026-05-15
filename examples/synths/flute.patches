@@ -1,0 +1,70 @@
+# flute.patches — breathy flute
+#
+# Triangle/sine carrier plus a touch of pitched, bandpass-filtered noise
+# for breath. Soft attack and release, with a delayed vibrato that
+# swells in once the note has settled.
+#
+# One `PolyAdsr` provides three per-voice envelopes from a single
+# trigger/gate:
+#   • `amp`   — overall loudness; built-in VCA sums and shapes the
+#               triangle, sine, and breath sources.
+#   • `noise` — soft breath layer that swells in under the tone and
+#               sustains lightly beneath it.
+#   • `vib`   — vibrato contour: it gates the LFO depth and ramps the
+#               LFO rate (faster as the vibrato deepens).
+#
+# The `PolyLfo` is sync'd to `kbd.trigger`, so vibrato phase restarts at
+# each note rather than free-running.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module vibrato  : PolyLfo  { rate: 3.0, spread: 1.0 }
+    kbd.trigger -> vibrato.sync
+
+    module osc      : PolyOsc  { fm_type: logarithmic }
+    module noise    : PolyNoise
+    # Airy breath band — high, near-flat. Low Q keeps it unpitched
+    # (a wispy hiss, not a resonant whistle).
+    module breath_f : PolySvf { cutoff: 9.0, q: 0.15 }
+
+    # Three envelopes from one module, sharing trigger/gate. See the
+    # file header for what each channel drives.
+    module env : PolyAdsr([amp, noise, vib]) {
+        @amp:   { attack: 0.12,  decay: 0.2,  sustain: 0.85, release: 0.3 }
+        @noise: { attack: 0.05, decay: 0.12, sustain: 0.25, release: 0.2  }
+        @vib:   { delay: 0.5,    attack: 0.4, decay: 0.1,    sustain: 1.0, release: 0.2 }
+    }
+
+    env.out[vib] -[2.0]-> vibrato.rate_cv
+
+    module filt     : PolyLowpass { cutoff: 3.0kHz, resonance: 0.1 }
+    module verb     : FdnReverb { character: chamber, size: 0.45, mix: 0.25 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.trigger     -> env.trigger
+    kbd.gate        -> env.gate
+    kbd.voct        -> osc.voct
+
+    # Vibrato depth: LFO scaled by the vib envelope, summed into voct
+    # as ±0.2 semitones of pitch modulation.
+    vibrato.sine    -> env.vca_in[vib]
+    env.vca_out[vib] -[0.1s]-> osc.fm
+    env.vca_out[vib] -[0.01]-> breath_f.fm
+    
+
+    noise.white     -> breath_f.in
+    breath_f.bandpass -> env.vca_in[noise]
+    
+
+    # Amplitude envelope = built-in VCA on the amp channel; carrier and
+    # breath fan in to `vca_in[amp]` and auto-sum at the cable boundary.
+    osc.triangle      -[0.7]-> env.vca_in[amp]
+    osc.sine          -[0.3]-> env.vca_in[amp]
+    env.vca_out[noise] -[0.15]-> env.vca_in[amp]
+    env.vca_out[amp]  -> filt.in
+
+    filt.out     -[0.1]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

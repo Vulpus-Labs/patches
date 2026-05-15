@@ -1,0 +1,42 @@
+# ring_lead.patches — ring-modulated metallic lead
+#
+# A polyphonic saw fed through a per-voice PolyVca whose CV is a mono
+# carrier broadcast to all voices. Multiplying signal × bipolar carrier
+# behaves like ring modulation: sum/difference sidebands of the played
+# note and the carrier appear in the spectrum.
+#
+# The carrier frequency stays fixed (~440 Hz region), so the perceived
+# tone shifts character with the played note — clangorous in the lower
+# register, more harmonious near the carrier pitch.
+
+patch {
+    module kbd      : PolyMidiToCv
+
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.005, decay: 0.18, sustain: 0.65, release: 0.2 }
+    module amp_vca  : PolyVca
+
+    module filt     : PolyLowpass { cutoff: 8.0, resonance: 0.2 }   # ~4 kHz, static
+
+    module carrier  : Osc { frequency: 5.4 }
+    module rm_vca   : PolyVca
+
+    module verb     : FdnReverb { character: plate, size: 0.5, mix: 0.3 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+
+    osc.sawtooth    -> amp_vca.in
+    amp_env.out     -> amp_vca.cv
+    amp_vca.out     -> filt.in
+
+    filt.out        -> rm_vca.in
+    carrier.sine    -> rm_vca.cv    # per-voice ring modulation (signal × bipolar carrier)
+
+    rm_vca.out   -[0.18]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

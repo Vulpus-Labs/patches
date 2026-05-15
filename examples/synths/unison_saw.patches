@@ -1,0 +1,47 @@
+# unison_saw.patches — fat detuned-saw lead
+#
+# Three sawtooth layers: centre, slightly sharp, slightly flat. Drift
+# adds slow per-voice tuning instability. Mild filter sweep.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module up       : PolyTuner { cent: 9 }
+    module dn       : PolyTuner { cent: -9 }
+
+    module o_mid    : PolyOsc { drift: 0.06 }
+    module o_up     : PolyOsc { drift: 0.06 }
+    module o_dn     : PolyOsc { drift: 0.06 }
+    module mix      : PolySum([mid, up, dn])
+
+    module amp_env  : PolyAdsr  { attack: 0.005, decay: 0.2, sustain: 0.75, release: 0.25 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.01, decay: 0.5, sustain: 0.5, release: 0.4 }
+    module filt     : PolyLowpass { cutoff: 1.0kHz, resonance: 0.4, saturate: true }
+    module verb     : FdnReverb { character: hall, size: 0.5, mix: 0.2 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> o_mid.voct
+    kbd.voct        -> up.in
+    kbd.voct        -> dn.in
+    up.out          -> o_up.voct
+    dn.out          -> o_dn.voct
+
+    o_mid.sawtooth -[0.5]-> mix.in[mid]
+    o_up.sawtooth  -[0.4]-> mix.in[up]
+    o_dn.sawtooth  -[0.4]-> mix.in[dn]
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+    filt_env.out -[0.9]-> filt.voct
+
+    filt.out     -[0.08]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

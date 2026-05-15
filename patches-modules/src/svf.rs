@@ -8,7 +8,7 @@ use patches_core::modules::{CountAxis, ModuleDescriptorTemplate, ParameterTempla
 use patches_core::{StructuralParams, BuildError};
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
-use patches_dsp::{SvfKernel, svf_f, q_to_damp};
+use patches_dsp::{SvfKernel, svf_f, q_to_damp, stability_clamp};
 
 module_params! {
     Svf {
@@ -78,7 +78,9 @@ impl Svf {
 
     fn recompute_static_coeffs(&mut self) {
         let fc = (C0_FREQ * self.cutoff.exp2()).clamp(1.0, self.sample_rate * 0.499);
-        self.kernel.set_static(svf_f(fc, self.sample_rate), q_to_damp(self.q));
+        let d = q_to_damp(self.q);
+        let f = stability_clamp(svf_f(fc, self.sample_rate), d);
+        self.kernel.set_static(f, d);
     }
 }
 
@@ -126,8 +128,8 @@ impl Module for Svf {
         let default_q = 0.0_f32;
         let fc = (C0_FREQ * default_cutoff.exp2())
             .clamp(1.0, audio_environment.sample_rate * 0.499);
-        let f = svf_f(fc, audio_environment.sample_rate);
         let d = q_to_damp(default_q);
+        let f = stability_clamp(svf_f(fc, audio_environment.sample_rate), d);
         Self {
             instance_id,
             descriptor,
@@ -198,8 +200,8 @@ impl Module for Svf {
         let q_cv = if self.in_q_cv.is_connected()  { pool.read_mono(&self.in_q_cv)  } else { 0.0 };
         let fc = (C0_FREQ * (self.cutoff + voct + fm * 2.0).exp2())
             .clamp(1.0, self.sample_rate * 0.499);
-        let ft = svf_f(fc, self.sample_rate);
         let dt = q_to_damp((self.q + q_cv).clamp(0.0, 1.0));
+        let ft = stability_clamp(svf_f(fc, self.sample_rate), dt);
         self.kernel.begin_ramp(ft, dt, self.interval_recip);
     }
 }

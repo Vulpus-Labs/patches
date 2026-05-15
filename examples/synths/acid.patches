@@ -1,0 +1,32 @@
+# acid.patches — TB-303 style squelch lead
+#
+# Single square through a high-resonance lowpass with a fast filter
+# envelope. A bit of saturation drive at the end gives it the
+# characteristic snarl.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.002, decay: 0.18, sustain: 0.5, release: 0.1 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.001, decay: 0.32, sustain: 0.0, release: 0.18 }
+    module filt     : PolyLowpass { cutoff: 250.0Hz, resonance: 0.92, saturate: true }
+    module drive    : Drive { mode: saturate, drive: 2.6, tone: 0.55, mix: 0.7 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.square      -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+    filt_env.out -[2.4]-> filt.voct
+
+    filt.out     -[0.15]-> drive.in
+    drive.out       -> lim.in
+    lim.out         -> out.in
+}

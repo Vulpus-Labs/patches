@@ -1,0 +1,38 @@
+# pad.patches — slow detuned saw pad
+#
+# Two detuned sawtooth layers (via PolyOsc drift + a PolyTuner cents-offset
+# second layer) feed a soft lowpass and a long hall reverb. Slow attack,
+# long release.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module det      : PolyTuner { cent: 11 }       # second layer detuned +11¢
+
+    module osc_a    : PolyOsc { drift: 0.06 }
+    module osc_b    : PolyOsc { drift: 0.06 }
+    module mix      : PolySum([a, b])
+
+    module amp_env  : PolyAdsr   { attack: 0.7, decay: 1.0, sustain: 0.9, release: 1.2 }
+    module vca      : PolyVca
+    module filt     : PolyLowpass { cutoff: 1.4kHz, resonance: 0.15 }
+    module verb     : FdnReverb { character: cathedral, size: 0.85, mix: 0.55, pre_delay: 0.1 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc_a.voct
+    kbd.voct        -> det.in
+    det.out         -> osc_b.voct
+
+    osc_a.sawtooth -[0.5]-> mix.in[a]
+    osc_b.sawtooth -[0.5]-> mix.in[b]
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt.out     -[0.08]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

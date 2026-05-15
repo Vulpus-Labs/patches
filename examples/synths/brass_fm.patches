@@ -1,0 +1,60 @@
+# brass_fm.patches — DX-style FM brass
+#
+# Three-operator stack (op3 → op2 → op1) with self-feedback on op3.
+# The feedback turns op3 into a saw-spectrum modulator, op2 reshapes it,
+# and op1 is the audible sine carrier. Each operator has its own
+# envelope, so the spectrum opens up over the attack and tucks back in
+# on release — the hallmark "brass bite" that subtractive saw+filter
+# can't quite reach.
+#
+# Subtle bipolar LFO into linear-FM gives breath; light hall makes it
+# sit in a room without dulling the bite.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module vibrato  : Lfo  { rate: 5.5, mode: bipolar }
+
+    # Top operator: fast-ish attack, self-feedback, modulates op2.
+    # Slightly slower attack than op2 so the spectrum brightens over the
+    # first ~100 ms of each note.
+    module op3 : PolyOp {
+        attack: 0.12, decay: 0.2, sustain: 0.85, release: 0.25
+    }
+    # Middle operator: modulates op1.
+    module op2 : PolyOp {
+        attack: 0.08, decay: 0.18, sustain: 0.9, release: 0.22
+    }
+    # Carrier: sine at base pitch, amp envelope.
+    module op1 : PolyOp {
+        attack: 0.06, decay: 0.2, sustain: 0.95, release: 0.25
+    }
+
+    module verb     : FdnReverb { character: hall, size: 0.4, mix: 0.2 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    # Vibrato fanned to every operator so the stack tracks the wobble.
+    vibrato.sine -[0.02]-> op1.fm, op2.fm, op3.fm
+
+    kbd.voct -> op1.voct
+    kbd.voct -> op2.voct
+    kbd.voct -> op3.voct
+
+    kbd.trigger -> op1.trigger
+    kbd.gate    -> op1.gate
+    kbd.trigger -> op2.trigger
+    kbd.gate    -> op2.gate
+    kbd.trigger -> op3.trigger
+    kbd.gate    -> op3.gate
+
+    # Self-feedback on op3 → saw-like spectrum → brass bite.
+    op3.out -[0.7]-> op3.feedback
+
+    # Stack: op3 → op2.phase_mod → op2 → op1.phase_mod → op1.out (audible).
+    op3.out -[2.5]-> op2.phase_mod
+    op2.out -[1.8]-> op1.phase_mod
+
+    op1.out      -[0.12]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

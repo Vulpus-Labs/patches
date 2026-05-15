@@ -1,0 +1,44 @@
+# kalimba.patches — thumb piano
+#
+# Sine fundamental with a fast-decay envelope, plus a quick noise click
+# at the attack. The click filter has a static cutoff (does not track
+# voct) to keep PolySvf stable across the keyboard range.
+
+patch {
+    module kbd      : PolyMidiToCv
+
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.001, decay: 0.45, sustain: 0.0, release: 0.4 }
+    module vca      : PolyVca
+
+    module noise    : PolyNoise
+    module click_hp : PolyHighpass { cutoff: 6.0, resonance: 0.0 }   # static ~1 kHz HP
+    module click_env: PolyAdsr  { attack: 0.001, decay: 0.012, sustain: 0.0, release: 0.01 }
+    module click_vca: PolyVca
+
+    module mix      : PolySum([tone, click])
+    module verb     : FdnReverb { character: room, size: 0.35, mix: 0.18 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    noise.white     -> click_hp.in
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> click_env.trigger
+    kbd.gate        -> click_env.gate
+
+    osc.sine        -> vca.in
+    amp_env.out     -> vca.cv
+
+    click_hp.out    -> click_vca.in
+    click_env.out   -> click_vca.cv
+
+    vca.out       -[0.9]-> mix.in[tone]
+    click_vca.out -[0.5]-> mix.in[click]
+
+    mix.out      -[0.18]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

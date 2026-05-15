@@ -1,0 +1,26 @@
+# sub.patches — pure sine sub bass
+#
+# One octave below played pitch, sine only. Gentle attack avoids
+# clicks; no filter. Limiter handles the headroom.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module tune     : PolyTuner { octave: -1 }
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.008, decay: 0.18, sustain: 0.9, release: 0.18 }
+    module vca      : PolyVca
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> tune.in
+    tune.out        -> osc.voct
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+
+    osc.sine        -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out      -[0.25]-> lim.in
+    lim.out         -> out.in
+}

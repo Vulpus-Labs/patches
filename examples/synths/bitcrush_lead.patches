@@ -1,0 +1,38 @@
+# bitcrush_lead.patches — lo-fi crushed lead
+#
+# Square lead through a lowpass, then a mono bitcrusher with a moderate
+# rate (heavier rates alias badly on high-harmonic-content waveforms
+# like square and turn the pitch unstable). A pre-crusher lowpass keeps
+# the bandwidth in check.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.003, decay: 0.2, sustain: 0.7, release: 0.18 }
+    module vca      : PolyVca
+    module filt     : PolyLowpass { cutoff: 1.5kHz, resonance: 0.25 }
+
+    # Anti-alias lowpass before the crusher tames the upper harmonics
+    # of the square that would otherwise alias chaotically.
+    module pre_lp   : Lowpass { cutoff: 7.0, resonance: 0.0 }
+    module crush    : Bitcrusher { rate: 0.6, depth: 10, dry_wet: 0.8 }
+    module drive    : Drive { mode: clip, drive: 1.4, tone: 0.4, mix: 0.55 }
+    module dly      : StereoDelay { delay_ms: 220, feedback: 0.3, tone: 0.5, dry_wet: 0.25, pingpong: true }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+
+    osc.square      -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+
+    filt.out     -[0.15]-> pre_lp.in
+    pre_lp.out      -> crush.in
+    crush.out       -> drive.in
+    drive.out       -> dly.in
+    dly.out         -> lim.in
+    lim.out         -> out.in
+}

@@ -2,6 +2,10 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AdsrStage {
     Idle,
+    /// Pre-attack hold: output stays at 0 for `delay_secs` after trigger
+    /// (gated). Transitions to `Attack` when the delay counter expires,
+    /// or back to `Idle` if the gate drops first.
+    Delay,
     Attack,
     Decay,
     Sustain,
@@ -58,6 +62,12 @@ pub struct AdsrCore {
     decay_k: f32,
     release_k: f32,
     sample_rate: f32,
+    /// Pre-attack delay in seconds. When > 0, a rising trigger enters
+    /// `Delay` instead of `Attack`. Default 0 → existing behaviour is
+    /// bit-identical.
+    delay_secs: f32,
+    /// Samples remaining in the current `Delay` stage.
+    delay_samples_left: u32,
 }
 
 impl AdsrCore {
@@ -75,7 +85,15 @@ impl AdsrCore {
             decay_k: 0.0,
             release_k: 0.0,
             sample_rate,
+            delay_secs: 0.0,
+            delay_samples_left: 0,
         }
+    }
+
+    /// Set pre-attack delay in seconds. `0.0` disables the delay phase
+    /// (default — keeps existing patches bit-identical).
+    pub fn set_delay(&mut self, delay_secs: f32) {
+        self.delay_secs = delay_secs.max(0.0);
     }
 
     /// Recompute increments from the given ADSR parameters.
@@ -133,9 +151,30 @@ impl AdsrCore {
     ///
     /// Returns the envelope level clamped to [0, 1].
     pub fn tick(&mut self, triggered: bool, gate_high: bool) -> f32 {
-        // Rising trigger: restart Attack from any state and current level
+        // Rising trigger: enter Delay (if configured) or restart Attack from
+        // any state and current level.
         if triggered {
-            self.stage = AdsrStage::Attack;
+            if self.delay_secs > 0.0 {
+                self.stage = AdsrStage::Delay;
+                self.level = 0.0;
+                self.delay_samples_left = (self.delay_secs * self.sample_rate).max(1.0) as u32;
+            } else {
+                self.stage = AdsrStage::Attack;
+            }
+        }
+
+        // Delay runs first and may transition to Attack within this same
+        // sample, so the attack increment applies immediately on the first
+        // post-delay sample.
+        if self.stage == AdsrStage::Delay {
+            if !gate_high {
+                self.stage = AdsrStage::Idle;
+                self.level = 0.0;
+            } else if self.delay_samples_left > 0 {
+                self.delay_samples_left -= 1;
+            } else {
+                self.stage = AdsrStage::Attack;
+            }
         }
 
         match self.shape {
@@ -149,6 +188,7 @@ impl AdsrCore {
     fn tick_linear(&mut self, gate_high: bool) {
         match self.stage {
             AdsrStage::Idle => {}
+            AdsrStage::Delay => {}
             AdsrStage::Attack => {
                 if !gate_high {
                     self.enter_release();
@@ -190,6 +230,7 @@ impl AdsrCore {
     fn tick_exponential(&mut self, gate_high: bool) {
         match self.stage {
             AdsrStage::Idle => {}
+            AdsrStage::Delay => {}
             AdsrStage::Attack => {
                 if !gate_high {
                     self.enter_release();
@@ -491,6 +532,59 @@ mod tests {
         for _ in 0..10_000 { core.tick(false, false); }
         assert_eq!(core.stage, AdsrStage::Idle);
         assert!(core.level.abs() < 1e-3);
+    }
+
+    /// Delay phase holds output at 0 for the configured time, then attack
+    /// begins on the next sample.
+    #[test]
+    fn delay_holds_zero_then_attacks() {
+        // sample_rate=10, delay=0.5s → 5 samples of silence
+        // attack=0.1s → inc=1.0 (reaches 1.0 in one sample)
+        let mut core = make_core(0.1, 0.1, 0.5, 0.5, 10.0);
+        core.set_delay(0.5);
+        // Tick 0: trigger fires; delay phase begins. Level should stay 0.
+        let v = core.tick(true, true);
+        assert_eq!(v, 0.0, "level must be 0 on trigger sample with delay");
+        assert_eq!(core.stage, AdsrStage::Delay);
+        // Next 4 samples remain in Delay at 0.
+        for i in 1..5 {
+            let v = core.tick(false, true);
+            assert_eq!(v, 0.0, "delay sample {i} must be 0");
+            assert_eq!(core.stage, AdsrStage::Delay);
+        }
+        // Sample 5: Delay counter exhausted; transition to Attack and apply
+        // the first attack increment within the same tick.
+        let v = core.tick(false, true);
+        assert!(v > 0.0, "attack should begin once delay elapses; got {v}");
+    }
+
+    /// Delay defaults to 0 → trigger goes straight to Attack (bit-identical
+    /// with prior behaviour).
+    #[test]
+    fn default_delay_is_zero() {
+        let mut core = make_core(0.1, 0.1, 0.5, 0.5, 10.0);
+        // attack=0.1s at 10 Hz = 1 sample → trigger reaches 1.0 immediately
+        let v = core.tick(true, true);
+        assert_eq!(v, 1.0);
+        assert_eq!(core.stage, AdsrStage::Decay);
+    }
+
+    /// Releasing the gate during Delay returns the envelope to Idle without
+    /// emitting any output.
+    #[test]
+    fn delay_aborts_on_gate_drop() {
+        let mut core = make_core(0.1, 0.1, 0.5, 0.5, 10.0);
+        core.set_delay(0.5);
+        core.tick(true, true);
+        assert_eq!(core.stage, AdsrStage::Delay);
+        // Drop gate after one delay sample
+        let v = core.tick(false, false);
+        assert_eq!(v, 0.0);
+        assert_eq!(core.stage, AdsrStage::Idle);
+        // Subsequent ticks stay idle at 0.
+        for _ in 0..10 {
+            assert_eq!(core.tick(false, false), 0.0);
+        }
     }
 
     /// T7 — determinism: reset() produces bit-identical output on repeated runs.

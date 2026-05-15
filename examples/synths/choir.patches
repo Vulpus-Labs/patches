@@ -1,0 +1,30 @@
+# choir.patches — vowel-like choir pad
+#
+# Sawtooth through a high-Q bandpass acting as a vocal formant peak.
+# Slow attack and release; long, dark hall.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module vibrato  : Lfo { rate: 4.5 }
+    module osc      : PolyOsc { drift: 0.08 }
+    module form     : PolyBandpass { center: 6.5, bandwidth_q: 5.0 }
+    module amp_env  : PolyAdsr  { attack: 0.6, decay: 0.6, sustain: 0.85, release: 1.0 }
+    module vca      : PolyVca
+    module verb     : FdnReverb { character: cathedral, size: 0.9, mix: 0.55, pre_delay: 0.08 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    vibrato.sine -[0.02]-> osc.fm
+
+    kbd.voct        -> osc.voct
+    osc.sawtooth    -> form.in
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    form.out        -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out      -[0.18]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

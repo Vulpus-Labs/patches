@@ -1,0 +1,67 @@
+# tubular.patches — long-ringing tubular bell
+#
+# FM bell with inharmonic modulator partials at the strike tones of a
+# tubular bell (~1.41× and ~2.81× the carrier — the same tritone pair
+# Chowning used for the canonical bell, doubled). The carrier rings
+# long; the strike modulator dies fast so the metallic clang is
+# percussive while the body partial sustains a softer inharmonic
+# motion into the tail. Plate reverb on the output.
+#
+# Auto poly→stereo conversion (ADR 0074) folds the poly carrier into
+# the stereo reverb input — no PolyToMono in the wiring.
+
+patch {
+    module kbd        : PolyMidiToCv
+
+    # Upper strike partial: short, high-index metallic clang.
+    module strike_tun : PolyTuner { octave: 1, semi: 5, cent: 84 }   # ~2.81 ratio
+    module strike_op  : PolyOp {
+        waveform: sine,
+        attack: 0.004, decay: 0.18, sustain: 0.0, release: 0.18,
+        shape: exponential
+    }
+
+    # Lower inharmonic partial: keeps a soft tritone shimmer alive
+    # through the carrier's decay tail.
+    module body_tun   : PolyTuner { semi: 5, cent: 84 }              # ~1.41 ratio
+    module body_op    : PolyOp {
+        waveform: sine,
+        attack: 0.005, decay: 1.0, sustain: 0.0, release: 1.0
+    }
+
+    module mod_mix    : PolySum(2)
+
+    # Carrier: long-decay sine — the pitched ring of the tube.
+    module car        : PolyOp {
+        waveform: sine,
+        attack: 0.001, decay: 3, sustain: 0.0, release: 3
+    }
+
+    module filter : Lowpass { cutoff: 7 }
+
+    module verb       : FdnReverb { character: plate, size: 0.85, mix: 0.4 }
+    module lim        : StereoLimiter { threshold: -3db }
+    module out        : AudioOut
+
+    kbd.voct        -> strike_tun.in
+    strike_tun.out  -> strike_op.voct
+    kbd.voct        -> body_tun.in
+    body_tun.out    -> body_op.voct
+    kbd.voct        -> car.voct
+
+    kbd.trigger     -> strike_op.trigger
+    kbd.gate        -> strike_op.gate
+    kbd.trigger     -> body_op.trigger
+    kbd.gate        -> body_op.gate
+    kbd.trigger     -> car.trigger
+    kbd.gate        -> car.gate
+
+    strike_op.out -[2.6]-> mod_mix.in[0]
+    body_op.out   -[0.9]-> mod_mix.in[1]
+    mod_mix.out          -> car.phase_mod
+
+    car.out -[0.14]-> filter.in
+    filter.out -> verb.in
+    verb.out         -> lim.in
+    lim.out          -> out.in
+}

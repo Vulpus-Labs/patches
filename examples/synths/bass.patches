@@ -1,0 +1,40 @@
+# bass.patches — punchy synth bass
+#
+# Saw + sub-octave sine, short snappy envelope, lowpass with envelope
+# sweep. Slight drive for grit. Drop an octave so it sits low.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module sub_tun  : PolyTuner { octave: -1 }
+    module osc      : PolyOsc
+    module sub      : PolyOsc
+    module mix      : PolySum([sub, body])
+    module amp_env  : PolyAdsr  { attack: 0.002, decay: 0.22, sustain: 0.55, release: 0.18 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.001, decay: 0.18, sustain: 0.2, release: 0.15 }
+    module filt     : PolyLowpass { cutoff: 350.0Hz, resonance: 0.4, saturate: true }
+    module drive    : Drive { mode: saturate, drive: 1.8, tone: 0.5, mix: 0.6 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.voct        -> sub_tun.in
+    sub_tun.out     -> sub.voct
+
+    osc.sawtooth -[0.6]-> mix.in[body]
+    sub.sine     -[0.8]-> mix.in[sub]
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+    filt_env.out -[1.5]-> filt.voct
+
+    filt.out     -[0.14]-> drive.in
+    drive.out       -> lim.in
+    lim.out         -> out.in
+}

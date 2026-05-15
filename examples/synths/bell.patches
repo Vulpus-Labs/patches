@@ -1,0 +1,63 @@
+# bell.patches — FM bell
+#
+# Carrier sine driven by three modulator branches summed into phase_mod:
+#   - strike:  mod_osc at Chowning ratio ~1.4, fast-decay env, high index
+#   - body:    same mod_osc, slow-decay env, low index — keeps inharmonic
+#              motion alive in the tail instead of naked sine
+#   - shimmer: mod2_osc one octave higher (~2.8 ratio), slow decay, low index
+
+patch {
+    module kbd      : PolyMidiToCv
+    module mod_osc  : PolyOsc
+    module mod_tun  : PolyTuner { semi: 5, cent: 84 }              # ~1.4 ratio
+    module mod_env  : PolyAdsr  { attack: 0.001, decay: 1.2, sustain: 0.4, release: 1.2 }
+    module mod_vca  : PolyVca
+    module body_env : PolyAdsr  { attack: 0.02,  decay: 1.6, sustain: 0.0, release: 1.6 }
+    module body_vca : PolyVca
+    module mod2_osc : PolyOsc
+    module mod2_tun : PolyTuner { octave: 2, semi: 5, cent: 84 }   # ~2.8 ratio
+    module shim_env : PolyAdsr  { attack: 0.005, decay: 1.4, sustain: 0.0, release: 1.4 }
+    module shim_vca : PolyVca
+    module mod_mix  : PolySum(3)
+    module car      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.001, decay: 1.8, sustain: 0.0, release: 1.8 }
+    module vca      : PolyVca
+    module verb     : FdnReverb { character: hall, size: 0.6, mix: 0.35 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> mod_tun.in
+    mod_tun.out     -> mod_osc.voct
+    kbd.voct        -> mod2_tun.in
+    mod2_tun.out    -> mod2_osc.voct
+    kbd.voct        -> car.voct
+
+    kbd.trigger     -> mod_env.trigger
+    kbd.gate        -> mod_env.gate
+    mod_osc.sine    -> mod_vca.in
+    mod_env.out     -> mod_vca.cv
+    mod_vca.out  -[3.5]-> mod_mix.in[0]
+
+    kbd.trigger     -> body_env.trigger
+    kbd.gate        -> body_env.gate
+    mod_osc.sine    -> body_vca.in
+    body_env.out    -> body_vca.cv
+    body_vca.out -[1.2]-> mod_mix.in[1]
+
+    kbd.trigger     -> shim_env.trigger
+    kbd.gate        -> shim_env.gate
+    mod2_osc.sine   -> shim_vca.in
+    shim_env.out    -> shim_vca.cv
+    shim_vca.out -[0.8]-> mod_mix.in[2]
+
+    mod_mix.out     -> car.phase_mod
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    car.sine        -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out      -[0.2]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

@@ -1,0 +1,40 @@
+# wobble.patches — sub bass with LFO-swept lowpass
+#
+# Square + sub-octave sine, sustained envelope. An LFO modulates the
+# filter cutoff for the wobble. Drive after the collapse for grit.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module sub_tun  : PolyTuner { octave: -1 }
+    module osc      : PolyOsc
+    module sub      : PolyOsc
+    module mix      : PolySum([sub, body])
+
+    module lfo      : Lfo { rate: 3.0, mode: unipolar_positive }
+
+    module amp_env  : PolyAdsr  { attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.2 }
+    module vca      : PolyVca
+    module filt     : PolyLowpass { cutoff: 180.0Hz, resonance: 0.7, saturate: true }
+    module drive    : Drive { mode: saturate, drive: 2.0, tone: 0.45, mix: 0.6 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.voct        -> sub_tun.in
+    sub_tun.out     -> sub.voct
+
+    osc.square -[0.5]-> mix.in[body]
+    sub.sine   -[0.8]-> mix.in[sub]
+
+    lfo.triangle -[2.5]-> filt.fm
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt.out     -[0.14]-> drive.in
+    drive.out       -> lim.in
+    lim.out         -> out.in
+}

@@ -1,0 +1,43 @@
+# organ.patches — drawbar organ (additive sines)
+#
+# Three sine harmonics (fundamental, octave, octave+fifth) summed in
+# fixed ratios. Square plateau envelope, no filter sweep. A touch of
+# rotary-flavour delay for body.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module t_oct    : PolyTuner { octave: 1 }
+    module t_8va5   : PolyTuner { octave: 1, semi: 7 }
+
+    module o1       : PolyOsc
+    module o2       : PolyOsc
+    module o3       : PolyOsc
+    module mix      : PolySum([h1, h2, h3])
+
+    module amp_env  : PolyAdsr  { attack: 0.01, decay: 0.05, sustain: 1.0, release: 0.15 }
+    module vca      : PolyVca
+    module dly      : StereoDelay { delay_ms: 60, feedback: 0.15, tone: 0.6, dry_wet: 0.3 }
+    module verb     : FdnReverb { character: chamber, size: 0.4, mix: 0.18 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> o1.voct
+    kbd.voct        -> t_oct.in
+    kbd.voct        -> t_8va5.in
+    t_oct.out       -> o2.voct
+    t_8va5.out      -> o3.voct
+
+    o1.sine     -[0.8]-> mix.in[h1]
+    o2.sine     -[0.5]-> mix.in[h2]
+    o3.sine     -[0.3]-> mix.in[h3]
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out      -[0.15]-> dly.in
+    dly.out         -> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

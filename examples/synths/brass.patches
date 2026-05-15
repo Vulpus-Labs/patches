@@ -1,0 +1,34 @@
+# brass.patches — synth brass
+#
+# Sawtooth through a resonant lowpass with a slow filter-envelope swell.
+# Subtle vibrato gives breath, light hall gives ensemble depth.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module vibrato  : Lfo       { rate: 5.5, mode: bipolar }
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.08, decay: 0.2, sustain: 0.8, release: 0.25 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.18, decay: 0.4, sustain: 0.6, release: 0.4 }
+    module filt     : PolyLowpass { cutoff: 600.0Hz, resonance: 0.3, saturate: true }
+    module verb     : FdnReverb { character: hall, size: 0.4, mix: 0.2 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    vibrato.sine -[0.02]-> osc.fm
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.sawtooth    -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+    filt_env.out -[1.2]-> filt.voct
+
+    filt.out     -[0.12]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

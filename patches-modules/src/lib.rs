@@ -12,8 +12,10 @@ pub mod midi_split;
 pub mod midi_transpose;
 pub mod midi_arp;
 pub mod midi_delay;
+pub mod op;
 pub mod oscillator;
 pub mod poly_adsr;
+pub mod poly_op;
 pub mod poly_filter;
 pub mod poly_midi_to_cv;
 pub mod poly_sum;
@@ -77,8 +79,10 @@ pub use midi_split::MidiSplit;
 pub use midi_transpose::MidiTranspose;
 pub use midi_arp::MidiArp;
 pub use midi_delay::MidiDelay;
+pub use op::Op;
 pub use oscillator::Oscillator;
 pub use poly_adsr::PolyAdsr;
+pub use poly_op::PolyOp;
 pub use poly_midi_to_cv::PolyMidiToCv;
 pub use poly_sum::PolySum;
 pub use poly_osc::PolyOsc;
@@ -146,6 +150,8 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<MidiTranspose>();
     r.register::<MidiArp>();
     r.register::<MidiDelay>();
+    r.register::<Op>();
+    r.register::<PolyOp>();
     r.register::<PolyOsc>();
     r.register::<PolyAdsr>();
     r.register::<PolyVca>();
@@ -225,6 +231,8 @@ mod tests {
             "PolyTuner",
             "MidiToCv",
             "PolyMidiToCv",
+            "Op",
+            "PolyOp",
             "PolyOsc",
             "PolyAdsr",
             "PolyVca",

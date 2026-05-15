@@ -1,0 +1,35 @@
+# lead.patches — bright square/saw lead
+#
+# Mixed square + sawtooth, lowpass with moderate resonance and a quick
+# filter envelope. Light delay for body.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyOsc { drift: 0.04 }
+    module mix      : PolySum([saw, sq])
+    module amp_env  : PolyAdsr  { attack: 0.003, decay: 0.18, sustain: 0.7, release: 0.18 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr  { attack: 0.005, decay: 0.22, sustain: 0.4, release: 0.2 }
+    module filt     : PolyLowpass { cutoff: 1.2kHz, resonance: 0.55, saturate: true }
+    module delay    : StereoDelay { delay_ms: 280, feedback: 0.35, tone: 0.7, dry_wet: 0.25, pingpong: true }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.sawtooth -[0.6]-> mix.in[saw]
+    osc.square   -[0.5]-> mix.in[sq]
+    mix.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt_env.out -[1.0]-> filt.voct
+
+    filt.out     -[0.1]-> delay.in
+    delay.out       -> lim.in
+    lim.out         -> out.in
+}

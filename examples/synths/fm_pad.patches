@@ -1,0 +1,64 @@
+# fm_pad.patches — evolving 3-op FM pad
+#
+# Three-operator stack (op3 → op2 → op1) with progressively slower
+# attacks and long *decays-away* on the upper modulators. The pad
+# blooms over the first ~2 s as op2 and op3 attack in, then the
+# modulators slowly decay back toward a low sustain so the held note
+# settles to a warm, mostly-sinusoidal carrier instead of holding the
+# bright FM bite indefinitely.
+
+patch {
+    module kbd : PolyMidiToCv
+
+    # Top operator: one octave up, very slow attack, decays toward near-
+    # silent sustain so the upper layer fades out entirely once the note
+    # has settled.
+    module op3 : PolyOp {
+        frequency: 1.0,
+        attack: 2.0, decay: 3.5, sustain: 0.05, release: 1.4
+    }
+    # Middle operator: one octave up, decays back to a low sustain so the
+    # held-note spectrum is dominated by carrier + a small first
+    # sideband, not the bloom's mod-stack.
+    module op2 : PolyOp {
+        frequency: 1.0,
+        attack: 1.2, decay: 2.5, sustain: 0.2, release: 1.2
+    }
+    # Carrier: sine at base pitch, slow-attack amp envelope that holds.
+    module op1 : PolyOp {
+        attack: 0.8, decay: 0.4, sustain: 0.9, release: 1.4
+    }
+
+    module filt     : PolyLowpass { cutoff: 1.6kHz, resonance: 0.1 }
+    module verb     : FdnReverb { character: hall, size: 0.75, mix: 0.45, pre_delay: 0.08 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    module lfo : PolyLfo { rate: 4.0 }
+    kbd.trigger -> lfo.sync
+    lfo.sine -[0.2]-> op1.fm, op2.fm, op3.fm
+
+    kbd.voct -> op1.voct
+    kbd.voct -> op2.voct
+    kbd.voct -> op3.voct
+
+    kbd.trigger -> op1.trigger
+    kbd.gate    -> op1.gate
+    kbd.trigger -> op2.trigger
+    kbd.gate    -> op2.gate
+    kbd.trigger -> op3.trigger
+    kbd.gate    -> op3.gate
+
+    # Stack: op3 → op2.phase_mod → op2 → op1.phase_mod → op1.out (audible).
+    # Low mod indices: peak index into op1 is ~0.65 (op2 at 1.0 × 0.65),
+    # which sits in horn/soft-string territory rather than DX-bell.
+    # Anything above ~0.9 cascades to a metallic upper-sideband cluster
+    # because the two stages multiply, not add.
+    op3.out -[0.55]-> op2.phase_mod
+    op2.out -[0.75]-> op1.phase_mod
+
+    op1.out         -> filt.in
+    filt.out     -[0.1]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

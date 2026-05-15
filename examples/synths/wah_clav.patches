@@ -1,0 +1,38 @@
+# wah_clav.patches — clavinet with auto-wah
+#
+# Saw through a high-resonance bandpass whose centre frequency is swept
+# by an LFO. Per-note filter envelope adds bite on the attack.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyOsc
+    module amp_env  : PolyAdsr  { attack: 0.001, decay: 0.32, sustain: 0.0, release: 0.18 }
+    module vca      : PolyVca
+
+    module filt_env : PolyAdsr  { attack: 0.001, decay: 0.12, sustain: 0.0, release: 0.1 }
+    module wah_lfo  : Lfo { rate: 2.2, mode: bipolar }
+    module filt     : PolyBandpass { center: 4.5, bandwidth_q: 5.0, saturate: true }
+
+    module drive    : Drive { mode: saturate, drive: 1.8, tone: 0.5, mix: 0.55 }
+    module dly      : StereoDelay { delay_ms: 180, feedback: 0.2, tone: 0.6, dry_wet: 0.18 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.sawtooth    -> vca.in
+    amp_env.out     -> vca.cv
+    vca.out         -> filt.in
+
+    wah_lfo.sine -[1.2]-> filt.fm
+    filt_env.out -[1.0]-> filt.voct
+
+    filt.out     -[0.14]-> drive.in
+    drive.out       -> dly.in
+    dly.out         -> lim.in
+    lim.out         -> out.in
+}
