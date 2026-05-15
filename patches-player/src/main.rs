@@ -19,6 +19,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
+use patches_io::wav_recorder::WavRecorder;
 use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::{
     monitor_channel, new_event_queue, EventScheduler, MidiConnector, MonitorAttach,
@@ -35,6 +36,26 @@ mod tui;
 
 use controller_env::{EnvSideChannel, RatatuiEnv};
 use patches_plugin_common::{Action, Controller, Env as _};
+
+type RecordSink = (Option<WavRecorder>, Option<rtrb::Producer<[f32; 2]>>);
+
+/// Open a WAV recorder against the engine's output device, if recording
+/// was requested. Returns `(handle, producer)` — `handle` must outlive
+/// the audio stream so its `Drop` finalises the file; `producer` is
+/// handed to [`SoundEngine::start`].
+fn open_record_sink(
+    sound: &SoundEngine,
+    record_path: Option<&str>,
+) -> std::io::Result<RecordSink> {
+    let Some(path) = record_path else {
+        return Ok((None, None));
+    };
+    let rate = sound
+        .output_rate()
+        .ok_or_else(|| std::io::Error::other("device not opened"))?;
+    let (rec, tx) = patches_io::wav_recorder::open(path, rate)?;
+    Ok((Some(rec), Some(tx)))
+}
 
 /// Render a [`CompileError`] to stderr using the source map it carries.
 fn render_compile_error(err: &CompileError) {
@@ -181,8 +202,10 @@ fn run_headless(
         .take_audio_endpoints()
         .ok_or("audio endpoints already taken")?;
 
+    let (_recorder, record_tx) = open_record_sink(&sound, record_path)?;
+
     let (midi_producer, midi_consumer) = new_event_queue(256);
-    sound.start(processor, plan_rx, Some(midi_consumer), record_path, None)?;
+    sound.start(processor, plan_rx, Some(midi_consumer), record_tx, None)?;
 
     let scheduler = EventScheduler::new(sample_rate, 128);
     let _midi_connector = match MidiConnector::open(sound.clock(), midi_producer, scheduler) {
@@ -353,13 +376,14 @@ fn run_tui(
     };
 
     let record_muted = record_path.map(|_| Arc::new(AtomicBool::new(true)));
+    let (_recorder, record_tx) = open_record_sink(&sound, record_path)?;
 
     let (midi_producer, midi_consumer) = new_event_queue(256);
     sound.start(
         processor,
         plan_rx,
         Some(midi_consumer),
-        record_path,
+        record_tx,
         record_muted.clone(),
     )?;
 
