@@ -2,7 +2,13 @@
 name = "patches-dsp"
 version = "0.6.0"
 edition = "2021"
-publish = false
+rust-version = "1.80"
+description = "Pure DSP kernels (filters, oscillators, delay, resampling, fast math) for the Patches modular-audio framework."
+license = "MIT"
+repository = "https://github.com/Vulpus-Labs/patches"
+readme = "README.md"
+keywords = ["audio", "dsp", "filter", "synthesizer", "music"]
+categories = ["multimedia::audio"]
 
 [lib]
 name = "patches_dsp"

@@ -85,7 +85,6 @@ pub enum EngineError {
     NotOpened,
     AlreadyOpened,
     AlreadyStarted,
-    RecordOpenError(std::io::Error),
     SampleRateMismatch { input: u32, output: u32 },
     DevicesError(cpal::DevicesError),
     BuildInputStreamError(cpal::BuildStreamError),
@@ -103,7 +102,6 @@ impl fmt::Display for EngineError {
             EngineError::NotOpened => write!(f, "start() called before open(); call open() first"),
             EngineError::AlreadyOpened => write!(f, "open() called after the device has already been opened"),
             EngineError::AlreadyStarted => write!(f, "start() called after the engine has already been started"),
-            EngineError::RecordOpenError(e) => write!(f, "failed to open WAV recording file: {e}"),
             EngineError::SampleRateMismatch { input, output } => {
                 write!(f, "input device sample rate ({input} Hz) does not match output device ({output} Hz)")
             }
@@ -120,8 +118,9 @@ impl std::error::Error for EngineError {}
 ///
 /// The processor and plan-channel consumer are built by the host (via
 /// `patches-host::HostBuilder`) and handed to [`start`](Self::start).
-/// `SoundEngine` owns only CPAL device state, the audio clock, optional
-/// WAV recording, and optional audio input capture.
+/// `SoundEngine` owns only CPAL device state, the audio clock, and
+/// optional audio input capture. WAV recording, if any, is owned by the
+/// caller — see [`start`](Self::start).
 ///
 /// ## Lifecycle
 ///
@@ -131,13 +130,11 @@ impl std::error::Error for EngineError {}
 ///    the actual sample rate.
 /// 3. [`start`](Self::start) — install the processor + plan consumer and
 ///    begin audio.
-/// 4. [`stop`](Self::stop) — release the stream and joint optional
-///    recorder.
+/// 4. [`stop`](Self::stop) — release the stream.
 pub struct SoundEngine {
     opened_device: Option<OpenedDevice>,
     stream: Option<Stream>,
     clock: Arc<AudioClock>,
-    recorder: Option<patches_io::wav_recorder::WavRecorder>,
     input_capture: Option<crate::input_capture::InputCapture>,
     input_rx: Option<rtrb::Consumer<[f32; 2]>>,
     oversampling_factor: usize,
@@ -152,7 +149,6 @@ impl SoundEngine {
             opened_device: None,
             stream: None,
             clock: Arc::new(AudioClock::new()),
-            recorder: None,
             input_capture: None,
             input_rx: None,
             oversampling_factor: oversampling.factor(),
@@ -216,12 +212,17 @@ impl SoundEngine {
     ///
     /// The host (typically `patches-host::HostRuntime`) owns the cleanup thread
     /// and plan producer; this method is purely a CPAL-stream installer.
+    ///
+    /// `record_tx` is an optional `rtrb` producer that receives one `[L, R]`
+    /// frame per output sample. The caller owns the consumer side (e.g. a
+    /// WAV writer thread); see `patches_io::wav_recorder` for the canonical
+    /// implementation.
     pub fn start(
         &mut self,
         processor: PatchProcessor,
         plan_rx: rtrb::Consumer<AdoptionMessage>,
         event_queue: Option<EventQueueConsumer>,
-        record_path: Option<&str>,
+        record_tx: Option<rtrb::Producer<[f32; 2]>>,
         record_muted: Option<Arc<AtomicBool>>,
     ) -> Result<(), EngineError> {
         if self.stream.is_some() {
@@ -230,16 +231,6 @@ impl SoundEngine {
 
         let OpenedDevice { device, config, sample_format, channels } =
             self.opened_device.take().ok_or(EngineError::NotOpened)?;
-
-        let record_tx = if let Some(path) = record_path {
-            let sample_rate = config.sample_rate.0;
-            let (recorder, tx) = patches_io::wav_recorder::open(path, sample_rate)
-                .map_err(EngineError::RecordOpenError)?;
-            self.recorder = Some(recorder);
-            Some(tx)
-        } else {
-            None
-        };
 
         if let Some(ref capture) = self.input_capture {
             capture.play().map_err(EngineError::PlayStreamError)?;
@@ -273,11 +264,18 @@ impl SoundEngine {
     pub fn stop(&mut self) {
         self.stream.take();
         self.input_capture.take();
-        self.recorder.take();
     }
 
     /// Return a clone of the shared [`AudioClock`].
     pub fn clock(&self) -> Arc<AudioClock> {
         Arc::clone(&self.clock)
+    }
+
+    /// Output device sample rate in Hz (post-decimation), available between
+    /// [`open`](Self::open) and [`start`](Self::start). Useful for opening
+    /// a WAV recorder that will receive the same frames written to the
+    /// hardware output buffer.
+    pub fn output_rate(&self) -> Option<u32> {
+        self.opened_device.as_ref().map(|d| d.config.sample_rate.0)
     }
 }

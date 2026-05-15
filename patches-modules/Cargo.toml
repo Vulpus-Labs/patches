@@ -7,7 +7,6 @@ publish = false
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-dsp = { path = "../patches-dsp" }
-patches-io = { path = "../patches-io" }
 patches-tracker-core = { path = "../patches-tracker-core" }
 rtrb = "0.3"
 

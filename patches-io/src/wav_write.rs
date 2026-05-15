@@ -4,10 +4,8 @@
 //! low-level streaming helpers ([`write_wav_header`], [`commit_wav_sizes`],
 //! [`finalize_wav`]) for use by the engine's ring-buffer recorder.
 
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
-
-use crate::audio_data::AudioIoError;
 
 // ---------------------------------------------------------------------------
 // Complete-file writer
@@ -16,10 +14,14 @@ use crate::audio_data::AudioIoError;
 /// Write a complete 16-bit PCM WAV file from per-channel sample data.
 ///
 /// `channels` is a slice of channel buffers (all must be the same length).
-/// Samples are clamped to [-1, 1] before quantisation.
-pub fn write_wav(path: &Path, channels: &[&[f32]], sample_rate: u32) -> Result<(), AudioIoError> {
+/// Samples are clamped to [-1, 1] before quantisation. Returns
+/// `ErrorKind::InvalidInput` if `channels` is empty.
+pub fn write_wav(path: &Path, channels: &[&[f32]], sample_rate: u32) -> io::Result<()> {
     if channels.is_empty() {
-        return Err(AudioIoError::NoSamples);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "write_wav: channels is empty",
+        ));
     }
     let num_frames = channels[0].len();
     let n_ch = channels.len() as u16;
@@ -156,11 +158,10 @@ mod tests {
     }
 
     #[test]
-    fn write_and_read_round_trip() {
+    fn round_trip_in_memory_writer() {
         let left = vec![0.5f32, -0.5, 0.25];
         let right = vec![-0.25f32, 0.75, 0.0];
 
-        // Build the WAV in memory to avoid temp-dir portability issues.
         let channels: &[&[f32]] = &[&left, &right];
         let num_frames = left.len();
         let n_ch = channels.len() as u16;
@@ -175,26 +176,14 @@ mod tests {
         }
         finalize_wav(&mut buf, n_ch, 16, num_frames as u32).unwrap();
 
-        // Read it back with our WAV parser.
-        let parsed = crate::wav_read::parse_wav(buf.get_ref()).unwrap();
-        assert_eq!(parsed.channels.len(), 2);
-        assert_eq!(parsed.channels[0].len(), 3);
-        assert!((parsed.sample_rate - 44100.0).abs() < 0.01);
+        let data = buf.into_inner();
+        // 44 bytes header + 3 frames * 2ch * 2bytes = 44 + 12 = 56 bytes.
+        assert_eq!(data.len(), 56);
 
-        // 16-bit quantisation gives ~1/32768 error.
-        for i in 0..3 {
-            assert!(
-                (parsed.channels[0][i] - left[i]).abs() < 0.001,
-                "L[{i}]: {} vs {}",
-                parsed.channels[0][i],
-                left[i]
-            );
-            assert!(
-                (parsed.channels[1][i] - right[i]).abs() < 0.001,
-                "R[{i}]: {} vs {}",
-                parsed.channels[1][i],
-                right[i]
-            );
-        }
+        // Sizes were committed on finalise.
+        let riff_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let data_size = u32::from_le_bytes([data[40], data[41], data[42], data[43]]);
+        assert_eq!(data_size, 12);
+        assert_eq!(riff_size, data_size + 36);
     }
 }

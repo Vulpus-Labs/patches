@@ -12,6 +12,7 @@ path = "src/main.rs"
 patches-host        = { path = "../patches-host" }
 patches-cpal        = { path = "../patches-cpal" }
 patches-engine      = { path = "../patches-engine" }
+patches-io          = { path = "../patches-io" }
 patches-planner     = { path = "../patches-planner" }
 patches-dsl         = { path = "../patches-dsl" }
 patches-modules     = { path = "../patches-modules" }
