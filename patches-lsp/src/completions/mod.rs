@@ -236,18 +236,18 @@ mod tests {
 
     #[test]
     fn completions_while_typing_module_type() {
-        let source = "patch {\n    module x : Pitch\n}";
+        let source = "patch {\n    module x : Pol\n}";
         let (tree, model, registry) = setup(source);
-        let byte_offset = source.find("Pitch").unwrap() + 5;
+        let byte_offset = source.find("Pol").unwrap() + 3;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
-            labels.contains(&"PitchShift"),
-            "expected PitchShift in completions, got: {labels:?}"
+            labels.contains(&"PolyOsc"),
+            "expected PolyOsc in completions, got: {labels:?}"
         );
         assert!(
-            labels.contains(&"ConvReverb"),
-            "expected ConvReverb in completions, got: {labels:?}"
+            labels.contains(&"PolyAdsr"),
+            "expected PolyAdsr in completions, got: {labels:?}"
         );
     }
 

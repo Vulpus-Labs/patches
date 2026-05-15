@@ -30,72 +30,122 @@
             "poly_layout": "Audio"
           }
         ],
-        "per_axis_inputs": [],
-        "global_outputs": [
-          {
-            "name": "out",
-            "kind": "Mono",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          }
+        "per_axis_inputs": [
+          [
+            "channels",
+            {
+              "name": "vca_in",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ]
         ],
-        "per_axis_outputs": [],
-        "realtime_params": [
-          {
-            "name": "attack",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.01
-              }
+        "global_outputs": [],
+        "per_axis_outputs": [
+          [
+            "channels",
+            {
+              "name": "out",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
             }
-          },
-          {
-            "name": "decay",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.1
-              }
+          ],
+          [
+            "channels",
+            {
+              "name": "vca_out",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
             }
-          },
-          {
-            "name": "sustain",
-            "kind": {
-              "Float": {
-                "min": 0.0,
-                "max": 1.0,
-                "default": 0.7
-              }
-            }
-          },
-          {
-            "name": "release",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.3
-              }
-            }
-          },
-          {
-            "name": "shape",
-            "kind": {
-              "Enum": {
-                "variants": [
-                  "linear",
-                  "exponential"
-                ],
-                "default": "linear"
-              }
-            }
-          }
+          ]
         ],
+        "realtime_params": [],
         "structural_params": [],
-        "per_axis_realtime_params": [],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "delay",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 10.0,
+                  "default": 0.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "attack",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.01
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "decay",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.1
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "sustain",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 0.7
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "release",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.3
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "shape",
+              "kind": {
+                "Enum": {
+                  "variants": [
+                    "linear",
+                    "exponential"
+                  ],
+                  "default": "linear"
+                }
+              }
+            }
+          ]
+        ],
         "per_axis_structural_params": []
       }
     },
@@ -2292,6 +2342,201 @@
       }
     },
     {
+      "name": "Op",
+      "template": {
+        "name": "Op",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "voct",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "fm",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "phase_mod",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "feedback",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "trigger",
+            "kind": "Mono",
+            "mono_layout": "Trigger",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "gate",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "env",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "frequency",
+            "kind": {
+              "Float": {
+                "min": -4.0,
+                "max": 12.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "fm_type",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "logarithmic"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "waveform",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "sine",
+                  "half_sine",
+                  "abs_sine",
+                  "quarter_sine",
+                  "alt_sine",
+                  "alt_abs_sine",
+                  "square",
+                  "saw"
+                ],
+                "default": "sine"
+              }
+            }
+          },
+          {
+            "name": "delay",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 10.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.01
+              }
+            }
+          },
+          {
+            "name": "decay",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.1
+              }
+            }
+          },
+          {
+            "name": "sustain",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.7
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.3
+              }
+            }
+          },
+          {
+            "name": "shape",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "exponential"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "phase_reset",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "off",
+                  "on"
+                ],
+                "default": "off"
+              }
+            }
+          },
+          {
+            "name": "start_phase",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Osc",
       "template": {
         "name": "Osc",
@@ -2494,72 +2739,122 @@
             "poly_layout": "Audio"
           }
         ],
-        "per_axis_inputs": [],
-        "global_outputs": [
-          {
-            "name": "out",
-            "kind": "Poly",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          }
+        "per_axis_inputs": [
+          [
+            "channels",
+            {
+              "name": "vca_in",
+              "kind": "Poly",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ]
         ],
-        "per_axis_outputs": [],
-        "realtime_params": [
-          {
-            "name": "attack",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.01
-              }
+        "global_outputs": [],
+        "per_axis_outputs": [
+          [
+            "channels",
+            {
+              "name": "out",
+              "kind": "Poly",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
             }
-          },
-          {
-            "name": "decay",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.1
-              }
+          ],
+          [
+            "channels",
+            {
+              "name": "vca_out",
+              "kind": "Poly",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
             }
-          },
-          {
-            "name": "sustain",
-            "kind": {
-              "Float": {
-                "min": 0.0,
-                "max": 1.0,
-                "default": 0.7
-              }
-            }
-          },
-          {
-            "name": "release",
-            "kind": {
-              "Float": {
-                "min": 0.001,
-                "max": 10.0,
-                "default": 0.3
-              }
-            }
-          },
-          {
-            "name": "shape",
-            "kind": {
-              "Enum": {
-                "variants": [
-                  "linear",
-                  "exponential"
-                ],
-                "default": "linear"
-              }
-            }
-          }
+          ]
         ],
+        "realtime_params": [],
         "structural_params": [],
-        "per_axis_realtime_params": [],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "delay",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 10.0,
+                  "default": 0.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "attack",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.01
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "decay",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.1
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "sustain",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 0.7
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "release",
+              "kind": {
+                "Float": {
+                  "min": 0.001,
+                  "max": 10.0,
+                  "default": 0.3
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "shape",
+              "kind": {
+                "Enum": {
+                  "variants": [
+                    "linear",
+                    "exponential"
+                  ],
+                  "default": "linear"
+                }
+              }
+            }
+          ]
+        ],
         "per_axis_structural_params": []
       }
     },
@@ -3118,6 +3413,201 @@
         ],
         "per_axis_outputs": [],
         "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "PolyOp",
+      "template": {
+        "name": "PolyOp",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "voct",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "fm",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "phase_mod",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "feedback",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "trigger",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Trigger"
+          },
+          {
+            "name": "gate",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "env",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "frequency",
+            "kind": {
+              "Float": {
+                "min": -4.0,
+                "max": 12.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "fm_type",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "logarithmic"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "waveform",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "sine",
+                  "half_sine",
+                  "abs_sine",
+                  "quarter_sine",
+                  "alt_sine",
+                  "alt_abs_sine",
+                  "square",
+                  "saw"
+                ],
+                "default": "sine"
+              }
+            }
+          },
+          {
+            "name": "delay",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 10.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.01
+              }
+            }
+          },
+          {
+            "name": "decay",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.1
+              }
+            }
+          },
+          {
+            "name": "sustain",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.7
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 0.001,
+                "max": 10.0,
+                "default": 0.3
+              }
+            }
+          },
+          {
+            "name": "shape",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "exponential"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "phase_reset",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "off",
+                  "on"
+                ],
+                "default": "off"
+              }
+            }
+          },
+          {
+            "name": "start_phase",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
         "structural_params": [],
         "per_axis_realtime_params": [],
         "per_axis_structural_params": []
