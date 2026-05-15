@@ -113,51 +113,8 @@ fn common_setup(
     oversampling: OversamplingFactor,
     device_config: DeviceConfig,
     module_paths: Vec<PathBuf>,
-    no_stdlib: bool,
 ) -> Result<CommonSetup, Box<dyn std::error::Error>> {
     let mut registry = patches_modules::default_registry();
-
-    if !no_stdlib {
-        let stdlib = patches_ffi::stdlib_scanner();
-        if stdlib.paths.is_empty() {
-            return Err(
-                "no stdlib bundle search path resolved (set PATCHES_PLUGIN_PATH \
-                 or run from a workspace with target/<profile>/; pass \
-                 --no-stdlib to opt out)"
-                    .into(),
-            );
-        }
-        let before = registry.module_names().count();
-        let report = stdlib.scan(&mut registry);
-        let after = registry.module_names().count();
-        let bundle_count = report.loaded.len() + report.replaced.len();
-        if bundle_count == 0 {
-            return Err(
-                "stdlib bundle scan loaded zero modules (pass --no-stdlib if \
-                 the host does not need the stdlib bundles)"
-                    .into(),
-            );
-        }
-        println!(
-            "stdlib bundles: {} module(s) registered (registry: {before} → {after})",
-            bundle_count,
-        );
-        for m in &report.loaded {
-            println!("  loaded  {} v{:#x} ({})", m.name, m.version, m.path.display());
-        }
-        for r in &report.replaced {
-            println!(
-                "  replaced {} v{:#x} → v{:#x} ({})",
-                r.name, r.from, r.to, r.path.display(),
-            );
-        }
-        for s in &report.skipped {
-            println!("  skipped  {s:?}");
-        }
-        for (p, e) in &report.errors {
-            eprintln!("  error   {}: {e}", p.display());
-        }
-    }
 
     if !module_paths.is_empty() {
         let scanner = patches_ffi::PluginScanner::new(module_paths);
@@ -203,10 +160,9 @@ fn run_headless(
     no_stdin: bool,
     device_config: DeviceConfig,
     module_paths: Vec<PathBuf>,
-    no_stdlib: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let CommonSetup { mut sound, mut runtime, source, registry, sample_rate, .. } =
-        common_setup(path, oversampling, device_config, module_paths, no_stdlib)?;
+        common_setup(path, oversampling, device_config, module_paths)?;
 
     let loaded = match runtime.compile_and_push_blocking(&source, &registry) {
         Ok(loaded) => loaded,
@@ -321,10 +277,9 @@ fn run_tui(
     device_config: DeviceConfig,
     module_paths: Vec<PathBuf>,
     monitor_enabled: bool,
-    no_stdlib: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let CommonSetup { mut sound, mut runtime, source: _source, registry, sample_rate, .. } =
-        common_setup(path, oversampling, device_config, module_paths.clone(), no_stdlib)?;
+        common_setup(path, oversampling, device_config, module_paths.clone())?;
     if monitor_enabled {
         runtime.set_monitor(true);
     }
@@ -581,7 +536,6 @@ fn print_usage() {
     eprintln!("  --no-stdin                 (legacy/--no-tui) run without stdin");
     eprintln!("  --no-tui                   Use the legacy stdout frontend");
     eprintln!("  --module-path <DIR|FILE>   Scan directory or file for FFI plugin bundles (repeatable)");
-    eprintln!("  --no-stdlib                Skip the default stdlib bundle scan (vintage, drums, fft)");
     eprintln!("  --monitor                  Enable per-instance CPU monitor tab (ADR 0065)");
 }
 
@@ -595,14 +549,12 @@ fn main() {
     let mut device_config = DeviceConfig::default();
     let mut module_paths: Vec<PathBuf> = Vec::new();
     let mut monitor_enabled = false;
-    let mut no_stdlib = false;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-stdin" => no_stdin = true,
             "--no-tui" => no_tui = true,
-            "--no-stdlib" => no_stdlib = true,
             "--module-path" => match args.next() {
                 Some(p) => module_paths.push(PathBuf::from(p)),
                 None => {
@@ -685,7 +637,6 @@ fn main() {
             no_stdin,
             device_config,
             module_paths,
-            no_stdlib,
         )
     } else {
         run_tui(
@@ -695,7 +646,6 @@ fn main() {
             device_config,
             module_paths,
             monitor_enabled,
-            no_stdlib,
         )
     };
 

@@ -31,13 +31,12 @@ fn scan_and_register_gain_plugin() {
     let source = gain_dylib_path();
     assert!(source.exists(), "gain plugin dylib not found at {}", source.display());
 
-    // Symlink the dylib into the scan directory
+    // Symlink the dylib into the scan directory under a .pxm name.
+    let dest = dir.join("test_gain_plugin.pxm");
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, dir.join(source.file_name().unwrap()))
-        .expect("symlink");
+    std::os::unix::fs::symlink(&source, &dest).expect("symlink");
     #[cfg(windows)]
-    std::os::windows::fs::symlink_file(&source, dir.join(source.file_name().unwrap()))
-        .expect("symlink");
+    std::os::windows::fs::symlink_file(&source, &dest).expect("symlink");
 
     // Scan
     let results = scan_plugins(&dir);
@@ -95,23 +94,17 @@ fn invalid_file_does_not_prevent_other_plugins() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create temp dir");
 
-    // Write an invalid "plugin" file
-    #[cfg(target_os = "macos")]
-    let bad_name = "bad_plugin.dylib";
-    #[cfg(target_os = "linux")]
-    let bad_name = "bad_plugin.so";
-    #[cfg(target_os = "windows")]
-    let bad_name = "bad_plugin.dll";
-    std::fs::write(dir.join(bad_name), b"not a real dylib").expect("write bad file");
+    // Write an invalid "plugin" file under the .pxm extension so the
+    // scanner picks it up.
+    std::fs::write(dir.join("bad_plugin.pxm"), b"not a real dylib").expect("write bad file");
 
-    // Also symlink the good gain plugin
+    // Also symlink the good gain plugin under a .pxm name.
     let source = gain_dylib_path();
+    let dest = dir.join("test_gain_plugin.pxm");
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, dir.join(source.file_name().unwrap()))
-        .expect("symlink");
+    std::os::unix::fs::symlink(&source, &dest).expect("symlink");
     #[cfg(windows)]
-    std::os::windows::fs::symlink_file(&source, dir.join(source.file_name().unwrap()))
-        .expect("symlink");
+    std::os::windows::fs::symlink_file(&source, &dest).expect("symlink");
 
     let mut registry = Registry::new();
     let errors = register_plugins(&dir, &mut registry);
