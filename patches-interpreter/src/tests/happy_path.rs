@@ -52,6 +52,7 @@ fn float_param_is_accepted() {
         port_aliases: vec![],
         provenance: Provenance::root(span()),
         param_block_span: None,
+        type_name_span: None,
     }];
     let result = build(&flat, &registry(), &env()).unwrap();
     let node = result.graph.get_node(&"osc1".into()).expect("osc1 missing");
@@ -84,6 +85,7 @@ fn enum_param_is_accepted() {
         port_aliases: vec![],
         provenance: Provenance::root(span()),
         param_block_span: None,
+        type_name_span: None,
     }];
     let result = build(&flat, &registry(), &env()).unwrap();
     let node = result.graph.get_node(&"osc1".into()).expect("osc1 missing");

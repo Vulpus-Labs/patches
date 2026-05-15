@@ -102,7 +102,16 @@ pub(super) fn bind_module(
             } else {
                 BindErrorCode::UnknownModuleType
             };
-            errors.push(BindError::new(code, fm.provenance.clone(), e.to_string()));
+            // For UnknownModuleType, narrow the squiggle to the type-name
+            // ident on the RHS of `name : type_name` rather than the wider
+            // `provenance.site` (which covers `name : type_name`).
+            let prov = match (code, fm.type_name_span) {
+                (BindErrorCode::UnknownModuleType, Some(s)) => {
+                    Provenance::with_chain(s, &fm.provenance.expansion)
+                }
+                _ => fm.provenance.clone(),
+            };
+            errors.push(BindError::new(code, prov, e.to_string()));
             return mark_unresolved(fm, code);
         }
     };

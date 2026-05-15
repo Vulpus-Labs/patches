@@ -11,6 +11,7 @@ fn unknown_type_name_returns_interpret_error() {
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 10, 20)),
         param_block_span: None,
+        type_name_span: None,
     }];
     let err = build(&flat, &registry(), &env()).unwrap_err();
     assert!(err.message.contains("NonExistentModule"));
@@ -78,6 +79,7 @@ fn graph_error_wrapped_with_span() {
             port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
         sum_module("mix", 1),
     ];
@@ -97,14 +99,14 @@ fn graph_error_wrapped_with_span() {
         },
     ];
     let err = build(&flat, &registry(), &env()).unwrap_err();
-    // Note: the `polyosc.sine` source is poly while `osc1.sine` is mono;
-    // the per-edge bind already rejects this with `CableKindMismatch`
-    // (kinds disagree against the mono target). That is the error the
-    // user sees — `HeterogeneousFanIn` only fires when both individual
-    // sources independently bind successfully.
+    // After ADR 0074 the per-edge bind accepts mono Audio → mono and
+    // poly Audio → mono individually, so both sources resolve. The
+    // mismatch surfaces at fan-in coalescing as `HeterogeneousFanIn`
+    // ("mixes incompatible source kinds") because the auto-Sum picker
+    // requires uniform source kinds.
     assert!(
-        err.message.to_lowercase().contains("cable kind") ||
-            err.message.to_lowercase().contains("heterogeneous"),
+        err.message.to_lowercase().contains("incompatible source kinds")
+            || err.message.to_lowercase().contains("cable kind"),
         "expected fan-in / kind-mismatch error, got: {}", err.message,
     );
 }
@@ -124,6 +126,7 @@ fn duplicate_module_id_is_error() {
             port_aliases: vec![],
             provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 30, 33)),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
     let err = build(&flat, &registry(), &env()).unwrap_err();
@@ -194,8 +197,9 @@ fn scale_out_of_range_is_error() {
 }
 
 #[test]
-fn cable_kind_mismatch_mono_to_poly_is_error() {
-    // Osc.sine (mono out) → PolyOsc.voct (poly in): kind mismatch.
+fn mono_audio_to_poly_audio_auto_converts() {
+    // Osc.sine (mono Audio) → PolyOsc.voct (poly Audio): ADR 0074
+    // accepts the edge and inserts a synthetic `MonoToPoly` converter.
     let mut flat = empty_flat();
     flat.modules = vec![
         osc_module("mono_src"),
@@ -207,6 +211,7 @@ fn cable_kind_mismatch_mono_to_poly_is_error() {
             port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
     let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 100, 120));
@@ -222,12 +227,12 @@ fn cable_kind_mismatch_mono_to_poly_is_error() {
         from_provenance: prov.clone(),
         to_provenance: prov,
     }];
-    let err = build(&flat, &registry(), &env()).unwrap_err();
+    let result = build(&flat, &registry(), &env()).expect("build should succeed");
+    let names: Vec<_> = result.graph.node_ids().iter().map(|id| id.to_string()).collect();
     assert!(
-        err.message.to_lowercase().contains("kind") || err.message.to_lowercase().contains("arit"),
-        "expected cable-kind-mismatch error, got: {}", err.message
+        names.iter().any(|n| n.starts_with("__autoconv_poly_dst_voct")),
+        "expected synthetic MonoToPoly converter in graph: {names:?}",
     );
-    assert_eq!(err.span(), Span::new(SourceId::SYNTHETIC, 100, 120));
 }
 
 #[test]
@@ -240,12 +245,14 @@ fn mono_layout_mismatch_audio_to_trigger_is_error() {
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
     let prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 200, 220));
@@ -275,12 +282,14 @@ fn mono_layout_trigger_to_trigger_is_allowed() {
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
     flat.connections = vec![connection("lfo", "reset_out", 0, "arp", "clock", 0)];
@@ -300,6 +309,7 @@ fn unknown_param_name_returns_interpret_error() {
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 1, 5)),
         param_block_span: None,
+        type_name_span: None,
     }];
     let err = build(&flat, &registry(), &env()).unwrap_err();
     assert!(err.message.contains("no_such_param"));
@@ -318,6 +328,7 @@ fn unknown_type_surfaces_as_bind_error() {
         port_aliases: vec![],
         provenance: Provenance::root(Span::new(SourceId::SYNTHETIC, 10, 20)),
         param_block_span: None,
+        type_name_span: None,
     }];
     let bound = bind(&flat, &registry());
     assert_eq!(bound.errors.len(), 1);
@@ -376,6 +387,7 @@ fn fan_in_synthesizes_sum_module() {
         port_aliases: vec![],
         provenance: Provenance::root(span()),
         param_block_span: None,
+        type_name_span: None,
     };
     let dup_prov = Provenance::root(Span::new(SourceId::SYNTHETIC, 50, 60));
     let dup_conn = FlatConnection {
@@ -493,6 +505,9 @@ fn bind_is_canonical_scale_out_of_range() {
 
 #[test]
 fn bind_is_canonical_cable_kind_mismatch() {
+    // Mono Audio source feeding a poly *Trigger* input: mono↔poly
+    // conversion sugar (ADR 0074) only covers Audio↔Audio, so this
+    // remains a `CableKindMismatch`.
     let mut flat = empty_flat();
     flat.modules = vec![
         osc_module("mono_src"),
@@ -501,9 +516,10 @@ fn bind_is_canonical_cable_kind_mismatch() {
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
-    flat.connections = vec![connection("mono_src", "sine", 0, "poly_dst", "voct", 0)];
+    flat.connections = vec![connection("mono_src", "sine", 0, "poly_dst", "sync", 0)];
     let err = build(&flat, &registry(), &env()).unwrap_err();
     assert_bind_source(&err, BindErrorCode::CableKindMismatch);
 }
@@ -517,12 +533,14 @@ fn bind_is_canonical_mono_layout_mismatch() {
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
         FlatModule {
             id: "arp".into(), type_name: "MidiArp".to_string(),
             shape: vec![], params: vec![], port_aliases: vec![],
             provenance: Provenance::root(span()),
             param_block_span: None,
+            type_name_span: None,
         },
     ];
     flat.connections = vec![connection("lfo", "square", 0, "arp", "clock", 0)];

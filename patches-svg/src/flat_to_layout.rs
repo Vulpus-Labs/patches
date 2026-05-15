@@ -30,37 +30,42 @@ pub struct EdgeOrigin(pub usize);
 /// `flat.connections`. Nodes are listed in id-sorted order for stable
 /// output.
 ///
-/// Synthesised auto-Sum modules (`__autosum_*`, ticket 0852) are
-/// collapsed: the synthesised module is omitted from `nodes`, its
-/// outgoing `out → target.port` connection is dropped, and each
-/// incoming `src → autosum.in[i]` is rewritten to land directly on
-/// `target.port`. The collapsed target port is recorded in the target
-/// node's [`GraphShapeHint::summed_input_ports`] so the renderer can draw a
-/// `+` summing-junction glyph in place of the usual input dot. Edges
-/// returned in parallel with [`EdgeOrigin`] entries point back at the
-/// original user-authored connections so hint enrichment can resolve
-/// provenance after the rewrite.
+/// Synthesised auto-Sum (`__autosum_*`, ticket 0852) and auto-conv
+/// (`__autoconv_*`, ADR 0074 / ticket 0892) modules are collapsed: the
+/// synthesised module is omitted from `nodes`, its outgoing `out →
+/// target.port` connection is dropped, and each incoming `src →
+/// synth.in[i]` is rewritten to land directly on `target.port`. For
+/// auto-Sum the collapsed target port is also recorded in the target
+/// node's [`GraphShapeHint::summed_input_ports`] so the renderer can
+/// draw a `+` summing-junction glyph in place of the usual input dot;
+/// auto-conv collapses without a glyph (the conversion is invisible
+/// to the user). Edges returned in parallel with [`EdgeOrigin`] entries
+/// point back at the original user-authored connections so hint
+/// enrichment can resolve provenance after the rewrite.
 pub fn flat_to_layout_input(
     flat: &FlatPatch,
     config: &LayoutConfig,
 ) -> (Vec<LayoutNode>, Vec<LayoutEdge>, Vec<EdgeOrigin>) {
-    // Map each autosum module id to its (target_module, target_port,
-    // target_index) — i.e. the downstream consumer the autosum's `out`
-    // edge feeds. If an autosum has zero or multiple outgoing edges
-    // (defensive: shouldn't happen for well-formed bind output), it is
-    // not collapsed.
-    let mut autosum_target: HashMap<QName, (QName, String, u32)> = HashMap::new();
-    let mut autosum_out_count: HashMap<QName, usize> = HashMap::new();
+    // Map each synthesised (autosum / autoconv) module id to its
+    // (target_module, target_port, target_index) — i.e. the downstream
+    // consumer the synthetic node's `out` edge feeds — plus a flag
+    // recording whether the target port should be rendered with a
+    // summing-junction glyph. If a synthetic has zero or multiple
+    // outgoing edges (defensive: shouldn't happen for well-formed bind
+    // output), it is not collapsed.
+    let mut synth_target: HashMap<QName, (QName, String, u32, bool)> = HashMap::new();
+    let mut synth_out_count: HashMap<QName, usize> = HashMap::new();
     for c in &flat.connections {
-        if c.from_module.is_autosum() {
-            *autosum_out_count.entry(c.from_module.clone()).or_insert(0) += 1;
-            autosum_target.insert(
+        if c.from_module.is_synthetic() {
+            *synth_out_count.entry(c.from_module.clone()).or_insert(0) += 1;
+            let add_summing_glyph = c.from_module.is_autosum();
+            synth_target.insert(
                 c.from_module.clone(),
-                (c.to_module.clone(), c.to_port.clone(), c.to_index),
+                (c.to_module.clone(), c.to_port.clone(), c.to_index, add_summing_glyph),
             );
         }
     }
-    autosum_target.retain(|id, _| autosum_out_count.get(id).copied().unwrap_or(0) == 1);
+    synth_target.retain(|id, _| synth_out_count.get(id).copied().unwrap_or(0) == 1);
 
     let mut inputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
     let mut outputs_by_node: HashMap<QName, Vec<String>> = HashMap::new();
@@ -71,19 +76,21 @@ pub fn flat_to_layout_input(
     let mut edges = Vec::with_capacity(flat.connections.len());
     let mut origins = Vec::with_capacity(flat.connections.len());
     for (idx, c) in flat.connections.iter().enumerate() {
-        // Drop the synthesised `autosum.out → target` edge: the
-        // collapsed fan-in edges below carry the target connection.
-        if c.from_module.is_autosum() && autosum_target.contains_key(&c.from_module) {
+        // Drop the synthesised `synth.out → target` edge: the collapsed
+        // edges below carry the target connection.
+        if c.from_module.is_synthetic() && synth_target.contains_key(&c.from_module) {
             continue;
         }
-        // Rewrite `src → autosum.in[i]` to `src → target.port`.
+        // Rewrite `src → synth.in[i]` to `src → target.port`.
         let (to_module, to_port_name, to_port_index) =
-            if c.to_module.is_autosum() && autosum_target.contains_key(&c.to_module) {
-                let (tm, tp, ti) = &autosum_target[&c.to_module];
-                summed_inputs
-                    .entry(tm.clone())
-                    .or_default()
-                    .insert(port_label(tp, *ti));
+            if c.to_module.is_synthetic() && synth_target.contains_key(&c.to_module) {
+                let (tm, tp, ti, add_summing_glyph) = &synth_target[&c.to_module];
+                if *add_summing_glyph {
+                    summed_inputs
+                        .entry(tm.clone())
+                        .or_default()
+                        .insert(port_label(tp, *ti));
+                }
                 (tm.clone(), tp.clone(), *ti)
             } else {
                 (c.to_module.clone(), c.to_port.clone(), c.to_index)
@@ -114,7 +121,7 @@ pub fn flat_to_layout_input(
     }
 
     let mut modules: Vec<&patches_dsl::FlatModule> =
-        flat.modules.iter().filter(|m| !m.id.is_autosum()).collect();
+        flat.modules.iter().filter(|m| !m.id.is_synthetic()).collect();
     modules.sort_by(|a, b| a.id.cmp(&b.id));
 
     let mut nodes = Vec::with_capacity(modules.len());

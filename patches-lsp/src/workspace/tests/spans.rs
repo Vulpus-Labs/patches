@@ -189,6 +189,65 @@ patch {
 }
 
 #[test]
+fn mono_poly_audio_conv_no_longer_diagnosed() {
+    // ADR 0074 / ticket 0892: mono Audio → poly Audio and the reverse
+    // are now accepted via synthetic `__autoconv_*` modules. The LSP
+    // must no longer emit BN0008 (cable kind mismatch) for either.
+    let src = "\
+patch {
+    module lfo : Lfo
+    module voices : PolyOsc
+    module bus : Sum(1)
+    lfo.sine -> voices.voct
+    voices.sine -> bus.in
+}
+";
+    let tmp = TempDir::new("autoconv_diag");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let diags = ws.analyse_flat(&uri, src.to_string());
+    assert!(
+        diags.iter().all(|d| !matches!(&d.code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(c))
+                if c == "BN0008")),
+        "mono↔poly Audio conversions should be auto-converted, not diagnosed: {diags:?}",
+    );
+}
+
+#[test]
+fn autoconv_hover_does_not_expose_synthetic_name() {
+    // Companion to the autosum hover test: hover on a connection that
+    // gets auto-converted must name the user's modules, never the
+    // synthesised `__autoconv_*` junction.
+    let src = "\
+patch {
+    module lfo : Lfo
+    module voices : PolyOsc
+    lfo.sine -> voices.voct
+}
+";
+    let tmp = TempDir::new("autoconv_hover");
+    tmp.write("a.patches", src);
+    let ws = DocumentWorkspace::new();
+    let uri = tmp.uri("a.patches");
+    let _ = ws.analyse_flat(&uri, src.to_string());
+
+    let needle = "lfo.sine -> voices";
+    let pos = position_at(src, needle, needle.len() - 3);
+    let h = ws.hover(&uri, pos).expect("hover on auto-converted cable");
+    let text = hover_value(&h);
+    assert!(
+        !text.contains("__autoconv"),
+        "hover on `{needle}` leaked synthesised name:\n{text}"
+    );
+    assert!(
+        text.contains("voices"),
+        "hover on `{needle}` should name user's `voices` consumer:\n{text}"
+    );
+}
+
+#[test]
 fn fan_in_hover_does_not_expose_autosum_synthetic_name() {
     // Ticket 0857: synthesised `__autosum_*` modules are an internal
     // bind-stage artifact. User-facing hover surfaces walk the

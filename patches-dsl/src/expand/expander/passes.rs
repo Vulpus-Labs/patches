@@ -109,6 +109,7 @@ pub(in crate::expand) fn translate_modules(
                 .collect();
             let provenance = Provenance::with_chain(decl.span, frame.ctx.call_chain);
             let param_block_span = param_block_span_of(decl);
+            let type_name_span = Some(decl.type_name.span);
             frame.state.flat_modules.push(FlatModule {
                 id: inst_id,
                 type_name: type_name.clone(),
@@ -117,6 +118,7 @@ pub(in crate::expand) fn translate_modules(
                 port_aliases,
                 provenance,
                 param_block_span,
+                type_name_span,
             });
             frame.state.module_names.insert(decl.name.name.clone());
         }

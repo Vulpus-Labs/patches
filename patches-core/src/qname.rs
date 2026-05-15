@@ -14,6 +14,12 @@ use std::fmt;
 /// rather than a user-authored module — see ticket 0857.
 pub const AUTOSUM_PREFIX: &str = "__autosum_";
 
+/// Prefix used by the descriptor-bind kind-conversion pass to name
+/// synthesised `MonoToPoly` / `PolyToMono` modules inserted at accepted
+/// mono↔poly Audio kind mismatches (ADR 0074, ticket 0892). Surface
+/// tools hide these alongside `__autosum_*` via [`QName::is_synthetic`].
+pub const AUTOCONV_PREFIX: &str = "__autoconv_";
+
 /// A qualified identifier: an optional chain of namespace segments plus a
 /// final bare name.
 ///
@@ -55,6 +61,19 @@ impl QName {
     /// should test `name.starts_with(AUTOSUM_PREFIX)` directly.
     pub fn is_autosum(&self) -> bool {
         self.name.starts_with(AUTOSUM_PREFIX)
+    }
+
+    /// True iff this name was synthesised by the kind-conversion bind
+    /// pass for mono↔poly Audio sugar (ADR 0074, ticket 0892).
+    pub fn is_autoconv(&self) -> bool {
+        self.name.starts_with(AUTOCONV_PREFIX)
+    }
+
+    /// Umbrella predicate: true iff this name was synthesised by *any*
+    /// descriptor-bind pass (auto-Sum or auto-conv). Surface tools
+    /// (SVG, LSP, profiler) elide these from user-facing views.
+    pub fn is_synthetic(&self) -> bool {
+        self.is_autosum() || self.is_autoconv()
     }
 }
 

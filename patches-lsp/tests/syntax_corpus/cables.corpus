@@ -64,6 +64,20 @@ module a : AudioOut
 module b : AudioOut
 osc.sine -> a.in, b.in
 
+=== ok mono audio to poly audio auto-broadcast
+# ADR 0074: mono Audio source feeding a poly Audio input is silently
+# converted via a synthetic `__autoconv_*` MonoToPoly — no diagnostic.
+module lfo : Lfo
+module voices : PolyOsc
+lfo.sine -> voices.voct
+
+=== ok poly audio to mono audio auto-sum-fold
+# ADR 0074: poly Audio source feeding a mono Audio input is silently
+# converted via a synthetic `__autoconv_*` PolyToMono — no diagnostic.
+module voices : PolyOsc
+module bus : Sum(1)
+voices.sine -> bus.in
+
 === both_error missing arrow
 module osc : Osc
 module out : AudioOut

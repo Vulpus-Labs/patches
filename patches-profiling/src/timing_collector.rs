@@ -90,33 +90,36 @@ impl TimingCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patches_core::AUTOSUM_PREFIX;
+    use patches_core::{AUTOCONV_PREFIX, AUTOSUM_PREFIX};
 
-    /// Ticket 0857: synthesised auto-Sum modules must not surface in the
-    /// profiler under their `__autosum_*` instance id. The collector is
+    /// Ticket 0857 + ADR 0074: synthesised auto-Sum (`__autosum_*`) and
+    /// auto-conv (`__autoconv_*`) modules must not surface in the
+    /// profiler under their synthetic instance id. The collector is
     /// keyed by `(InstanceId, &'static str)` where the string is the
-    /// module's descriptor *type* name (e.g. `"Sum"`), set by
-    /// [`crate::timing_shim::TimingShim::new`] from
+    /// module's descriptor *type* name (e.g. `"Sum"`, `"MonoToPoly"`),
+    /// set by [`crate::timing_shim::TimingShim::new`] from
     /// `Module::descriptor().module_name`. Per-instance rows therefore
     /// carry the type name and a numeric `InstanceId`; the QName-based
-    /// `__autosum_*` id never reaches this layer. This test pins the
-    /// invariant — should that ever change, the report would start
-    /// leaking synthesised names and the profiler view would diverge
-    /// from the user's authored patch.
+    /// `__autosum_*` / `__autoconv_*` id never reaches this layer.
+    /// This test pins the invariant — should that ever change, the
+    /// report would start leaking synthesised names and the profiler
+    /// view would diverge from the user's authored patch.
     #[test]
-    fn autosum_synthesised_names_do_not_reach_collector() {
+    fn synthesised_names_do_not_reach_collector() {
         let collector = TimingCollector::new();
         let id = InstanceId::next();
-        // The shim records the *type* name. An autosum module is an
-        // instance of `Sum` (or `PolySum`/`StereoSum`); its descriptor
-        // returns the type name, which is what gets recorded here.
+        // The shim records the *type* name. A synthesised node is an
+        // instance of `Sum`/`PolySum`/`StereoSum` (autosum) or
+        // `MonoToPoly`/`PolyToMono` (autoconv); its descriptor returns
+        // the type name, which is what gets recorded here.
         collector.record_process(id, "Sum", 100);
-        collector.record_periodic(id, "Sum", 50);
+        collector.record_periodic(id, "MonoToPoly", 50);
 
         for r in collector.report() {
             assert!(
-                !r.module_name.starts_with(AUTOSUM_PREFIX),
-                "synthesised autosum name leaked into TimingRecord: {}",
+                !r.module_name.starts_with(AUTOSUM_PREFIX)
+                    && !r.module_name.starts_with(AUTOCONV_PREFIX),
+                "synthesised name leaked into TimingRecord: {}",
                 r.module_name
             );
         }

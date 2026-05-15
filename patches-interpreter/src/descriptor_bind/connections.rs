@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use patches_core::{
-    cables::{CableKind, PolyLayout},
+    cables::{CableKind, MonoLayout, PolyLayout},
     PortDescriptor, PortRef, Provenance, QName,
 };
 use patches_dsl::flat::{CableMap, FlatConnection, FlatPortRef, PortDirection};
@@ -161,17 +161,38 @@ pub(super) fn bind_connection(
     };
 
     // Cable kind must match exactly, except for the mono→stereo
-    // broadcast coercion (ADR 0059 §2): a mono Audio source feeding a
-    // stereo input is accepted; the planner replicates the sample on
-    // read.
+    // broadcast coercion (ADR 0059 §2) and the mono↔poly Audio
+    // conversions (ADR 0074): the kind-conversion pass in
+    // descriptor_bind rewrites accepted Audio mismatches through
+    // synthetic `MonoToPoly` / `PolyToMono` modules; the connection
+    // resolves here so that rewrite has something to walk. Poly Audio
+    // → Stereo composes the two: the pass inserts `PolyToMono`, and the
+    // resulting Mono Audio → Stereo edge falls into the broadcast path
+    // at runtime ModuleGraph construction.
     let mono_to_stereo_broadcast = matches!(
         (&from_port_desc.kind, &to_port_desc.kind),
         (CableKind::Mono, CableKind::Stereo),
-    ) && matches!(
-        from_port_desc.mono_layout,
-        patches_core::cables::MonoLayout::Audio,
-    );
-    if from_port_desc.kind != to_port_desc.kind && !mono_to_stereo_broadcast {
+    ) && matches!(from_port_desc.mono_layout, MonoLayout::Audio);
+    let mono_audio_to_poly_audio = matches!(
+        (&from_port_desc.kind, &to_port_desc.kind),
+        (CableKind::Mono, CableKind::Poly),
+    ) && from_port_desc.mono_layout == MonoLayout::Audio
+        && to_port_desc.poly_layout == PolyLayout::Audio;
+    let poly_audio_to_mono_audio = matches!(
+        (&from_port_desc.kind, &to_port_desc.kind),
+        (CableKind::Poly, CableKind::Mono),
+    ) && from_port_desc.poly_layout == PolyLayout::Audio
+        && to_port_desc.mono_layout == MonoLayout::Audio;
+    let poly_audio_to_stereo = matches!(
+        (&from_port_desc.kind, &to_port_desc.kind),
+        (CableKind::Poly, CableKind::Stereo),
+    ) && from_port_desc.poly_layout == PolyLayout::Audio;
+    let kind_conv_accepted =
+        mono_audio_to_poly_audio || poly_audio_to_mono_audio || poly_audio_to_stereo;
+    if from_port_desc.kind != to_port_desc.kind
+        && !mono_to_stereo_broadcast
+        && !kind_conv_accepted
+    {
         errors.push(BindError::new(
             BindErrorCode::CableKindMismatch,
             conn.provenance.clone(),
@@ -188,7 +209,10 @@ pub(super) fn bind_connection(
     }
 
     // Poly layout compatibility (mono-mono is trivially compatible).
+    // Only runs when both endpoints are poly — the mono↔poly Audio
+    // conversions handle layout pairing themselves (Audio↔Audio only).
     if from_port_desc.kind == CableKind::Poly
+        && to_port_desc.kind == CableKind::Poly
         && !from_port_desc.poly_layout.compatible_with(to_port_desc.poly_layout)
     {
         errors.push(BindError::new(

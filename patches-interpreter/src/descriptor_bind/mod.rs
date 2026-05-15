@@ -36,6 +36,7 @@
 pub mod connections;
 pub mod errors;
 mod fan_in;
+mod kind_conv;
 pub mod modules;
 
 pub use connections::{
@@ -210,6 +211,13 @@ pub fn bind_with_base_dir(
     // satisfy that invariant.
     fan_in::coalesce_fan_in(&mut modules, &mut connections, registry, &mut errors);
 
+    // Auto-convert accepted mono↔poly Audio kind mismatches (ADR 0074)
+    // by inserting synthesised `MonoToPoly` / `PolyToMono` instances.
+    // Runs *after* fan-in so a fan-in sum whose output kind disagrees
+    // with the target also gets a converter inserted on its sum→target
+    // edge.
+    kind_conv::coalesce_kind_conv(&mut modules, &mut connections, registry, &mut errors);
+
     BoundPatch {
         graph: BoundGraph { modules, connections, port_refs, errors },
         song_data: flat.song_data.clone(),
@@ -244,6 +252,7 @@ mod tests {
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
             param_block_span: None,
+            type_name_span: None,
         }
     }
 
@@ -256,6 +265,7 @@ mod tests {
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
             param_block_span: None,
+            type_name_span: None,
         }
     }
 
@@ -297,6 +307,7 @@ mod tests {
             port_aliases: vec![],
             provenance: CoreProv::root(Span::new(SourceId::SYNTHETIC, 5, 10)),
             param_block_span: None,
+            type_name_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
@@ -337,6 +348,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: CoreProv::root(syn()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "b".into(),
@@ -346,6 +358,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: CoreProv::root(syn()),
                 param_block_span: None,
+                type_name_span: None,
             },
         ];
         let bound = bind(&flat, &registry());
@@ -363,6 +376,7 @@ mod tests {
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
             param_block_span: None,
+            type_name_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
@@ -405,6 +419,7 @@ mod tests {
             port_aliases: vec![],
             provenance: CoreProv::root(syn()),
             param_block_span: None,
+            type_name_span: None,
         }];
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
@@ -507,6 +522,218 @@ mod tests {
         source_scales.sort_by(|x, y| x.partial_cmp(y).unwrap());
         assert_eq!(source_scales, vec![0.25, 0.75]);
         assert_eq!(sum_to_mix_scale, Some(1.0));
+    }
+
+    // ── Auto-conversion of mono↔poly Audio (ADR 0074, ticket 0892) ────
+
+    fn poly_osc(id: &str) -> FlatModule {
+        FlatModule {
+            id: id.into(),
+            type_name: "PolyOsc".into(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: CoreProv::root(syn()),
+            param_block_span: None,
+            type_name_span: None,
+        }
+    }
+
+    fn mono_to_poly(id: &str) -> FlatModule {
+        FlatModule {
+            id: id.into(),
+            type_name: "MonoToPoly".into(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: CoreProv::root(syn()),
+            param_block_span: None,
+            type_name_span: None,
+        }
+    }
+
+    #[test]
+    fn mono_audio_to_poly_audio_synthesizes_monotopoly() {
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("src"), poly_osc("dst")];
+        flat.connections = vec![conn("src", "sine", "dst", "voct")];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+
+        let conv = bound
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                BoundModule::Resolved(r) if r.id.is_autoconv() => Some(r),
+                _ => None,
+            })
+            .expect("auto-conv module synthesised");
+        assert_eq!(conv.type_name, "MonoToPoly");
+        assert!(conv.id.name.starts_with("__autoconv_dst_voct"));
+        // Original edge replaced by src→conv and conv→dst.
+        assert_eq!(bound.connections.len(), 2);
+        let mut saw_src_to_conv = false;
+        let mut saw_conv_to_dst = false;
+        for bc in &bound.connections {
+            let BoundConnection::Resolved(rc) = bc else { panic!() };
+            if rc.from_module == QName::bare("src") && rc.to_module == conv.id {
+                saw_src_to_conv = true;
+            }
+            if rc.from_module == conv.id && rc.to_module == QName::bare("dst") {
+                saw_conv_to_dst = true;
+            }
+        }
+        assert!(saw_src_to_conv && saw_conv_to_dst);
+    }
+
+    #[test]
+    fn poly_audio_to_mono_audio_synthesizes_polytomono() {
+        // PolyOsc.sine (poly Audio) → Sum.in (mono Audio).
+        let mut flat = empty_flat();
+        flat.modules = vec![poly_osc("voices"), sum("mix", 1)];
+        flat.connections = vec![conn("voices", "sine", "mix", "in")];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+
+        let conv = bound
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                BoundModule::Resolved(r) if r.id.is_autoconv() => Some(r),
+                _ => None,
+            })
+            .expect("auto-conv module synthesised");
+        assert_eq!(conv.type_name, "PolyToMono");
+        assert!(conv.id.name.starts_with("__autoconv_mix_in"));
+        assert_eq!(bound.connections.len(), 2);
+    }
+
+    #[test]
+    fn mono_to_poly_trigger_still_rejected() {
+        // Mono Audio → poly Trigger is not Audio↔Audio; stays rejected.
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("src"), poly_osc("dst")];
+        flat.connections = vec![conn("src", "sine", "dst", "sync")];
+        let bound = bind(&flat, &registry());
+        assert!(!bound.errors.is_empty());
+        assert_eq!(bound.errors[0].code, BindErrorCode::CableKindMismatch);
+        let synth = bound
+            .modules
+            .iter()
+            .any(|m| matches!(m, BoundModule::Resolved(r) if r.id.is_autoconv()));
+        assert!(!synth, "no auto-conv module should be created");
+    }
+
+    #[test]
+    fn explicit_monotopoly_does_not_double_convert() {
+        // User-written MonoToPoly between mono src and poly dst is two
+        // kind-matching edges; auto-conv must not fire.
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("src"), mono_to_poly("m2p"), poly_osc("dst")];
+        flat.connections = vec![
+            conn("src", "sine", "m2p", "in"),
+            conn("m2p", "out", "dst", "voct"),
+        ];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let synth_count = bound
+            .modules
+            .iter()
+            .filter(|m| matches!(m, BoundModule::Resolved(r) if r.id.is_autoconv()))
+            .count();
+        assert_eq!(synth_count, 0);
+        assert_eq!(bound.connections.len(), 2);
+    }
+
+    #[test]
+    fn poly_fanin_into_mono_inserts_polysum_then_autoconv() {
+        // Two poly Audio sources fan into a mono Audio input.
+        // fan_in synthesises PolySum (output poly Audio); kind_conv then
+        // inserts PolyToMono on the sum→target edge.
+        let mut flat = empty_flat();
+        flat.modules = vec![poly_osc("a"), poly_osc("b"), sum("mix", 1)];
+        flat.connections = vec![
+            conn("a", "sine", "mix", "in"),
+            conn("b", "sine", "mix", "in"),
+        ];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let has_polysum = bound.modules.iter().any(|m| matches!(
+            m, BoundModule::Resolved(r) if r.type_name == "PolySum" && r.id.is_autosum()
+        ));
+        let has_polytomono = bound.modules.iter().any(|m| matches!(
+            m, BoundModule::Resolved(r) if r.type_name == "PolyToMono" && r.id.is_autoconv()
+        ));
+        assert!(has_polysum, "expected synth PolySum from fan-in");
+        assert!(has_polytomono, "expected synth PolyToMono from kind-conv after fan-in");
+    }
+
+    #[test]
+    fn two_consumers_each_get_their_own_converter() {
+        // mono src drives two poly dst voct inputs. Each edge converts
+        // independently — ADR 0074 doesn't share converters across
+        // consumers (fusion makes the duplication free).
+        let mut flat = empty_flat();
+        flat.modules = vec![osc("src"), poly_osc("a"), poly_osc("b")];
+        flat.connections = vec![
+            conn("src", "sine", "a", "voct"),
+            conn("src", "sine", "b", "voct"),
+        ];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+        let synth_count = bound
+            .modules
+            .iter()
+            .filter(|m| matches!(m, BoundModule::Resolved(r) if r.id.is_autoconv()))
+            .count();
+        assert_eq!(synth_count, 2);
+    }
+
+    #[test]
+    fn poly_audio_to_stereo_synthesizes_polytomono() {
+        // PolyOsc.sine (poly Audio) → FdnReverb.in (stereo): ADR 0074 §
+        // poly→stereo case. Auto-conv inserts PolyToMono; the remaining
+        // mono→stereo edge is broadcast-coerced at runtime ModuleGraph
+        // construction.
+        let verb = FlatModule {
+            id: "verb".into(),
+            type_name: "FdnReverb".into(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: CoreProv::root(syn()),
+            param_block_span: None,
+            type_name_span: None,
+        };
+        let mut flat = empty_flat();
+        flat.modules = vec![poly_osc("voices"), verb];
+        flat.connections = vec![conn("voices", "sine", "verb", "in")];
+        let bound = bind(&flat, &registry());
+        assert!(bound.errors.is_empty(), "unexpected errors: {:?}", bound.errors);
+
+        let conv = bound
+            .modules
+            .iter()
+            .find_map(|m| match m {
+                BoundModule::Resolved(r) if r.id.is_autoconv() => Some(r),
+                _ => None,
+            })
+            .expect("auto-conv module synthesised");
+        assert_eq!(conv.type_name, "PolyToMono");
+        assert!(conv.id.name.starts_with("__autoconv_verb_in"));
+        assert_eq!(bound.connections.len(), 2);
+
+        // The synthesised conv→target edge is Mono→Stereo (broadcast).
+        let mut saw_conv_to_stereo = false;
+        for bc in &bound.connections {
+            let BoundConnection::Resolved(rc) = bc else { panic!() };
+            if rc.from_module == conv.id {
+                assert_eq!(rc.from_kind, patches_core::cables::CableKind::Mono);
+                assert_eq!(rc.to_kind, patches_core::cables::CableKind::Stereo);
+                saw_conv_to_stereo = true;
+            }
+        }
+        assert!(saw_conv_to_stereo);
     }
 
     #[test]

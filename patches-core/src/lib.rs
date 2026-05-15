@@ -142,7 +142,7 @@ pub use host_control::{
 };
 pub use midi::{MidiEvent, MidiMessage};
 pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
-pub use qname::{QName, AUTOSUM_PREFIX};
+pub use qname::{QName, AUTOCONV_PREFIX, AUTOSUM_PREFIX};
 pub use tracker::{TrackerData, PatternBank, SongBank, Pattern, Song, ReceivesTrackerData};
 pub use tracker::Step as TrackerStep;
 pub use modules::{describe_for, validate_and_pack, validate_parameters, Module, PortConnectivity, ValidatedParamFrame};

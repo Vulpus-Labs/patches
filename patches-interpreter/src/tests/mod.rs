@@ -35,6 +35,7 @@ pub(super) fn osc_module(id: &str) -> FlatModule {
         port_aliases: vec![],
         provenance: Provenance::root(span()),
         param_block_span: None,
+        type_name_span: None,
     }
 }
 
@@ -47,6 +48,7 @@ pub(super) fn sum_module(id: &str, channels: i64) -> FlatModule {
         port_aliases: vec![],
         provenance: Provenance::root(span()),
         param_block_span: None,
+        type_name_span: None,
     }
 }
 

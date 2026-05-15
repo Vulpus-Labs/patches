@@ -27,6 +27,11 @@ pub struct FlatModule {
     /// the search scope for the offending key beyond `provenance.site`
     /// (which is intentionally narrow — `name : type_name`).
     pub param_block_span: Option<patches_core::source_span::Span>,
+    /// Source span covering just the `type_name` identifier on the RHS of
+    /// `name : type_name`. Used to narrow the `UnknownModuleType` squiggle
+    /// to the offending type token, rather than `provenance.site` which
+    /// covers the wider `name : type_name` range.
+    pub type_name_span: Option<patches_core::source_span::Span>,
     /// Index → alias name for indexed ports declared via shape alias lists
     /// (e.g. `(channels: [drums, bass])`). Used by downstream diagnostics so
     /// "available ports" lists can show user-visible alias labels rather than

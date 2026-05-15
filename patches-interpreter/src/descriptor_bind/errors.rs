@@ -44,6 +44,10 @@ pub enum BindErrorCode {
     /// `Sum` / `PolySum` / `StereoSum` module needed to synthesize the
     /// merge node.
     AutoSumModuleMissing,
+    /// Auto-conversion required for an accepted mono↔poly Audio edge
+    /// (ADR 0074) but the registry is missing the `MonoToPoly` /
+    /// `PolyToMono` module needed to synthesise the converter.
+    AutoConvModuleMissing,
 }
 
 impl BindErrorCode {
@@ -62,6 +66,7 @@ impl BindErrorCode {
             Self::MonoLayoutMismatch => "BN0013",
             Self::HeterogeneousFanIn => "BN0014",
             Self::AutoSumModuleMissing => "BN0015",
+            Self::AutoConvModuleMissing => "BN0016",
         }
     }
 
@@ -80,6 +85,7 @@ impl BindErrorCode {
             Self::MonoLayoutMismatch => "mono layout mismatch",
             Self::HeterogeneousFanIn => "heterogeneous fan-in",
             Self::AutoSumModuleMissing => "auto-sum module missing from registry",
+            Self::AutoConvModuleMissing => "auto-conv module missing from registry",
         }
     }
 }

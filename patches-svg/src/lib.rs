@@ -132,6 +132,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "vca".into(),
@@ -141,6 +142,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {
@@ -212,6 +214,7 @@ mod tests {
             port_aliases: vec![],
             provenance: Provenance::root(synthetic_span()),
             param_block_span: None,
+            type_name_span: None,
         }];
         let svg = render(&patch, &SvgOptions::default());
         assert!(svg.contains("a&amp;b : &lt;Odd&gt;"));
@@ -289,6 +292,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "b".into(),
@@ -298,6 +302,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {
@@ -332,6 +337,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "b".into(),
@@ -341,6 +347,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "mix".into(),
@@ -350,6 +357,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "__autosum_mix_in".into(),
@@ -359,6 +367,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
         ];
         let edge = |from: &str, fp: &str, to: &str, tp: &str, ti: u32| FlatConnection {
@@ -436,6 +445,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
             FlatModule {
                 id: "sink".into(),
@@ -445,6 +455,7 @@ mod tests {
                 port_aliases: vec![],
                 provenance: Provenance::root(synthetic_span()),
                 param_block_span: None,
+                type_name_span: None,
             },
         ];
         patch.graph.connections = vec![FlatConnection {
