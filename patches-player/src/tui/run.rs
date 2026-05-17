@@ -111,10 +111,8 @@ fn handle_key(view: &mut View, code: KeyCode) -> Option<LoopOutcome> {
         KeyCode::Char('2') => view.tab = Tab::Meters,
         KeyCode::Char('3') => view.tab = Tab::Spectrum,
         KeyCode::Char('4') => view.tab = Tab::Scope,
-        KeyCode::Char('5') => {
-            if view.cpu_snapshot.is_some() {
-                view.tab = Tab::Cpu;
-            }
+        KeyCode::Char('5') if view.cpu_snapshot.is_some() => {
+            view.tab = Tab::Cpu;
         }
         KeyCode::Tab => cycle_tab(view),
         KeyCode::Char('z') => toggle_scope_snap(view),

@@ -149,15 +149,15 @@ pub fn draw_splash(
                 let x = (ox + cx) as u16;
                 let y = (oy + cy) as u16;
                 let Some(cell) = buf.cell_mut((x, y)) else { continue };
-                if lit == 0 {
-                    cell.set_char(' ').set_style(Style::default());
-                } else {
-                    let r = (sum_r / lit) as u8;
-                    let g = (sum_g / lit) as u8;
-                    let b = (sum_b / lit) as u8;
-                    let glyph = char::from_u32(0x2800 + mask).unwrap_or(' ');
-                    cell.set_char(glyph)
-                        .set_style(Style::default().fg(Color::Rgb(r, g, b)));
+                match sum_r.checked_div(lit).zip(sum_g.checked_div(lit)).zip(sum_b.checked_div(lit)) {
+                    None => {
+                        cell.set_char(' ').set_style(Style::default());
+                    }
+                    Some(((r, g), b)) => {
+                        let glyph = char::from_u32(0x2800 + mask).unwrap_or(' ');
+                        cell.set_char(glyph)
+                            .set_style(Style::default().fg(Color::Rgb(r as u8, g as u8, b as u8)));
+                    }
                 }
             }
         }
