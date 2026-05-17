@@ -111,7 +111,7 @@ fn adopt_plan(plan: &mut ExecutionPlan, stale: &mut StaleState) {
         let _ = pool.tombstone(idx);
     }
     let states = std::mem::take(&mut plan.new_module_param_state);
-    for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+    for ((idx, m), ps) in plan.new_modules.drain(..).zip(states) {
         pool.install(idx, m, ps);
     }
 }

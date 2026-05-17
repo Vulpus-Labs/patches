@@ -83,7 +83,7 @@ mod builder {
             .expect("build should succeed");
         let mut module_pool = ModulePool::new(256);
         let states = std::mem::take(&mut plan.new_module_param_state);
-        for ((idx, m), ps) in plan.new_modules.drain(..).zip(states.into_iter()) {
+        for ((idx, m), ps) in plan.new_modules.drain(..).zip(states) {
             module_pool.install(idx, m, ps);
         }
         (plan, state, module_pool)

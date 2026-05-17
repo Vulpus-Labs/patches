@@ -74,35 +74,33 @@ fn validate_module_params(
             ast::ParamEntry::KeyValue {
                 name: Some(param_name),
                 ..
-            } => {
-                if !desc.has_parameter(&param_name.name) {
-                    let replacements = crate::lsp_util::rank_suggestions(
-                        &param_name.name,
-                        desc.parameter_names(),
-                        3,
-                    );
-                    let known = desc.parameter_names().join(", ");
-                    let message = match replacements.first() {
-                        Some(first) => format!(
-                            "unknown parameter '{}' on module '{}'. Did you mean '{}'? Known parameters: {}",
-                            param_name.name, name, first, known
-                        ),
-                        None if !known.is_empty() => format!(
-                            "unknown parameter '{}' on module '{}'. Known parameters: {}",
-                            param_name.name, name, known
-                        ),
-                        None => format!(
-                            "unknown parameter '{}' on module '{}'",
-                            param_name.name, name
-                        ),
-                    };
-                    diags.push(Diagnostic {
-                        kind: crate::ast_builder::DiagnosticKind::UnknownParameter,
-                        span: param_name.span,
-                        message,
-                        replacements,
-                    });
-                }
+            } if !desc.has_parameter(&param_name.name) => {
+                let replacements = crate::lsp_util::rank_suggestions(
+                    &param_name.name,
+                    desc.parameter_names(),
+                    3,
+                );
+                let known = desc.parameter_names().join(", ");
+                let message = match replacements.first() {
+                    Some(first) => format!(
+                        "unknown parameter '{}' on module '{}'. Did you mean '{}'? Known parameters: {}",
+                        param_name.name, name, first, known
+                    ),
+                    None if !known.is_empty() => format!(
+                        "unknown parameter '{}' on module '{}'. Known parameters: {}",
+                        param_name.name, name, known
+                    ),
+                    None => format!(
+                        "unknown parameter '{}' on module '{}'",
+                        param_name.name, name
+                    ),
+                };
+                diags.push(Diagnostic {
+                    kind: crate::ast_builder::DiagnosticKind::UnknownParameter,
+                    span: param_name.span,
+                    message,
+                    replacements,
+                });
             }
             ast::ParamEntry::AtBlock { .. } => {
                 // At-blocks desugar to indexed params — name validation would
