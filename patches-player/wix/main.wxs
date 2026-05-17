@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Patches Windows MSI installer (ticket 0900).
+
+  Built via cargo-wix from the patches-player crate directory:
+
+      cargo wix --no-build --install-version <semver>
+
+  CI stages binaries, manual PDF, LICENSE, and examples into
+  $(var.StagingDir) and runs `heat` to harvest the examples tree into
+  wix/examples.wxs (providing ComponentGroup CG.Examples) before
+  candle/light run.
+
+  The UpgradeCode below is fixed for the lifetime of the product and
+  MUST NOT change between releases — it is how Windows recognises a
+  newer MSI as an upgrade of an installed older version.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Patches"
+    Manufacturer="Patches"
+    Language="1033"
+    Codepage="1252"
+    Version="$(var.Version)"
+    UpgradeCode="05D81327-68AE-4F1F-A3C3-573B7C9767A8">
+
+    <Package
+      Id="*"
+      Keywords="Installer"
+      Description="Patches modular audio synthesis system"
+      Manufacturer="Patches"
+      InstallerVersion="500"
+      Languages="1033"
+      Compressed="yes"
+      InstallScope="perMachine"
+      SummaryCodepage="1252" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <Icon Id="ProductIcon.ico" SourceFile="$(var.IconSource)" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/vulpus-labs/patches" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <Feature Id="Complete" Title="Patches" Level="1" Display="expand">
+      <ComponentGroupRef Id="CG.Player" />
+      <ComponentGroupRef Id="CG.Clap" />
+      <ComponentGroupRef Id="CG.Examples" />
+      <ComponentGroupRef Id="CG.Shortcuts" />
+      <ComponentGroupRef Id="CG.FileAssoc" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="Patches" />
+      </Directory>
+      <!--
+        CommonFiles64Folder = %CommonProgramFiles% on x64 Windows,
+        which the CLAP spec lists as a default scan location.
+      -->
+      <Directory Id="CommonFiles64Folder">
+        <Directory Id="ClapDir" Name="CLAP" />
+      </Directory>
+      <!--
+        CommonDocumentsFolder = %PUBLIC%\Documents — visible to every
+        user under "Documents" in File Explorer. Per-machine MSIs
+        cannot reliably target an individual user's profile; see the
+        ticket's "My Documents vs Public Documents" note.
+      -->
+      <Directory Id="CommonDocumentsFolder">
+        <Directory Id="PubDocsPatches" Name="Patches">
+          <Directory Id="PubDocsPatchesExamples" Name="examples" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="StartMenuDir" Name="Patches" />
+      </Directory>
+    </Directory>
+
+    <ComponentGroup Id="CG.Player" Directory="INSTALLDIR">
+      <Component Id="CmpPatchPlayer" Guid="*">
+        <File Id="FilePatchPlayer"
+              Source="$(var.StagingDir)\patch_player.exe"
+              KeyPath="yes" />
+        <!--
+          App Paths: lets `patch_player` resolve from any cmd /
+          PowerShell prompt without manual PATH editing.
+        -->
+        <RegistryKey Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\App Paths\patch_player.exe">
+          <RegistryValue Type="string" Value="[#FilePatchPlayer]" />
+          <RegistryValue Name="Path" Type="string" Value="[INSTALLDIR]" />
+        </RegistryKey>
+      </Component>
+      <Component Id="CmpManual" Guid="*">
+        <File Id="FileManual"
+              Source="$(var.StagingDir)\patches-manual.pdf"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="CmpLicense" Guid="*">
+        <File Source="$(var.StagingDir)\LICENSE.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="CG.Clap" Directory="ClapDir">
+      <Component Id="CmpClap" Guid="*">
+        <File Id="FilePatchesClap"
+              Source="$(var.StagingDir)\Patches.clap"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="CG.Shortcuts" Directory="StartMenuDir">
+      <Component Id="CmpStartMenu" Guid="*">
+        <!--
+          Non-advertised shortcut to a folder. The RegistryValue
+          below is the component's KeyPath; the Shortcut targets the
+          PubDocsPatchesExamples directory.
+        -->
+        <Shortcut Id="ScExamples"
+                  Name="Patches Examples"
+                  Description="Bundled Patches example files"
+                  Target="[PubDocsPatchesExamples]"
+                  WorkingDirectory="PubDocsPatchesExamples" />
+        <Shortcut Id="ScManual"
+                  Name="Patches Manual"
+                  Description="Patches user manual (PDF)"
+                  Target="[#FileManual]"
+                  WorkingDirectory="INSTALLDIR" />
+        <RemoveFolder Id="RmStartMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Patches\StartMenu"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="CG.FileAssoc" Directory="INSTALLDIR">
+      <Component Id="CmpFileAssoc" Guid="*">
+        <RegistryKey Root="HKLM" Key="Software\Classes\.patches">
+          <RegistryValue Type="string" Value="Patches.patchfile" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Patches.patchfile">
+          <RegistryValue Type="string" Value="Patches Patch" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Patches.patchfile\DefaultIcon">
+          <RegistryValue Type="string" Value="[#FilePatchPlayer],0" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Patches.patchfile\shell\open\command">
+          <RegistryValue Type="string" Value="&quot;[#FilePatchPlayer]&quot; &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM"
+                     Key="Software\Classes\Applications\patch_player.exe\SupportedTypes">
+          <RegistryValue Name=".patches" Type="string" Value="" />
+        </RegistryKey>
+        <RegistryValue Root="HKLM"
+                       Key="Software\Patches\FileAssoc"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      PubDocsPatches / PubDocsPatchesExamples need an explicit
+      "remove if empty" so user-added patches survive uninstall.
+      The component lives in INSTALLDIR but creates and tears down
+      the public-docs folders. CG.Examples (heat-harvested) installs
+      example files into PubDocsPatchesExamples.
+    -->
+    <DirectoryRef Id="PubDocsPatchesExamples">
+      <Component Id="CmpExamplesDir" Guid="*">
+        <CreateFolder />
+        <RemoveFolder Id="RmExamplesDir" On="uninstall" />
+        <RemoveFolder Id="RmPubDocsPatches"
+                      Directory="PubDocsPatches"
+                      On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Patches\PubDocs"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="ExamplesDir" Title="ExamplesDir" Level="1" Display="hidden">
+      <ComponentRef Id="CmpExamplesDir" />
+    </Feature>
+  </Product>
+</Wix>

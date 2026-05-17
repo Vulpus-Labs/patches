@@ -165,6 +165,99 @@ jobs:
           path: "*.vsix"
           if-no-files-found: error
 
+  build-windows-msi:
+    name: Build Windows MSI
+    # Skip on prerelease tags (e.g. v0.7.3-rc.1). Windows Installer
+    # Version is strictly numeric MAJOR.MINOR.BUILD — SemVer prerelease
+    # suffixes are rejected by cargo-wix --install-version.
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [build-windows, build-docs]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked --version "^0.3"
+
+      - name: Download Windows binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-windows-x86_64
+          path: artifacts/windows
+
+      - name: Download docs PDF
+        uses: actions/download-artifact@v4
+        with:
+          name: release-docs-pdf
+          path: artifacts/docs
+
+      - name: Stage MSI inputs
+        # MSI sources are resolved relative to candle.exe's cwd (the
+        # patches-player package dir), so everything is staged under
+        # patches-player/wix/staging/. CLAUDE.md sits next to the
+        # example .patches files but is editor scaffolding, not user
+        # content — strip it so it doesn't end up in Public Documents.
+        shell: bash
+        run: |
+          set -e
+          STAGE=patches-player/wix/staging
+          mkdir -p "$STAGE/examples"
+          cp artifacts/windows/patch_player.exe "$STAGE/"
+          cp artifacts/windows/Patches.clap     "$STAGE/"
+          cp artifacts/docs/patches-manual.pdf  "$STAGE/"
+          cp LICENSE                            "$STAGE/LICENSE.txt"
+          cp -r examples/. "$STAGE/examples/"
+          rm -f "$STAGE/examples/CLAUDE.md"
+
+      - name: Harvest examples with heat
+        # Generates patches-player/wix/examples.wxs containing the
+        # ComponentGroup CG.Examples referenced by main.wxs. Using a
+        # var.ExamplesSource indirection so the heat-time path and
+        # candle-time path can differ if we ever re-stage.
+        shell: pwsh
+        run: |
+          $heat = Join-Path $env:WIX 'bin\heat.exe'
+          & $heat dir 'patches-player\wix\staging\examples' `
+            -nologo `
+            -cg CG.Examples `
+            -dr PubDocsPatchesExamples `
+            -var var.ExamplesSource `
+            -gg -g1 -sfrag -srd -scom -sreg `
+            -out 'patches-player\wix\examples.wxs'
+
+      - name: Build MSI
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $ver = $env:REF_NAME -replace '^v',''
+          $msi = "patches-$ver-windows-x86_64.msi"
+          cargo wix `
+            --package patches-player `
+            --no-build `
+            --nocapture `
+            --install-version $ver `
+            -C '-arch' -C 'x64' `
+            -C '-dStagingDir=wix\staging' `
+            -C '-dExamplesSource=wix\staging\examples' `
+            -C '-dIconSource=..\assets\patches.ico' `
+            -o "$msi"
+          # Move to a predictable artifact location.
+          New-Item -ItemType Directory -Force -Path msi-out | Out-Null
+          Move-Item $msi msi-out\
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-msi
+          path: msi-out/*.msi
+          if-no-files-found: error
+
   build-docs:
     name: Build PDF docs
     runs-on: ubuntu-latest
@@ -197,7 +290,18 @@ jobs:
 
   package-and-release:
     name: Package and publish release
-    needs: [build-windows, build-macos, build-vsix, build-docs]
+    # build-windows-msi is a need so we don't race it on stable tags;
+    # the `if` below tolerates its skipped state on prerelease tags
+    # (where MSI is intentionally not built — see that job's `if`).
+    needs: [build-windows, build-windows-msi, build-macos, build-vsix, build-docs]
+    if: >-
+      always()
+      && needs.build-windows.result == 'success'
+      && needs.build-macos.result == 'success'
+      && needs.build-vsix.result == 'success'
+      && needs.build-docs.result == 'success'
+      && (needs.build-windows-msi.result == 'success'
+          || needs.build-windows-msi.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -251,11 +355,18 @@ jobs:
           stage_common "${MAC_X64_DIR}"
           tar -czf "${MAC_X64_DIR}.tar.gz" "${MAC_X64_DIR}"
 
+          # MSI shipped alongside the zip on stable releases — skipped
+          # on prerelease tags, so guard the copy.
+          if [ -d artifacts/release-windows-msi ]; then
+            cp artifacts/release-windows-msi/*.msi .
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             patches-*-windows-x86_64.zip
+            patches-*-windows-x86_64.msi
             patches-*-macos-aarch64.tar.gz
             patches-*-macos-x86_64.tar.gz
           generate_release_notes: true

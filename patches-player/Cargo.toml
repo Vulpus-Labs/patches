@@ -1,6 +1,6 @@
 [package]
 name = "patches-player"
-version = "0.6.0"
+version = "0.7.3-rc.1"
 edition = "2021"
 publish = false
 
@@ -36,7 +36,24 @@ tempfile = "3"
 # a const RGB array (see build.rs). No runtime image dep.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
+[target.'cfg(windows)'.build-dependencies]
+# Embeds patches.ico into patch_player.exe as resource index 0 so the
+# .patches file-association DefaultIcon (set by the MSI installer,
+# ticket 0900) resolves to a real icon.
+winresource = "0.1"
+
 [features]
 default = []
 # Install the audio-thread allocator trap (ADR 0045 spike 4). Debug-only.
 audio-thread-allocator-trap = ["patches-alloc-trap/audio-thread-allocator-trap"]
+
+# cargo-wix configuration. The MSI manifest lives in wix/main.wxs; this
+# table is what `cargo wix` consults for product naming and licence. The
+# UpgradeCode GUID is in main.wxs and must remain stable across releases.
+[package.metadata.wix]
+name = "Patches"
+product-name = "Patches"
+no-build = true
+# license is omitted: cargo-wix would otherwise try to render an RTF
+# from a license-file pointed to here; we ship the workspace LICENSE
+# verbatim via the Cmp.License component instead.
