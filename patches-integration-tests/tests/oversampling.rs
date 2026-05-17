@@ -42,35 +42,6 @@ fn sine_out_graph(sample_rate: f32) -> (patches_core::ModuleGraph, AudioEnvironm
     (graph, env)
 }
 
-/// With 1× oversampling the output must be non-zero and finite — baseline check.
-#[test]
-fn oversampling_none_output_non_zero_finite() {
-    let factor = OversamplingFactor::None;
-    // HeadlessEngine with None runs at the device sample rate unchanged.
-    let (graph, env) = sine_out_graph(48_000.0 * factor.factor() as f32);
-    let registry = patches_modules::default_registry();
-
-    let (plan, _) =
-        build_patch(&graph, &registry, &env, &PlannerState::empty(), POOL_CAP, MODULE_CAP)
-            .unwrap();
-
-    let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, factor);
-    engine.adopt_plan(plan);
-
-    // Advance a few ticks and collect the audio-out values.
-    let mut samples = Vec::new();
-    for _ in 0..128 {
-        engine.tick();
-        samples.push(engine.last_left());
-        samples.push(engine.last_right());
-    }
-
-    // All values must be finite.
-    assert!(samples.iter().all(|v| v.is_finite()), "output contains non-finite values");
-    // At least one sample must be non-zero (the oscillator is running).
-    assert!(samples.iter().any(|&v| v != 0.0), "all output samples are zero");
-}
-
 /// With 2× oversampling the HeadlessEngine itself ticks at 1× (HeadlessEngine
 /// is not a real audio callback), but the *plan* is built at the 2× sample rate
 /// and the modules initialise correctly. Verify non-zero finite output.

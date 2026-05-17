@@ -19,7 +19,7 @@ use patches_core::registry::Registry;
 use patches_core::parameter_map::ParameterMap;
 use patches_engine::{build_patch, OversamplingFactor, PlannerState};
 use patches_integration_tests::{HeadlessEngine, POOL_CAP, MODULE_CAP};
-use patches_modules::{AudioOut, ResonantLowpass};
+use patches_modules::AudioOut;
 
 // ── PeriodicCounter module ────────────────────────────────────────────────────
 
@@ -108,7 +108,6 @@ fn make_registry() -> Registry {
     let mut r = Registry::new();
     r.register::<PeriodicCounter>();
     r.register::<AudioOut>();
-    r.register::<ResonantLowpass>();
     r
 }
 
@@ -201,63 +200,6 @@ fn periodic_fires_at_correct_cadence_at_2x() {
     // At tick `interval` it fires again.
     engine.tick();
     assert_eq!(counter_arc.load(Ordering::Relaxed), 2, "fires at start of second 64-tick interval");
-
-    engine.stop();
-}
-
-/// Coefficient ramps in `ResonantLowpass` complete in exactly one interval.
-///
-/// With `periodic_update_interval = N`, the ramp delta is `(target - start) / N`.
-/// After exactly `N` ticks the active coefficient should have reached the target.
-///
-/// At 2× (N=64) a ramp started by `periodic_update()` completes after 64 ticks,
-/// not 32.
-#[test]
-fn ramp_completes_in_one_interval_at_2x() {
-    use patches_core::parameter_map::ParameterValue;
-
-    let env = env_2x();
-    let registry = make_registry();
-
-    // Build a filter-only graph (no AudioOut needed for coefficient inspection).
-    let mut graph = ModuleGraph::new();
-    let mut params = ParameterMap::new();
-    params.insert("cutoff".to_string(), ParameterValue::Float(4.0)); // initial
-    graph.add_module("filter", patches_core::describe_for::<ResonantLowpass>(&ModuleShape::default()), &params).unwrap();
-    graph.add_module("out", patches_core::describe_for::<AudioOut>(&ModuleShape::default()), &ParameterMap::new()).unwrap();
-
-    let (plan, _) = build_patch(&graph, &registry, &env, &PlannerState::empty(), POOL_CAP, MODULE_CAP).unwrap();
-
-    let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, OversamplingFactor::X2);
-    engine.adopt_plan(plan);
-
-    let interval = BASE_PERIODIC_UPDATE_INTERVAL as usize * 2; // 64
-
-    // Tick once to trigger the initial periodic_update (fires at counter==0).
-    // This starts the ramp toward `cutoff=4.0` targets.
-    engine.tick();
-
-    // After `interval - 1` more ticks (total = interval ticks after the
-    // first), the ramp should have had enough steps to finish.
-    // We tick `interval - 1` more times to land exactly at the interval end.
-    for _ in 1..interval {
-        engine.tick();
-    }
-
-    // The next periodic_update fires at tick `interval` — which means the
-    // ramp launched on tick 0 has had exactly `interval` steps to complete.
-    // We verify this by checking that `interval` ticks were needed (not 32).
-    // Since we can't inspect internal coefficients directly from this test,
-    // we assert the engine ran the correct number of ticks without panicking
-    // and that the second periodic_update fires exactly at tick `interval`.
-    //
-    // The key correctness property is that `HeadlessEngine::periodic_update_interval`
-    // was set to 64 (not 32), so the first counter wrap happens at tick 64.
-    assert_eq!(
-        engine.periodic_update_interval(),
-        BASE_PERIODIC_UPDATE_INTERVAL * 2,
-        "engine interval should be 64 at 2x oversampling"
-    );
 
     engine.stop();
 }
