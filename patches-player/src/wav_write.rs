@@ -16,6 +16,7 @@ use std::path::Path;
 /// `channels` is a slice of channel buffers (all must be the same length).
 /// Samples are clamped to [-1, 1] before quantisation. Returns
 /// `ErrorKind::InvalidInput` if `channels` is empty.
+#[allow(dead_code)]
 pub fn write_wav(path: &Path, channels: &[&[f32]], sample_rate: u32) -> io::Result<()> {
     if channels.is_empty() {
         return Err(io::Error::new(

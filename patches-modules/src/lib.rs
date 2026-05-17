@@ -1,3 +1,5 @@
+pub mod tracker_core;
+
 pub mod adsr;
 pub mod audio_in;
 pub mod mixer;

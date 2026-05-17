@@ -9,6 +9,10 @@ publish = false
 name = "patches_svg"
 path = "src/lib.rs"
 
+[[bin]]
+name = "patches-svg"
+path = "src/bin/patches-svg.rs"
+
 [dependencies]
 patches-core = { path = "../patches-core" }
 patches-dsl = { path = "../patches-dsl" }

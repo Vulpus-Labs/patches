@@ -18,8 +18,7 @@ patches-dsl/               PEG parser and template expander for the .patches DSL
 patches-interpreter/       Validates FlatPatch against module registry; builds ModuleGraph
 patches-modules/           Module implementations (oscillators, filters, effects, etc.)
 patches-engine/            Patch builder, sound engine, CPAL integration
-patches-player/            patch_player binary: load a patch, play, hot-reload on change
-patches-io/                I/O integration (audio capture, WAV recording)
+patches-player/            patch_player: play, hot-reload, WAV record
 patches-clap/              CLAP audio plugin (wry webview GUI)
 patches-plugin-common/     GUI-toolkit-agnostic plugin state/helpers
 patches-lsp/               Language Server Protocol for .patches files (used by VS Code extension)

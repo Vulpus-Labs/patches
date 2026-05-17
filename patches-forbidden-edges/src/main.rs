@@ -24,7 +24,6 @@ const LEAF_CRATES: &[&str] = &[
     "patches-player",
     "patches-clap",
     "patches-lsp",
-    "patches-svg-cli",
     "patches-tools",
     "patches-forbidden-edges",
     "patches-vscode",

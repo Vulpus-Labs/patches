@@ -18,7 +18,6 @@ exclude_globs = [
     "patches-lsp/**",
     "patches-ffi/**",
     "patches-ffi-common/**",
-    "patches-io/**",
     "patches-player/**",
     "patches-modules/**",
     "patches-profiling/**",

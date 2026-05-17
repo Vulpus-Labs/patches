@@ -4,7 +4,7 @@
 
 use patches_core::TrackerData;
 
-use crate::ClockBusFrame;
+use super::ClockBusFrame;
 
 /// Per-sample state for the pattern player.
 ///

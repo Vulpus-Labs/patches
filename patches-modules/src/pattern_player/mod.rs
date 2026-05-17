@@ -8,7 +8,7 @@ use patches_core::{
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
-use patches_tracker_core::{ClockBusFrame, PatternPlayerCore};
+use crate::tracker_core::{ClockBusFrame, PatternPlayerCore};
 
 /// A generic multi-channel step sequencer that reads a poly clock bus, steps
 /// through pattern data from `TrackerData`, and outputs cv1/cv2/trigger/gate

@@ -19,7 +19,6 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use patches_cpal::{enumerate_devices, DeviceConfig, SoundEngine};
-use patches_io::wav_recorder::WavRecorder;
 use patches_diagnostics::RenderedDiagnostic;
 use patches_engine::{
     monitor_channel, new_event_queue, EventScheduler, MidiConnector, MonitorAttach,
@@ -33,6 +32,10 @@ mod cpu_monitor;
 mod diagnostic_render;
 mod splash;
 mod tui;
+mod wav_recorder;
+mod wav_write;
+
+use wav_recorder::WavRecorder;
 
 use controller_env::{EnvSideChannel, RatatuiEnv};
 use patches_plugin_common::{
@@ -55,7 +58,7 @@ fn open_record_sink(
     let rate = sound
         .output_rate()
         .ok_or_else(|| std::io::Error::other("device not opened"))?;
-    let (rec, tx) = patches_io::wav_recorder::open(path, rate)?;
+    let (rec, tx) = wav_recorder::open(path, rate)?;
     Ok((Some(rec), Some(tx)))
 }
 

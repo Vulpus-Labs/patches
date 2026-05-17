@@ -215,7 +215,7 @@ impl SoundEngine {
     ///
     /// `record_tx` is an optional `rtrb` producer that receives one `[L, R]`
     /// frame per output sample. The caller owns the consumer side (e.g. a
-    /// WAV writer thread); see `patches_io::wav_recorder` for the canonical
+    /// WAV writer thread); see `wav_recorder` in `patches-player` for the canonical
     /// implementation.
     pub fn start(
         &mut self,

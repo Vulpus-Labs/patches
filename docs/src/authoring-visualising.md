@@ -11,8 +11,8 @@ exposed through:
 - The VS Code extension command **Show Patch Graph**.
 - The LSP `patches/renderSvg` custom request, for any LSP client.
 - The `patches_svg` library crate, for programmatic use.
-- The `patches-svg-cli` workspace crate, which produces a `patches-svg`
-  binary (`publish = false`, build with `cargo build -p patches-svg-cli`).
+- The `patches-svg` binary, shipped by the `patches-svg` workspace crate
+  (`publish = false`, build with `cargo build -p patches-svg --bin patches-svg`).
 
 ## From VS Code
 

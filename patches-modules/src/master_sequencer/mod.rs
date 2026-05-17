@@ -9,7 +9,7 @@ use patches_core::{
 };
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
-use patches_tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
+use crate::tracker_core::{HostTransport, SequencerCore, TickResult, TransportEdges};
 
 mod params;
 use params::params as mp;

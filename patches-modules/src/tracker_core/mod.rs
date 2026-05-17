@@ -1,19 +1,16 @@
 //! Pure state-machine logic for Patches trackers.
 //!
-//! This crate holds the tracker transport/pattern-advance machinery that
-//! was previously embedded in `patches-modules/src/master_sequencer/` and
-//! `patches-modules/src/pattern_player/`. The module wrappers in
-//! `patches-modules` stay thin: port decode, call into a core, port
-//! encode. All state mutation lives here.
+//! This module holds the tracker transport/pattern-advance machinery used
+//! by `master_sequencer` and `pattern_player`. The module wrappers stay
+//! thin: port decode, call into a core, port encode. All state mutation
+//! lives here.
 //!
 //! # Scope: tracker, not DSP
 //!
 //! Tracker logic — pattern advance, step timing, swing, loop
 //! transitions, clock-bus encoding — is not signal processing. It does
 //! not filter, delay, resample, or otherwise transform audio streams.
-//! This crate deliberately lives alongside `patches-dsp` rather than
-//! inside it, so that `patches-dsp` stays a focused home for reusable
-//! DSP building blocks. See ADR 0042.
+//! See ADR 0042.
 //!
 //! Consumers pass `&TrackerData` (from `patches-core`) in as a
 //! parameter; the cores do not own `Arc` handles. `GLOBAL_TRANSPORT`
