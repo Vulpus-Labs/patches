@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Delays &amp; reverb - Patches Manual — v0.5.1</title>
+        <title>Delays &amp; reverb - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -234,6 +234,7 @@ the buffer write before the next sample. N is set by <code>channels</code>.</p>
 <tbody>
 <tr><td><code>in</code></td><td>Mono audio input</td></tr>
 <tr><td><code>drywet_cv</code></td><td>Additive CV for <code>dry_wet</code></td></tr>
+<tr><td><code>sync_ms[0]</code> … <code>sync_ms[n-1]</code></td><td>When connected, overrides <code>delay_ms[i]</code> with the input value in ms</td></tr>
 <tr><td><code>delay_cv[0]</code> … <code>delay_cv[n-1]</code></td><td>Additive CV for delay time (±1 scales ±100%)</td></tr>
 <tr><td><code>gain_cv[0]</code> … <code>gain_cv[n-1]</code></td><td>Additive CV for tap gain</td></tr>
 <tr><td><code>fb_cv[0]</code> … <code>fb_cv[n-1]</code></td><td>Additive CV for feedback amount</td></tr>
@@ -304,15 +305,14 @@ R→L). N is set by <code>channels</code>.</p>
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>in_left</code></td><td>Left audio input</td></tr>
-<tr><td><code>in_right</code></td><td>Right audio input</td></tr>
+<tr><td><code>in</code></td><td>Stereo audio input</td></tr>
 <tr><td><code>drywet_cv</code></td><td>Additive CV for <code>dry_wet</code></td></tr>
+<tr><td><code>sync_ms[0]</code> … <code>sync_ms[n-1]</code></td><td>When connected, overrides <code>delay_ms[i]</code> with the input value in ms</td></tr>
 <tr><td><code>delay_cv[0]</code> … <code>delay_cv[n-1]</code></td><td>Additive CV for delay time</td></tr>
 <tr><td><code>gain_cv[0]</code> … <code>gain_cv[n-1]</code></td><td>Additive CV for tap gain</td></tr>
 <tr><td><code>fb_cv[0]</code> … <code>fb_cv[n-1]</code></td><td>Additive CV for feedback amount</td></tr>
 <tr><td><code>pan_cv[0]</code> … <code>pan_cv[n-1]</code></td><td>Additive CV for tap pan</td></tr>
-<tr><td><code>return_left[0]</code> … <code>return_left[n-1]</code></td><td>Pre-gain L return per tap</td></tr>
-<tr><td><code>return_right[0]</code> … <code>return_right[n-1]</code></td><td>Pre-gain R return per tap</td></tr>
+<tr><td><code>return[0]</code> … <code>return[n-1]</code></td><td>Pre-gain stereo return per tap</td></tr>
 </tbody>
 </table>
 </div>
@@ -323,10 +323,8 @@ R→L). N is set by <code>channels</code>.</p>
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>out_left</code></td><td>Left dry/wet mixed output</td></tr>
-<tr><td><code>out_right</code></td><td>Right dry/wet mixed output</td></tr>
-<tr><td><code>send_left[0]</code> … <code>send_left[n-1]</code></td><td>Pre-gain L tap signal per tap</td></tr>
-<tr><td><code>send_right[0]</code> … <code>send_right[n-1]</code></td><td>Pre-gain R tap signal per tap</td></tr>
+<tr><td><code>out</code></td><td>Stereo dry/wet mixed output</td></tr>
+<tr><td><code>send[0]</code> … <code>send[n-1]</code></td><td>Pre-gain stereo tap signal per tap</td></tr>
 </tbody>
 </table>
 </div>
@@ -381,8 +379,7 @@ control the room model; <code>size</code> and <code>brightness</code> sweep with
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>in_left</code></td><td>Left audio input (if unconnected, <code>in_right</code> is used for both channels)</td></tr>
-<tr><td><code>in_right</code></td><td>Right audio input</td></tr>
+<tr><td><code>in</code></td><td>Stereo audio input (mono sources are silently broadcast L = R)</td></tr>
 <tr><td><code>size_cv</code></td><td>Additive CV for <code>size</code></td></tr>
 <tr><td><code>brightness_cv</code></td><td>Additive CV for <code>brightness</code></td></tr>
 <tr><td><code>pre_delay_cv</code></td><td>Additive CV for <code>pre_delay</code></td></tr>
@@ -397,11 +394,17 @@ control the room model; <code>size</code> and <code>brightness</code> sweep with
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>out_left</code></td><td>Left reverb output</td></tr>
-<tr><td><code>out_right</code></td><td>Right reverb output</td></tr>
+<tr><td><code>out</code></td><td>Stereo reverb output</td></tr>
 </tbody>
 </table>
 </div>
+<hr>
+<h2 id="convolution-reverb-external-bundle"><a class="header" href="#convolution-reverb-external-bundle">Convolution reverb (external bundle)</a></h2>
+<p><code>ConvReverb</code> and <code>StereoConvReverb</code> are <em>not</em> part of the in-tree
+<code>patches-modules</code> crate. They ship from the external
+<strong>patches-fft-bundle</strong> and are loaded at runtime by the plugin
+scanner — see <a href="../extending-native-plugin.html">Implementing a native plugin</a>
+for how host-loaded bundles work.</p>
 
                     </main>
 

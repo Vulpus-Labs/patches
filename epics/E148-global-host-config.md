@@ -1,8 +1,9 @@
 ---
 id: E148
 title: Global host config for `.pxm` bundle directories
-status: open
+status: closed
 created: 2026-05-15
+closed: 2026-05-17
 adr: 0075
 ---
 
@@ -60,10 +61,10 @@ and write the same `settings.toml` via a shared `Env::load_global_config`
 
 ## Tickets
 
-- [0896 — `GlobalConfig` schema and env trait methods in patches-plugin-common](../../tickets/open/0896-global-config-schema-and-env-trait.md)
-- [0897 — `PluginScanner` resolution tier for global bundle dirs](../../tickets/open/0897-scanner-global-config-resolution.md)
-- [0898 — patches-player: load + persist global config, TUI bundle-dir action](../../tickets/open/0898-patches-player-global-config-wiring.md)
-- [0899 — patches-clap: load + persist global config, UI bundle-dir controls](../../tickets/open/0899-patches-clap-global-config-wiring.md)
+- [0896 — `GlobalConfig` schema and env trait methods in patches-plugin-common](../../tickets/closed/0896-global-config-schema-and-env-trait.md)
+- [0897 — `PluginScanner` resolution tier for global bundle dirs](../../tickets/closed/0897-scanner-global-config-resolution.md)
+- [0898 — patches-player: load + persist global config, TUI bundle-dir action](../../tickets/closed/0898-patches-player-global-config-wiring.md)
+- [0899 — patches-clap: load + persist global config, UI bundle-dir controls](../../tickets/closed/0899-patches-clap-global-config-wiring.md)
 
 ## Acceptance
 
@@ -82,3 +83,23 @@ and write the same `settings.toml` via a shared `Env::load_global_config`
 - Sandboxed CLAP host (Logic on macOS) loads without crashing or
   refusing modules; if a save fails, a status-log line surfaces.
 - All four tiers (`inner` / `commit` / `push` / `smoke`) green.
+
+## Outcome (2026-05-17)
+
+All four child tickets closed. Both shells share
+`patches_plugin_common::default_global_config_path` so the file
+location matches across hosts. `Controller::Action::AddBundleDir` /
+`RemoveBundleDir` + `StateDelta.global_config_changed` carry the
+mutation; each shell owns its own flush cadence — `patch_player`
+debounces (mirrors the existing sidecar flush), the CLAP plugin
+writes immediately on each mutation. Sidecar `module_paths` is
+scrubbed on save and ignored on load per ADR 0075 §"Persistence
+boundary"; existing files remain forward-compatible. CLI
+`--module-path` and `PATCHES_PLUGIN_PATH` keep working as
+highest-priority per-invocation overrides via
+`PluginScanner::with_global_dirs`.
+
+`just commit` green for `patches-player`, `patches-plugin-common`,
+and `patches-clap`. Full `push` / `smoke` tiers not run here —
+defer to CI; the work is scoped to two shells + the shared
+plugin-common surface.

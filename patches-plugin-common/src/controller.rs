@@ -106,6 +106,18 @@ pub enum Action {
     AddModulePath,
     AddModulePathDirect(PathBuf),
     RemoveModulePath(usize),
+    /// Add a bundle directory to the persisted global-config list (ADR
+    /// 0075). Updates `controller.module_paths`, scans the new dir into
+    /// the live registry, and flips `global_config_changed` so the
+    /// shell can flush `settings.toml`.
+    AddBundleDir(PathBuf),
+    /// Remove a bundle directory by path. Modules already loaded from
+    /// that dir stay live until the host restarts; the removal is
+    /// surfaced in the status log.
+    RemoveBundleDir(PathBuf),
+    /// Open a folder picker and, on success, lower to [`Action::AddBundleDir`].
+    /// The webview "Add directory…" button posts this intent.
+    AddBundleDirPick,
     Rescan,
     SetTapOpt {
         name: String,
@@ -143,6 +155,10 @@ pub struct StateDelta {
     pub requires_restart: bool,
     pub snapshot_changed: bool,
     pub plan_recompile: bool,
+    /// Set when [`Action::AddBundleDir`] / [`Action::RemoveBundleDir`]
+    /// mutated the persisted bundle-dir list (ADR 0075). The shell
+    /// flushes `settings.toml` separately from the sidecar.
+    pub global_config_changed: bool,
 }
 
 /// Side-effect surface the controller calls into.
@@ -415,6 +431,12 @@ impl Controller {
             Action::AddModulePath => self.apply_add_module_path(env),
             Action::AddModulePathDirect(dir) => self.add_module_path(dir, env),
             Action::RemoveModulePath(idx) => self.apply_remove_module_path(idx),
+            Action::AddBundleDir(dir) => self.apply_add_bundle_dir(dir, env),
+            Action::RemoveBundleDir(dir) => self.apply_remove_bundle_dir(dir),
+            Action::AddBundleDirPick => match env.pick_folder() {
+                Some(dir) => self.apply_add_bundle_dir(dir, env),
+                None => StateDelta::default(),
+            },
             Action::Rescan => self.apply_rescan(env),
             Action::SetTapOpt { name, opt } => self.apply_set_tap_opt(name, opt),
             Action::SetWindowSize(w, h) => self.apply_set_window_size(w, h),
@@ -802,7 +824,11 @@ impl Controller {
                     if let Some(sidecar) = env.sidecar_path(&file_path) {
                         match env.load_sidecar(&sidecar) {
                             Ok(Some(settings)) => {
-                                self.module_paths = settings.module_paths;
+                                // Sidecar must never carry module paths
+                                // (ADR 0075 §"Persistence boundary"); the
+                                // legacy field is ignored. Bundle dirs
+                                // are owned by the global config.
+                                let _ = settings.module_paths;
                                 self.tap_opts = settings.tap_opts;
                                 self.window_size = settings.window_size;
                                 self.host_controls = settings.host_controls;
@@ -886,6 +912,59 @@ impl Controller {
             tap_opts: self.tap_opts.clone(),
             window_size: self.window_size,
             module_paths: self.module_paths.clone(),
+        }
+    }
+
+    /// Add a bundle dir to the persisted list and scan it into the
+    /// live registry. The "live scan" makes added modules available
+    /// without restarting — version-replacement evictions still need a
+    /// restart, but those are uncommon for a freshly-added dir.
+    fn apply_add_bundle_dir(&mut self, dir: PathBuf, env: &mut dyn Env) -> StateDelta {
+        if self.module_paths.iter().any(|p| p == &dir) {
+            return StateDelta::default();
+        }
+        self.module_paths.push(dir.clone());
+        let scan = env.scan_into(std::slice::from_ref(&dir), &mut self.registry);
+        self.push_status(format!("Added bundle dir: {}", dir.display()));
+        let quiet = scan.summary.is_empty()
+            || scan
+                .summary
+                .starts_with("0 loaded, 0 replaced, 0 skipped, 0 errors");
+        if !quiet {
+            self.push_status(format!("Module scan: {}", scan.summary));
+        }
+        for line in scan.details {
+            self.push_status(line);
+        }
+        if !scan.module_names.is_empty() {
+            self.module_names = scan.module_names;
+        }
+        StateDelta {
+            persistable_changed: true,
+            global_config_changed: true,
+            snapshot_changed: true,
+            ..Default::default()
+        }
+    }
+
+    /// Drop a bundle dir from the persisted list. Already-loaded
+    /// modules stay registered until host restart — surfaced in the
+    /// status log so the user knows the change isn't fully live yet.
+    fn apply_remove_bundle_dir(&mut self, dir: PathBuf) -> StateDelta {
+        let len_before = self.module_paths.len();
+        self.module_paths.retain(|p| p != &dir);
+        if self.module_paths.len() == len_before {
+            return StateDelta::default();
+        }
+        self.push_status(format!(
+            "Removed bundle dir: {} (loaded modules persist until restart)",
+            dir.display()
+        ));
+        StateDelta {
+            persistable_changed: true,
+            global_config_changed: true,
+            snapshot_changed: true,
+            ..Default::default()
         }
     }
 
@@ -1425,7 +1504,10 @@ mod tests {
         c.apply(Action::LoadPath(path), &mut env);
         assert_eq!(c.window_size, Some((1024, 768)));
         assert_eq!(c.tap_opts.get("kick").unwrap().spectrum_fft_size, 4096);
-        assert_eq!(c.module_paths, vec![PathBuf::from("/tmp/m")]);
+        // Sidecar's legacy module_paths field is ignored on load
+        // (ADR 0075 §"Persistence boundary"). Bundle dirs live in the
+        // global config instead.
+        assert!(c.module_paths.is_empty());
         assert!(c
             .status_log
             .iter()

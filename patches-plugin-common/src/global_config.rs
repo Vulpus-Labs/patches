@@ -12,6 +12,15 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Resolve the OS-native location of `settings.toml` via the
+/// `directories` crate. Returns `None` when no home directory can be
+/// determined — extremely rare; callers fall back to in-memory defaults
+/// rather than crashing.
+pub fn default_global_config_path() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "Patches")
+        .map(|p| p.config_dir().join("settings.toml"))
+}
+
 /// Schema version embedded in every `settings.toml`. Bump when the
 /// shape of [`GlobalConfig`] changes incompatibly so older readers can
 /// refuse to load rather than silently misinterpret bytes.

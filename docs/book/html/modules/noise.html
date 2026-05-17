@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Noise - Patches Manual — v0.5.1</title>
+        <title>Noise - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -213,8 +213,7 @@ produce independent signals.</p>
 <pre><code class="language-text">Noise noise
 AudioOut out
 
-noise.white -&gt; out.in_left
-noise.white -&gt; out.in_right
+noise.white -&gt; out.in
 </code></pre>
 <p><strong>Example — pink noise for modulation</strong></p>
 <pre><code class="language-text">Noise lfo_noise
@@ -245,15 +244,16 @@ PRNG and filter state, so voices are uncorrelated with each other and with any
 patches — for example, routing the <code>white</code> output through a <code>PolyVca</code> to add
 noise to each voice’s amplitude independently.</p>
 <p><strong>Example — per-voice breath noise</strong></p>
-<pre><code class="language-text">PolyNoise src
-PolyVca noise_vca
-PolyAdsr env { attack: 5ms, decay: 100ms, sustain: 0.2, release: 200ms }
-PolyMidiIn midi
+<pre><code class="language-patches">patch {
+    module src       : PolyNoise
+    module noise_vca : PolyVca
+    module env       : PolyAdsr { attack: 0.005, decay: 0.1, sustain: 0.2, release: 0.2 }
+    module midi      : PolyMidiToCv
 
-midi.voct   -&gt; env.gate  (unused — routing gate)
-midi.gate   -&gt; env.gate
-env.out     -&gt; noise_vca.cv
-src.white   -&gt; noise_vca.signal
+    midi.gate -&gt; env.gate
+    env.out   -&gt; noise_vca.cv
+    src.white -&gt; noise_vca.in
+}
 </code></pre>
 
                     </main>

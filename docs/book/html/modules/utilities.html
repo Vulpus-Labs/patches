@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Utilities - Patches Manual — v0.5.1</title>
+        <title>Utilities - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -198,6 +198,7 @@ space gives a perceptually constant-ratio (equal-interval) glide.</p>
 </thead>
 <tbody>
 <tr><td><code>glide_ms</code></td><td>float (ms)</td><td><code>100.0</code></td><td>Glide time in milliseconds (0–10000)</td></tr>
+<tr><td><code>slur_amount</code></td><td>float</td><td><code>1.0</code></td><td>Multiplier applied to <code>glide_ms</code> while <code>slur_in</code> is high (0–100)</td></tr>
 </tbody>
 </table>
 </div>
@@ -209,6 +210,7 @@ space gives a perceptually constant-ratio (equal-interval) glide.</p>
 </thead>
 <tbody>
 <tr><td><code>in</code></td><td>Input signal (typically V/oct)</td></tr>
+<tr><td><code>slur_in</code></td><td>Gate: when high, glide time is multiplied by <code>slur_amount</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -322,11 +324,23 @@ simultaneously on each rising edge (threshold 0.5).</p>
 </div>
 <hr>
 <h2 id="quant--voct-quantiser"><a class="header" href="#quant--voct-quantiser"><code>Quant</code> — V/oct quantiser</a></h2>
-<p>Snaps a continuous V/oct signal to the nearest note in a user-supplied semitone
-set. The formula applied before quantisation is:</p>
+<p>Snaps a continuous V/oct signal to the nearest pitch in a user-supplied set.
+The scale is declared via <code>channels</code> (an alias list or count), with one
+<code>pitch[i]</code> parameter per scale degree. Each pitch is a V/oct value reduced
+modulo 1.0 into <code>[0.0, 1.0)</code>, giving an octave-invariant pitch class. The
+quantiser is not restricted to 12-tone equal temperament: any microtonal or
+non-Western scale can be declared by supplying the desired V/oct fractions
+directly. The formula applied before quantisation is:</p>
 <pre><code class="language-text">quantised_input = centre + in × scale
 </code></pre>
 <p>Emits a one-sample pulse on <code>trig_out</code> whenever the quantised pitch changes.</p>
+<p><strong>Example</strong></p>
+<pre><code class="language-text">module quant : Quant(channels: [root, third, fifth]) {
+    pitch[root]:  C0,
+    pitch[third]: Eb0,
+    pitch[fifth]: G0
+}
+</code></pre>
 <p><strong>Parameters</strong></p>
 <div class="table-wrapper">
 <table>
@@ -334,7 +348,7 @@ set. The formula applied before quantisation is:</p>
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>notes</code></td><td>array (up to 12)</td><td><code>["0"]</code></td><td>Semitone offsets within an octave (0–11). Values are parsed as integers.</td></tr>
+<tr><td><code>pitch[i]</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>Target pitch per scale degree (i in 0..N−1, N = <code>channels</code>)</td></tr>
 <tr><td><code>centre</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>DC offset added to the input before quantisation (−4 to +4)</td></tr>
 <tr><td><code>scale</code></td><td>float</td><td><code>1.0</code></td><td>Gain applied to <code>in</code> before quantisation (−4 to +4)</td></tr>
 </tbody>
@@ -366,7 +380,7 @@ set. The formula applied before quantisation is:</p>
 <hr>
 <h2 id="polyquant--polyphonic-voct-quantiser"><a class="header" href="#polyquant--polyphonic-voct-quantiser"><code>PolyQuant</code> — Polyphonic V/oct quantiser</a></h2>
 <p>Applies the same quantisation logic as <code>Quant</code> independently to each of the 16
-polyphonic voices. All voices share the same <code>notes</code>, <code>centre</code>, and <code>scale</code>
+polyphonic voices. All voices share the same <code>pitch[i]</code>, <code>centre</code>, and <code>scale</code>
 parameters. Each voice has its own <code>trig_out</code> channel that fires independently
 when that voice’s quantised pitch changes.</p>
 <p><strong>Parameters</strong></p>
@@ -376,7 +390,7 @@ when that voice’s quantised pitch changes.</p>
 <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>notes</code></td><td>array (up to 12)</td><td><code>["0"]</code></td><td>Semitone offsets within an octave (0–11)</td></tr>
+<tr><td><code>pitch[i]</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>Target pitch per scale degree (i in 0..N−1, N = <code>channels</code>)</td></tr>
 <tr><td><code>centre</code></td><td>float (V/oct)</td><td><code>0.0</code></td><td>DC offset added to each voice before quantisation (−4 to +4)</td></tr>
 <tr><td><code>scale</code></td><td>float</td><td><code>1.0</code></td><td>Gain applied to each voice before quantisation (−4 to +4)</td></tr>
 </tbody>

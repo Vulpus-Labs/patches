@@ -16,7 +16,9 @@ pub use controller::{
     PersistedSettings, PresetEnvelope, RescanProbe, ScanDetails, SidecarEnvelope, StateDelta,
     PRESET_SCHEMA_VERSION, SIDECAR_SCHEMA_VERSION,
 };
-pub use global_config::{GlobalConfig, GlobalConfigError, GLOBAL_CONFIG_SCHEMA_VERSION};
+pub use global_config::{
+    default_global_config_path, GlobalConfig, GlobalConfigError, GLOBAL_CONFIG_SCHEMA_VERSION,
+};
 
 pub use gui::{
     DiagnosticView, GuiSnapshot, Intent, ScopeMode, SpectrumRender, TapDisplayOpts, TapFrame,

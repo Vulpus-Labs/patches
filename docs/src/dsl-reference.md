@@ -1,12 +1,22 @@
 # DSL reference
 
-This is the complete syntax reference for `.patches` files. It assumes familiarity with the concepts in [Building a patch](building-a-patch.md).
+This is the complete syntax reference for `.patches` files. It
+assumes familiarity with the concepts in
+[Mental model](mental-model.md) and the narrative introductions in
+[DSL basics](dsl-basics.md),
+[Signal kinds and cable rules](dsl-signal-kinds.md),
+[Templates and abstraction](dsl-templates.md), and
+[Poly and voice allocation](dsl-poly.md). This page is the lookup;
+those are the on-ramp.
 
 ## File structure
 
 A patch file contains zero or more top-level blocks followed by exactly one `patch` block. Comments run from `#` to end of line. Whitespace is insignificant.
 
 ```patches
+# optional: include another .patches file (templates / patterns / sections)
+include "shared/voices.patches"
+
 # optional: pattern definitions for the tracker sequencer
 pattern kick_basic {
     hit: x:1.0 . . . x:1.0 . . .
@@ -17,6 +27,11 @@ song my_song(kick, bass) {
     play {
         kick_basic, bass_verse
     }
+}
+
+# optional: top-level reusable section (visible to all songs)
+section intro {
+    kick_basic, bass_verse
 }
 
 # optional: templates
@@ -30,18 +45,31 @@ patch {
 }
 ```
 
+### `include` directive
+
+`include "path"` inlines another `.patches` file at the point of the
+directive. Includes are resolved at parse time, relative to the including
+file. The included file may contribute templates, patterns, songs, and
+top-level sections — but not a `patch` block (only the root file declares
+one).
+
 ## Module declarations
 
 ```
 module <name> : <Type>
 module <name> : <Type> { <params> }
 module <name> : <Type>(<shape-args>) { <params> }
+stereo module <name> : <Type>(<shape-args>) { <params> }
 ```
 
 - **name** — an identifier (`[a-zA-Z_][a-zA-Z0-9_-]*`). Used for connections and for identity matching across hot-reloads.
 - **Type** — the module type name as registered in the module registry (e.g. `Osc`, `PolyAdsr`, `Sum`).
 - **shape-args** — key-value pairs that control port arity. Written in parentheses before the parameter braces: `Sum(channels: 3)`.
 - **params** — key-value pairs configuring the module's parameters.
+- **`stereo`** — prefix keyword requesting two parallel
+  instances of the module sharing connections and parameters. Per-side
+  overrides use `@l:` / `@r:` at-blocks; per-side ports are addressed via
+  `port[l]` / `port[r]`.
 
 ### Parameter syntax
 
@@ -75,20 +103,35 @@ module mix : Mixer(channels: [drums, bass, lead]) {
 }
 ```
 
+On a `stereo` module, the special `@l:` / `@r:` blocks override per side:
+
+```patches
+stereo module dly : Delay(channels: 2) {
+    @0: { delay_ms: 250 },
+    @l: { feedback: 0.45 },   # left-side-only override
+    @r: { feedback: 0.55 }    # right-side-only override
+}
+```
+
 ### Parameter value types
 
-| Syntax             | Type      | Notes                                         |
-| ------------------ | --------- | --------------------------------------------- |
-| `440.0`            | float     | bare decimal                                  |
-| `2`                | int       | bare integer                                  |
-| `440Hz`            | frequency | converted to V/oct; also `2.5kHz`             |
-| `-6dB`             | amplitude | converted to linear (0 dB = 1.0, -6 dB ≈ 0.5) |
-| `C4`, `A#3`, `Bb2` | note name | converted to V/oct                            |
-| `true` / `false`   | boolean   |                                               |
-| `linear`           | string    | unquoted; `"linear"` also works               |
-| `"hello world"`    | string    | quotes required if value contains spaces      |
+| Syntax              | Type      | Notes                                                |
+| ------------------- | --------- | ---------------------------------------------------- |
+| `440.0`             | float     | bare decimal                                         |
+| `2`                 | int       | bare integer                                         |
+| `440Hz`             | frequency | converted to V/oct; also `2.5kHz`                    |
+| `-6dB`              | amplitude | converted to linear (0 dB = 1.0, -6 dB ≈ 0.5)        |
+| `7s`                | interval  | semitones, converted to V/oct (`s` = semitone)       |
+| `50c`               | interval  | cents, converted to V/oct (`c` = cent)               |
+| `C4`, `A#3`, `Bb2`  | note name | converted to V/oct                                   |
+| `true` / `false`    | boolean   |                                                      |
+| `linear`            | string    | unquoted; `"linear"` also works                      |
+| `"hello world"`     | string    | quotes required if value contains spaces             |
+| `file("ir.wav")`    | file path | resolves to a WAV file path (used by convolution)    |
 
-Frequency, note, and dB literals are case-insensitive. There is no time-unit suffix; durations are bare floats in seconds.
+Frequency, note, and dB literals are case-insensitive. There is no
+time-unit suffix; durations are bare floats in seconds. `s` after a number
+means **semitones**, not seconds.
 
 ## Connections
 
@@ -113,7 +156,7 @@ The scale factor is a float multiplied onto the signal at the cable level.
 
 A scalar `-[k]->` only multiplies the signal. To map a known source
 range affinely onto a destination range, use a **range expression**
-on the arrow (ADR 0062):
+on the arrow:
 
 ```patches
 ctrl.knob -[uni(20Hz, 8kHz)]-> filter.cutoff
@@ -129,13 +172,10 @@ For knob and host-control sources delivering a normalized value:
 
 ```patches
 patch {
-    module knob   : Param(name: "cutoff")
-    module filt   : Svf
-    module mix    : Param(name: "wet")
-    module xfade  : Mix
+    knob   cutoff { displayName: "Cutoff" }
+    module filt : Svf
 
-    knob.out -[uni(20Hz, 8kHz)]-> filt.cutoff
-    mix.out  -[uni(-0.5, 1.0)]-> xfade.amount
+    ~cutoff -[uni(20Hz, 8kHz)]-> filt.cutoff
 }
 ```
 
@@ -191,12 +231,49 @@ $.audio <-[0.5]- vca.out
 
 ### Indexed ports
 
+The index in brackets selects which slot of a multi-port to connect.
+Aliases declared on the module's shape are the idiomatic form:
+
 ```patches
-osc_a.sine -> mix.in[0]
-osc_b.sine -> mix.in[1]
+module mix : Mixer([drums, bass, lead])
+
+kick.out -> mix.in[drums]
+bass.out -> mix.in[bass]
+lead.out -> mix.in[lead]
 ```
 
-The index in brackets selects which slot of a multi-port to connect.
+Numeric indices work when the shape is declared as a bare count:
+
+```patches
+module sum : Sum(2)
+
+osc_a.sine -> sum.in[0]
+osc_b.sine -> sum.in[1]
+```
+
+On `stereo` modules, the channel selectors `[l]` and `[r]` address the
+per-side instance instead of a numeric index:
+
+```patches
+stereo module dly : Delay
+src.left  -> dly.in[l]
+src.right -> dly.in[r]
+```
+
+### Fan-in and fan-out
+
+A comma-separated list of endpoints on either side of an arrow connects
+multiple sources or destinations in one statement:
+
+```patches
+osc.sine -> filter.in, scope.in            # fan-out: one source → many sinks
+voice_a.out, voice_b.out -> mix.in         # fan-in: many sources → one sink
+```
+
+Fan-out drives every listed sink from the same source. Fan-in to a single
+input port of uniform cable kind is **auto-summed**: the expander
+synthesises a `Sum` (or `PolySum` / `StereoSum`) module under the hood.
+Mixed-kind fan-in is rejected at expansion time.
 
 ### Arity expansion
 
@@ -208,7 +285,9 @@ The `[*name]` wildcard expands into one connection per index from 0 to `name - 1
 
 ### Rules
 
-- Each input port accepts exactly one cable. A second connection to the same input is an error.
+- An input port may receive multiple connections of uniform cable kind;
+  the expander synthesises a `Sum` / `PolySum` / `StereoSum` to combine
+  them (see *Fan-in and fan-out*). Mixed-kind fan-in is rejected.
 - An output port can drive any number of inputs.
 - Cable kinds must match: mono ↔ mono, poly ↔ poly, stereo ↔ stereo.
   Use `MonoToPoly` / `PolyToMono` to bridge mono and poly.
@@ -314,7 +393,9 @@ template voice(attack: float = 0.01, decay: float = 0.1, sustain: float = 0.7) {
 }
 ```
 
-- **Parameters** are typed: `float`, `int`, `str`, `bool`. Parameters with `= default` are optional at the call site; those without are required.
+- **Parameters** are typed: `float`, `int`, `str`, `bool`, `pattern`,
+  `song`. Parameters with `= default` are optional at the call site;
+  those without are required.
 - **Boundary ports** are declared with `in:` and `out:` lists. Inside the template body, `$.name` refers to a boundary port.
 - **Parameter references** `<name>` substitute the parameter's value anywhere in the template body: in parameter values (`{ attack: <attack> }`), port names (`osc.<wave>`), and cable scales (`-[<gain>]->`).
 
@@ -334,12 +415,14 @@ Each instantiation expands to a separate copy of the template's modules with man
 
 ### Parameter types
 
-| Type    | Accepts                                        |
-| ------- | ---------------------------------------------- |
-| `float` | numeric values (int-to-float coercion allowed) |
-| `int`   | integer values                                 |
-| `str`   | string values                                  |
-| `bool`  | `true` / `false`                               |
+| Type      | Accepts                                              |
+| --------- | ---------------------------------------------------- |
+| `float`   | numeric values (int-to-float coercion allowed)       |
+| `int`     | integer values                                       |
+| `str`     | string values                                        |
+| `bool`    | `true` / `false`                                     |
+| `pattern` | pattern names — passed to a `PatternPlayer` cell     |
+| `song`    | song names — passed to a `MasterSequencer` cell      |
 
 Type checking is strict. A `float` parameter rejects `true`; a `bool` rejects `0`.
 
@@ -429,8 +512,7 @@ duty cycle gate.
 ## Songs
 
 A song block defines a playback order built from named `section` blocks and
-`play` statements. See [ADR 0035](../../adr/0035-song-sections-play-composition.md)
-for the design.
+`play` statements.
 
 ```patches
 song my_song(bass, lead, drums) {

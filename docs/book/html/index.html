@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Introduction - Patches Manual — v0.5.1</title>
+        <title>Introduction - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a680bed.js"></script>
+        <script src="toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,33 +181,45 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>Patches is a modular audio synthesiser you program with a text file. You describe a graph of modules — oscillators, filters, envelopes, effects — and how they connect. The engine runs the graph in real time. When you edit the file and save, the engine swaps in the new graph without stopping the audio or resetting module state. This makes it a live-coding instrument: you perform by editing.</p>
-<h2 id="building"><a class="header" href="#building">Building</a></h2>
-<pre><code class="language-bash">git clone &lt;repo-url&gt;
-cd patches
-cargo build
-</code></pre>
+<p>Patches is a modular audio instrument with a text-based patch language. You describe a graph of modules — oscillators, filters, envelopes, sequencers, effects — and how they connect; the engine runs the graph in real time. Editing the patch file and saving swaps in the new graph without interrupting audio or resetting module state, so the language doubles as a REPL for the development cycle.</p>
+<h2 id="why-patches"><a class="header" href="#why-patches">Why Patches?</a></h2>
+<p>Other software modular systems aim to provide a skeuomorphic UI representation of a Eurorack-style physical modular setup. Patches skips the UI layer entirely, focusing instead on providing a convenient, powerful, machine-readable and human/LLM-writeable DSL for defining modular patches, and a fast, efficient, real-time-stable synthesis engine for running them. The DSL is supported by a full LSP implementation, giving the user hinting, autocomplete and navigation support.</p>
+<h2 id="three-ways-to-run-a-patch"><a class="header" href="#three-ways-to-run-a-patch">Three ways to run a patch</a></h2>
+<p>Patches has no single intended workflow. The same <code>.patches</code> file works in any of these contexts:</p>
+<p><strong>As a CLAP plugin in a DAW.</strong> Load the <code>Patches</code> plugin in REAPER, Bitwig, or any CLAP host. Point it at a patch file, drive it from MIDI tracks, automate its parameters, save with the project. Use this when you want a custom synth voice inside a larger production.</p>
+<p><strong>As a standalone instrument driven by external MIDI.</strong> Run <code>patch_player hello.patches</code>, connect a controller, play. Use this when you want a hardware-style instrument with no DAW in the loop.</p>
+<p><strong>As a self-contained piece driven by built-in sequencing.</strong> A patch can include the tracker, step sequencer, and clock modules — its own note source. Run it in the player and the piece plays itself. Use this when the patch <em>is</em> the composition.</p>
+<p>The DSL, module set, and audio engine are identical across all three. Pick the surface that fits the task.</p>
 <h2 id="a-first-patch"><a class="header" href="#a-first-patch">A first patch</a></h2>
 <pre><code class="language-patches">patch {
     module osc : Osc { frequency: 440Hz }
     module out : AudioOut
 
-    osc.sine -&gt; out.in_left
-    osc.sine -&gt; out.in_right
+    osc.sine -&gt; out.in
 }
 </code></pre>
-<p>Save this as <code>hello.patches</code> and run:</p>
-<pre><code class="language-bash">cargo run -p patches-player -- hello.patches
+<p>Save as <code>hello.patches</code> and run:</p>
+<pre><code class="language-bash">patch_player hello.patches
 </code></pre>
-<p>A 440 Hz sine tone. Change the frequency to <code>220Hz</code>, save, and the pitch drops — no click, no restart. Change <code>osc.sine</code> to <code>osc.sawtooth</code> for a brighter timbre. Press Ctrl-C to stop.</p>
-<p>For MIDI-driven patches, connect your controller before starting the player. <code>MidiIn</code> and <code>PolyMidiIn</code> use the first available MIDI port.</p>
+<p>A 440 Hz sine tone. Change the frequency to <code>220Hz</code>, save, and the pitch drops — no click, no restart. Change <code>osc.sine</code> to <code>osc.sawtooth</code> for a brighter timbre. Ctrl-C to stop.</p>
+<h2 id="whats-next"><a class="header" href="#whats-next">What’s next</a></h2>
+<ul>
+<li><strong>Mental model</strong> — how patches are built from modules, ports, cables, and signal kinds. Read this before the DSL chapters; it is the conceptual foundation everything else assumes.</li>
+<li><strong>Installation</strong> — getting the player, CLAP plugin, and VS Code extension onto your machine.</li>
+<li><strong>Basic operation</strong> — running existing patches in each of the three workflows.</li>
+<li><strong>The DSL</strong> — the patch language in detail.</li>
+<li><strong>Patch authoring</strong> — building real instruments and pieces.</li>
+<li><strong>Module reference</strong> — every built-in module, its ports, and its parameters.</li>
+<li><strong>Extending Patches</strong> — writing modules in Rust, or as native plugins via the ABI.</li>
+<li><strong>Internals</strong> — the audio engine, CLAP plugin, and language server.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
 
-                            <a rel="next prefetch" href="building-a-patch.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="mental-model.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -218,7 +230,7 @@ cargo build
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
 
-                    <a rel="next prefetch" href="building-a-patch.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="mental-model.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

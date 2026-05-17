@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use patches_dsl::manifest::{Manifest, TapType};
+use patches_plugin_common::Action;
+use std::path::PathBuf;
 use patches_observation::processor::{
     spectrum_bin_count, SpectrumReadOpts, SCOPE_RING_SAMPLES, SPECTRUM_FFT_SIZE_DEFAULT,
     SPECTRUM_FFT_SIZE_MAX,
@@ -231,6 +233,32 @@ pub const HEATMAP_HISTORY_CAP: usize = 1024;
 /// Exponential-smoothing weight for spectrum curve magnitudes.
 pub const SPECTRUM_SMOOTH_ALPHA: f32 = 0.7;
 
+/// Mode of an open bundle-dir prompt (ADR 0075, ticket 0898).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptKind {
+    AddBundleDir,
+    RemoveBundleDir,
+}
+
+/// One-shot inline text prompt — captures keystrokes until the user
+/// commits with Enter or cancels with Esc. The TUI renders the live
+/// input at the bottom of the events pane (or wherever the renderer
+/// chooses to surface it).
+#[derive(Clone, Debug)]
+pub struct Prompt {
+    pub kind: PromptKind,
+    pub input: String,
+}
+
+impl Prompt {
+    pub fn label(&self) -> &'static str {
+        match self.kind {
+            PromptKind::AddBundleDir => "Add bundle dir",
+            PromptKind::RemoveBundleDir => "Remove bundle dir",
+        }
+    }
+}
+
 /// Mutable view state shared between the input loop and the draw loop.
 pub struct View {
     pub header: HeaderInfo,
@@ -254,6 +282,13 @@ pub struct View {
     drop_logged_at: HashMap<String, Instant>,
     pub(crate) trigger_flash_at: HashMap<String, Instant>,
     pub cpu_snapshot: Option<Arc<std::sync::Mutex<crate::cpu_monitor::CpuSnapshot>>>,
+    /// Open bundle-dir prompt, if any. Set by 'b' / 'B' key handlers;
+    /// cleared on Enter (commit) or Esc (cancel).
+    pub prompt: Option<Prompt>,
+    /// Queue of bundle-dir actions waiting for the main loop to apply.
+    /// `tui::run`'s `on_tick` closure drains this and dispatches into
+    /// the controller — keeping action plumbing out of the TUI module.
+    pending_actions: VecDeque<Action>,
 }
 
 impl View {
@@ -280,6 +315,54 @@ impl View {
             drop_logged_at: HashMap::new(),
             trigger_flash_at: HashMap::new(),
             cpu_snapshot: None,
+            prompt: None,
+            pending_actions: VecDeque::new(),
+        }
+    }
+
+    /// Take the next queued bundle-dir action, if any. Returns `None`
+    /// when the prompt is idle and the queue is empty.
+    pub fn take_pending_bundle_action(&mut self) -> Option<Action> {
+        self.pending_actions.pop_front()
+    }
+
+    /// Commit the open prompt by enqueueing the matching action and
+    /// closing the prompt. Empty input cancels with a log line so the
+    /// user sees the no-op.
+    pub fn commit_prompt(&mut self) {
+        let Some(prompt) = self.prompt.take() else {
+            return;
+        };
+        let trimmed = prompt.input.trim();
+        if trimmed.is_empty() {
+            self.log.push(format!("{}: cancelled (empty path)", prompt.label()));
+            return;
+        }
+        let path = PathBuf::from(trimmed);
+        let action = match prompt.kind {
+            PromptKind::AddBundleDir => Action::AddBundleDir(path),
+            PromptKind::RemoveBundleDir => Action::RemoveBundleDir(path),
+        };
+        self.pending_actions.push_back(action);
+    }
+
+    /// Open a new prompt; if one is already open, leave it alone — the
+    /// user should commit or cancel first. Re-pressing the same key is
+    /// a deliberate no-op rather than a confusing reset.
+    pub fn open_prompt(&mut self, kind: PromptKind) {
+        if self.prompt.is_some() {
+            return;
+        }
+        self.prompt = Some(Prompt {
+            kind,
+            input: String::new(),
+        });
+    }
+
+    /// Cancel any open prompt. Idempotent.
+    pub fn cancel_prompt(&mut self) {
+        if let Some(p) = self.prompt.take() {
+            self.log.push(format!("{}: cancelled", p.label()));
         }
     }
 

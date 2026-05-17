@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>DSL reference - Patches Manual — v0.5.1</title>
+        <title>DSL reference - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a680bed.js"></script>
+        <script src="toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,10 +181,37 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="dsl-reference"><a class="header" href="#dsl-reference">DSL reference</a></h1>
-<p>This is the complete syntax reference for <code>.patches</code> files. It assumes familiarity with the concepts in <a href="building-a-patch.html">Building a patch</a>.</p>
+<p>This is the complete syntax reference for <code>.patches</code> files. It
+assumes familiarity with the concepts in
+<a href="mental-model.html">Mental model</a> and the narrative introductions in
+<a href="dsl-basics.html">DSL basics</a>,
+<a href="dsl-signal-kinds.html">Signal kinds and cable rules</a>,
+<a href="dsl-templates.html">Templates and abstraction</a>, and
+<a href="dsl-poly.html">Poly and voice allocation</a>. This page is the lookup;
+those are the on-ramp.</p>
 <h2 id="file-structure"><a class="header" href="#file-structure">File structure</a></h2>
-<p>A patch file contains zero or more template definitions followed by exactly one <code>patch</code> block. Comments run from <code>#</code> to end of line. Whitespace is insignificant.</p>
-<pre><code class="language-patches"># optional templates
+<p>A patch file contains zero or more top-level blocks followed by exactly one <code>patch</code> block. Comments run from <code>#</code> to end of line. Whitespace is insignificant.</p>
+<pre><code class="language-patches"># optional: include another .patches file (templates / patterns / sections)
+include "shared/voices.patches"
+
+# optional: pattern definitions for the tracker sequencer
+pattern kick_basic {
+    hit: x:1.0 . . . x:1.0 . . .
+}
+
+# optional: song definitions referencing patterns
+song my_song(kick, bass) {
+    play {
+        kick_basic, bass_verse
+    }
+}
+
+# optional: top-level reusable section (visible to all songs)
+section intro {
+    kick_basic, bass_verse
+}
+
+# optional: templates
 template voice(...) {
     ...
 }
@@ -194,16 +221,27 @@ patch {
     ...
 }
 </code></pre>
+<h3 id="include-directive"><a class="header" href="#include-directive"><code>include</code> directive</a></h3>
+<p><code>include "path"</code> inlines another <code>.patches</code> file at the point of the
+directive. Includes are resolved at parse time, relative to the including
+file. The included file may contribute templates, patterns, songs, and
+top-level sections — but not a <code>patch</code> block (only the root file declares
+one).</p>
 <h2 id="module-declarations"><a class="header" href="#module-declarations">Module declarations</a></h2>
 <pre><code>module &lt;name&gt; : &lt;Type&gt;
 module &lt;name&gt; : &lt;Type&gt; { &lt;params&gt; }
 module &lt;name&gt; : &lt;Type&gt;(&lt;shape-args&gt;) { &lt;params&gt; }
+stereo module &lt;name&gt; : &lt;Type&gt;(&lt;shape-args&gt;) { &lt;params&gt; }
 </code></pre>
 <ul>
 <li><strong>name</strong> — an identifier (<code>[a-zA-Z_][a-zA-Z0-9_-]*</code>). Used for connections and for identity matching across hot-reloads.</li>
 <li><strong>Type</strong> — the module type name as registered in the module registry (e.g. <code>Osc</code>, <code>PolyAdsr</code>, <code>Sum</code>).</li>
 <li><strong>shape-args</strong> — key-value pairs that control port arity. Written in parentheses before the parameter braces: <code>Sum(channels: 3)</code>.</li>
 <li><strong>params</strong> — key-value pairs configuring the module’s parameters.</li>
+<li><strong><code>stereo</code></strong> — prefix keyword requesting two parallel
+instances of the module sharing connections and parameters. Per-side
+overrides use <code>@l:</code> / <code>@r:</code> at-blocks; per-side ports are addressed via
+<code>port[l]</code> / <code>port[r]</code>.</li>
 </ul>
 <h3 id="parameter-syntax"><a class="header" href="#parameter-syntax">Parameter syntax</a></h3>
 <p>Parameters are comma-separated <code>key: value</code> pairs:</p>
@@ -220,8 +258,15 @@ module &lt;name&gt; : &lt;Type&gt;(&lt;shape-args&gt;) { &lt;params&gt; }
 </code></pre>
 <p>When the module shape defines named aliases, those can be used instead of numeric indices:</p>
 <pre><code class="language-patches">module mix : Mixer(channels: [drums, bass, lead]) {
-    @drums: { level: 0.8 },
-    @bass:  { level: 0.6 }
+    @drums { level: 0.8 },
+    @bass  { level: 0.6 }
+}
+</code></pre>
+<p>On a <code>stereo</code> module, the special <code>@l:</code> / <code>@r:</code> blocks override per side:</p>
+<pre><code class="language-patches">stereo module dly : Delay(channels: 2) {
+    @0: { delay_ms: 250 },
+    @l: { feedback: 0.45 },   # left-side-only override
+    @r: { feedback: 0.55 }    # right-side-only override
 }
 </code></pre>
 <h3 id="parameter-value-types"><a class="header" href="#parameter-value-types">Parameter value types</a></h3>
@@ -235,43 +280,195 @@ module &lt;name&gt; : &lt;Type&gt;(&lt;shape-args&gt;) { &lt;params&gt; }
 <tr><td><code>2</code></td><td>int</td><td>bare integer</td></tr>
 <tr><td><code>440Hz</code></td><td>frequency</td><td>converted to V/oct; also <code>2.5kHz</code></td></tr>
 <tr><td><code>-6dB</code></td><td>amplitude</td><td>converted to linear (0 dB = 1.0, -6 dB ≈ 0.5)</td></tr>
+<tr><td><code>7s</code></td><td>interval</td><td>semitones, converted to V/oct (<code>s</code> = semitone)</td></tr>
+<tr><td><code>50c</code></td><td>interval</td><td>cents, converted to V/oct (<code>c</code> = cent)</td></tr>
 <tr><td><code>C4</code>, <code>A#3</code>, <code>Bb2</code></td><td>note name</td><td>converted to V/oct</td></tr>
 <tr><td><code>true</code> / <code>false</code></td><td>boolean</td><td></td></tr>
 <tr><td><code>linear</code></td><td>string</td><td>unquoted; <code>"linear"</code> also works</td></tr>
 <tr><td><code>"hello world"</code></td><td>string</td><td>quotes required if value contains spaces</td></tr>
-<tr><td><code>[1, 2, 3]</code></td><td>array</td><td></td></tr>
+<tr><td><code>file("ir.wav")</code></td><td>file path</td><td>resolves to a WAV file path (used by convolution)</td></tr>
 </tbody>
 </table>
 </div>
-<p>Frequency, note, and dB literals are case-insensitive. There is no time-unit suffix; durations are bare floats in seconds.</p>
+<p>Frequency, note, and dB literals are case-insensitive. There is no
+time-unit suffix; durations are bare floats in seconds. <code>s</code> after a number
+means <strong>semitones</strong>, not seconds.</p>
 <h2 id="connections"><a class="header" href="#connections">Connections</a></h2>
 <h3 id="forward-connection"><a class="header" href="#forward-connection">Forward connection</a></h3>
-<pre><code class="language-patches">osc.sine -&gt; out.in_left
+<pre><code class="language-patches">osc.sine -&gt; out.in
 </code></pre>
+<p><code>out</code> here is <code>AudioOut</code>, whose <code>in</code> is a stereo port. The mono <code>osc.sine</code>
+broadcasts onto both channels automatically (see <em>Cable kinds</em> below).</p>
 <h3 id="scaled-forward-connection"><a class="header" href="#scaled-forward-connection">Scaled forward connection</a></h3>
-<pre><code class="language-patches">osc.sine -[0.5]-&gt; out.in_left
+<pre><code class="language-patches">osc.sine -[0.5]-&gt; out.in
 </code></pre>
 <p>The scale factor is a float multiplied onto the signal at the cable level.</p>
+<h3 id="range-mapped-connections"><a class="header" href="#range-mapped-connections">Range-mapped connections</a></h3>
+<p>A scalar <code>-[k]-&gt;</code> only multiplies the signal. To map a known source
+range affinely onto a destination range, use a <strong>range expression</strong>
+on the arrow:</p>
+<pre><code class="language-patches">ctrl.knob -[uni(20Hz, 8kHz)]-&gt; filter.cutoff
+lfo.out   -[bi(C2, C5)]-&gt;      osc.voct
+</code></pre>
+<p>Both forms hard-clip at the destination endpoints; out-of-source-range
+inputs saturate.</p>
+<h4 id="unilo-hi--0-1--lo-hi"><a class="header" href="#unilo-hi--0-1--lo-hi"><code>uni(lo, hi)</code> — <code>[0, 1]</code> → <code>[lo, hi]</code></a></h4>
+<p>For knob and host-control sources delivering a normalized value:</p>
+<pre><code class="language-patches">patch {
+    knob   cutoff { displayName: "Cutoff" }
+    module filt : Svf
+
+    ~cutoff -[uni(20Hz, 8kHz)]-&gt; filt.cutoff
+}
+</code></pre>
+<h4 id="bilo-hi---1-1--lo-hi"><a class="header" href="#bilo-hi---1-1--lo-hi"><code>bi(lo, hi)</code> — <code>[-1, 1]</code> → <code>[lo, hi]</code></a></h4>
+<p>For bipolar modulation sources (LFOs, audio-rate modulators):</p>
+<pre><code class="language-patches">patch {
+    module lfo : Lfo
+    module osc : Osc
+
+    # vibrato around C4, ±1 octave; note literals lower to v/oct.
+    lfo.sine -[bi(C3, C5)]-&gt; osc.voct
+}
+</code></pre>
+<p>Note literals and <code>Hz</code> / <code>kHz</code> literals mix freely inside a single
+range — both belong to the <strong>pitch family</strong> and lower to v/oct over
+<code>C0</code>. Other unit families (<code>s</code>, <code>dB</code>) stay in their native unit.
+Cross-family pairs are rejected at expansion time:</p>
+<pre><code class="language-patches"># error: cable range endpoints have incompatible unit families:
+#        pitch vs level
+osc.sine -[bi(440Hz, -12dB)]-&gt; dst.in
+</code></pre>
+<p>Endpoints accept the same forms as scalar scales: numeric and
+unit-suffixed literals, note literals, and <code>&lt;param&gt;</code> references. A
+template can therefore parameterise the destination range:</p>
+<pre><code class="language-patches">template knob_to_cutoff(lo: float, hi: float) {
+    in: knob
+    out: cutoff
+    $.knob -[uni(&lt;lo&gt;, &lt;hi&gt;)]-&gt; $.cutoff
+}
+</code></pre>
+<p>Range and scalar segments compose freely across template boundaries
+(see <em>Scale composition</em> below); the result is a single affine plus
+clip applied once at the destination port.</p>
 <h3 id="backward-connection"><a class="header" href="#backward-connection">Backward connection</a></h3>
 <pre><code class="language-patches">$.audio &lt;- vca.out
 $.audio &lt;-[0.5]- vca.out
 </code></pre>
 <p><code>&lt;-</code> connects from right to left. Primarily useful inside templates for wiring boundary ports. The scaled form uses <code>&lt;-[scale]-</code>.</p>
 <h3 id="indexed-ports"><a class="header" href="#indexed-ports">Indexed ports</a></h3>
-<pre><code class="language-patches">osc_a.sine -&gt; mix.in[0]
-osc_b.sine -&gt; mix.in[1]
+<p>The index in brackets selects which slot of a multi-port to connect.
+Aliases declared on the module’s shape are the idiomatic form:</p>
+<pre><code class="language-patches">module mix : Mixer([drums, bass, lead])
+
+kick.out -&gt; mix.in[drums]
+bass.out -&gt; mix.in[bass]
+lead.out -&gt; mix.in[lead]
 </code></pre>
-<p>The index in brackets selects which slot of a multi-port to connect.</p>
+<p>Numeric indices work when the shape is declared as a bare count:</p>
+<pre><code class="language-patches">module sum : Sum(2)
+
+osc_a.sine -&gt; sum.in[0]
+osc_b.sine -&gt; sum.in[1]
+</code></pre>
+<p>On <code>stereo</code> modules, the channel selectors <code>[l]</code> and <code>[r]</code> address the
+per-side instance instead of a numeric index:</p>
+<pre><code class="language-patches">stereo module dly : Delay
+src.left  -&gt; dly.in[l]
+src.right -&gt; dly.in[r]
+</code></pre>
+<h3 id="fan-in-and-fan-out"><a class="header" href="#fan-in-and-fan-out">Fan-in and fan-out</a></h3>
+<p>A comma-separated list of endpoints on either side of an arrow connects
+multiple sources or destinations in one statement:</p>
+<pre><code class="language-patches">osc.sine -&gt; filter.in, scope.in            # fan-out: one source → many sinks
+voice_a.out, voice_b.out -&gt; mix.in         # fan-in: many sources → one sink
+</code></pre>
+<p>Fan-out drives every listed sink from the same source. Fan-in to a single
+input port of uniform cable kind is <strong>auto-summed</strong>: the expander
+synthesises a <code>Sum</code> (or <code>PolySum</code> / <code>StereoSum</code>) module under the hood.
+Mixed-kind fan-in is rejected at expansion time.</p>
 <h3 id="arity-expansion"><a class="header" href="#arity-expansion">Arity expansion</a></h3>
 <pre><code class="language-patches">$.audio[*size] -&gt; sum.in[*size]
 </code></pre>
 <p>The <code>[*name]</code> wildcard expands into one connection per index from 0 to <code>name - 1</code>. Only valid inside templates where <code>name</code> is an int parameter.</p>
 <h3 id="rules"><a class="header" href="#rules">Rules</a></h3>
 <ul>
-<li>Each input port accepts exactly one cable. A second connection to the same input is an error.</li>
+<li>An input port may receive multiple connections of uniform cable kind;
+the expander synthesises a <code>Sum</code> / <code>PolySum</code> / <code>StereoSum</code> to combine
+them (see <em>Fan-in and fan-out</em>). Mixed-kind fan-in is rejected.</li>
 <li>An output port can drive any number of inputs.</li>
-<li>Mono outputs can only connect to mono inputs; poly to poly. Use <code>MonoToPoly</code> / <code>PolyToMono</code> to bridge.</li>
+<li>Cable kinds must match: mono ↔ mono, poly ↔ poly, stereo ↔ stereo.
+Use <code>MonoToPoly</code> / <code>PolyToMono</code> to bridge mono and poly.</li>
 </ul>
+<h3 id="cable-kinds-mono--poly--stereo"><a class="header" href="#cable-kinds-mono--poly--stereo">Cable kinds (mono / poly / stereo)</a></h3>
+<ul>
+<li><strong>Mono</strong> carries one <code>f32</code> per tick. The default for control and audio cables.</li>
+<li><strong>Poly</strong> carries 16 voices (<code>[f32; 16]</code>). Used by <code>Poly*</code> modules.</li>
+<li><strong>Stereo</strong> carries an <code>(L, R)</code> pair. Stereo modules expose a single
+port — <code>stereo_delay.in</code>, <code>lim.out</code> — instead of paired <code>*_left</code> /
+<code>*_right</code> ports.</li>
+</ul>
+<p>A mono Audio source feeding a stereo input is silently broadcast
+(<code>L = R = source</code>); no extra wiring is needed for the common
+“mono-into-effect” case. Stereo→mono is rejected — when the user
+genuinely wants the two halves apart they go through <code>StereoSplitter</code>,
+and <code>StereoJoiner</code> assembles two monos back into one stereo cable.</p>
+<h2 id="host-controls"><a class="header" href="#host-controls">Host controls</a></h2>
+<p>A <strong>host control</strong> is a named source surfaced to the plugin host
+(CLAP parameter, knob row in the CLI). Four kinds, declared at the
+top of <code>patch { ... }</code>:</p>
+<pre><code class="language-patches">patch {
+    knob    cutoff   { displayName: "Cutoff" }
+    slider  mix      { default: 0.5 }
+    toggle  bypass   { default: false }
+    trigger fire     { }
+}
+</code></pre>
+<ul>
+<li><code>knob</code> / <code>slider</code> produce a smoothed audio-rate signal in
+<code>[-1, 1]</code>.</li>
+<li><code>toggle</code> produces a stepped 0 / 1 signal; <code>default</code> is required.</li>
+<li><code>trigger</code> produces one-sample pulses fired by the host; no
+required fields.</li>
+</ul>
+<h3 id="fields"><a class="header" href="#fields">Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Kinds</th><th>Optional</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>displayName</code></td><td>all</td><td>yes</td><td>Surface label for the host UI.</td></tr>
+<tr><td><code>unit</code></td><td>knob / slider</td><td>yes</td><td>Hint for value formatting.</td></tr>
+<tr><td><code>default</code></td><td>knob / slider / toggle</td><td>knob / slider only</td><td>Toggle requires <code>default</code>; others optional.</td></tr>
+<tr><td><code>low</code> / <code>high</code></td><td>knob / slider</td><td>yes</td><td>Display-only metadata. Runtime mapping is the cable</td></tr>
+<tr><td></td><td></td><td></td><td>range operator’s job (see <em>Range-mapped connections</em>).</td></tr>
+<tr><td><code>taper</code></td><td>knob / slider</td><td>yes</td><td>UI taper hint (<code>linear</code>, <code>exp</code>).</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="references"><a class="header" href="#references">References</a></h3>
+<p>A <code>~name</code> reference on a cable endpoint connects the host control to
+a port:</p>
+<pre><code class="language-patches">patch {
+    knob cutoff { }
+    module filt : Svf
+    ~cutoff -[uni(20Hz, 8kHz)]-&gt; filt.cutoff
+}
+</code></pre>
+<p>The cable carries the normalized <code>[-1, 1]</code> value; the range operator
+remaps it to the destination’s musical units.</p>
+<h3 id="implicit-knob"><a class="header" href="#implicit-knob">Implicit knob</a></h3>
+<p>If a <code>~name</code> cable endpoint has no matching declaration, the
+desugarer synthesises an empty <code>knob name {}</code> block:</p>
+<pre><code class="language-patches">patch {
+    module filt : Svf
+    ~cutoff -[uni(20Hz, 8kHz)]-&gt; filt.cutoff   # implicit knob `cutoff`
+}
+</code></pre>
+<p>Implicit and explicit empty-knob forms lower to the same patch. To
+surface a <code>slider</code>, <code>toggle</code>, or <code>trigger</code> instead, declare it
+explicitly — only <code>knob</code> is implicit.</p>
 <h2 id="templates"><a class="header" href="#templates">Templates</a></h2>
 <p>Templates define reusable sub-graphs that are expanded at compile time with no runtime cost.</p>
 <h3 id="definition"><a class="header" href="#definition">Definition</a></h3>
@@ -291,7 +488,9 @@ osc_b.sine -&gt; mix.in[1]
 }
 </code></pre>
 <ul>
-<li><strong>Parameters</strong> are typed: <code>float</code>, <code>int</code>, <code>str</code>, <code>bool</code>. Parameters with <code>= default</code> are optional at the call site; those without are required.</li>
+<li><strong>Parameters</strong> are typed: <code>float</code>, <code>int</code>, <code>str</code>, <code>bool</code>, <code>pattern</code>,
+<code>song</code>. Parameters with <code>= default</code> are optional at the call site;
+those without are required.</li>
 <li><strong>Boundary ports</strong> are declared with <code>in:</code> and <code>out:</code> lists. Inside the template body, <code>$.name</code> refers to a boundary port.</li>
 <li><strong>Parameter references</strong> <code>&lt;name&gt;</code> substitute the parameter’s value anywhere in the template body: in parameter values (<code>{ attack: &lt;attack&gt; }</code>), port names (<code>osc.&lt;wave&gt;</code>), and cable scales (<code>-[&lt;gain&gt;]-&gt;</code>).</li>
 </ul>
@@ -300,8 +499,8 @@ osc_b.sine -&gt; mix.in[1]
     module v1 : voice(attack: 0.005, sustain: 0.6)
     module v2 : voice    # all defaults
 
-    v1.audio -&gt; out.in_left
-    v2.audio -&gt; out.in_right
+    v1.audio -&gt; out.in
+    v2.audio -&gt; out.in
 }
 </code></pre>
 <p>Each instantiation expands to a separate copy of the template’s modules with mangled names to avoid collisions.</p>
@@ -316,6 +515,8 @@ osc_b.sine -&gt; mix.in[1]
 <tr><td><code>int</code></td><td>integer values</td></tr>
 <tr><td><code>str</code></td><td>string values</td></tr>
 <tr><td><code>bool</code></td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td><code>pattern</code></td><td>pattern names — passed to a <code>PatternPlayer</code> cell</td></tr>
+<tr><td><code>song</code></td><td>song names — passed to a <code>MasterSequencer</code> cell</td></tr>
 </tbody>
 </table>
 </div>
@@ -337,16 +538,122 @@ osc_b.sine -&gt; mix.in[1]
 <p>When a scaled connection crosses a template boundary, the scales are multiplied. A connection <code>-[0.5]-&gt;</code> into a template that internally has <code>-[0.3]-&gt;</code> produces an effective scale of 0.15 at the underlying cable.</p>
 <h3 id="nesting"><a class="header" href="#nesting">Nesting</a></h3>
 <p>Templates can instantiate other templates. A <code>filtered_voice</code> template can contain <code>module v : voice(...)</code> and add further processing. Expansion is recursive — the outermost template is fully flattened before the patch is built.</p>
+<h2 id="patterns"><a class="header" href="#patterns">Patterns</a></h2>
+<p>Pattern blocks define step data for the tracker sequencer. Each pattern has
+one or more named channels, and each channel has a row of step values.</p>
+<pre><code class="language-patches">pattern bass_line {
+    note: C2  .  Eb2 .  G1  .  Ab1 .
+    vel:  1.0 .  0.8 .  0.9 .  0.7 .
+}
+</code></pre>
+<ul>
+<li><strong>Channel names</strong> (<code>note</code>, <code>vel</code>, <code>hit</code>, etc.) are identifiers. They must
+match the <code>channels</code> list on the <code>PatternPlayer</code> that reads this pattern.</li>
+<li>All channels in a pattern must have the <strong>same number of steps</strong>.</li>
+<li>Steps are separated by whitespace.</li>
+</ul>
+<h3 id="step-notation"><a class="header" href="#step-notation">Step notation</a></h3>
+<p>Each step produces up to four signals: <code>cv1</code>, <code>cv2</code>, <code>trigger</code>, and <code>gate</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Syntax</th><th>cv1</th><th>cv2</th><th>trigger</th><th>gate</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>C4</code>, <code>A#3</code></td><td>V/oct</td><td>—</td><td>yes</td><td>yes</td><td>Note (pitch to cv1)</td></tr>
+<tr><td><code>x</code></td><td>—</td><td>—</td><td>yes</td><td>yes</td><td>Trigger hit</td></tr>
+<tr><td><code>x:0.8</code></td><td>—</td><td>0.8</td><td>yes</td><td>yes</td><td>Trigger with cv2 (velocity)</td></tr>
+<tr><td><code>0.5</code></td><td>0.5</td><td>—</td><td>yes</td><td>yes</td><td>Float value to cv1</td></tr>
+<tr><td><code>0.5:0.3</code></td><td>0.5</td><td>0.3</td><td>yes</td><td>yes</td><td>Float cv1 and cv2</td></tr>
+<tr><td><code>.</code></td><td>—</td><td>—</td><td>no</td><td>no</td><td>Rest</td></tr>
+<tr><td><code>~</code></td><td>—</td><td>—</td><td>no</td><td>yes</td><td>Tie (sustain gate, no retrigger)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Values support the same unit suffixes as module parameters: <code>440Hz</code>,
+<code>2.5kHz</code>, <code>-6dB</code>, and note names are all valid.</p>
+<h3 id="slides"><a class="header" href="#slides">Slides</a></h3>
+<p>A slide interpolates cv1 (and optionally cv2) linearly over the tick
+duration:</p>
+<pre><code class="language-patches">note: C4&gt;E4  .  G4:0.5&gt;0.8  .
+</code></pre>
+<p>The <code>&gt;</code> separates start and end values. The gate stays high through the
+slide. Slides work with notes, floats, and cv1:cv2 pairs.</p>
+<h3 id="repeats"><a class="header" href="#repeats">Repeats</a></h3>
+<p>A repeat subdivides a single tick into multiple sub-triggers:</p>
+<pre><code class="language-patches">hit: x*3  .  x*2  .
+</code></pre>
+<p><code>x*3</code> fires three evenly-spaced triggers within the tick, each with an ~80%
+duty cycle gate.</p>
+<h2 id="songs"><a class="header" href="#songs">Songs</a></h2>
+<p>A song block defines a playback order built from named <code>section</code> blocks and
+<code>play</code> statements.</p>
+<pre><code class="language-patches">song my_song(bass, lead, drums) {
+    section verse {
+        bass_verse, lead_verse, drums_a
+        bass_verse, lead_verse, drums_b
+    }
+    section chorus {
+        bass_chor, lead_chor, drums_a
+    }
+
+    play verse
+    @loop
+    play (verse, chorus) * 2
+}
+</code></pre>
+<h3 id="lanes"><a class="header" href="#lanes">Lanes</a></h3>
+<p>The <strong>lanes</strong> — the identifiers in parentheses after the song name — declare
+one column per pattern assignment. Every row must supply exactly this many
+cells. Lane names must match the <code>channels</code> shape argument on the
+<code>MasterSequencer</code>.</p>
+<h3 id="cells"><a class="header" href="#cells">Cells</a></h3>
+<p>A row is a comma-separated list of cells. A cell is one of:</p>
+<ul>
+<li>a pattern name — the pattern played in that lane for that row;</li>
+<li><code>_</code> — silence on that lane;</li>
+<li><code>&lt;param&gt;</code> — a template-parameter reference, resolved at expansion time.</li>
+</ul>
+<p>Rows are separated by newlines (newlines are significant inside row
+sequences). A parenthesised sub-sequence can be repeated: <code>(a, b                                                                c, d) * 2</code>.
+A bare <code>cell * N</code> (without parentheses) is rejected at parse time.</p>
+<h3 id="sections"><a class="header" href="#sections">Sections</a></h3>
+<p>A <code>section</code> block is a named, reusable row sequence. Sections may be defined
+inside a song (song-local scope) or at file top level (visible to all songs).
+A section has no lane count of its own; it is validated against the invoking
+song’s lanes when <code>play</code> references it.</p>
+<h3 id="play-statements"><a class="header" href="#play-statements">Play statements</a></h3>
+<p><code>play</code> composes sections into the song’s running row list:</p>
+<ul>
+<li><code>play verse</code> — append <code>verse</code>.</li>
+<li><code>play verse, chorus</code> — append <code>verse</code>, then <code>chorus</code>.</li>
+<li><code>play chorus * 2</code> — append <code>chorus</code> twice (<code>*</code> binds tighter than <code>,</code>).</li>
+<li><code>play (verse, chorus) * 4</code> — append the group four times.</li>
+<li><code>play { row, ... }</code> — an anonymous inline body (no section name).</li>
+<li><code>play chorus { row, ... }</code> — defines <code>chorus</code> as a song-local section and
+plays it once. Later <code>play chorus</code> / <code>chorus</code> references replay it.</li>
+</ul>
+<p>Inline bodies (<code>play { ... }</code> and <code>play name { ... }</code>) appear only as the
+entire body of a single <code>play</code> statement. They cannot be mixed into a
+composition expression such as <code>play a, { row, ... }, b</code>.</p>
+<h3 id="loop-marker"><a class="header" href="#loop-marker">Loop marker</a></h3>
+<p><code>@loop</code> is a standalone song item between <code>play</code> statements. It sets the
+loop-back row index in the emitted song. A song may contain at most one
+<code>@loop</code>; omitting it loops the song from the beginning.</p>
+<h3 id="inline-patterns"><a class="header" href="#inline-patterns">Inline patterns</a></h3>
+<p><code>pattern</code> blocks may appear as song items alongside <code>section</code> and <code>play</code>.
+Inline patterns are song-local: their names are mangled under the enclosing
+song so two songs may each define a <code>fill</code> pattern without collision.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="live-coding.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="dsl-poly.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="modules/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="authoring-synth-voice.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -356,11 +663,11 @@ osc_b.sine -&gt; mix.in[1]
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="live-coding.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="dsl-poly.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="modules/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="authoring-synth-voice.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

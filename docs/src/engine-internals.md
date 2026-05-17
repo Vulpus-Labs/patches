@@ -19,7 +19,7 @@ A `.patches` file goes through four stages before audio runs:
   Interpreter (patches-interpreter)  Validate against module registry → ModuleGraph
      │
      ▼
-  Planner (patches-engine)      Graph → ExecutionPlan, reusing surviving modules
+  Planner (patches-planner)     Graph → ExecutionPlan, reusing surviving modules
      │
      ▼
   Audio thread                  Tick loop: execute plan, one sample at a time
@@ -35,42 +35,90 @@ A `.patches` file goes through four stages before audio runs:
 
 ## The cable pool
 
-All inter-module signals live in a single contiguous allocation: a `Vec<[CableValue; 2]>`. Each cable occupies one slot in this vector. The two-element inner array is a ping-pong pair.
+Inter-module signals live in a single pool split into two regions:
+
+- **Scratch region** — `[0, SCRATCH_CAPACITY)`. One `CableValue` per slot;
+  consumers read producers' *current-tick* output. Used by every cable
+  inside a fused (acyclic) subgraph.
+- **Cycle region** — `[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)`.
+  `[CableValue; 2]` ping-pong pair per slot; consumers read the *previous*
+  tick's value. Used by cables that carry feedback across an SCC boundary.
+
+A single virtual `cable_idx` selects the region: indices below
+`SCRATCH_CAPACITY` route to scratch, the rest to cycle. Capacities are
+fixed at compile time (`SCRATCH_CAPACITY = 2048`, `CYCLE_CAPACITY = 128`);
+the planner reports `BufferPoolExhausted` if a patch overflows either
+region.
+
+`CableValue` is a fixed 16-lane `f32` slot:
 
 ```rust
-pub enum CableValue {
-    Mono(f32),
-    Poly([f32; 16]),
-}
+#[repr(transparent)]
+pub struct CableValue(pub [f32; 16]);
 ```
 
-`CableValue` is `Copy`. On each tick, the write index `wi` alternates between 0 and 1. Modules write to `pool[cable_idx][wi]` and read from `pool[cable_idx][1 - wi]`. This gives every cable a one-sample delay: a module always reads the value that was written on the *previous* tick. The consequence is that execution order does not matter — modules can be scheduled in any order and the results are identical. Feedback connections are also well-defined: they carry the previous tick's value.
+The cable's declared kind — `Mono`, `Stereo`, or `Poly` — is static and
+tells reader and writer which prefix of the array carries data: lane 0
+for `Mono`, lanes 0–1 for `Stereo`, all 16 lanes for `Poly`. There is no
+runtime tag. Constructors `CableValue::mono(v)`, `stereo(l, r)`, and
+`poly([..; 16])` zero the unused lanes; accessors `as_mono`, `as_stereo`,
+`as_poly` read only the relevant prefix. Holding all slots at 16 lanes
+lets a slot used for `Mono` in one plan be repurposed as `Poly` in the
+next without reallocating the pool.
+
+**Subgraph fusion.** Across SCCs the planner emits modules in
+topological order and routes cross-SCC cables through the scratch region,
+so consumers read producers' current-tick output. This removes the
+per-cable one-sample lag that would otherwise accumulate audibly across
+long signal chains, without changing the patch author's mental model.
+Cycle-bearing cables (those that close a feedback loop) live in the cycle
+region and retain the 1-sample delay, which makes them well-defined
+regardless of execution order. Calling fused modules out of topological
+order causes silent reads of stale data — this matters when extending the
+planner, not when authoring patches.
 
 ### Reserved slots
 
-The first 16 slots are reserved for infrastructure and never allocated to user cables:
+The first `RESERVED_SLOTS = 32` scratch indices are reserved for
+infrastructure and never allocated to user cables. They are split into a
+**backplane** at the bottom and **sinks** at the top of the reserved
+range:
 
-| Index   | Name              | Purpose                                                             |
-| ------- | ----------------- | ------------------------------------------------------------------- |
-| 0       | `MONO_READ_SINK`  | Disconnected mono inputs read zero from here                        |
-| 1       | `POLY_READ_SINK`  | Disconnected poly inputs read zero from here                        |
-| 2       | `MONO_WRITE_SINK` | Unconnected mono outputs write harmlessly here                      |
-| 3       | `POLY_WRITE_SINK` | Unconnected poly outputs write harmlessly here                      |
-| 4       | `AUDIO_OUT_L`     | Left audio output — AudioOut writes, callback reads                 |
-| 5       | `AUDIO_OUT_R`     | Right audio output                                                  |
-| 6       | `AUDIO_IN_L`      | Left audio input (reserved)                                         |
-| 7       | `AUDIO_IN_R`      | Right audio input (reserved)                                        |
-| 8       | `GLOBAL_CLOCK`    | Absolute sample counter, written by callback each tick              |
-| 9       | `GLOBAL_DRIFT`    | Slowly varying value in [-1, 1] for globally correlated pitch drift |
-| 10–15   | —                 | Reserved for future use                                             |
+| Index | Name                    | Kind   | Purpose                                                       |
+| ----- | ----------------------- | ------ | ------------------------------------------------------------- |
+| 0     | `AUDIO_OUT_L`           | mono   | Left audio output — `AudioOut` writes, callback reads         |
+| 1     | `AUDIO_OUT_R`           | mono   | Right audio output                                            |
+| 2     | `AUDIO_IN_L`            | mono   | Left audio input (`AudioIn`)                                  |
+| 3     | `AUDIO_IN_R`            | mono   | Right audio input                                             |
+| 4     | `GLOBAL_TRANSPORT`      | poly   | Transport frame — sample count + tempo + position  |
+| 5     | `GLOBAL_DRIFT`          | mono   | Slowly varying value in `[-1, 1]` for correlated pitch drift  |
+| 6     | `GLOBAL_MIDI`           | poly   | Packed MIDI frame — up to 5 events per sample      |
+| 7–10  | `TAP_BASE..+4`          | poly   | `Tap` module storage — 4 slots × 16 lanes = 64 tap channels   |
+| 11–14 | `HOST_CONTROL_BASE..+4` | poly   | Host-control values — 4 slots × 16 lanes = 64 controls        |
+| 15–27 | —                       | —      | Spare backplane capacity (no live mapping)                    |
+| 28    | `MONO_READ_SINK`        | mono   | Disconnected mono inputs read zero from here                  |
+| 29    | `POLY_READ_SINK`        | poly   | Disconnected poly inputs read zero from here                  |
+| 30    | `MONO_WRITE_SINK`       | mono   | Unconnected mono outputs write harmlessly here                |
+| 31    | `POLY_WRITE_SINK`       | poly   | Unconnected poly outputs write harmlessly here                |
 
-Disconnected ports point at the sink slots. This means `process` never needs to branch on connectivity — it can always call `pool.read_mono(&self.port)` safely, getting zero for unconnected inputs. Modules that want to *skip work* for disconnected outputs can check the `connected` field on their output port.
+The sinks sit at the top of the reserved range so the FFI plugin loader can shift plugin-visible scratch past the backplane while
+still resolving plugin-relative `[0, SINK_SLOTS)` to the sink slots. The
+backplane → sink layout is asserted at compile time.
+
+Disconnected ports point at the sink slots. This means `process` never
+needs to branch on connectivity — it can always call
+`pool.read_mono(&self.port)` safely, getting zero for unconnected
+inputs. Modules that want to *skip work* for disconnected outputs can
+check `output.is_connected()`.
 
 ### Buffer stability
 
 The cable pool persists across re-plans. Unchanged cables keep their buffer index, so CV signals on cables that were not rewired continue without interruption. Recycled and newly allocated slots are listed in the execution plan's `to_zero` vector; the audio thread zeroes them before the first tick of the new plan.
 
-The pool has a fixed capacity (default 4096 slots). A freelist tracks available indices for allocation.
+Pool capacities are fixed compile-time constants
+(`SCRATCH_CAPACITY = 2048`, `CYCLE_CAPACITY = 128`). The planner allocates
+dyn-scratch indices above `RESERVED_SLOTS` via a high-water mark; cycle
+indices are allocated in the cycle region in build order.
 
 ## Audio thread constraints
 
@@ -81,6 +129,8 @@ The audio callback runs under hard real-time constraints. Violating them causes 
 **No blocking.** No mutexes, no file or network I/O, no syscalls that may sleep.
 
 **No deallocation.** Dropping a `Box<dyn Module>` can run arbitrary destructor code. All deallocation is routed to a background thread (see below).
+
+**Unwinding panic policy.** The CLAP host and any crate loaded as an FFI plugin must build with `panic = "unwind"`. `PatchProcessor::tick` catches module panics at the tick boundary and halts the engine cleanly — that only works with table-based unwinding. `panic = "abort"` in the workspace or plugin profiles defeats the catch and takes the host process down with the panic.
 
 Communication with the control thread uses an **rtrb** lock-free single-producer / single-consumer ring buffer. The callback polls it at the start of each processing block.
 
@@ -126,7 +176,11 @@ Dropping a module or an old execution plan runs destructors that may allocate or
 ```rust
 enum CleanupAction {
     DropModule(Box<dyn Module>),
-    DropPlan(ExecutionPlan),
+    DropPlan(Box<ExecutionPlan>),
+    DropParamState(Box<ParamState>),
+    DropParamFrame(Box<ParamFrame>),
+    DropMonitorMeta(Box<MonitorMeta>),
+    DropHostControlPlanMeta(Box<HostControlPlanMeta>),
 }
 ```
 
@@ -134,7 +188,7 @@ The audio thread pushes to this buffer; the cleanup thread drops the values on i
 
 ## Cable kinds
 
-The system has three cable kinds (ADR 0015, ADR 0059):
+The system has three cable kinds:
 
 - **Mono** — one `f32` per tick. The default.
 - **Poly** — `[f32; 16]` per tick (one value per voice). Voice count is
@@ -153,7 +207,7 @@ layout — it is exclusively audio/CV.
 | Mono          | Mono     | direct (layouts must match)                     |
 | Poly          | Poly     | direct (layouts must match)                     |
 | Stereo        | Stereo   | direct                                          |
-| Mono Audio    | Stereo   | **broadcast**: `(s, s)` (ADR 0059 §2)           |
+| Mono Audio    | Stereo   | **broadcast**: `(s, s)`           |
 | Stereo        | Mono     | rejected (`CableKindMismatch`)                  |
 | Poly ↔ Stereo | —        | rejected                                        |
 | Mono ↔ Poly   | —        | rejected (use `MonoToPoly` / `PolyToMono`)      |
@@ -181,14 +235,23 @@ Some modules need to recompute internal coefficients when their CV inputs change
 ```rust
 pub trait Module {
     // ...
-    const WANTS_PERIODIC: bool = false;
+    fn wants_periodic(&self) -> bool { false }
     fn periodic_update(&mut self, _pool: &CablePool<'_>) {}
 }
 ```
 
-Modules that set `WANTS_PERIODIC = true` override `periodic_update` to read their CV inputs and update filter coefficients, frequency targets, or other derived state. The planner collects their slot indices at plan-build time; every `periodic_update_interval` samples (typically a few dozen), the audio thread dispatches to `periodic_update` through the normal `&mut dyn Module` path. The per-sample `process` call then uses these precomputed values, keeping the hot path fast.
+Modules whose `wants_periodic()` returns `true` override `periodic_update`
+to read their CV inputs and update filter coefficients, frequency
+targets, or other derived state. The planner queries `wants_periodic()`
+once at plan-build time and collects matching slot indices; every
+`periodic_update_interval` samples (typically a few dozen), the audio
+thread dispatches `periodic_update` through the normal
+`&mut dyn Module` path. The per-sample `process` call then uses these
+precomputed values, keeping the hot path fast.
 
-This replaces the earlier `PeriodicUpdate` trait with `as_periodic()` (deleted in E114 / ADR 0052 along with its raw-pointer caching footgun).
+This replaces an earlier `PeriodicUpdate` trait and its
+`as_periodic()` lookup, which were removed along with their
+raw-pointer caching footgun.
 
 ## Observability
 
@@ -200,22 +263,14 @@ from the audio thread — and exposed via `RuntimeArcTables::snapshot()`
 
 `RuntimeCountersSnapshot` contains:
 
-- `float_buffers.capacity` — current `ArcTable<[f32]>` slot capacity.
-- `float_buffers.high_watermark` — peak live-id count seen since
-  runtime start (monotonic).
-- `float_buffers.growth_events` — number of `ArcTable` grow
-  operations (chunk appends + index retire).
-- `float_buffers.releases_queued` — cumulative count of ids pushed
-  onto the audio→control release ring.
-- `float_buffers.releases_drained` — cumulative count drained on the
-  control thread.
-- `float_buffers.pending_release_depth()` — derived queue depth
-  (`queued - drained`), eventually consistent.
 - `param_frames_dispatched` — cumulative count of `ParamFrame`
   deliveries. The dispatcher increments this via
   `RuntimeAudioHandles::note_param_frame_dispatched()`.
 
-These are the observability surface referenced by ADR 0043 (cable tap
-/ observation). The attach API that routes counters to a UI or
-logging sink is still deferred; until then, tests and soak runs read
-them directly through the snapshot accessors.
+The earlier `FloatBuffer` / `ArcTable<[f32]>` counters were retired with
+the pipeline itself; the snapshot surface is intentionally
+small now.
+
+The attach API that routes counters to a UI or logging sink is still
+deferred; until then, tests and soak runs read them directly through
+the snapshot accessors.

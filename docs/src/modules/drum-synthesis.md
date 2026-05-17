@@ -1,12 +1,20 @@
-# Drum synthesis
+# Drum synthesis (external bundle)
 
-> **Source of truth:** the doc comments on each module struct in
-> `patches-modules/src/` define the canonical port names, parameter
-> ranges, and behaviour. This page is kept in sync with those comments.
+> **Source of truth:** the doc comments on each module struct in the
+> external `patches-drums` crate (in the `patches-bundles` repo) define
+> the canonical port names, parameter ranges, and behaviour. This page
+> is kept in sync with those comments.
 
-Patches includes a set of 808-style electronic drum synthesisers. Each module
-has a single `trigger` input (rising edge) and a mono `out`. They are designed
-to be driven by the tracker sequencer (see
+The 808-style electronic drum synthesisers documented on this page are
+**not** in the in-tree `patches-modules` crate. They ship as the
+`patches-drums` bundle from the external `patches-bundles` repository
+and are loaded at runtime by the host's plugin scanner. See [Implementing a native plugin](../extending-native-plugin.md)
+for how host-loaded bundles work and the host's stdlib search path
+(`patches_ffi::scanner::stdlib_scanner`) for where bundles are
+discovered.
+
+Each module has a single `trigger` input (rising edge) and a mono `out`.
+They are designed to be driven by the tracker sequencer (see
 [Tracker sequencer](tracker.md)) but work with any trigger source.
 
 All drum modules use zero-allocation DSP kernels from `patches-dsp` and are

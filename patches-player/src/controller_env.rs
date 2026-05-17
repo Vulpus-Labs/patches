@@ -10,15 +10,17 @@
 //! adds the methods). When it lands, the Ratatui impl reads/writes a
 //! sibling `<patch>.patches.state` JSON file.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use patches_diagnostics::RenderedDiagnostic;
 use patches_dsl::manifest::Manifest;
 use patches_host::{HostRuntime, InMemorySource};
 use patches_plugin_common::{
-    xdg_list_presets, xdg_load_preset, xdg_preset_path, xdg_save_preset, CompileFailure,
-    CompileSuccess, DiagnosticView, Env, PersistedSettings, RescanProbe, ScanDetails,
-    SidecarEnvelope, TapSummary, SIDECAR_SCHEMA_VERSION,
+    default_global_config_path, xdg_list_presets, xdg_load_preset, xdg_preset_path,
+    xdg_save_preset, CompileFailure, CompileSuccess, DiagnosticView, Env, GlobalConfig,
+    PersistedSettings, RescanProbe, ScanDetails, SidecarEnvelope, TapSummary,
+    SIDECAR_SCHEMA_VERSION,
 };
 use patches_core::registry::Registry;
 
@@ -30,6 +32,12 @@ pub struct EnvSideChannel {
     pub last_manifest: Option<Manifest>,
     pub last_dependencies: Vec<PathBuf>,
     pub last_expand_warnings: Vec<String>,
+    /// Bundle-dir / module paths already merged into the live registry
+    /// (canonicalised when possible). Lets [`Env::scan_into`] skip
+    /// previously-scanned paths so patch reloads don't re-scan, while
+    /// [`Action::AddBundleDir`](patches_plugin_common::Action::AddBundleDir)
+    /// still hot-loads freshly added directories.
+    pub scanned_paths: HashSet<PathBuf>,
 }
 
 pub struct RatatuiEnv<'a> {
@@ -122,25 +130,33 @@ impl<'a> Env for RatatuiEnv<'a> {
         }
         probe
     }
-    fn scan_into(&mut self, _paths: &[PathBuf], registry: &mut Registry) -> ScanDetails {
-        // The player scans module paths once at startup (`common_setup`)
-        // and treats that snapshot as authoritative — paths are fixed to
-        // the CLI args and cannot change for the lifetime of the
-        // process. The controller's pre-compile `scan_into` would
-        // otherwise re-scan and log a "skip" line per already-loaded
-        // module on every reload. Return an empty result and let the
-        // existing registry stand.
-        let mut module_names: Vec<String> =
-            registry.module_names().map(|s| s.to_string()).collect();
-        module_names.sort();
-        ScanDetails {
-            // Sentinel that the controller suppresses ("0 loaded, 0
-            // replaced, 0 skipped, 0 errors"). Empty strings would log
-            // as "Module scan: " — louder, not quieter.
-            summary: "0 loaded, 0 replaced, 0 skipped, 0 errors".into(),
-            details: Vec::new(),
-            module_names,
+    fn scan_into(&mut self, paths: &[PathBuf], registry: &mut Registry) -> ScanDetails {
+        // Dedup against paths already scanned this session (startup
+        // scan + prior AddBundleDir actions). Re-scanning would emit
+        // "skip lower-version" lines on every patch reload otherwise.
+        let unseen: Vec<PathBuf> = paths
+            .iter()
+            .filter(|p| !self.side.scanned_paths.contains(*p))
+            .cloned()
+            .collect();
+        if unseen.is_empty() {
+            let mut module_names: Vec<String> =
+                registry.module_names().map(|s| s.to_string()).collect();
+            module_names.sort();
+            return ScanDetails {
+                summary: "0 loaded, 0 replaced, 0 skipped, 0 errors".into(),
+                details: Vec::new(),
+                module_names,
+            };
         }
+        let details = scan_into_registry(&unseen, registry);
+        for p in &unseen {
+            self.side
+                .scanned_paths
+                .insert(std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()));
+            self.side.scanned_paths.insert(p.clone());
+        }
+        details
     }
     fn reset_and_scan(&mut self, paths: &[PathBuf]) -> (Registry, ScanDetails) {
         let mut registry = patches_modules::default_registry();
@@ -181,6 +197,54 @@ impl<'a> Env for RatatuiEnv<'a> {
         Ok(Some(env.settings))
     }
 
+    fn global_config_path(&self) -> Option<PathBuf> {
+        global_config_path()
+    }
+
+    fn load_global_config(&mut self) -> std::io::Result<Option<GlobalConfig>> {
+        let Some(path) = global_config_path() else {
+            return Ok(None);
+        };
+        let bytes = match std::fs::read_to_string(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        match GlobalConfig::from_toml_str(&bytes) {
+            Ok(cfg) => Ok(Some(cfg)),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn save_global_config(&mut self, cfg: &GlobalConfig) -> std::io::Result<()> {
+        let path = global_config_path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "global config path unavailable on this platform",
+            )
+        })?;
+        let serialised = cfg
+            .to_toml_string()
+            .map_err(std::io::Error::from)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Atomic write: tmp + rename so a crash mid-write can't corrupt
+        // the live settings.toml. The tmp is sibling to the target so
+        // `rename` stays on one filesystem.
+        let mut tmp = path.clone();
+        match tmp.file_name() {
+            Some(n) => {
+                let mut name = n.to_os_string();
+                name.push(".tmp");
+                tmp.set_file_name(name);
+            }
+            None => return Err(std::io::Error::other("global config path has no filename")),
+        }
+        std::fs::write(&tmp, serialised.as_bytes())?;
+        std::fs::rename(&tmp, &path)
+    }
+
     fn preset_path(&self, patch_stem: &str, preset_name: &str) -> Option<PathBuf> {
         xdg_preset_path(patch_stem, preset_name)
     }
@@ -199,7 +263,12 @@ impl<'a> Env for RatatuiEnv<'a> {
         path: &Path,
         settings: &PersistedSettings,
     ) -> std::io::Result<()> {
-        let envelope = SidecarEnvelope::new(settings.clone());
+        // ADR 0075 §"Persistence boundary": sidecars never carry bundle
+        // dirs. The legacy field stays in the serde shape for back-
+        // compat with existing files; we just write empty.
+        let mut scrubbed = settings.clone();
+        scrubbed.module_paths.clear();
+        let envelope = SidecarEnvelope::new(scrubbed);
         let json = serde_json::to_string_pretty(&envelope).map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("sidecar: {e}"))
         })?;
@@ -220,6 +289,13 @@ impl<'a> Env for RatatuiEnv<'a> {
             Err(e) => Err(e),
         }
     }
+}
+
+/// OS-native global-config location (ADR 0075). Thin wrapper over the
+/// shared helper in `patches_plugin_common`; both shells must hit the
+/// same path so writes from one are visible to the other.
+pub(crate) fn global_config_path() -> Option<PathBuf> {
+    default_global_config_path()
 }
 
 /// Sidecar location adjacent to a `.patches` file:
@@ -381,7 +457,11 @@ mod sidecar_tests {
         with_env(|e| {
             e.save_sidecar(&path, &original).expect("save");
             let loaded = e.load_sidecar(&path).expect("load").expect("some");
-            assert_eq!(loaded, original);
+            // ADR 0075: sidecars never carry bundle dirs; the
+            // legacy `module_paths` field is scrubbed on save.
+            let mut expected = original.clone();
+            expected.module_paths.clear();
+            assert_eq!(loaded, expected);
         });
     }
 

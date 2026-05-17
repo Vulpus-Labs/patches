@@ -793,7 +793,7 @@
     if (!paths || paths.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.textContent = "no scan paths configured";
+      empty.textContent = "no bundle directories configured";
       root.appendChild(empty);
       return;
     }
@@ -806,7 +806,7 @@
       row.appendChild(text);
       const rm = document.createElement("button");
       rm.className = "btn btn-remove";
-      rm.dataset.removeIndex = String(i);
+      rm.dataset.removePath = paths[i];
       rm.textContent = "Remove";
       row.appendChild(rm);
       root.appendChild(row);
@@ -935,8 +935,8 @@
       }
       return;
     }
-    if (t.classList.contains("btn-remove") && t.dataset.removeIndex !== void 0) {
-      postIntent("remove_path", { index: parseInt(t.dataset.removeIndex, 10) });
+    if (t.classList.contains("btn-remove") && t.dataset.removePath !== void 0) {
+      postIntent("remove_bundle_dir", { path: t.dataset.removePath });
       return;
     }
     if (t.classList.contains("btn") && t.dataset.intent) {

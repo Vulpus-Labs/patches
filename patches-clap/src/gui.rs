@@ -44,6 +44,8 @@ fn intent_log_label(intent: &Intent) -> &'static str {
         Intent::Rescan => "rescan_requested",
         Intent::AddPath => "add_path_requested",
         Intent::RemovePath { .. } => "remove_path_requested",
+        Intent::AddBundleDir => "add_bundle_dir_requested",
+        Intent::RemoveBundleDir { .. } => "remove_bundle_dir_requested",
         Intent::SetTapOpt { .. } => "set_tap_opt",
         Intent::Ready => "webview_ready",
     }

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Envelopes - Patches Manual — v0.5.1</title>
+        <title>Envelopes - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -186,58 +186,79 @@
 <code>patches-modules/src/</code> define the canonical port names, parameter
 ranges, and behaviour. This page is kept in sync with those comments.</p>
 </blockquote>
-<h2 id="adsr--mono-adsr-envelope"><a class="header" href="#adsr--mono-adsr-envelope"><code>Adsr</code> — Mono ADSR envelope</a></h2>
-<p>A standard Attack-Decay-Sustain-Release envelope generator.</p>
+<h2 id="adsr--multi-channel-dadsr-envelope-with-built-in-vca"><a class="header" href="#adsr--multi-channel-dadsr-envelope-with-built-in-vca"><code>Adsr</code> — Multi-channel DADSR envelope with built-in VCA</a></h2>
+<p>Multi-channel Attack-Decay-Sustain-Release envelope generator with an
+optional pre-attack <strong>D</strong>elay phase and built-in VCA pass-through. One
+module emits N independent envelopes (one per channel) driven by a
+single shared <code>trigger</code> and <code>gate</code>.</p>
+<p>With <code>channels = 1</code> (the default) it behaves as a conventional
+single-channel ADSR — <code>env.out</code>, <code>env.vca_in</code>, <code>env.vca_out</code> address
+channel 0 implicitly. Use <code>Adsr([amp, filt, vib])</code> or <code>Adsr(3)</code> to get
+multiple envelopes per trigger/gate.</p>
+<p>Each channel has its own delay/attack/decay/sustain/release/shape, and
+an optional VCA stage: if <code>vca_in[c]</code> is connected, <code>vca_out[c]</code> emits
+<code>vca_in[c] * env[c]</code>. Useful for tying amplitude, filter, and
+modulation envelopes to the same note event without wiring N separate
+modules. A rising <code>trigger</code> enters the per-channel Delay phase (output
+held at 0 for <code>delay[c]</code> seconds) before Attack begins. Releasing the
+gate during Delay returns the channel to Idle without emitting any
+envelope.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>trigger</td><td>Shared one-sample pulse starts the envelope on every channel</td></tr>
+<tr><td><code>gate</code></td><td>mono</td><td>Shared: held high to sustain; release to enter Release on every channel</td></tr>
+<tr><td><code>vca_in[i]</code></td><td>mono</td><td>Optional audio/CV input multiplied by the channel’s envelope (i in 0..N-1)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out[i]</code></td><td>mono</td><td>Envelope level for channel i in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out[i]</code></td><td>mono</td><td><code>vca_in[i] * out[i]</code> — pre-multiplied audio/CV</td></tr>
+</tbody>
+</table>
+</div>
 <p><strong>Parameters</strong></p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><th>Name</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>attack</code></td><td>float (s)</td><td><code>0.01</code></td><td>Attack time in seconds</td></tr>
-<tr><td><code>decay</code></td><td>float (s)</td><td><code>0.1</code></td><td>Decay time in seconds</td></tr>
-<tr><td><code>sustain</code></td><td>float</td><td><code>0.7</code></td><td>Sustain level (0–1)</td></tr>
-<tr><td><code>release</code></td><td>float (s)</td><td><code>0.3</code></td><td>Release time in seconds</td></tr>
-</tbody>
-</table>
-</div>
-<p><strong>Inputs</strong></p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Port</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>trigger</code></td><td>Rising edge starts the attack</td></tr>
-<tr><td><code>gate</code></td><td>High = sustain; falling edge starts release</td></tr>
-</tbody>
-</table>
-</div>
-<p><strong>Outputs</strong></p>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Port</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>out</code></td><td>Envelope value (0–1)</td></tr>
+<tr><td><code>delay[i]</code></td><td>float</td><td>0.0 – 10.0</td><td><code>0.0</code></td><td>Pre-attack hold time in seconds (output stays at 0)</td></tr>
+<tr><td><code>attack[i]</code></td><td>float</td><td>0.001 – 10.0</td><td><code>0.01</code></td><td>Attack time in seconds</td></tr>
+<tr><td><code>decay[i]</code></td><td>float</td><td>0.001 – 10.0</td><td><code>0.1</code></td><td>Decay time in seconds</td></tr>
+<tr><td><code>sustain[i]</code></td><td>float</td><td>0.0 – 1.0</td><td><code>0.7</code></td><td>Sustain level</td></tr>
+<tr><td><code>release[i]</code></td><td>float</td><td>0.001 – 10.0</td><td><code>0.3</code></td><td>Release time in seconds</td></tr>
+<tr><td><code>shape[i]</code></td><td>enum</td><td>linear, exponential</td><td><code>linear</code></td><td>Segment shape: linear ramp or analog-style RC curve</td></tr>
 </tbody>
 </table>
 </div>
 <hr>
-<h2 id="polyadsr--per-voice-adsr"><a class="header" href="#polyadsr--per-voice-adsr"><code>PolyAdsr</code> — Per-voice ADSR</a></h2>
-<p>Same as <code>Adsr</code> but operates independently on each polyphonic voice.</p>
-<p><strong>Parameters</strong> — same as <code>Adsr</code>.</p>
+<h2 id="polyadsr--per-voice-dadsr"><a class="header" href="#polyadsr--per-voice-dadsr"><code>PolyAdsr</code> — Per-voice DADSR</a></h2>
+<p>Same envelope shape as <code>Adsr</code> (delay/attack/decay/sustain/release/shape)
+but each voice has independent state, driven by per-voice
+<code>trigger</code> / <code>gate</code> poly cables. Optional per-voice VCA via <code>vca_in</code>.</p>
 <p><strong>Inputs</strong></p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Port</th><th>Description</th></tr>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>trigger</code></td><td>Per-voice trigger (poly)</td></tr>
-<tr><td><code>gate</code></td><td>Per-voice gate (poly)</td></tr>
+<tr><td><code>trigger</code></td><td>poly</td><td>Per-voice sub-sample trigger</td></tr>
+<tr><td><code>gate</code></td><td>poly</td><td>Per-voice gate</td></tr>
+<tr><td><code>vca_in</code></td><td>poly</td><td>Optional per-voice audio/CV multiplied by the envelope</td></tr>
 </tbody>
 </table>
 </div>
@@ -245,13 +266,16 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Port</th><th>Description</th></tr>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>out</code></td><td>Per-voice envelope (poly)</td></tr>
+<tr><td><code>out</code></td><td>poly</td><td>Per-voice envelope level in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out</code></td><td>poly</td><td><code>vca_in * out</code> per voice</td></tr>
 </tbody>
 </table>
 </div>
+<p><strong>Parameters</strong> — same names and ranges as <code>Adsr</code>. Parameters apply
+identically to all voices.</p>
 
                     </main>
 

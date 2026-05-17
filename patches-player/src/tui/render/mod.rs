@@ -364,7 +364,25 @@ fn draw_log(f: &mut Frame, area: Rect, view: &View) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn draw_footer(f: &mut Frame, area: Rect, _view: &View) {
+fn draw_footer(f: &mut Frame, area: Rect, view: &View) {
+    // While a bundle-dir prompt is open, the footer becomes the input
+    // line. Trailing underscore marks the cursor position.
+    if let Some(prompt) = view.prompt.as_ref() {
+        let line = Line::from(vec![
+            Span::styled(prompt.label(), Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(": "),
+            Span::raw(prompt.input.clone()),
+            Span::raw("_"),
+            Span::raw("    "),
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" commit  "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" cancel"),
+        ]);
+        let p = Paragraph::new(line).block(Block::default().borders(Borders::TOP));
+        f.render_widget(p, area);
+        return;
+    }
     let line = Line::from(vec![
         Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" quit  "),
@@ -381,7 +399,9 @@ fn draw_footer(f: &mut Frame, area: Rect, _view: &View) {
         Span::styled("m", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" spec mode  "),
         Span::styled("z", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" scope snap"),
+        Span::raw(" scope snap  "),
+        Span::styled("b/B", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" bundle dir"),
     ]);
     let p = Paragraph::new(line).block(Block::default().borders(Borders::TOP));
     f.render_widget(p, area);

@@ -19,7 +19,7 @@ use patches_observation::processor::{
 use patches_observation::subscribers::SubscribersHandle;
 
 use super::render::draw;
-use super::state::{SpectrumMode, Tab, View};
+use super::state::{PromptKind, SpectrumMode, Tab, View};
 
 /// Set up an alternate-screen ratatui terminal in raw mode.
 pub fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
@@ -81,6 +81,27 @@ pub fn run<F: FnMut(&mut View)>(
 }
 
 fn handle_key(view: &mut View, code: KeyCode) -> Option<LoopOutcome> {
+    // While a bundle-dir prompt is open, keys feed the prompt instead
+    // of triggering tab / playback controls. Esc cancels; Enter
+    // commits; the loop closure picks up the queued action.
+    if view.prompt.is_some() {
+        match code {
+            KeyCode::Esc => view.cancel_prompt(),
+            KeyCode::Enter => view.commit_prompt(),
+            KeyCode::Backspace => {
+                if let Some(p) = view.prompt.as_mut() {
+                    p.input.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(p) = view.prompt.as_mut() {
+                    p.input.push(c);
+                }
+            }
+            _ => {}
+        }
+        return None;
+    }
     match code {
         KeyCode::Char('q') | KeyCode::Esc => return Some(LoopOutcome::Quit),
         KeyCode::Char('r') => view.toggle_record_mute(),
@@ -101,6 +122,9 @@ fn handle_key(view: &mut View, code: KeyCode) -> Option<LoopOutcome> {
         KeyCode::Char('f') => cycle_fft_size(view),
         KeyCode::Char('-') => scope_window_zoom(view, 0.5),
         KeyCode::Char('=') => scope_window_zoom(view, 2.0),
+        // Bundle-dir prompts (ADR 0075, ticket 0898).
+        KeyCode::Char('b') => view.open_prompt(PromptKind::AddBundleDir),
+        KeyCode::Char('B') => view.open_prompt(PromptKind::RemoveBundleDir),
         _ => {}
     }
     None

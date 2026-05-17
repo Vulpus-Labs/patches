@@ -12,20 +12,22 @@ space gives a perceptually constant-ratio (equal-interval) glide.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `glide_ms` | float (ms) | `100.0` | Glide time in milliseconds (0–10000) |
+| Parameter     | Type       | Default | Description                                                      |
+| ------------- | ---------- | ------- | ---------------------------------------------------------------- |
+| `glide_ms`    | float (ms) | `100.0` | Glide time in milliseconds (0–10000)                             |
+| `slur_amount` | float      | `1.0`   | Multiplier applied to `glide_ms` while `slur_in` is high (0–100) |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Input signal (typically V/oct) |
+| Port      | Description                                                |
+| --------- | ---------------------------------------------------------- |
+| `in`      | Input signal (typically V/oct)                             |
+| `slur_in` | Gate: when high, glide time is multiplied by `slur_amount` |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description     |
+| ----- | --------------- |
 | `out` | Smoothed output |
 
 ---
@@ -43,22 +45,22 @@ Setting all parameters to zero passes the signal through unchanged.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `octave` | int | `0` | Octave shift (−8 to +8) |
-| `semi` | int | `0` | Semitone shift (−12 to +12) |
-| `cent` | int | `0` | Fine-tune in cents (−100 to +100; 100 cents = 1 semitone) |
+| Parameter | Type | Default | Description                                               |
+| --------- | ---- | ------- | --------------------------------------------------------- |
+| `octave`  | int  | `0`     | Octave shift (−8 to +8)                                   |
+| `semi`    | int  | `0`     | Semitone shift (−12 to +12)                               |
+| `cent`    | int  | `0`     | Fine-tune in cents (−100 to +100; 100 cents = 1 semitone) |
 
 **Inputs**
 
 | Port | Description |
-| --- | --- |
+| ---- | ----------- |
 | `in` | V/oct input |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description      |
+| ----- | ---------------- |
 | `out` | Transposed V/oct |
 
 ---
@@ -71,15 +73,15 @@ to 0.0 before the first trigger.
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Signal to sample |
+| Port   | Description                                         |
+| ------ | --------------------------------------------------- |
+| `in`   | Signal to sample                                    |
 | `trig` | Trigger input; latch fires on the ≥ 0.5 rising edge |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description       |
+| ----- | ----------------- |
 | `out` | Held output value |
 
 ---
@@ -91,15 +93,15 @@ simultaneously on each rising edge (threshold 0.5).
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Polyphonic signal to sample (16 voices) |
+| Port   | Description                                   |
+| ------ | --------------------------------------------- |
+| `in`   | Polyphonic signal to sample (16 voices)       |
 | `trig` | Mono trigger; all voices are latched together |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description                        |
+| ----- | ---------------------------------- |
 | `out` | Polyphonic held output (16 voices) |
 
 ---
@@ -132,23 +134,23 @@ module quant : Quant(channels: [root, third, fifth]) {
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `pitch[i]` | float (V/oct) | `0.0` | Target pitch per scale degree (i in 0..N−1, N = `channels`) |
-| `centre` | float (V/oct) | `0.0` | DC offset added to the input before quantisation (−4 to +4) |
-| `scale` | float | `1.0` | Gain applied to `in` before quantisation (−4 to +4) |
+| Parameter  | Type          | Default | Description                                                 |
+| ---------- | ------------- | ------- | ----------------------------------------------------------- |
+| `pitch[i]` | float (V/oct) | `0.0`   | Target pitch per scale degree (i in 0..N−1, N = `channels`) |
+| `centre`   | float (V/oct) | `0.0`   | DC offset added to the input before quantisation (−4 to +4) |
+| `scale`    | float         | `1.0`   | Gain applied to `in` before quantisation (−4 to +4)         |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
+| Port | Description            |
+| ---- | ---------------------- |
 | `in` | Continuous V/oct input |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `out` | Quantised V/oct output |
+| Port       | Description                                                |
+| ---------- | ---------------------------------------------------------- |
+| `out`      | Quantised V/oct output                                     |
 | `trig_out` | One-sample pulse (1.0) on each pitch change, otherwise 0.0 |
 
 ---
@@ -162,23 +164,23 @@ when that voice's quantised pitch changes.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `pitch[i]` | float (V/oct) | `0.0` | Target pitch per scale degree (i in 0..N−1, N = `channels`) |
-| `centre` | float (V/oct) | `0.0` | DC offset added to each voice before quantisation (−4 to +4) |
-| `scale` | float | `1.0` | Gain applied to each voice before quantisation (−4 to +4) |
+| Parameter  | Type          | Default | Description                                                  |
+| ---------- | ------------- | ------- | ------------------------------------------------------------ |
+| `pitch[i]` | float (V/oct) | `0.0`   | Target pitch per scale degree (i in 0..N−1, N = `channels`)  |
+| `centre`   | float (V/oct) | `0.0`   | DC offset added to each voice before quantisation (−4 to +4) |
+| `scale`    | float         | `1.0`   | Gain applied to each voice before quantisation (−4 to +4)    |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
+| Port | Description                        |
+| ---- | ---------------------------------- |
 | `in` | Polyphonic V/oct input (16 voices) |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `out` | Polyphonic quantised V/oct output (16 voices) |
+| Port       | Description                                            |
+| ---------- | ------------------------------------------------------ |
+| `out`      | Polyphonic quantised V/oct output (16 voices)          |
 | `trig_out` | Per-voice one-sample pulse on pitch change (16 voices) |
 
 ---
@@ -192,19 +194,19 @@ introduces harmonic colouring.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `drive` | float (dB) | `1.0` | Diode operating point in dB (0.2–20.0); low = linear, high = saturated |
+| Parameter | Type       | Default | Description                                                            |
+| --------- | ---------- | ------- | ---------------------------------------------------------------------- |
+| `drive`   | float (dB) | `1.0`   | Diode operating point in dB (0.2–20.0); low = linear, high = saturated |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `signal` | Audio signal to modulate |
+| Port      | Description                |
+| --------- | -------------------------- |
+| `signal`  | Audio signal to modulate   |
 | `carrier` | Carrier / modulator signal |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description           |
+| ----- | --------------------- |
 | `out` | Ring-modulated output |

@@ -72,4 +72,29 @@ fn main() {
     // Also rerun if the assets dir changes existence.
     let assets = crate_dir.join("assets");
     println!("cargo:rerun-if-changed={}", assets.display());
+
+    embed_windows_icon(&crate_dir);
 }
+
+// Embed the workspace icon into patch_player.exe as resource index 0.
+// Only runs when target = Windows AND host = Windows: cross-compiling
+// from macOS/Linux would need an RC toolchain (llvm-rc / mingw windres);
+// release builds happen on the Windows CI runner where this is native.
+#[cfg(target_os = "windows")]
+fn embed_windows_icon(crate_dir: &PathBuf) {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "windows" {
+        return;
+    }
+    let icon = crate_dir.join("../assets/patches.ico");
+    if !icon.exists() {
+        return;
+    }
+    println!("cargo:rerun-if-changed={}", icon.display());
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon(icon.to_str().expect("icon path is valid UTF-8"));
+    res.compile().expect("embed windows icon");
+}
+
+#[cfg(not(target_os = "windows"))]
+fn embed_windows_icon(_crate_dir: &PathBuf) {}

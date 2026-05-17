@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Implementing modules - Patches Manual — v0.5.1</title>
+        <title>Implementing modules - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a680bed.js"></script>
+        <script src="toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -181,243 +181,139 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="implementing-modules"><a class="header" href="#implementing-modules">Implementing modules</a></h1>
-<p>This chapter covers everything needed to add a new module to Patches: the <code>Module</code> trait, the descriptor builder, a worked example, registration, and testing.</p>
-<h2 id="the-module-trait"><a class="header" href="#the-module-trait">The Module trait</a></h2>
-<p>All audio modules implement <code>patches_core::Module</code> (defined in <code>patches-core/src/modules/module.rs</code>). The trait has a small surface:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>pub trait Module: Send {
-    fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor where Self: Sized;
-    fn prepare(env: &amp;AudioEnvironment, descriptor: ModuleDescriptor, id: InstanceId) -&gt; Self
-        where Self: Sized;
-    fn descriptor(&amp;self) -&gt; &amp;ModuleDescriptor;
-    fn instance_id(&amp;self) -&gt; InstanceId;
-    fn set_ports(&amp;mut self, inputs: &amp;[InputPort], outputs: &amp;[OutputPort]);
-    fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap);
-    fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;);
-    fn as_any(&amp;self) -&gt; &amp;dyn std::any::Any;
-
-    // Optional:
-    fn as_midi_receiver(&amp;mut self) -&gt; Option&lt;&amp;mut dyn ReceivesMidi&gt; { None }
-}
-<span class="boring">}</span></code></pre>
-<p>The lifecycle is: <code>describe</code> (static, at registration) → <code>prepare</code> (construct instance) → <code>set_ports</code> (called when topology changes) → <code>update_validated_parameters</code> (called when parameters change) → <code>process</code> (called once per sample, at audio rate).</p>
-<h3 id="describe"><a class="header" href="#describe">describe</a></h3>
-<p>A static method — called on the type, not an instance. Returns the <code>ModuleDescriptor</code> for this module at the given shape. Built using the descriptor builder:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor {
-    ModuleDescriptor::new("MyModule", shape.clone())
-        .mono_in("signal")
-        .mono_in("cv")
-        .mono_out("out")
-        .float_param("gain", 0.0, 2.0, 1.0)
-        .enum_param("mode", &amp;["add", "mul"], "add")
-}
-<span class="boring">}</span></code></pre>
-<p>Port and parameter names are <code>&amp;'static str</code>. The order you add ports determines their positional index in <code>set_ports</code>.</p>
-<h3 id="prepare"><a class="header" href="#prepare">prepare</a></h3>
-<p>Allocates and returns a new instance. Store the descriptor, instance ID, and <code>env.sample_rate</code> if needed. Initialise all port fields to their defaults (<code>MonoInput::default()</code>, etc.) — they will be set properly by the first <code>set_ports</code> call before <code>process</code> runs.</p>
-<p>This method is infallible.</p>
-<h3 id="set_ports"><a class="header" href="#set_ports">set_ports</a></h3>
-<p>Called when the patch topology changes. The slice positions correspond to the order ports were declared in <code>describe</code>. Extract ports with <code>MonoInput::from_ports(inputs, index)</code>.</p>
-<p>Must not allocate, block, or perform I/O — it may be called on the audio thread.</p>
-<h3 id="update_validated_parameters"><a class="header" href="#update_validated_parameters">update_validated_parameters</a></h3>
-<p>Apply parameter values to the instance’s fields. The map has already been validated against the descriptor, so types and ranges are guaranteed correct. Parameters not present in the map are unchanged — leave them at their current values.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap) {
-    if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
-        self.gain = *v;
-    }
-}
-<span class="boring">}</span></code></pre>
-<h3 id="process"><a class="header" href="#process">process</a></h3>
-<p>Called once per sample at audio rate (typically 44,100 times per second). Read inputs and write outputs through the cable pool:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;) {
-    let signal = pool.read_mono(&amp;self.in_signal);
-    let cv = pool.read_mono(&amp;self.in_cv);
-    pool.write_mono(&amp;self.out_audio, signal * cv);
-}
-<span class="boring">}</span></code></pre>
-<p><strong>Must not allocate, block, or perform I/O.</strong> Pre-compute or look up all values. Avoid branches that touch heap memory.</p>
-<h3 id="descriptor-instance_id-as_any"><a class="header" href="#descriptor-instance_id-as_any">descriptor, instance_id, as_any</a></h3>
-<p>Boilerplate — return the stored descriptor, the stored ID, and <code>self</code> respectively.</p>
-<h2 id="descriptor-builder-reference"><a class="header" href="#descriptor-builder-reference">Descriptor builder reference</a></h2>
-<h3 id="port-methods"><a class="header" href="#port-methods">Port methods</a></h3>
+<p>This chapter is for adding a new module to the in-tree
+<code>patches-modules</code> crate. The trait, descriptor templates, and
+audio-thread contract are identical to the <a href="extending-native-plugin.html">native plugin
+SDK</a> — only the packaging differs.</p>
+<p>If you want the worked example, read the native-plugin chapter
+first. The 88-line <code>Gain</code> module there is the smallest complete
+module, and the Rust is the same whether it ships in-tree or as a
+loadable bundle. This chapter covers what’s different about in-tree
+modules.</p>
+<h2 id="what-changes-for-in-tree"><a class="header" href="#what-changes-for-in-tree">What changes for in-tree</a></h2>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Method</th><th>Adds</th></tr>
+<tr><th>Concern</th><th>Native plugin</th><th>In-tree module</th></tr>
 </thead>
 <tbody>
-<tr><td><code>.mono_in("name")</code></td><td>One <code>MonoInput</code> port</td></tr>
-<tr><td><code>.mono_in_multi("name", n)</code></td><td><code>n</code> <code>MonoInput</code> ports at indices 0..n</td></tr>
-<tr><td><code>.poly_in("name")</code></td><td>One <code>PolyInput</code> port</td></tr>
-<tr><td><code>.poly_in_multi("name", n)</code></td><td><code>n</code> <code>PolyInput</code> ports</td></tr>
-<tr><td><code>.mono_out("name")</code></td><td>One <code>MonoOutput</code> port</td></tr>
-<tr><td><code>.mono_out_multi("name", n)</code></td><td><code>n</code> <code>MonoOutput</code> ports</td></tr>
-<tr><td><code>.poly_out("name")</code></td><td>One <code>PolyOutput</code> port</td></tr>
-<tr><td><code>.poly_out_multi("name", n)</code></td><td><code>n</code> <code>PolyOutput</code> ports</td></tr>
+<tr><td>Crate</td><td>New <code>cdylib</code> outside the tree</td><td>New file under <code>patches-modules/src/</code></td></tr>
+<tr><td>Dependency</td><td><code>patches-sdk = "0.7"</code></td><td><code>patches-core</code>, <code>patches-dsp</code></td></tr>
+<tr><td>Registration</td><td><code>export_plugin!</code> macro</td><td><code>Registry::register::&lt;Module&gt;()</code> in <code>patches-modules::default_registry()</code></td></tr>
+<tr><td>Loading</td><td>Discovered via bundle dirs</td><td>Compiled into the host</td></tr>
+<tr><td>Distribution</td><td>Built separately, shipped as <code>.pxm</code></td><td>Ships with the main release</td></tr>
+<tr><td>Docs</td><td>Source comments only</td><td>Source comments → manual’s module reference (see below)</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="parameter-methods"><a class="header" href="#parameter-methods">Parameter methods</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Method</th><th>Adds</th></tr>
-</thead>
-<tbody>
-<tr><td><code>.float_param("name", min, max, default)</code></td><td>Float parameter</td></tr>
-<tr><td><code>.float_param_multi("name", n, min, max, default)</code></td><td><code>n</code> indexed float params</td></tr>
-<tr><td><code>.int_param("name", min, max, default)</code></td><td>Integer parameter</td></tr>
-<tr><td><code>.bool_param("name", default)</code></td><td>Boolean parameter</td></tr>
-<tr><td><code>.enum_param("name", &amp;["a", "b"], "a")</code></td><td>String enum parameter</td></tr>
-<tr><td><code>.array_param("name", &amp;[], max_length)</code></td><td>Variable-length string array</td></tr>
-<tr><td><code>.sink()</code></td><td>Marks module as the audio output sink</td></tr>
-</tbody>
-</table>
-</div>
-<h2 id="worked-example-gain"><a class="header" href="#worked-example-gain">Worked example: Gain</a></h2>
-<p>A module with one audio input, one CV input, a <code>gain</code> float parameter, a <code>clip</code> boolean parameter, and one output.</p>
-<h3 id="struct"><a class="header" href="#struct">Struct</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>// patches-modules/src/gain.rs
-
-use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId,
-    Module, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
-};
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
-
-pub struct Gain {
-    instance_id: InstanceId,
-    descriptor: ModuleDescriptor,
-    in_signal: MonoInput,
-    in_cv: MonoInput,
-    out_audio: MonoOutput,
-    gain: f32,
-    clip: bool,
-}
-<span class="boring">}</span></code></pre>
-<h3 id="implementation"><a class="header" href="#implementation">Implementation</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>impl Module for Gain {
-    fn describe(shape: &amp;ModuleShape) -&gt; ModuleDescriptor {
-        ModuleDescriptor::new("Gain", shape.clone())
-            .mono_in("in")
-            .mono_in("cv")
-            .mono_out("out")
-            .float_param("gain", 0.0, 4.0, 1.0)
-            .bool_param("clip", false)
-    }
-
-    fn prepare(
-        _env: &amp;AudioEnvironment,
-        descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -&gt; Self {
-        Self {
-            instance_id,
-            descriptor,
-            in_signal: MonoInput::default(),
-            in_cv: MonoInput::default(),
-            out_audio: MonoOutput::default(),
-            gain: 1.0,
-            clip: false,
-        }
-    }
-
-    fn descriptor(&amp;self) -&gt; &amp;ModuleDescriptor { &amp;self.descriptor }
-    fn instance_id(&amp;self) -&gt; InstanceId { self.instance_id }
-    fn as_any(&amp;self) -&gt; &amp;dyn std::any::Any { self }
-
-    fn set_ports(&amp;mut self, inputs: &amp;[InputPort], outputs: &amp;[OutputPort]) {
-        self.in_signal = MonoInput::from_ports(inputs, 0);  // matches "in"
-        self.in_cv     = MonoInput::from_ports(inputs, 1);  // matches "cv"
-        self.out_audio = MonoOutput::from_ports(outputs, 0); // matches "out"
-    }
-
-    fn update_validated_parameters(&amp;mut self, params: &amp;ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
-            self.gain = *v;
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get("clip", 0) {
-            self.clip = *v;
-        }
-    }
-
-    fn process(&amp;mut self, pool: &amp;mut CablePool&lt;'_&gt;) {
-        let signal = pool.read_mono(&amp;self.in_signal);
-        let cv     = pool.read_mono(&amp;self.in_cv);
-        let mut out = signal * cv * self.gain;
-        if self.clip {
-            out = out.clamp(-1.0, 1.0);
-        }
-        pool.write_mono(&amp;self.out_audio, out);
-    }
-}
-<span class="boring">}</span></code></pre>
-<p>Port order in <code>describe</code> must match the positional indices in <code>set_ports</code>. Here <code>"in"</code> is input index 0, <code>"cv"</code> is input index 1, and <code>"out"</code> is output index 0.</p>
-<h3 id="registration"><a class="header" href="#registration">Registration</a></h3>
-<p>In <code>patches-modules/src/lib.rs</code>:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>pub mod gain;
-pub use gain::Gain;
-<span class="boring">}</span></code></pre>
-<p>And in <code>default_registry()</code>:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>r.register::&lt;Gain&gt;();
-<span class="boring">}</span></code></pre>
-<p>The DSL name comes from the string passed to <code>ModuleDescriptor::new</code> — here <code>"Gain"</code>. Users write <code>module g : Gain { gain: 0.5, clip: true }</code>.</p>
-<h2 id="testing-with-moduleharness"><a class="header" href="#testing-with-moduleharness">Testing with ModuleHarness</a></h2>
-<p><code>ModuleHarness</code> from <code>patches_core::test_support</code> provides a single-module test fixture with a cable pool, named-port accessors, and automatic ping-pong management.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>#[cfg(test)]
-mod tests {
-    use super::*;
-    use patches_core::test_support::{assert_nearly, ModuleHarness, params};
-
-    #[test]
-    fn multiplies_signal_by_cv_and_gain() {
-        let mut h = ModuleHarness::build::&lt;Gain&gt;(params!["gain" =&gt; 2.0_f32]);
-        h.set_mono("in", 0.5);
-        h.set_mono("cv", 0.8);
-        h.tick();
-        assert_nearly!(0.8, h.read_mono("out"));  // 0.5 * 0.8 * 2.0
-    }
-
-    #[test]
-    fn clip_clamps_output() {
-        let mut h = ModuleHarness::build::&lt;Gain&gt;(params!["gain" =&gt; 4.0_f32, "clip" =&gt; true]);
-        h.set_mono("in", 1.0);
-        h.set_mono("cv", 1.0);
-        h.tick();
-        assert_nearly!(1.0, h.read_mono("out"));  // 4.0 clamped to 1.0
-    }
-}
-<span class="boring">}</span></code></pre>
-<p><code>params!</code> builds a <code>ParameterMap</code> from key-value pairs. <code>set_mono</code> writes a value to a named input port. <code>tick</code> runs one sample through the module. <code>read_mono</code> reads a named output port.</p>
-<h2 id="checklist"><a class="header" href="#checklist">Checklist</a></h2>
-<p>Before submitting a new module:</p>
+<p>The <code>Module</code> trait, <code>ModuleDescriptorTemplate</code>, parameter handles
+via <code>module_params!</code>, and the audio-thread rules are identical.
+Anything you’d write inside a plugin’s <code>impl Module</code> goes into an
+in-tree module unchanged.</p>
+<h2 id="steps-for-a-new-in-tree-module"><a class="header" href="#steps-for-a-new-in-tree-module">Steps for a new in-tree module</a></h2>
+<ol>
+<li><strong>Add a file.</strong> <code>patches-modules/src/my_module.rs</code>. Use one of
+the existing modules as a starting template — <code>oscillator.rs</code>,
+<code>vca.rs</code>, and <code>glide.rs</code> are good shapes.</li>
+<li><strong>Implement <code>Module</code>.</strong> Same surface as the SDK example. Use
+types from <code>patches-core</code> directly instead of <code>patches-sdk</code>
+re-exports (<code>patches_core::cables::*</code>,
+<code>patches_core::modules::*</code>, <code>patches_core::param_frame::ParamView</code>).</li>
+<li><strong>Declare the module.</strong> Add <code>pub mod my_module;</code> to
+<code>patches-modules/src/lib.rs</code> (and <code>pub use my_module::MyModule;</code>
+if you want it re-exported by name).</li>
+<li><strong>Register it.</strong> In <code>default_registry()</code> in
+<code>patches-modules/src/lib.rs</code>, add
+<code>r.register::&lt;MyModule&gt;();</code>. The order in this function controls
+nothing user-visible; group with related modules for readability.</li>
+<li><strong>Document it.</strong> Add a doc comment in the source per the module
+documentation standard (covered below). The manual’s module
+reference is generated from these comments.</li>
+<li><strong>Test it.</strong> Use the <code>ModuleHarness</code> test support in
+<code>patches-core::test_support</code> to exercise the module without a
+running audio engine.</li>
+</ol>
+<h2 id="dsp-code-lives-in-patches-dsp"><a class="header" href="#dsp-code-lives-in-patches-dsp">DSP code lives in <code>patches-dsp</code></a></h2>
+<p>Pure DSP algorithms — filter kernels, ADSR cores, oversampling,
+delay lines, noise PRNGs — belong in <code>patches-dsp</code>, not
+<code>patches-modules</code>. The split:</p>
 <ul>
-<li><code>describe</code> declares all ports and parameters with correct names and types</li>
-<li>Port order in <code>describe</code> matches <code>set_ports</code> positional indices</li>
-<li><code>prepare</code> initialises all port fields to their defaults</li>
-<li><code>update_validated_parameters</code> handles all declared parameters</li>
-<li><code>process</code> does not allocate, block, or perform I/O</li>
-<li>Module registered in <code>default_registry()</code></li>
-<li>Unit tests with <code>ModuleHarness</code> cover the main behaviours</li>
-<li><code>cargo clippy</code> and <code>cargo test</code> pass</li>
-<li>Doc comment on the struct follows the <a href="https://github.com/anthropics/patches/blob/main/CLAUDE.md">module documentation standard</a></li>
+<li><strong><code>patches-dsp</code></strong> — algorithm. Takes raw <code>f32</code> inputs, returns
+<code>f32</code> outputs. No <code>patches-core</code>, no module protocol, no
+allocation. Pure functions or state objects.</li>
+<li><strong><code>patches-modules</code></strong> — protocol glue. Wraps a DSP kernel as a
+Patches module: declares ports and parameters, reads from the
+cable pool, calls the kernel, writes back.</li>
+</ul>
+<p>Most existing modules are thin wrappers — the SVF filter module
+holds an <code>SvfCore</code> from <code>patches-dsp</code> and threads cable values
+through it. That separation lets the DSP code be tested in
+isolation and reused by multiple modules (e.g. mono and poly
+variants both reach into the same kernel).</p>
+<h2 id="module-documentation-standard"><a class="header" href="#module-documentation-standard">Module documentation standard</a></h2>
+<p>Every module under <code>patches-modules/src/</code> carries a doc comment
+(<code>///</code> on the struct or <code>//!</code> at file level) in a standard form.
+This comment is the <strong>source of truth</strong> for the manual’s module
+reference under <code>docs/src/modules/</code>.</p>
+<p>The format, condensed (full spec in <code>CLAUDE.md</code>):</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>/// Brief one-line description.
+///
+/// Extended description (algorithm, CV behaviour, etc.).
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `name` | mono/poly | What it does |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `name` | mono/poly | What it does |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `name` | float/int/bool/enum | range | `default` | What it does |
+<span class="boring">}</span></code></pre>
+<p>Port names must match the strings in the module’s descriptor
+template. Indexed ports use <code>port[i]</code> notation with a note on the
+range. Omit sections that don’t apply.</p>
+<p>When you change a module’s ports or parameters, update this
+comment in the same commit. The manual regeneration tooling reads
+the comments as authoritative.</p>
+<h2 id="audio-thread-rules"><a class="header" href="#audio-thread-rules">Audio-thread rules</a></h2>
+<p>Same as for native plugins, same as for the engine itself:</p>
+<ul>
+<li>No allocation on the audio thread (<code>process</code>,
+<code>update_validated_parameters</code>, <code>set_ports</code>).</li>
+<li>No blocking (no mutexes, no I/O, no syscalls).</li>
+<li>No unbounded loops.</li>
+<li><code>panic = "unwind"</code> only — the tick-boundary catch_unwind
+requires it.</li>
+</ul>
+<p>The <code>patches-engine</code> integration tests run with the
+<code>audio-thread-allocator-trap</code> feature on, which traps any heap
+allocation on the audio thread and panics — useful for catching
+accidental allocation in <code>process</code> during development. The harness
+in <code>patches-core::test_support</code> exposes a <code>Harness::tick</code> that
+matches the engine’s calling convention closely enough that
+allocation bugs in your module’s hot path will surface there.</p>
+<h2 id="cross-reference"><a class="header" href="#cross-reference">Cross-reference</a></h2>
+<ul>
+<li><a href="extending-native-plugin.html">Writing a native plugin</a> — the
+worked example. Read this for the trait surface walk-through.</li>
+<li><a href="extending-abi.html">Native plugin ABI</a> — the underlying C ABI.
+Not needed for in-tree modules (no FFI boundary) but useful if
+you want to understand how descriptors and parameter frames
+cross the same trait surface when packaged as a bundle.</li>
+<li><a href="engine-internals.html">Engine internals</a> — what the host does
+with your module: planner, cable pool, plan handoff, periodic
+updates.</li>
 </ul>
 
                     </main>
@@ -428,7 +324,7 @@ mod tests {
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="engine-internals.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="extending-abi.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -442,7 +338,7 @@ mod tests {
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="engine-internals.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="extending-abi.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

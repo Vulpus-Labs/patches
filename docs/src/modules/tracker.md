@@ -59,14 +59,15 @@ The clock bus carries four poly voices:
 
 **Parameters**
 
-| Name            | Type      | Range      | Default | Description                           |
-| --------------- | --------- | ---------- | ------- | ------------------------------------- |
-| `bpm`           | float     | 1.0–999.0  | `120.0` | Tempo in beats per minute             |
-| `rows_per_beat` | int       | 1–64       | `4`     | Steps per beat                        |
-| `song`          | song_name | —          | none    | Name of the song to play              |
-| `loop`          | bool      | —          | `true`  | Loop at end of song                   |
-| `autostart`     | bool      | —          | `true`  | Begin playback on activation          |
-| `swing`         | float     | 0.0–1.0    | `0.5`   | Swing ratio for alternating steps     |
+| Name            | Type      | Range          | Default | Description                                                     |
+| --------------- | --------- | -------------- | ------- | --------------------------------------------------------------- |
+| `bpm`           | float     | 1.0–999.0      | `120.0` | Tempo in beats per minute                                       |
+| `rows_per_beat` | int       | 1–64           | `4`     | Steps per beat                                                  |
+| `song`          | song_name | —              | none    | Name of the song to play                                        |
+| `loop`          | bool      | —              | `true`  | Loop at end of song                                             |
+| `autostart`     | bool      | —              | `true`  | Begin playback on activation                                    |
+| `swing`         | float     | 0.0–1.0        | `0.5`   | Swing ratio for alternating steps                               |
+| `sync`          | enum      | auto/free/host | `auto`  | Clock source: `auto` picks `host` when hosted, otherwise `free` |
 
 **Shape arguments**
 

@@ -86,7 +86,7 @@ export function renderModulePaths(paths) {
   if (!paths || paths.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "no scan paths configured";
+    empty.textContent = "no bundle directories configured";
     root.appendChild(empty);
     return;
   }
@@ -99,7 +99,10 @@ export function renderModulePaths(paths) {
     row.appendChild(text);
     const rm = document.createElement("button");
     rm.className = "btn btn-remove";
-    rm.dataset.removeIndex = String(i);
+    // Path string is the controller's canonical key for the action;
+    // sending it verbatim avoids index drift when the list mutates
+    // between click + dispatch.
+    rm.dataset.removePath = paths[i];
     rm.textContent = "Remove";
     row.appendChild(rm);
     root.appendChild(row);

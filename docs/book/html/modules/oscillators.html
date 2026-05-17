@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Oscillators - Patches Manual — v0.5.1</title>
+        <title>Oscillators - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -212,6 +212,7 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><td><code>fm</code></td><td>Frequency modulation input</td></tr>
 <tr><td><code>pulse_width_cv</code></td><td>Pulse width control for square wave (−1 to +1; maps to 0–99% duty cycle)</td></tr>
 <tr><td><code>phase_mod</code></td><td>Phase modulation offset (0–1, fraction of a cycle; wraps)</td></tr>
+<tr><td><code>sync</code></td><td>Sub-sample hard-sync trigger: phase reset with PolyBLEP correction on saw/square</td></tr>
 </tbody>
 </table>
 </div>
@@ -226,6 +227,7 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><td><code>triangle</code></td><td>Triangle wave</td></tr>
 <tr><td><code>sawtooth</code></td><td>Sawtooth wave (PolyBLEP anti-aliased)</td></tr>
 <tr><td><code>square</code></td><td>Square wave (PolyBLEP anti-aliased; duty cycle set by <code>pulse_width_cv</code>)</td></tr>
+<tr><td><code>reset_out</code></td><td>Trigger emitting the sub-sample fractional position of each phase wrap</td></tr>
 </tbody>
 </table>
 </div>
@@ -300,8 +302,9 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>sync</code></td><td>Rising edge resets phase to zero</td></tr>
+<tr><td><code>sync</code></td><td>Sub-sample phase reset trigger</td></tr>
 <tr><td><code>rate_cv</code></td><td>Added linearly to <code>rate</code> (Hz); effective rate clamped to 0.001–40.0 Hz</td></tr>
+<tr><td><code>sync_ms</code></td><td>When connected, overrides <code>rate</code> with this value interpreted as period in ms</td></tr>
 </tbody>
 </table>
 </div>
@@ -318,6 +321,7 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><td><code>saw_down</code></td><td>Falling sawtooth</td></tr>
 <tr><td><code>square</code></td><td>Square wave (50% duty cycle)</td></tr>
 <tr><td><code>random</code></td><td>Sample-and-hold random value, updated once per cycle</td></tr>
+<tr><td><code>reset_out</code></td><td>Trigger emitting the sub-sample fractional position of each phase wrap</td></tr>
 </tbody>
 </table>
 </div>

@@ -1,263 +1,142 @@
 # Implementing modules
 
-This chapter covers everything needed to add a new module to Patches: the `Module` trait, the descriptor builder, a worked example, registration, and testing.
+This chapter is for adding a new module to the in-tree
+`patches-modules` crate. The trait, descriptor templates, and
+audio-thread contract are identical to the [native plugin
+SDK](extending-native-plugin.md) — only the packaging differs.
 
-## The Module trait
+If you want the worked example, read the native-plugin chapter
+first. The 88-line `Gain` module there is the smallest complete
+module, and the Rust is the same whether it ships in-tree or as a
+loadable bundle. This chapter covers what's different about in-tree
+modules.
 
-All audio modules implement `patches_core::Module` (defined in `patches-core/src/modules/module.rs`). The trait has a small surface:
+## What changes for in-tree
 
-```rust
-pub trait Module: Send {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor where Self: Sized;
-    fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, id: InstanceId) -> Self
-        where Self: Sized;
-    fn descriptor(&self) -> &ModuleDescriptor;
-    fn instance_id(&self) -> InstanceId;
-    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]);
-    fn update_validated_parameters(&mut self, params: &ParameterMap);
-    fn process(&mut self, pool: &mut CablePool<'_>);
-    fn as_any(&self) -> &dyn std::any::Any;
+| Concern        | Native plugin                       | In-tree module                                                            |
+| -------------- | ----------------------------------- | ------------------------------------------------------------------------- |
+| Crate          | New `cdylib` outside the tree       | New file under `patches-modules/src/`                                     |
+| Dependency     | `patches-sdk = "0.7"`               | `patches-core`, `patches-dsp`                                             |
+| Registration   | `export_plugin!` macro              | `Registry::register::<Module>()` in `patches-modules::default_registry()` |
+| Loading        | Discovered via bundle dirs          | Compiled into the host                                                    |
+| Distribution   | Built separately, shipped as `.pxm` | Ships with the main release                                               |
+| Docs           | Source comments only                | Source comments → manual's module reference (see below)                   |
 
-    // Optional:
-    fn as_midi_receiver(&mut self) -> Option<&mut dyn ReceivesMidi> { None }
-}
-```
+The `Module` trait, `ModuleDescriptorTemplate`, parameter handles
+via `module_params!`, and the audio-thread rules are identical.
+Anything you'd write inside a plugin's `impl Module` goes into an
+in-tree module unchanged.
 
-The lifecycle is: `describe` (static, at registration) → `prepare` (construct instance) → `set_ports` (called when topology changes) → `update_validated_parameters` (called when parameters change) → `process` (called once per sample, at audio rate).
+## Steps for a new in-tree module
 
-### describe
+1. **Add a file.** `patches-modules/src/my_module.rs`. Use one of
+   the existing modules as a starting template — `oscillator.rs`,
+   `vca.rs`, and `glide.rs` are good shapes.
+2. **Implement `Module`.** Same surface as the SDK example. Use
+   types from `patches-core` directly instead of `patches-sdk`
+   re-exports (`patches_core::cables::*`,
+   `patches_core::modules::*`, `patches_core::param_frame::ParamView`).
+3. **Declare the module.** Add `pub mod my_module;` to
+   `patches-modules/src/lib.rs` (and `pub use my_module::MyModule;`
+   if you want it re-exported by name).
+4. **Register it.** In `default_registry()` in
+   `patches-modules/src/lib.rs`, add
+   `r.register::<MyModule>();`. The order in this function controls
+   nothing user-visible; group with related modules for readability.
+5. **Document it.** Add a doc comment in the source per the module
+   documentation standard (covered below). The manual's module
+   reference is generated from these comments.
+6. **Test it.** Use the `ModuleHarness` test support in
+   `patches-core::test_support` to exercise the module without a
+   running audio engine.
 
-A static method — called on the type, not an instance. Returns the `ModuleDescriptor` for this module at the given shape. Built using the descriptor builder:
+## DSP code lives in `patches-dsp`
 
-```rust
-fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-    ModuleDescriptor::new("MyModule", shape.clone())
-        .mono_in("signal")
-        .mono_in("cv")
-        .mono_out("out")
-        .float_param("gain", 0.0, 2.0, 1.0)
-        .enum_param(params::mode, Mode::Add)
-}
-```
+Pure DSP algorithms — filter kernels, ADSR cores, oversampling,
+delay lines, noise PRNGs — belong in `patches-dsp`, not
+`patches-modules`. The split:
 
-Port and parameter names are `&'static str`. The order you add ports determines their positional index in `set_ports`.
+- **`patches-dsp`** — algorithm. Takes raw `f32` inputs, returns
+  `f32` outputs. No `patches-core`, no module protocol, no
+  allocation. Pure functions or state objects.
+- **`patches-modules`** — protocol glue. Wraps a DSP kernel as a
+  Patches module: declares ports and parameters, reads from the
+  cable pool, calls the kernel, writes back.
 
-### prepare
+Most existing modules are thin wrappers — the SVF filter module
+holds an `SvfCore` from `patches-dsp` and threads cable values
+through it. That separation lets the DSP code be tested in
+isolation and reused by multiple modules (e.g. mono and poly
+variants both reach into the same kernel).
 
-Allocates and returns a new instance. Store the descriptor, instance ID, and `env.sample_rate` if needed. Initialise all port fields to their defaults (`MonoInput::default()`, etc.) — they will be set properly by the first `set_ports` call before `process` runs.
+## Module documentation standard
 
-This method is infallible.
+Every module under `patches-modules/src/` carries a doc comment
+(`///` on the struct or `//!` at file level) in a standard form.
+This comment is the **source of truth** for the manual's module
+reference under `docs/src/modules/`.
 
-### set_ports
-
-Called when the patch topology changes. The slice positions correspond to the order ports were declared in `describe`. Extract ports with `MonoInput::from_ports(inputs, index)`.
-
-Must not allocate, block, or perform I/O — it may be called on the audio thread.
-
-### update_validated_parameters
-
-Apply parameter values to the instance's fields. The map has already been validated against the descriptor, so types and ranges are guaranteed correct. Parameters not present in the map are unchanged — leave them at their current values.
-
-```rust
-fn update_validated_parameters(&mut self, params: &ParameterMap) {
-    if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
-        self.gain = *v;
-    }
-}
-```
-
-### process
-
-Called once per sample at audio rate (typically 44,100 times per second). Read inputs and write outputs through the cable pool:
-
-```rust
-fn process(&mut self, pool: &mut CablePool<'_>) {
-    let signal = pool.read_mono(&self.in_signal);
-    let cv = pool.read_mono(&self.in_cv);
-    pool.write_mono(&self.out_audio, signal * cv);
-}
-```
-
-**Must not allocate, block, or perform I/O.** Pre-compute or look up all values. Avoid branches that touch heap memory.
-
-### descriptor, instance_id, as_any
-
-Boilerplate — return the stored descriptor, the stored ID, and `self` respectively.
-
-## Descriptor builder reference
-
-### Port methods
-
-| Method | Adds |
-|--------|------|
-| `.mono_in("name")` | One `MonoInput` port |
-| `.mono_in_multi("name", n)` | `n` `MonoInput` ports at indices 0..n |
-| `.poly_in("name")` | One `PolyInput` port |
-| `.poly_in_multi("name", n)` | `n` `PolyInput` ports |
-| `.mono_out("name")` | One `MonoOutput` port |
-| `.mono_out_multi("name", n)` | `n` `MonoOutput` ports |
-| `.poly_out("name")` | One `PolyOutput` port |
-| `.poly_out_multi("name", n)` | `n` `PolyOutput` ports |
-
-### Parameter methods
-
-| Method | Adds |
-|--------|------|
-| `.float_param("name", min, max, default)` | Float parameter |
-| `.float_param_multi("name", n, min, max, default)` | `n` indexed float params |
-| `.int_param("name", min, max, default)` | Integer parameter |
-| `.bool_param("name", default)` | Boolean parameter |
-| `.enum_param(params::name, E::Default)` | Typed enum parameter (variants from `params_enum!`) |
-| `.array_param("name", &[], max_length)` | Variable-length string array |
-| `.sink()` | Marks module as the audio output sink |
-
-## Worked example: Gain
-
-A module with one audio input, one CV input, a `gain` float parameter, a `clip` boolean parameter, and one output.
-
-### Struct
+The format, condensed (full spec in `CLAUDE.md`):
 
 ```rust
-// patches-modules/src/gain.rs
-
-use patches_core::{
-    AudioEnvironment, CablePool, InputPort, InstanceId,
-    Module, ModuleDescriptor, ModuleShape, MonoInput, MonoOutput, OutputPort,
-};
-use patches_core::parameter_map::{ParameterMap, ParameterValue};
-
-pub struct Gain {
-    instance_id: InstanceId,
-    descriptor: ModuleDescriptor,
-    in_signal: MonoInput,
-    in_cv: MonoInput,
-    out_audio: MonoOutput,
-    gain: f32,
-    clip: bool,
-}
+/// Brief one-line description.
+///
+/// Extended description (algorithm, CV behaviour, etc.).
+///
+/// # Inputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `name` | mono/poly | What it does |
+///
+/// # Outputs
+///
+/// | Port | Kind | Description |
+/// |------|------|-------------|
+/// | `name` | mono/poly | What it does |
+///
+/// # Parameters
+///
+/// | Name | Type | Range | Default | Description |
+/// |------|------|-------|---------|-------------|
+/// | `name` | float/int/bool/enum | range | `default` | What it does |
 ```
 
-### Implementation
+Port names must match the strings in the module's descriptor
+template. Indexed ports use `port[i]` notation with a note on the
+range. Omit sections that don't apply.
 
-```rust
-impl Module for Gain {
-    fn describe(shape: &ModuleShape) -> ModuleDescriptor {
-        ModuleDescriptor::new("Gain", shape.clone())
-            .mono_in("in")
-            .mono_in("cv")
-            .mono_out("out")
-            .float_param("gain", 0.0, 4.0, 1.0)
-            .bool_param("clip", false)
-    }
+When you change a module's ports or parameters, update this
+comment in the same commit. The manual regeneration tooling reads
+the comments as authoritative.
 
-    fn prepare(
-        _env: &AudioEnvironment,
-        descriptor: ModuleDescriptor,
-        instance_id: InstanceId,
-    ) -> Self {
-        Self {
-            instance_id,
-            descriptor,
-            in_signal: MonoInput::default(),
-            in_cv: MonoInput::default(),
-            out_audio: MonoOutput::default(),
-            gain: 1.0,
-            clip: false,
-        }
-    }
+## Audio-thread rules
 
-    fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
-    fn instance_id(&self) -> InstanceId { self.instance_id }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+Same as for native plugins, same as for the engine itself:
 
-    fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
-        self.in_signal = MonoInput::from_ports(inputs, 0);  // matches "in"
-        self.in_cv     = MonoInput::from_ports(inputs, 1);  // matches "cv"
-        self.out_audio = MonoOutput::from_ports(outputs, 0); // matches "out"
-    }
+- No allocation on the audio thread (`process`,
+  `update_validated_parameters`, `set_ports`).
+- No blocking (no mutexes, no I/O, no syscalls).
+- No unbounded loops.
+- `panic = "unwind"` only — the tick-boundary catch_unwind
+  requires it.
 
-    fn update_validated_parameters(&mut self, params: &ParameterMap) {
-        if let Some(ParameterValue::Float(v)) = params.get("gain", 0) {
-            self.gain = *v;
-        }
-        if let Some(ParameterValue::Bool(v)) = params.get("clip", 0) {
-            self.clip = *v;
-        }
-    }
+The `patches-engine` integration tests run with the
+`audio-thread-allocator-trap` feature on, which traps any heap
+allocation on the audio thread and panics — useful for catching
+accidental allocation in `process` during development. The harness
+in `patches-core::test_support` exposes a `Harness::tick` that
+matches the engine's calling convention closely enough that
+allocation bugs in your module's hot path will surface there.
 
-    fn process(&mut self, pool: &mut CablePool<'_>) {
-        let signal = pool.read_mono(&self.in_signal);
-        let cv     = pool.read_mono(&self.in_cv);
-        let mut out = signal * cv * self.gain;
-        if self.clip {
-            out = out.clamp(-1.0, 1.0);
-        }
-        pool.write_mono(&self.out_audio, out);
-    }
-}
-```
+## Cross-reference
 
-Port order in `describe` must match the positional indices in `set_ports`. Here `"in"` is input index 0, `"cv"` is input index 1, and `"out"` is output index 0.
-
-### Registration
-
-In `patches-modules/src/lib.rs`:
-
-```rust
-pub mod gain;
-pub use gain::Gain;
-```
-
-And in `default_registry()`:
-
-```rust
-r.register::<Gain>();
-```
-
-The DSL name comes from the string passed to `ModuleDescriptor::new` — here `"Gain"`. Users write `module g : Gain { gain: 0.5, clip: true }`.
-
-## Testing with ModuleHarness
-
-`ModuleHarness` from `patches_core::test_support` provides a single-module test fixture with a cable pool, named-port accessors, and automatic ping-pong management.
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use patches_core::test_support::{assert_nearly, ModuleHarness, params};
-
-    #[test]
-    fn multiplies_signal_by_cv_and_gain() {
-        let mut h = ModuleHarness::build::<Gain>(params!["gain" => 2.0_f32]);
-        h.set_mono("in", 0.5);
-        h.set_mono("cv", 0.8);
-        h.tick();
-        assert_nearly!(0.8, h.read_mono("out"));  // 0.5 * 0.8 * 2.0
-    }
-
-    #[test]
-    fn clip_clamps_output() {
-        let mut h = ModuleHarness::build::<Gain>(params!["gain" => 4.0_f32, "clip" => true]);
-        h.set_mono("in", 1.0);
-        h.set_mono("cv", 1.0);
-        h.tick();
-        assert_nearly!(1.0, h.read_mono("out"));  // 4.0 clamped to 1.0
-    }
-}
-```
-
-`params!` builds a `ParameterMap` from key-value pairs. `set_mono` writes a value to a named input port. `tick` runs one sample through the module. `read_mono` reads a named output port.
-
-## Checklist
-
-Before submitting a new module:
-
-- `describe` declares all ports and parameters with correct names and types
-- Port order in `describe` matches `set_ports` positional indices
-- `prepare` initialises all port fields to their defaults
-- `update_validated_parameters` handles all declared parameters
-- `process` does not allocate, block, or perform I/O
-- Module registered in `default_registry()`
-- Unit tests with `ModuleHarness` cover the main behaviours
-- `cargo clippy` and `cargo test` pass
-- Doc comment on the struct follows the [module documentation standard](https://github.com/anthropics/patches/blob/main/CLAUDE.md)
+- [Writing a native plugin](extending-native-plugin.md) — the
+  worked example. Read this for the trait surface walk-through.
+- [Native plugin ABI](extending-abi.md) — the underlying C ABI.
+  Not needed for in-tree modules (no FFI boundary) but useful if
+  you want to understand how descriptors and parameter frames
+  cross the same trait surface when packaged as a bundle.
+- [Engine internals](engine-internals.md) — what the host does
+  with your module: planner, cable pool, plan handoff, periodic
+  updates.

@@ -35,7 +35,9 @@ mod splash;
 mod tui;
 
 use controller_env::{EnvSideChannel, RatatuiEnv};
-use patches_plugin_common::{Action, Controller, Env as _};
+use patches_plugin_common::{
+    Action, Controller, Env as _, GlobalConfig, GLOBAL_CONFIG_SCHEMA_VERSION,
+};
 
 type RecordSink = (Option<WavRecorder>, Option<rtrb::Producer<[f32; 2]>>);
 
@@ -72,6 +74,27 @@ fn render_load_warnings(loaded: &LoadedPatch) {
     for w in &loaded.layering_warnings {
         let d = RenderedDiagnostic::from_layering_warning(w);
         diagnostic_render::render_to_stderr(&d, &loaded.source_map);
+    }
+}
+
+/// Persist the bundle-dir list to `settings.toml` (ADR 0075). Failure
+/// is non-fatal — surface in the view log so the session keeps running
+/// against the in-memory list.
+fn flush_global_config(
+    controller: &Controller,
+    runtime: &mut patches_host::HostRuntime,
+    side: &mut EnvSideChannel,
+    view: &mut tui::View,
+) {
+    let cfg = GlobalConfig {
+        schema_version: GLOBAL_CONFIG_SCHEMA_VERSION,
+        bundle_dirs: controller.module_paths.clone(),
+    };
+    let mut env = RatatuiEnv { runtime, side };
+    if let Err(e) = patches_plugin_common::Env::save_global_config(&mut env, &cfg) {
+        view.log.push(format!("global config save failed: {e}"));
+    } else {
+        view.log.push("global config saved");
     }
 }
 
@@ -127,18 +150,62 @@ struct CommonSetup {
     source: PathSource,
     registry: patches_core::registry::Registry,
     sample_rate: f32,
+    /// `bundle_dirs` loaded from `settings.toml` at startup. Returned so
+    /// the TUI can seed `controller.module_paths` for display + further
+    /// edits without re-reading the file.
+    global_cfg: GlobalConfig,
+    /// Set of paths already scanned into `registry` during `common_setup`
+    /// — handed to [`EnvSideChannel::scanned_paths`] so that subsequent
+    /// patch reloads skip re-scanning. Distinct from the in-memory
+    /// `module_paths` list (which may not have been scanned at all if
+    /// the global config was empty + no CLI overrides).
+    scanned_paths: Vec<PathBuf>,
+    /// Startup warning lines accumulated before the TUI exists; the
+    /// `run_tui` body drains them into the view log.
+    startup_warnings: Vec<String>,
 }
 
 fn common_setup(
     path: &str,
     oversampling: OversamplingFactor,
     device_config: DeviceConfig,
-    module_paths: Vec<PathBuf>,
+    cli_module_paths: Vec<PathBuf>,
 ) -> Result<CommonSetup, Box<dyn std::error::Error>> {
-    let mut registry = patches_modules::default_registry();
+    let mut sound = SoundEngine::new(oversampling);
+    let cpal_env = sound.open(&device_config)?;
+    let sample_rate = cpal_env.sample_rate;
+    let mut runtime = HostBuilder::new()
+        .oversampling_factor(oversampling.factor())
+        .build(cpal_env)?;
 
-    if !module_paths.is_empty() {
-        let scanner = patches_ffi::PluginScanner::new(module_paths);
+    // Load global config through the Env trait so the lookup logic is
+    // shared with later writes. Failure is non-fatal — fall back to
+    // defaults and accumulate a startup warning.
+    let mut side = EnvSideChannel::default();
+    let mut startup_warnings: Vec<String> = Vec::new();
+    let global_cfg = {
+        let mut env = RatatuiEnv { runtime: &mut runtime, side: &mut side };
+        match patches_plugin_common::Env::load_global_config(&mut env) {
+            Ok(Some(cfg)) => cfg,
+            Ok(None) => GlobalConfig::default(),
+            Err(e) => {
+                startup_warnings.push(format!("global config load failed: {e}"));
+                GlobalConfig::default()
+            }
+        }
+    };
+
+    // Build the scanner across all four tiers (ADR 0075). CLI paths
+    // are per-invocation overrides; global-config bundle_dirs are the
+    // persisted set; the OS-default data dir is consulted iff present.
+    let scanner = patches_ffi::PluginScanner::with_global_dirs(
+        cli_module_paths.clone(),
+        &global_cfg.bundle_dirs,
+    );
+
+    let mut registry = patches_modules::default_registry();
+    let scanned_paths: Vec<PathBuf> = scanner.paths.clone();
+    if !scanned_paths.is_empty() {
         let report = scanner.scan(&mut registry);
         println!("module scan: {}", report.summary());
         for m in &report.loaded {
@@ -155,14 +222,6 @@ fn common_setup(
         }
     }
 
-    let mut sound = SoundEngine::new(oversampling);
-    let env = sound.open(&device_config)?;
-    let sample_rate = env.sample_rate;
-
-    let runtime = HostBuilder::new()
-        .oversampling_factor(oversampling.factor())
-        .build(env)?;
-
     let source = PathSource::new(path);
 
     Ok(CommonSetup {
@@ -171,6 +230,9 @@ fn common_setup(
         source,
         registry,
         sample_rate,
+        global_cfg,
+        scanned_paths,
+        startup_warnings,
     })
 }
 
@@ -298,11 +360,19 @@ fn run_tui(
     record_path: Option<&str>,
     oversampling: OversamplingFactor,
     device_config: DeviceConfig,
-    module_paths: Vec<PathBuf>,
+    cli_module_paths: Vec<PathBuf>,
     monitor_enabled: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let CommonSetup { mut sound, mut runtime, source: _source, registry, sample_rate, .. } =
-        common_setup(path, oversampling, device_config, module_paths.clone())?;
+    let CommonSetup {
+        mut sound,
+        mut runtime,
+        source: _source,
+        registry,
+        sample_rate,
+        global_cfg,
+        scanned_paths,
+        startup_warnings,
+    } = common_setup(path, oversampling, device_config, cli_module_paths.clone())?;
     if monitor_enabled {
         runtime.set_monitor(true);
     }
@@ -316,13 +386,13 @@ fn run_tui(
     );
     let subs_handle = observer.subscribers.clone();
 
-    // Build the unified controller; seed persistable state from CLI args.
-    // The registry was already populated with module-path scans by
-    // `common_setup`; hand it to the controller verbatim so a subsequent
-    // controller-driven scan would rediscover the same modules.
+    // Build the unified controller. `module_paths` represents the
+    // *persisted* bundle-dir list (ADR 0075) — global config only. CLI
+    // `--module-path` entries are baked into the registry via the
+    // scanner but never round-trip to disk.
     let mut controller = Controller::new();
     controller.registry = registry;
-    controller.module_paths = module_paths.clone();
+    controller.module_paths = global_cfg.bundle_dirs.clone();
     controller.module_names = controller
         .registry
         .module_names()
@@ -331,6 +401,15 @@ fn run_tui(
     controller.module_names.sort();
     controller.file_path = Some(PathBuf::from(path));
     let mut side = EnvSideChannel::default();
+    // Seed scanned-paths from common_setup so subsequent scan_into calls
+    // (patch reloads, AddBundleDir for already-scanned dirs) skip
+    // re-scanning. Each path is recorded both as-given and canonicalised
+    // so either form matches future lookups.
+    for p in scanned_paths {
+        let canon = std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+        side.scanned_paths.insert(canon);
+        side.scanned_paths.insert(p);
+    }
 
     let initial_delta = {
         let mut env = RatatuiEnv { runtime: &mut runtime, side: &mut side };
@@ -424,10 +503,19 @@ fn run_tui(
     refresh_watched(&mut watched, &dependencies);
     let _ = dependencies;
 
-    // Sidecar debounce window (ADR 0063 §5; ticket 0776). Settings
-    // edits flush after the loop has been quiet for this long.
+    // Sidecar + global-config debounce window (ADR 0063 §5; ticket
+    // 0776; ADR 0075). Settings edits flush after the loop has been
+    // quiet for this long. Same cadence for both so a single edit that
+    // mutates both surfaces collapses to one disk write per surface.
     const SIDECAR_DEBOUNCE: Duration = Duration::from_millis(500);
     let mut dirty_at: Option<Instant> = None;
+    let mut global_dirty_at: Option<Instant> = None;
+
+    // Drain startup warnings (e.g. malformed `settings.toml`) so the
+    // user sees them in the TUI rather than only on stderr.
+    for w in startup_warnings {
+        view.log.push(w);
+    }
 
     let external_quit = Arc::new(AtomicBool::new(false));
     let mut halt_reported = false;
@@ -521,6 +609,25 @@ fn run_tui(
                 }
             }
 
+            // Drain any pending bundle-dir prompt the user committed
+            // via the TUI input handler.
+            while let Some(action) = view.take_pending_bundle_action() {
+                let delta = {
+                    let mut env = RatatuiEnv {
+                        runtime: &mut runtime,
+                        side: &mut side,
+                    };
+                    controller.apply(action, &mut env)
+                };
+                if delta.persistable_changed {
+                    dirty_at = Some(Instant::now());
+                }
+                if delta.global_config_changed {
+                    global_dirty_at = Some(Instant::now());
+                }
+                drain_status(view, &controller, &mut last_status_drained);
+            }
+
             // Sidecar debounce flush. Only fires when the loop has been
             // quiet for SIDECAR_DEBOUNCE; sequential mutations within
             // the window collapse to a single save.
@@ -530,12 +637,21 @@ fn run_tui(
                     dirty_at = None;
                 }
             }
+            if let Some(t) = global_dirty_at {
+                if t.elapsed() >= SIDECAR_DEBOUNCE {
+                    flush_global_config(&controller, &mut runtime, &mut side, view);
+                    global_dirty_at = None;
+                }
+            }
         },
     );
 
-    // Final flush so a pending debounced save isn't lost on quit.
+    // Final flush so pending debounced saves aren't lost on quit.
     if dirty_at.is_some() {
         flush_sidecar(&controller, &mut runtime, &mut side, &mut view);
+    }
+    if global_dirty_at.is_some() {
+        flush_global_config(&controller, &mut runtime, &mut side, &mut view);
     }
 
     let restore = tui::leave_terminal(&mut terminal);

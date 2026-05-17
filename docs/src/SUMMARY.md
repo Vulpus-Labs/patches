@@ -1,11 +1,42 @@
 # Summary
 
-- [Introduction](introduction.md)
-- [Building a patch](building-a-patch.md)
-- [Anatomy of a synth](anatomy-of-a-synth.md)
-- [Live coding and hot-reload](live-coding.md)
+[Introduction](introduction.md)
+
+# Concepts
+
+- [Mental model](mental-model.md)
+
+# Installation
+
+- [Installing the player](install-player.md)
+- [Installing the CLAP plugin](install-clap.md)
+- [Installing the VS Code extension](install-vscode.md)
+- [Unsigned binaries](install-unsigned.md)
+
+# Basic operation
+
+- [Running a patch in the player](running-player.md)
+- [Running a patch in a DAW](running-daw.md)
+- [Self-contained patches](running-self-contained.md)
+
+# The DSL
+
+- [DSL basics](dsl-basics.md)
+- [Signal kinds and cable rules](dsl-signal-kinds.md)
+- [Templates and abstraction](dsl-templates.md)
+- [Poly and voice allocation](dsl-poly.md)
 - [DSL reference](dsl-reference.md)
-- [Module reference](modules/README.md)
+
+# Patch authoring
+
+- [Anatomy of a synth voice](authoring-synth-voice.md)
+- [Anatomy of a self-contained patch](authoring-self-contained.md)
+- [The edit-reload cycle](authoring-edit-reload.md)
+- [Visualising patches](authoring-visualising.md)
+
+# Module reference
+
+- [Overview](modules/README.md)
   - [Oscillators](modules/oscillators.md)
   - [Envelopes](modules/envelopes.md)
   - [Filters](modules/filters.md)
@@ -20,7 +51,20 @@
   - [Dynamics](modules/dynamics.md)
   - [Utilities](modules/utilities.md)
   - [Output](modules/output.md)
+
+# Extending Patches
+
 - [Implementing modules](implementing-modules.md)
+- [Native plugin ABI](extending-abi.md)
+- [Writing a native plugin](extending-native-plugin.md)
+
+# Internals
+
 - [Engine internals](engine-internals.md)
-- [Plugin ABI — descriptor schema](abi/descriptor-schema.md)
-- [Plugin ABI — wire formats](abi/wire-formats.md)
+- [CLAP plugin internals](internals-clap.md)
+- [LSP architecture](internals-lsp.md)
+
+# Appendices
+
+- [Glossary](glossary.md)
+- [Changelog](changelog.md)

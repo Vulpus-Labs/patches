@@ -17,25 +17,25 @@ Mono resonant filters.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `cutoff` | float (V/oct) | `6.0` | Cutoff as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time. |
-| `resonance` | float | `0.0` | Resonance (0–1; approaching 1 = self-oscillation) |
-| `saturate` | bool | `false` | Apply soft-clip saturation in the feedback path |
+| Parameter   | Type          | Default | Description                                                                                                                                               |
+| ----------- | ------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cutoff`    | float (V/oct) | `6.0`   | Cutoff as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time. |
+| `resonance` | float         | `0.0`   | Resonance (0–1; approaching 1 = self-oscillation)                                                                                                         |
+| `saturate`  | bool          | `false` | Apply soft-clip saturation in the feedback path                                                                                                           |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Audio input |
-| `voct` | V/oct offset added to `cutoff`; 1.0 = +1 octave |
-| `fm` | FM sweep: ±1 sweeps ±4 octaves around `cutoff` |
-| `resonance_cv` | Added to `resonance` |
+| Port           | Description                                     |
+| -------------- | ----------------------------------------------- |
+| `in`           | Audio input                                     |
+| `voct`         | V/oct offset added to `cutoff`; 1.0 = +1 octave |
+| `fm`           | FM sweep: ±1 sweeps ±2 octaves around `cutoff`  |
+| `resonance_cv` | Added to `resonance`                            |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description    |
+| ----- | -------------- |
 | `out` | Filtered audio |
 
 ---
@@ -46,25 +46,25 @@ Mono resonant bandpass filter.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `center` | float (V/oct) | `6.0` | Centre frequency as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time. |
-| `bandwidth_q` | float | `1.0` | Bandwidth Q (0.1–20; higher = narrower band) |
-| `saturate` | bool | `false` | Apply soft-clip saturation in the feedback path |
+| Parameter     | Type          | Default | Description                                                                                                                                                         |
+| ------------- | ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `center`      | float (V/oct) | `6.0`   | Centre frequency as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time. |
+| `bandwidth_q` | float         | `1.0`   | Bandwidth Q (0.1–20; higher = narrower band)                                                                                                                        |
+| `saturate`    | bool          | `false` | Apply soft-clip saturation in the feedback path                                                                                                                     |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Audio input |
-| `voct` | V/oct offset added to `center`; 1.0 = +1 octave |
-| `fm` | FM sweep: ±1 sweeps ±4 octaves around `center` |
-| `resonance_cv` | Added to `bandwidth_q` |
+| Port           | Description                                     |
+| -------------- | ----------------------------------------------- |
+| `in`           | Audio input                                     |
+| `voct`         | V/oct offset added to `center`; 1.0 = +1 octave |
+| `fm`           | FM sweep: ±1 sweeps ±2 octaves around `center`  |
+| `resonance_cv` | Added to `bandwidth_q`                          |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description    |
+| ----- | -------------- |
 | `out` | Filtered audio |
 
 ---
@@ -77,20 +77,18 @@ CV inputs carry poly cables; modulation is applied per-voice.
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Per-voice audio (poly) |
-| `voct` | Per-voice V/oct offset added to `cutoff`; 1.0 = +1 octave (poly) |
-| `fm` | Per-voice FM sweep: ±1 sweeps ±4 octaves around `cutoff` (poly) |
-| `resonance_cv` | Per-voice resonance modulation (poly) |
+| Port           | Description                                                      |
+| -------------- | ---------------------------------------------------------------- |
+| `in`           | Per-voice audio (poly)                                           |
+| `voct`         | Per-voice V/oct offset added to `cutoff`; 1.0 = +1 octave (poly) |
+| `fm`           | Per-voice FM sweep: ±1 sweeps ±2 octaves around `cutoff` (poly)  |
+| `resonance_cv` | Per-voice resonance modulation (poly)                            |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description                     |
+| ----- | ------------------------------- |
 | `out` | Per-voice filtered audio (poly) |
-
----
 
 ---
 
@@ -108,25 +106,25 @@ filter into ringing.
 
 **Parameters**
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `cutoff` | float (V/oct) | `6.0` | Cutoff as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time. |
-| `q` | float | `0.0` | Resonance (0–1). The mapping is exponential: values below 0.5 give moderate resonance; above 0.9 the filter enters self-oscillation territory (Q ≈ 70–100). |
+| Parameter | Type          | Default | Description                                                                                                                                                 |
+| --------- | ------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cutoff`  | float (V/oct) | `6.0`   | Cutoff as V/oct above C0: `0.0` = C0 (≈16 Hz), `4.0` = C4 (≈262 Hz), `6.0` = C6 (≈1047 Hz). `Hz`/`kHz` literals are accepted and converted at parse time.   |
+| `q`       | float         | `0.0`   | Resonance (0–1). The mapping is exponential: values below 0.5 give moderate resonance; above 0.9 the filter enters self-oscillation territory (Q ≈ 70–100). |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Audio input |
+| Port   | Description                                     |
+| ------ | ----------------------------------------------- |
+| `in`   | Audio input                                     |
 | `voct` | V/oct offset added to `cutoff`; 1.0 = +1 octave |
-| `fm` | FM sweep: ±1 sweeps ±4 octaves around `cutoff` |
-| `q_cv` | Added to `q` before clamping to [0, 1] |
+| `fm`   | FM sweep: ±1 sweeps ±2 octaves around `cutoff`  |
+| `q_cv` | Added to `q` before clamping to [0, 1]          |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `lowpass` | Lowpass output |
+| Port       | Description     |
+| ---------- | --------------- |
+| `lowpass`  | Lowpass output  |
 | `highpass` | Highpass output |
 | `bandpass` | Bandpass output |
 
@@ -148,18 +146,18 @@ Same as `Svf`: `cutoff` and `q`.
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Per-voice audio (poly) |
-| `voct` | Per-voice V/oct offset added to `cutoff` (poly) |
-| `fm` | Per-voice FM sweep: ±1 sweeps ±4 octaves around `cutoff` (poly) |
-| `q_cv` | Per-voice additive Q offset, clamped to [0, 1] (poly) |
+| Port   | Description                                                     |
+| ------ | --------------------------------------------------------------- |
+| `in`   | Per-voice audio (poly)                                          |
+| `voct` | Per-voice V/oct offset added to `cutoff` (poly)                 |
+| `fm`   | Per-voice FM sweep: ±1 sweeps ±2 octaves around `cutoff` (poly) |
+| `q_cv` | Per-voice additive Q offset, clamped to [0, 1] (poly)           |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `lowpass` | Per-voice lowpass output (poly) |
+| Port       | Description                      |
+| ---------- | -------------------------------- |
+| `lowpass`  | Per-voice lowpass output (poly)  |
 | `highpass` | Per-voice highpass output (poly) |
 | `bandpass` | Per-voice bandpass output (poly) |
 
@@ -171,15 +169,15 @@ Per-voice version of `Bandpass`. Same parameters as `Bandpass`.
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in` | Per-voice audio (poly) |
-| `voct` | Per-voice V/oct offset added to `center`; 1.0 = +1 octave (poly) |
-| `fm` | Per-voice FM sweep: ±1 sweeps ±4 octaves around `center` (poly) |
-| `resonance_cv` | Per-voice bandwidth_q modulation (poly) |
+| Port           | Description                                                      |
+| -------------- | ---------------------------------------------------------------- |
+| `in`           | Per-voice audio (poly)                                           |
+| `voct`         | Per-voice V/oct offset added to `center`; 1.0 = +1 octave (poly) |
+| `fm`           | Per-voice FM sweep: ±1 sweeps ±2 octaves around `center` (poly)  |
+| `resonance_cv` | Per-voice bandwidth_q modulation (poly)                          |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description                     |
+| ----- | ------------------------------- |
 | `out` | Per-voice filtered audio (poly) |

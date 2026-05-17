@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Mixers - Patches Manual — v0.5.1</title>
+        <title>Mixers - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -298,8 +298,8 @@ mute/solo.</p>
 <tr><td><code>pan_cv[0]</code> … <code>pan_cv[n-1]</code></td><td>Per-channel pan CV</td></tr>
 <tr><td><code>send_a_cv[0]</code> … <code>send_a_cv[n-1]</code></td><td>Per-channel send A CV</td></tr>
 <tr><td><code>send_b_cv[0]</code> … <code>send_b_cv[n-1]</code></td><td>Per-channel send B CV</td></tr>
-<tr><td><code>return_a_left</code> / <code>return_a_right</code></td><td>Send A stereo return</td></tr>
-<tr><td><code>return_b_left</code> / <code>return_b_right</code></td><td>Send B stereo return</td></tr>
+<tr><td><code>return_a</code></td><td>Send A stereo return</td></tr>
+<tr><td><code>return_b</code></td><td>Send B stereo return</td></tr>
 </tbody>
 </table>
 </div>
@@ -310,16 +310,16 @@ mute/solo.</p>
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>out_left</code> / <code>out_right</code></td><td>Main stereo output</td></tr>
-<tr><td><code>send_a_left</code> / <code>send_a_right</code></td><td>Send A stereo bus</td></tr>
-<tr><td><code>send_b_left</code> / <code>send_b_right</code></td><td>Send B stereo bus</td></tr>
+<tr><td><code>out</code></td><td>Main stereo output</td></tr>
+<tr><td><code>send_a</code></td><td>Send A stereo bus</td></tr>
+<tr><td><code>send_b</code></td><td>Send B stereo bus</td></tr>
 </tbody>
 </table>
 </div>
 <hr>
-<h2 id="polymix--unweighted-poly-sum"><a class="header" href="#polymix--unweighted-poly-sum"><code>PolyMix</code> — Unweighted poly sum</a></h2>
+<h2 id="polysum--unweighted-poly-sum"><a class="header" href="#polysum--unweighted-poly-sum"><code>PolySum</code> — Unweighted poly sum</a></h2>
 <p>Sums N poly inputs voice-by-voice with no level control.</p>
-<pre><code class="language-patches">module mix : PolyMix(channels: 2)
+<pre><code class="language-patches">module mix : PolySum(channels: 2)
 </code></pre>
 <p><strong>Inputs</strong></p>
 <div class="table-wrapper">
@@ -477,6 +477,34 @@ Level and pan CV inputs are mono.</p>
 </thead>
 <tbody>
 <tr><td><code>out</code></td><td>Poly cable (same value in every voice)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="stereosum--unweighted-stereo-sum"><a class="header" href="#stereosum--unweighted-stereo-sum"><code>StereoSum</code> — Unweighted stereo sum</a></h2>
+<p>Sums N stereo inputs into one stereo output, no level control. Useful for
+collapsing voice or bus outputs into a single stereo path.</p>
+<pre><code class="language-patches">module mix : StereoSum(channels: 3)
+</code></pre>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in[0]</code> … <code>in[n-1]</code></td><td>Stereo inputs</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Stereo sum</td></tr>
 </tbody>
 </table>
 </div>

@@ -266,6 +266,12 @@ pub enum Intent {
     Rescan,
     AddPath,
     RemovePath { index: usize },
+    /// Open a folder picker; the host adds the chosen directory to the
+    /// global-config bundle-dir list (ADR 0075, ticket 0899).
+    AddBundleDir,
+    /// Remove a bundle directory by path. The webview posts the path
+    /// string verbatim from its rendered list.
+    RemoveBundleDir { path: String },
     /// Update one per-slot display option. Posted by the webview when
     /// the user picks an FFT size, decimation, window length, etc. The
     /// flattened `opt` field carries the externally-tagged variant, so
@@ -293,6 +299,10 @@ impl Intent {
             Intent::Rescan => Action::Rescan,
             Intent::AddPath => Action::AddModulePath,
             Intent::RemovePath { index } => Action::RemoveModulePath(index),
+            Intent::AddBundleDir => Action::AddBundleDirPick,
+            Intent::RemoveBundleDir { path } => {
+                Action::RemoveBundleDir(std::path::PathBuf::from(path))
+            }
             Intent::SetTapOpt { name, opt } => Action::SetTapOpt { name, opt },
             Intent::Ready => return None,
         })

@@ -67,8 +67,8 @@ document.addEventListener("click", (ev) => {
     }
     return;
   }
-  if (t.classList.contains("btn-remove") && t.dataset.removeIndex !== undefined) {
-    postIntent("remove_path", { index: parseInt(t.dataset.removeIndex, 10) });
+  if (t.classList.contains("btn-remove") && t.dataset.removePath !== undefined) {
+    postIntent("remove_bundle_dir", { path: t.dataset.removePath });
     return;
   }
   if (t.classList.contains("btn") && t.dataset.intent) {

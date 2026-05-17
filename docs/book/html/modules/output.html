@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Output - Patches Manual — v0.5.1</title>
+        <title>Output - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -196,8 +196,7 @@ This module must appear exactly once in a patch.</p>
 <tr><th>Port</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>in_left</code></td><td>Left channel</td></tr>
-<tr><td><code>in_right</code></td><td>Right channel</td></tr>
+<tr><td><code>in</code></td><td>Stereo input. A mono source is silently broadcast to both channels (L = R).</td></tr>
 </tbody>
 </table>
 </div>
@@ -205,8 +204,7 @@ This module must appear exactly once in a patch.</p>
 a <code>StereoMixer</code>) to keep levels in range — summing many signals without
 attenuation will overdrive the output.</p>
 <p><strong>Example</strong></p>
-<pre><code class="language-patches">mix.out_left  -[0.1]-&gt; out.in_left
-mix.out_right -[0.1]-&gt; out.in_right
+<pre><code class="language-patches">mix.out -[0.1]-&gt; out.in
 </code></pre>
 
                     </main>

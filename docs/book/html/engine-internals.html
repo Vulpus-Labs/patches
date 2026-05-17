@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Engine internals - Patches Manual — v0.5.1</title>
+        <title>Engine internals - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a680bed.js"></script>
+        <script src="toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -196,7 +196,7 @@
   Interpreter (patches-interpreter)  Validate against module registry → ModuleGraph
      │
      ▼
-  Planner (patches-engine)      Graph → ExecutionPlan, reusing surviving modules
+  Planner (patches-planner)     Graph → ExecutionPlan, reusing surviving modules
      │
      ▼
   Audio thread                  Tick loop: execute plan, one sample at a time
@@ -206,46 +206,92 @@
 <p><strong>Interpreter.</strong> The <code>FlatPatch</code> is validated against the module registry. Module type names are resolved to descriptors. Parameters are checked against their declared types and ranges. Cable kinds (mono/poly) are verified to match between connected ports. The output is a <code>ModuleGraph</code> — a directed graph of typed nodes and edges.</p>
 <p><strong>Planner.</strong> The planner converts the <code>ModuleGraph</code> into an <code>ExecutionPlan</code> — a flat, ordered list of module slots and buffer assignments that the audio thread can execute without any graph traversal. The planner carries state between builds: it matches modules in the new graph against the previous plan by name and type, reusing existing instances (with their state intact) where possible. New modules are freshly instantiated; removed modules are listed as tombstones for cleanup.</p>
 <h2 id="the-cable-pool"><a class="header" href="#the-cable-pool">The cable pool</a></h2>
-<p>All inter-module signals live in a single contiguous allocation: a <code>Vec&lt;[CableValue; 2]&gt;</code>. Each cable occupies one slot in this vector. The two-element inner array is a ping-pong pair.</p>
+<p>Inter-module signals live in a single pool split into two regions:</p>
+<ul>
+<li><strong>Scratch region</strong> — <code>[0, SCRATCH_CAPACITY)</code>. One <code>CableValue</code> per slot;
+consumers read producers’ <em>current-tick</em> output. Used by every cable
+inside a fused (acyclic) subgraph.</li>
+<li><strong>Cycle region</strong> — <code>[SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)</code>.
+<code>[CableValue; 2]</code> ping-pong pair per slot; consumers read the <em>previous</em>
+tick’s value. Used by cables that carry feedback across an SCC boundary.</li>
+</ul>
+<p>A single virtual <code>cable_idx</code> selects the region: indices below
+<code>SCRATCH_CAPACITY</code> route to scratch, the rest to cycle. Capacities are
+fixed at compile time (<code>SCRATCH_CAPACITY = 2048</code>, <code>CYCLE_CAPACITY = 128</code>);
+the planner reports <code>BufferPoolExhausted</code> if a patch overflows either
+region.</p>
+<p><code>CableValue</code> is a fixed 16-lane <code>f32</code> slot:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>pub enum CableValue {
-    Mono(f32),
-    Poly([f32; 16]),
-}
+</span>#[repr(transparent)]
+pub struct CableValue(pub [f32; 16]);
 <span class="boring">}</span></code></pre>
-<p><code>CableValue</code> is <code>Copy</code>. On each tick, the write index <code>wi</code> alternates between 0 and 1. Modules write to <code>pool[cable_idx][wi]</code> and read from <code>pool[cable_idx][1 - wi]</code>. This gives every cable a one-sample delay: a module always reads the value that was written on the <em>previous</em> tick. The consequence is that execution order does not matter — modules can be scheduled in any order and the results are identical. Feedback connections are also well-defined: they carry the previous tick’s value.</p>
+<p>The cable’s declared kind — <code>Mono</code>, <code>Stereo</code>, or <code>Poly</code> — is static and
+tells reader and writer which prefix of the array carries data: lane 0
+for <code>Mono</code>, lanes 0–1 for <code>Stereo</code>, all 16 lanes for <code>Poly</code>. There is no
+runtime tag. Constructors <code>CableValue::mono(v)</code>, <code>stereo(l, r)</code>, and
+<code>poly([..; 16])</code> zero the unused lanes; accessors <code>as_mono</code>, <code>as_stereo</code>,
+<code>as_poly</code> read only the relevant prefix. Holding all slots at 16 lanes
+lets a slot used for <code>Mono</code> in one plan be repurposed as <code>Poly</code> in the
+next without reallocating the pool.</p>
+<p><strong>Subgraph fusion.</strong> Across SCCs the planner emits modules in
+topological order and routes cross-SCC cables through the scratch region,
+so consumers read producers’ current-tick output. This removes the
+per-cable one-sample lag that would otherwise accumulate audibly across
+long signal chains, without changing the patch author’s mental model.
+Cycle-bearing cables (those that close a feedback loop) live in the cycle
+region and retain the 1-sample delay, which makes them well-defined
+regardless of execution order. Calling fused modules out of topological
+order causes silent reads of stale data — this matters when extending the
+planner, not when authoring patches.</p>
 <h3 id="reserved-slots"><a class="header" href="#reserved-slots">Reserved slots</a></h3>
-<p>The first 16 slots are reserved for infrastructure and never allocated to user cables:</p>
+<p>The first <code>RESERVED_SLOTS = 32</code> scratch indices are reserved for
+infrastructure and never allocated to user cables. They are split into a
+<strong>backplane</strong> at the bottom and <strong>sinks</strong> at the top of the reserved
+range:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Index</th><th>Name</th><th>Purpose</th></tr>
+<tr><th>Index</th><th>Name</th><th>Kind</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td>0</td><td><code>MONO_READ_SINK</code></td><td>Disconnected mono inputs read zero from here</td></tr>
-<tr><td>1</td><td><code>POLY_READ_SINK</code></td><td>Disconnected poly inputs read zero from here</td></tr>
-<tr><td>2</td><td><code>MONO_WRITE_SINK</code></td><td>Unconnected mono outputs write harmlessly here</td></tr>
-<tr><td>3</td><td><code>POLY_WRITE_SINK</code></td><td>Unconnected poly outputs write harmlessly here</td></tr>
-<tr><td>4</td><td><code>AUDIO_OUT_L</code></td><td>Left audio output — AudioOut writes, callback reads</td></tr>
-<tr><td>5</td><td><code>AUDIO_OUT_R</code></td><td>Right audio output</td></tr>
-<tr><td>6</td><td><code>AUDIO_IN_L</code></td><td>Left audio input (reserved)</td></tr>
-<tr><td>7</td><td><code>AUDIO_IN_R</code></td><td>Right audio input (reserved)</td></tr>
-<tr><td>8</td><td><code>GLOBAL_CLOCK</code></td><td>Absolute sample counter, written by callback each tick</td></tr>
-<tr><td>9</td><td><code>GLOBAL_DRIFT</code></td><td>Slowly varying value in [-1, 1] for globally correlated pitch drift</td></tr>
-<tr><td>10–15</td><td>—</td><td>Reserved for future use</td></tr>
+<tr><td>0</td><td><code>AUDIO_OUT_L</code></td><td>mono</td><td>Left audio output — <code>AudioOut</code> writes, callback reads</td></tr>
+<tr><td>1</td><td><code>AUDIO_OUT_R</code></td><td>mono</td><td>Right audio output</td></tr>
+<tr><td>2</td><td><code>AUDIO_IN_L</code></td><td>mono</td><td>Left audio input (<code>AudioIn</code>)</td></tr>
+<tr><td>3</td><td><code>AUDIO_IN_R</code></td><td>mono</td><td>Right audio input</td></tr>
+<tr><td>4</td><td><code>GLOBAL_TRANSPORT</code></td><td>poly</td><td>Transport frame — sample count + tempo + position</td></tr>
+<tr><td>5</td><td><code>GLOBAL_DRIFT</code></td><td>mono</td><td>Slowly varying value in <code>[-1, 1]</code> for correlated pitch drift</td></tr>
+<tr><td>6</td><td><code>GLOBAL_MIDI</code></td><td>poly</td><td>Packed MIDI frame — up to 5 events per sample</td></tr>
+<tr><td>7–10</td><td><code>TAP_BASE..+4</code></td><td>poly</td><td><code>Tap</code> module storage — 4 slots × 16 lanes = 64 tap channels</td></tr>
+<tr><td>11–14</td><td><code>HOST_CONTROL_BASE..+4</code></td><td>poly</td><td>Host-control values — 4 slots × 16 lanes = 64 controls</td></tr>
+<tr><td>15–27</td><td>—</td><td>—</td><td>Spare backplane capacity (no live mapping)</td></tr>
+<tr><td>28</td><td><code>MONO_READ_SINK</code></td><td>mono</td><td>Disconnected mono inputs read zero from here</td></tr>
+<tr><td>29</td><td><code>POLY_READ_SINK</code></td><td>poly</td><td>Disconnected poly inputs read zero from here</td></tr>
+<tr><td>30</td><td><code>MONO_WRITE_SINK</code></td><td>mono</td><td>Unconnected mono outputs write harmlessly here</td></tr>
+<tr><td>31</td><td><code>POLY_WRITE_SINK</code></td><td>poly</td><td>Unconnected poly outputs write harmlessly here</td></tr>
 </tbody>
 </table>
 </div>
-<p>Disconnected ports point at the sink slots. This means <code>process</code> never needs to branch on connectivity — it can always call <code>pool.read_mono(&amp;self.port)</code> safely, getting zero for unconnected inputs. Modules that want to <em>skip work</em> for disconnected outputs can check the <code>connected</code> field on their output port.</p>
+<p>The sinks sit at the top of the reserved range so the FFI plugin loader can shift plugin-visible scratch past the backplane while
+still resolving plugin-relative <code>[0, SINK_SLOTS)</code> to the sink slots. The
+backplane → sink layout is asserted at compile time.</p>
+<p>Disconnected ports point at the sink slots. This means <code>process</code> never
+needs to branch on connectivity — it can always call
+<code>pool.read_mono(&amp;self.port)</code> safely, getting zero for unconnected
+inputs. Modules that want to <em>skip work</em> for disconnected outputs can
+check <code>output.is_connected()</code>.</p>
 <h3 id="buffer-stability"><a class="header" href="#buffer-stability">Buffer stability</a></h3>
 <p>The cable pool persists across re-plans. Unchanged cables keep their buffer index, so CV signals on cables that were not rewired continue without interruption. Recycled and newly allocated slots are listed in the execution plan’s <code>to_zero</code> vector; the audio thread zeroes them before the first tick of the new plan.</p>
-<p>The pool has a fixed capacity (default 4096 slots). A freelist tracks available indices for allocation.</p>
+<p>Pool capacities are fixed compile-time constants
+(<code>SCRATCH_CAPACITY = 2048</code>, <code>CYCLE_CAPACITY = 128</code>). The planner allocates
+dyn-scratch indices above <code>RESERVED_SLOTS</code> via a high-water mark; cycle
+indices are allocated in the cycle region in build order.</p>
 <h2 id="audio-thread-constraints"><a class="header" href="#audio-thread-constraints">Audio thread constraints</a></h2>
 <p>The audio callback runs under hard real-time constraints. Violating them causes audible glitches.</p>
 <p><strong>No allocations.</strong> All buffers and module state are pre-allocated when the plan is built. The callback never calls <code>Box::new</code>, <code>Vec::push</code> with growth, or any other heap-allocating operation.</p>
 <p><strong>No blocking.</strong> No mutexes, no file or network I/O, no syscalls that may sleep.</p>
 <p><strong>No deallocation.</strong> Dropping a <code>Box&lt;dyn Module&gt;</code> can run arbitrary destructor code. All deallocation is routed to a background thread (see below).</p>
+<p><strong>Unwinding panic policy.</strong> The CLAP host and any crate loaded as an FFI plugin must build with <code>panic = "unwind"</code>. <code>PatchProcessor::tick</code> catches module panics at the tick boundary and halts the engine cleanly — that only works with table-based unwinding. <code>panic = "abort"</code> in the workspace or plugin profiles defeats the catch and takes the host process down with the panic.</p>
 <p>Communication with the control thread uses an <strong>rtrb</strong> lock-free single-producer / single-consumer ring buffer. The callback polls it at the start of each processing block.</p>
 <h2 id="the-execution-plan"><a class="header" href="#the-execution-plan">The execution plan</a></h2>
 <p><code>ExecutionPlan</code> is the audio thread’s working document. It contains:</p>
@@ -280,33 +326,106 @@
 </span><span class="boring">fn main() {
 </span>enum CleanupAction {
     DropModule(Box&lt;dyn Module&gt;),
-    DropPlan(ExecutionPlan),
+    DropPlan(Box&lt;ExecutionPlan&gt;),
+    DropParamState(Box&lt;ParamState&gt;),
+    DropParamFrame(Box&lt;ParamFrame&gt;),
+    DropMonitorMeta(Box&lt;MonitorMeta&gt;),
+    DropHostControlPlanMeta(Box&lt;HostControlPlanMeta&gt;),
 }
 <span class="boring">}</span></code></pre>
 <p>The audio thread pushes to this buffer; the cleanup thread drops the values on its own time. If the buffer is full (which should not happen in normal operation), the audio thread falls back to dropping inline with a warning.</p>
-<h2 id="polyphony"><a class="header" href="#polyphony">Polyphony</a></h2>
-<p>The system supports two cable kinds: mono (a single <code>f32</code> per tick) and poly (an <code>[f32; 16]</code> array — one value per voice per tick). The voice count is fixed at engine initialisation (default 16) and shared by all poly cables in a patch.</p>
-<p>Poly modules (<code>PolyOsc</code>, <code>PolyAdsr</code>, <code>PolyVca</code>, etc.) process each voice independently within a single <code>process</code> call. Their ports read and write <code>[f32; 16]</code> arrays via <code>pool.read_poly</code> and <code>pool.write_poly</code>.</p>
-<p>Connecting a mono output to a poly input (or vice versa) is a validation error caught by the interpreter. <code>MonoToPoly</code> broadcasts a mono value to all 16 voices. <code>PolyToMono</code> sums all voices down to a single mono signal.</p>
-<p>Poly cable slots are zeroed with <code>Poly([0.0; 16])</code> rather than <code>Mono(0.0)</code> to prevent type mismatches during the first tick after a hot-reload.</p>
+<h2 id="cable-kinds"><a class="header" href="#cable-kinds">Cable kinds</a></h2>
+<p>The system has three cable kinds:</p>
+<ul>
+<li><strong>Mono</strong> — one <code>f32</code> per tick. The default.</li>
+<li><strong>Poly</strong> — <code>[f32; 16]</code> per tick (one value per voice). Voice count is
+fixed at engine initialisation and shared by all poly cables.</li>
+<li><strong>Stereo</strong> — <code>[f32; 2]</code> per tick, carried as <code>(L, R)</code>. Storage
+reuses the poly slot (lanes 0–1); pool layout is unchanged.</li>
+</ul>
+<p>Layouts (<code>MonoLayout::Audio</code>/<code>Trigger</code>, <code>PolyLayout::Audio</code>/<code>Trigger</code>/
+<code>Transport</code>/<code>Midi</code>) refine within <code>Mono</code> and <code>Poly</code>. Stereo carries no
+layout — it is exclusively audio/CV.</p>
+<h3 id="connection-rules"><a class="header" href="#connection-rules">Connection rules</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>From</th><th>To</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>Mono</td><td>Mono</td><td>direct (layouts must match)</td></tr>
+<tr><td>Poly</td><td>Poly</td><td>direct (layouts must match)</td></tr>
+<tr><td>Stereo</td><td>Stereo</td><td>direct</td></tr>
+<tr><td>Mono Audio</td><td>Stereo</td><td><strong>broadcast</strong>: <code>(s, s)</code></td></tr>
+<tr><td>Stereo</td><td>Mono</td><td>rejected (<code>CableKindMismatch</code>)</td></tr>
+<tr><td>Poly ↔ Stereo</td><td>—</td><td>rejected</td></tr>
+<tr><td>Mono ↔ Poly</td><td>—</td><td>rejected (use <code>MonoToPoly</code> / <code>PolyToMono</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Mono→stereo broadcast is consumer-side: the planner sets
+<code>StereoInput::broadcast_from_mono</code>, the cable still points at the mono
+producer’s slot, and <code>pool.read_stereo()</code> returns <code>(s, s)</code> from the
+underlying <code>CableValue::Mono</code>. No synthetic node, no extra audio-thread
+work. Stereo→mono needs an explicit <code>StereoSplitter</code>.</p>
+<h3 id="polyphony"><a class="header" href="#polyphony">Polyphony</a></h3>
+<p>Poly modules (<code>PolyOsc</code>, <code>PolyAdsr</code>, <code>PolyVca</code>, etc.) process each voice
+independently within a single <code>process</code> call. Their ports read and
+write <code>[f32; 16]</code> arrays via <code>pool.read_poly</code> and <code>pool.write_poly</code>.</p>
+<p>Poly cable slots are zeroed with <code>Poly([0.0; 16])</code> rather than
+<code>Mono(0.0)</code> to prevent type mismatches during the first tick after a
+hot-reload.</p>
 <h2 id="periodic-updates"><a class="header" href="#periodic-updates">Periodic updates</a></h2>
-<p>Some modules need to recompute internal coefficients when their CV inputs change — for example, a filter whose cutoff is controlled by a cable. Recomputing coefficients on every sample would be expensive, so the engine supports a <code>PeriodicUpdate</code> trait:</p>
+<p>Some modules need to recompute internal coefficients when their CV inputs change — for example, a filter whose cutoff is controlled by a cable. Recomputing on every sample would be expensive, so the <code>Module</code> trait exposes a periodic hook:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>pub trait PeriodicUpdate {
-    fn periodic_update(&amp;mut self, pool: &amp;CablePool&lt;'_&gt;);
+</span>pub trait Module {
+    // ...
+    fn wants_periodic(&amp;self) -&gt; bool { false }
+    fn periodic_update(&amp;mut self, _pool: &amp;CablePool&lt;'_&gt;) {}
 }
 <span class="boring">}</span></code></pre>
-<p>Modules that implement this trait (and return <code>Some(self)</code> from <code>as_periodic()</code>) have their <code>periodic_update</code> method called every N samples (a configurable interval, typically a few dozen samples). This is where they read their CV inputs and update filter coefficients, frequency targets, or other derived state. The processing in <code>process</code> then uses these precomputed values, keeping the per-sample path fast.</p>
+<p>Modules whose <code>wants_periodic()</code> returns <code>true</code> override <code>periodic_update</code>
+to read their CV inputs and update filter coefficients, frequency
+targets, or other derived state. The planner queries <code>wants_periodic()</code>
+once at plan-build time and collects matching slot indices; every
+<code>periodic_update_interval</code> samples (typically a few dozen), the audio
+thread dispatches <code>periodic_update</code> through the normal
+<code>&amp;mut dyn Module</code> path. The per-sample <code>process</code> call then uses these
+precomputed values, keeping the hot path fast.</p>
+<p>This replaces an earlier <code>PeriodicUpdate</code> trait and its
+<code>as_periodic()</code> lookup, which were removed along with their
+raw-pointer caching footgun.</p>
+<h2 id="observability"><a class="header" href="#observability">Observability</a></h2>
+<p>Each runtime’s FFI data plane carries a small set of counters that a
+non-real-time observer can sample at any time. They are updated with
+<code>Relaxed</code> atomics on the hot paths — no allocation, no blocking, safe
+from the audio thread — and exposed via <code>RuntimeArcTables::snapshot()</code>
+(control side) or <code>RuntimeAudioHandles::snapshot()</code> (audio side).</p>
+<p><code>RuntimeCountersSnapshot</code> contains:</p>
+<ul>
+<li><code>param_frames_dispatched</code> — cumulative count of <code>ParamFrame</code>
+deliveries. The dispatcher increments this via
+<code>RuntimeAudioHandles::note_param_frame_dispatched()</code>.</li>
+</ul>
+<p>The earlier <code>FloatBuffer</code> / <code>ArcTable&lt;[f32]&gt;</code> counters were retired with
+the pipeline itself; the snapshot surface is intentionally
+small now.</p>
+<p>The attach API that routes counters to a UI or logging sink is still
+deferred; until then, tests and soak runs read them directly through
+the snapshot accessors.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="implementing-modules.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="extending-native-plugin.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
+                            <a rel="next prefetch" href="internals-clap.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -314,10 +433,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="implementing-modules.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="extending-native-plugin.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
+                    <a rel="next prefetch" href="internals-clap.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
             </nav>
 
         </div>

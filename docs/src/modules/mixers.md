@@ -16,14 +16,14 @@ module mix : Sum(channels: 4)
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
+| Port                | Description |
+| ------------------- | ----------- |
 | `in[0]` … `in[n-1]` | Mono inputs |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description       |
+| ----- | ----------------- |
 | `out` | Sum of all inputs |
 
 ---
@@ -40,30 +40,30 @@ module mix : Mixer(channels: 4)
 
 **Parameters** (all indexed per channel)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `level[n]` | float | `1.0` | Channel gain (0–1) |
-| `send_a[n]` | float | `0.0` | Send A amount (0–1) |
-| `send_b[n]` | float | `0.0` | Send B amount (0–1) |
-| `mute[n]` | bool | `false` | Mute this channel |
-| `solo[n]` | bool | `false` | Solo this channel |
+| Parameter   | Type  | Default | Description         |
+| ----------- | ----- | ------- | ------------------- |
+| `level[n]`  | float | `1.0`   | Channel gain (0–1)  |
+| `send_a[n]` | float | `0.0`   | Send A amount (0–1) |
+| `send_b[n]` | float | `0.0`   | Send B amount (0–1) |
+| `mute[n]`   | bool  | `false` | Mute this channel   |
+| `solo[n]`   | bool  | `false` | Solo this channel   |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in[0]` … `in[n-1]` | Mono audio inputs |
-| `level_cv[0]` … `level_cv[n-1]` | Per-channel level CV (added to `level`) |
-| `send_a_cv[0]` … `send_a_cv[n-1]` | Per-channel send A CV |
-| `send_b_cv[0]` … `send_b_cv[n-1]` | Per-channel send B CV |
-| `return_a` | Return input added to main output |
-| `return_b` | Return input added to main output |
+| Port                              | Description                             |
+| --------------------------------- | --------------------------------------- |
+| `in[0]` … `in[n-1]`               | Mono audio inputs                       |
+| `level_cv[0]` … `level_cv[n-1]`   | Per-channel level CV (added to `level`) |
+| `send_a_cv[0]` … `send_a_cv[n-1]` | Per-channel send A CV                   |
+| `send_b_cv[0]` … `send_b_cv[n-1]` | Per-channel send B CV                   |
+| `return_a`                        | Return input added to main output       |
+| `return_b`                        | Return input added to main output       |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `out` | Main mono mix |
+| Port     | Description       |
+| -------- | ----------------- |
+| `out`    | Main mono mix     |
 | `send_a` | Send A bus output |
 | `send_b` | Send B bus output |
 
@@ -80,55 +80,55 @@ module mix : StereoMixer(channels: 4)
 
 **Parameters** (all indexed per channel)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `level[n]` | float | `1.0` | Channel gain (0–1) |
-| `pan[n]` | float | `0.0` | Pan (−1 = full left, +1 = full right) |
-| `send_a[n]` | float | `0.0` | Send A amount (0–1) |
-| `send_b[n]` | float | `0.0` | Send B amount (0–1) |
-| `mute[n]` | bool | `false` | Mute this channel |
-| `solo[n]` | bool | `false` | Solo this channel |
+| Parameter   | Type  | Default | Description                           |
+| ----------- | ----- | ------- | ------------------------------------- |
+| `level[n]`  | float | `1.0`   | Channel gain (0–1)                    |
+| `pan[n]`    | float | `0.0`   | Pan (−1 = full left, +1 = full right) |
+| `send_a[n]` | float | `0.0`   | Send A amount (0–1)                   |
+| `send_b[n]` | float | `0.0`   | Send B amount (0–1)                   |
+| `mute[n]`   | bool  | `false` | Mute this channel                     |
+| `solo[n]`   | bool  | `false` | Solo this channel                     |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in[0]` … `in[n-1]` | Mono audio inputs |
-| `level_cv[0]` … `level_cv[n-1]` | Per-channel level CV |
-| `pan_cv[0]` … `pan_cv[n-1]` | Per-channel pan CV |
+| Port                              | Description           |
+| --------------------------------- | --------------------- |
+| `in[0]` … `in[n-1]`               | Mono audio inputs     |
+| `level_cv[0]` … `level_cv[n-1]`   | Per-channel level CV  |
+| `pan_cv[0]` … `pan_cv[n-1]`       | Per-channel pan CV    |
 | `send_a_cv[0]` … `send_a_cv[n-1]` | Per-channel send A CV |
 | `send_b_cv[0]` … `send_b_cv[n-1]` | Per-channel send B CV |
-| `return_a` | Send A stereo return |
-| `return_b` | Send B stereo return |
+| `return_a`                        | Send A stereo return  |
+| `return_b`                        | Send B stereo return  |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `out` | Main stereo output |
-| `send_a` | Send A stereo bus |
-| `send_b` | Send B stereo bus |
+| Port     | Description        |
+| -------- | ------------------ |
+| `out`    | Main stereo output |
+| `send_a` | Send A stereo bus  |
+| `send_b` | Send B stereo bus  |
 
 ---
 
-## `PolyMix` — Unweighted poly sum
+## `PolySum` — Unweighted poly sum
 
 Sums N poly inputs voice-by-voice with no level control.
 
 ```patches
-module mix : PolyMix(channels: 2)
+module mix : PolySum(channels: 2)
 ```
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
+| Port                | Description |
+| ------------------- | ----------- |
 | `in[0]` … `in[n-1]` | Poly inputs |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description          |
+| ----- | -------------------- |
 | `out` | Per-voice sum (poly) |
 
 ---
@@ -144,23 +144,23 @@ module mix : PolyMixer(channels: 2)
 
 **Parameters** (indexed per channel)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `level[n]` | float | `1.0` | Channel gain (0–1) |
-| `mute[n]` | bool | `false` | Mute this channel |
-| `solo[n]` | bool | `false` | Solo this channel |
+| Parameter  | Type  | Default | Description        |
+| ---------- | ----- | ------- | ------------------ |
+| `level[n]` | float | `1.0`   | Channel gain (0–1) |
+| `mute[n]`  | bool  | `false` | Mute this channel  |
+| `solo[n]`  | bool  | `false` | Solo this channel  |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in[0]` … `in[n-1]` | Poly audio inputs |
+| Port                            | Description                 |
+| ------------------------------- | --------------------------- |
+| `in[0]` … `in[n-1]`             | Poly audio inputs           |
 | `level_cv[0]` … `level_cv[n-1]` | Per-channel level CV (mono) |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description          |
+| ----- | -------------------- |
 | `out` | Per-voice sum (poly) |
 
 ---
@@ -176,26 +176,26 @@ module mix : StereoPolyMixer(channels: 2)
 
 **Parameters** (indexed per channel)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `level[n]` | float | `1.0` | Channel gain (0–1) |
-| `pan[n]` | float | `0.0` | Pan (−1 = full left, +1 = full right) |
-| `mute[n]` | bool | `false` | Mute this channel |
-| `solo[n]` | bool | `false` | Solo this channel |
+| Parameter  | Type  | Default | Description                           |
+| ---------- | ----- | ------- | ------------------------------------- |
+| `level[n]` | float | `1.0`   | Channel gain (0–1)                    |
+| `pan[n]`   | float | `0.0`   | Pan (−1 = full left, +1 = full right) |
+| `mute[n]`  | bool  | `false` | Mute this channel                     |
+| `solo[n]`  | bool  | `false` | Solo this channel                     |
 
 **Inputs**
 
-| Port | Description |
-| --- | --- |
-| `in[0]` … `in[n-1]` | Poly audio inputs |
+| Port                            | Description                 |
+| ------------------------------- | --------------------------- |
+| `in[0]` … `in[n-1]`             | Poly audio inputs           |
 | `level_cv[0]` … `level_cv[n-1]` | Per-channel level CV (mono) |
-| `pan_cv[0]` … `pan_cv[n-1]` | Per-channel pan CV (mono) |
+| `pan_cv[0]` … `pan_cv[n-1]`     | Per-channel pan CV (mono)   |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
-| `out_left` | Per-voice left output (poly) |
+| Port        | Description                   |
+| ----------- | ----------------------------- |
+| `out_left`  | Per-voice left output (poly)  |
 | `out_right` | Per-voice right output (poly) |
 
 ---
@@ -207,13 +207,13 @@ Sums all active voices of a poly cable into a single mono signal.
 **Inputs**
 
 | Port | Description |
-| --- | --- |
-| `in` | Poly input |
+| ---- | ----------- |
+| `in` | Poly input  |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description            |
+| ----- | ---------------------- |
 | `out` | Mono sum of all voices |
 
 ---
@@ -225,11 +225,34 @@ Copies a mono signal into every voice slot of a poly cable.
 **Inputs**
 
 | Port | Description |
-| --- | --- |
-| `in` | Mono input |
+| ---- | ----------- |
+| `in` | Mono input  |
 
 **Outputs**
 
-| Port | Description |
-| --- | --- |
+| Port  | Description                            |
+| ----- | -------------------------------------- |
 | `out` | Poly cable (same value in every voice) |
+
+---
+
+## `StereoSum` — Unweighted stereo sum
+
+Sums N stereo inputs into one stereo output, no level control. Useful for
+collapsing voice or bus outputs into a single stereo path.
+
+```patches
+module mix : StereoSum(channels: 3)
+```
+
+**Inputs**
+
+| Port                | Description   |
+| ------------------- | ------------- |
+| `in[0]` … `in[n-1]` | Stereo inputs |
+
+**Outputs**
+
+| Port  | Description |
+| ----- | ----------- |
+| `out` | Stereo sum  |

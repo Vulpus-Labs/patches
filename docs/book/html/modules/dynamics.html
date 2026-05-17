@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Dynamics - Patches Manual — v0.5.1</title>
+        <title>Dynamics - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -252,6 +252,18 @@ a limited signal against an unlimitated reference.</li>
 <li>All buffers are pre-allocated at <code>prepare</code> time for the maximum <code>attack_ms</code>
 value (50 ms), so changing <code>attack_ms</code> at runtime never allocates.</li>
 </ul>
+<hr>
+<h2 id="stereolimiter--stereo-lookahead-limiter"><a class="header" href="#stereolimiter--stereo-lookahead-limiter"><code>StereoLimiter</code> — Stereo lookahead limiter</a></h2>
+<p>Stereo variant of <code>Limiter</code> with linked gain reduction across channels.
+See <code>patches-modules/src/stereo_limiter.rs</code> for the current parameter set.</p>
+<h2 id="bitcrusher--bit-depth-and-sample-rate-reduction"><a class="header" href="#bitcrusher--bit-depth-and-sample-rate-reduction"><code>Bitcrusher</code> — Bit-depth and sample-rate reduction</a></h2>
+<p>Quantises samples to a configurable bit depth and decimates the sample
+rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
+<h2 id="drive--nonlinear-waveshaper"><a class="header" href="#drive--nonlinear-waveshaper"><code>Drive</code> — Nonlinear waveshaper</a></h2>
+<p>Soft-clip saturation / overdrive. See <code>patches-modules/src/drive.rs</code>.</p>
+<h2 id="transientshaper--attacksustain-emphasis"><a class="header" href="#transientshaper--attacksustain-emphasis"><code>TransientShaper</code> — Attack/sustain emphasis</a></h2>
+<p>Envelope-follower-based transient emphasis and suppression. See
+<code>patches-modules/src/transient_shaper.rs</code>.</p>
 
                     </main>
 

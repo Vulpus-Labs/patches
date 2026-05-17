@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Building a patch - Patches Manual — v0.5.1</title>
+        <title>CLAP plugin internals - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4a680bed.js"></script>
+        <script src="toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="print.html" title="Print this book" aria-label="Print this book">
@@ -146,7 +146,7 @@
                         <a href="https://github.com/Vulpus-Labs/patches" title="Git repository" aria-label="Git repository">
                             <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/Vulpus-Labs/patches/edit/main/docs/src/src/building-a-patch.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                        <a href="https://github.com/Vulpus-Labs/patches/edit/main/docs/src/src/internals-clap.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
                             <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
 
@@ -180,109 +180,187 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="building-a-patch"><a class="header" href="#building-a-patch">Building a patch</a></h1>
-<p>A patch is a set of module instances and the cables between them. This chapter builds up the concepts one at a time, starting from a single module.</p>
-<h2 id="modules"><a class="header" href="#modules">Modules</a></h2>
-<p>A module declaration gives the instance a name and a type:</p>
-<pre><code class="language-patches">module osc : Osc
-</code></pre>
-<p>This creates an oscillator named <code>osc</code>. The name is how you refer to it when making connections; the type determines what it does and what ports it has.</p>
-<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
-<p>Most modules accept parameters that configure their behaviour. Parameters are written in braces after the type:</p>
-<pre><code class="language-patches">module osc : Osc { frequency: 440Hz }
-module env : Adsr { attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.3 }
-</code></pre>
-<p>Parameter values have types. The DSL supports several literal forms:</p>
+                        <h1 id="clap-plugin-internals"><a class="header" href="#clap-plugin-internals">CLAP plugin internals</a></h1>
+<p>This chapter is for contributors. It describes how <code>patches-clap</code>
+hosts the Patches engine inside a CLAP plugin: the webview GUI, the
+controller / action / state-delta cycle, persistence, and the
+single-dylib two-descriptor packaging.</p>
+<p>If you just want to <em>use</em> the plugin in a DAW, <a href="running-daw.html">Running a patch in
+a DAW</a> covers that.</p>
+<p>Source crates:</p>
+<ul>
+<li><code>patches-clap/</code> — the CLAP entrypoints, webview hosting, plugin
+lifecycle.</li>
+<li><code>patches-plugin-common/</code> — GUI-toolkit-agnostic state and
+controller logic shared between <code>patches-clap</code> and the player’s
+TUI.</li>
+</ul>
+<h2 id="single-dylib-two-descriptors"><a class="header" href="#single-dylib-two-descriptors">Single dylib, two descriptors</a></h2>
+<p>The bundle is one <code>cdylib</code>. The CLAP entrypoint exports a <em>factory</em>
+that advertises <strong>two</strong> descriptors, backed by the same
+<code>PatchesClapPlugin</code> struct (<code>patches-clap/src/descriptor.rs</code>):</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Syntax</th><th>Meaning</th></tr>
+<tr><th>ID</th><th>Name</th><th>First feature</th><th>Where it appears</th></tr>
 </thead>
 <tbody>
-<tr><td><code>440.0</code></td><td>float</td></tr>
-<tr><td><code>2</code></td><td>integer</td></tr>
-<tr><td><code>440Hz</code>, <code>2.5kHz</code></td><td>frequency — converted to V/oct internally</td></tr>
-<tr><td><code>-6dB</code></td><td>decibels — converted to linear amplitude</td></tr>
-<tr><td><code>C4</code>, <code>Bb2</code></td><td>note name — converted to V/oct</td></tr>
-<tr><td><code>true</code> / <code>false</code></td><td>boolean</td></tr>
-<tr><td><code>linear</code></td><td>bare string (quotes optional)</td></tr>
+<tr><td><code>com.vulpus-labs.patches</code></td><td><code>Patches</code></td><td><code>instrument</code></td><td>DAW instrument browser slot.</td></tr>
+<tr><td><code>com.vulpus-labs.patches.fx</code></td><td><code>Patches FX</code></td><td><code>audio-effect</code></td><td>DAW effect browser slot.</td></tr>
 </tbody>
 </table>
 </div>
-<p>Duration parameters like <code>attack</code> and <code>release</code> are bare floats in seconds — there is no time-unit suffix.</p>
-<h3 id="shape-arguments"><a class="header" href="#shape-arguments">Shape arguments</a></h3>
-<p>Some modules have a variable number of ports. Shape arguments control this and are written in parentheses before the parameter braces:</p>
-<pre><code class="language-patches">module mix : Sum(channels: 3)
-module dly : Delay(channels: 4)
+<p>Both descriptors carry the same set of feature tags
+(<code>instrument</code>, <code>synthesizer</code>, <code>audio-effect</code>, <code>stereo</code>); only the
+<em>order</em> differs. Hosts that bucket plugins by the first feature tag
+(Bitwig, Live, Logic) put the two descriptors in different slots
+from the same dylib. Hosts that don’t care about ordering see both
+descriptors with identical capability and surface them wherever they
+prefer.</p>
+<p>Per-host project state keys by descriptor ID. A project saved
+against <code>Patches</code> will not silently re-bind to <code>Patches FX</code> on
+reload — they are distinct identities even though they share an
+implementation.</p>
+<h2 id="plugin-lifetime"><a class="header" href="#plugin-lifetime">Plugin lifetime</a></h2>
+<pre><code class="language-text">clap_entry::init()
+  └── factory::create(descriptor_id) → PatchesClapPlugin
+        ├── init()       (host gives us the audio thread environment)
+        ├── activate()   (start engine, open audio I/O)
+        ├── process()    (called per audio block by the host)
+        ├── deactivate() (stop engine, close audio I/O)
+        └── destroy()    (drop)
 </code></pre>
-<p><code>Sum(channels: 3)</code> creates a mixer with three indexed inputs: <code>mix.in[0]</code>, <code>mix.in[1]</code>, <code>mix.in[2]</code>.</p>
-<h2 id="ports-and-connections"><a class="header" href="#ports-and-connections">Ports and connections</a></h2>
-<p>Modules have named input and output ports. A connection (cable) carries a signal from one output to one input:</p>
-<pre><code class="language-patches">osc.sine -&gt; out.in_left
+<p><code>process()</code> runs the engine for the host-supplied block. Parameter
+changes from the host arrive as a CLAP parameter event stream and
+are translated into the controller’s <code>Action::ParamSet</code> (or
+equivalent) before reaching the audio thread.</p>
+<h2 id="gui-wry-webview"><a class="header" href="#gui-wry-webview">GUI: wry webview</a></h2>
+<p>The plugin GUI is an embedded webview, parented to the host’s window
+via <code>wry</code>. Source: <code>patches-clap/src/gui.rs</code>.</p>
+<p>The webview loads a single bundled HTML/CSS/JS document
+(<code>assets/index.html</code>, <code>assets/app.css</code>, <code>assets/app.bundle.js</code> —
+the last is generated by <code>npm run build</code> and checked in so cargo
+builds without a Node toolchain).</p>
+<h3 id="ipc"><a class="header" href="#ipc">IPC</a></h3>
+<p>JS → Rust: the webview calls <code>window.ipc.postMessage(JSON)</code>. The
+JSON is parsed into an <code>Intent</code> enum
+(<code>patches-plugin-common::Intent</code>) and lowered into an <code>Action</code> for
+the controller.</p>
+<p>Rust → JS: the GUI builds a <code>GuiSnapshot</code> (a serialisable
+projection of the current state) and pushes it via
+<code>evaluate_script("window.__patches.applyState(...)")</code> at up to
+~30 Hz, skipping the push when the serialised snapshot hasn’t
+changed.</p>
+<p>Live tap data (scope frames, spectrum bins, meter levels) flows
+through a separate path with its own dedupe and cadence, so a
+high-rate scope update doesn’t interfere with snapshot dedupe
+(and vice versa).</p>
+<h3 id="why-a-webview"><a class="header" href="#why-a-webview">Why a webview</a></h3>
+<p>The trade-off chosen for the GUI was: maximise authoring agility
+for an unsettled UI vocabulary (lots of small experiments per
+feature, easy live-reload while developing), accept the binary-size
+and ABI-surface cost of bundling a webview. The webview model also
+gives us a clean serialisation boundary — anything in the GUI is
+defined by what crosses the <code>GuiSnapshot</code> / <code>Intent</code> types — which
+made it natural to factor the underlying logic into
+<code>patches-plugin-common</code>.</p>
+<h2 id="patches-plugin-common-controller--action--state-delta"><a class="header" href="#patches-plugin-common-controller--action--state-delta"><code>patches-plugin-common</code>: controller / action / state delta</a></h2>
+<p>The plugin’s state mutation logic lives in
+<code>patches-plugin-common::Controller</code>. The shape:</p>
+<pre><code class="language-text">Action (from GUI intent, host event, or file watcher)
+  → Controller::apply(action)
+      → mutates internal state
+      → returns StateDelta describing what changed
+  → caller reacts (push snapshot to GUI, save sidecar, etc.)
 </code></pre>
-<p>This reads: take the <code>sine</code> output of <code>osc</code> and feed it to the <code>in_left</code> input of <code>out</code>.</p>
-<p>An output can drive multiple inputs (fan-out):</p>
-<pre><code class="language-patches">osc.sine -&gt; out.in_left
-osc.sine -&gt; out.in_right
-</code></pre>
-<p>But each input accepts exactly one cable. To combine signals, use a mixer:</p>
-<pre><code class="language-patches">module mix : Sum(channels: 2)
-osc_a.sine -&gt; mix.in[0]
-osc_b.sine -&gt; mix.in[1]
-mix.out    -&gt; vca.in
-</code></pre>
-<h3 id="scaled-connections"><a class="header" href="#scaled-connections">Scaled connections</a></h3>
-<p>A cable can carry a scale factor that multiplies the signal:</p>
-<pre><code class="language-patches">osc.sine -[0.5]-&gt; out.in_left     # attenuate by half
-lfo.sine -[-1.0]-&gt; osc.phase_mod  # invert
-mod.out  -[0.03]-&gt; osc.phase_mod  # light FM
-</code></pre>
-<p>This is useful for mixing at different levels, attenuating modulation depth, or inverting a signal. The scale is applied at the cable level with no extra processing cost.</p>
-<h3 id="indexed-ports"><a class="header" href="#indexed-ports">Indexed ports</a></h3>
-<p>Modules with multi-port shape arguments use bracket notation:</p>
-<pre><code class="language-patches">module mix : StereoMixer(channels: 4) { level[0]: 0.8, pan[0]: -0.5 }
-
-osc.out   -&gt; mix.in_left[0]
-osc.out   -&gt; mix.in_right[0]
-noise.out -&gt; mix.in_left[1]
-</code></pre>
-<p>Indexed parameters can also be grouped with at-block syntax:</p>
-<pre><code class="language-patches">module dly : Delay(channels: 2) {
-    @0: { delay_ms: 250, feedback: 0.4 },
-    @1: { delay_ms: 375, feedback: 0.3 }
-}
-</code></pre>
-<h2 id="mono-and-poly"><a class="header" href="#mono-and-poly">Mono and poly</a></h2>
-<p>Cables come in two kinds: <strong>mono</strong> (one sample per tick) and <strong>poly</strong> (one sample per voice per tick, typically 16 voices). A module’s port kind is fixed by its type — <code>Osc</code> has mono ports, <code>PolyOsc</code> has poly ports.</p>
-<p>You cannot connect a mono output to a poly input or vice versa. Use <code>MonoToPoly</code> to broadcast a mono signal to all voices, and <code>PolyToMono</code> to sum voices down to mono.</p>
-<h2 id="cable-delay"><a class="header" href="#cable-delay">Cable delay</a></h2>
-<p>All cables have a one-sample delay. A module’s <code>process</code> call sees the values that other modules wrote on the <em>previous</em> tick. This means modules can run in any order without affecting the result, and feedback connections are well-defined — they simply carry the previous tick’s value.</p>
-<h2 id="a-complete-example"><a class="header" href="#a-complete-example">A complete example</a></h2>
-<p>Two detuned oscillators mixed and sent to stereo output:</p>
-<pre><code class="language-patches">patch {
-    module osc_a : Osc { frequency: 220Hz }
-    module osc_b : Osc { frequency: 221Hz }
-    module mix   : Sum(channels: 2)
-    module out   : AudioOut
-
-    osc_a.sawtooth -&gt; mix.in[0]
-    osc_b.sawtooth -&gt; mix.in[1]
-
-    mix.out -[0.3]-&gt; out.in_left
-    mix.out -[0.3]-&gt; out.in_right
-}
-</code></pre>
-<p>The 1 Hz detuning produces a slow beating effect. The <code>-[0.3]-&gt;</code> scaling keeps the output at a comfortable level. Save this, run it, then try changing one frequency or swapping <code>sawtooth</code> for <code>square</code> while it plays.</p>
+<p><code>Action</code> is a closed enum:</p>
+<ul>
+<li><strong>UI gestures</strong>: <code>Browse</code>, <code>Reload</code>, <code>LoadPath</code>, <code>AddModulePath</code>,
+<code>RemoveModulePath</code>, <code>Rescan</code>, <code>AddBundleDir</code>, <code>SetTapOpt</code>,
+<code>SetWindowSize</code>, <code>SavePreset</code>, <code>LoadPreset</code>.</li>
+<li><strong>Host events</strong>: <code>Activate</code>, <code>Deactivate</code>, <code>StateLoad</code>,
+<code>HaltObserved</code>, <code>DiagnosticsDrained</code>.</li>
+</ul>
+<p><code>StateDelta</code> flags which downstream effects need to fire — typically
+<code>snapshot_changed</code> (push a new snapshot to the webview),
+<code>persistable_changed</code> (host should re-save the project),
+<code>global_config_changed</code> (write <code>settings.toml</code> to disk),
+<code>plan_recompile</code> (rebuild and hand off a new <code>ExecutionPlan</code>),
+<code>requires_restart</code> (the change can only take effect after the host
+reactivates the plugin).</p>
+<p>The webview is a thin shell over this model: every button is an
+intent JSON, every state visible in the UI is a field on
+<code>GuiSnapshot</code>. The same controller backs the player’s ratatui TUI
+(via the <code>Env</code> trait abstracting filesystem and host interaction).</p>
+<h2 id="persistence"><a class="header" href="#persistence">Persistence</a></h2>
+<p>Two scopes, deliberately separated:</p>
+<h3 id="per-patch-state-host-owned"><a class="header" href="#per-patch-state-host-owned">Per-patch state (host-owned)</a></h3>
+<p>The plugin returns CLAP state on save and accepts it on load. State
+captures the loaded patch’s identity (file path + verbatim DSL
+source as fallback), host-control values, per-tap display options,
+GUI window size, and the per-patch module-paths list. The DAW
+serialises this into its project file; reloading the project
+restores all of it.</p>
+<p>If the original <code>.patches</code> file no longer resolves at the original
+path, the plugin falls back to the embedded DSL source so the
+project still plays. <strong>Browse</strong> in the GUI re-points it at a live
+file.</p>
+<h3 id="global-config-plugin-owned"><a class="header" href="#global-config-plugin-owned">Global config (plugin-owned)</a></h3>
+<p>The <code>bundle_dirs</code> setting and any other host-scoped settings live
+in a cross-platform <code>settings.toml</code> under the user’s config
+directory. Resolved through <code>patches-plugin-common::GlobalConfig</code>,
+written when the user changes the value via the GUI (immediate
+save, not deferred). The CLAP path’s bundle-dir resolution adds to
+the env-var / constructor-supplied / default-data-dir tiers used
+elsewhere.</p>
+<p>A sandboxed host that denies filesystem writes will get a
+graceful no-op on save; reads tolerate a missing or unreadable
+config.</p>
+<h2 id="real-time-boundaries"><a class="header" href="#real-time-boundaries">Real-time boundaries</a></h2>
+<p>The plugin maintains the same real-time boundaries as the player.
+The CLAP-supplied audio thread is treated as the engine’s audio
+thread; no allocation, blocking, or syscalls in <code>process</code>. The
+control thread runs the controller, the file watcher, the LSP
+client (none), webview IPC, and persistence; it communicates with
+the audio thread through the engine’s lock-free rings (plan handoff,
+cleanup queue).</p>
+<p>The webview ticker runs on its own thread and produces snapshots at
+its cadence. The host’s main thread shows the webview.</p>
+<h2 id="halt-handling"><a class="header" href="#halt-handling">Halt handling</a></h2>
+<p><code>PatchProcessor::tick</code> is wrapped in <code>catch_unwind</code>. On
+a module panic, the engine halts cleanly and sends a
+<code>HaltObserved</code> action to the controller, which surfaces the
+diagnostic in the GUI log pane and stops further <code>process</code>
+invocations from producing audio until the patch is reloaded.</p>
+<p>This is why the workspace must keep <code>panic = "unwind"</code>. With
+<code>panic = "abort"</code>, the catch can’t intercept and the host process
+crashes instead.</p>
+<h2 id="reading-the-source"><a class="header" href="#reading-the-source">Reading the source</a></h2>
+<p>If you’re tracing a feature end to end:</p>
+<ol>
+<li>The <strong>user gesture</strong> is a button or text input in the webview
+(<code>patches-clap/assets/src/</code>).</li>
+<li>JS posts an <strong>Intent</strong> via <code>window.ipc.postMessage</code>
+(<code>patches-plugin-common/src/gui.rs</code>).</li>
+<li>The plugin lowers it into an <strong>Action</strong> and passes to
+<code>Controller::apply</code> (<code>patches-plugin-common/src/controller.rs</code>).</li>
+<li>The controller mutates state and returns a <strong>StateDelta</strong>.</li>
+<li>The plugin reacts: pushes a new snapshot to the webview,
+asks the host to re-save, writes <code>settings.toml</code>, or whatever
+the delta indicates.</li>
+</ol>
+<p>Each step is small. The reducer-style split keeps the actual logic
+testable without a CLAP host or a webview attached.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="introduction.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="engine-internals.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="anatomy-of-a-synth.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="internals-lsp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -292,11 +370,11 @@ noise.out -&gt; mix.in_left[1]
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="introduction.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="engine-internals.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="anatomy-of-a-synth.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="internals-lsp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

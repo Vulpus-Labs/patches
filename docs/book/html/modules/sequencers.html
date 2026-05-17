@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Sequencers &amp; clocks - Patches Manual — v0.5.1</title>
+        <title>Sequencers &amp; clocks - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -220,52 +220,41 @@ accumulator, so they are always phase-locked to each other.</p>
 </table>
 </div>
 <hr>
-<h2 id="seq--step-sequencer"><a class="header" href="#seq--step-sequencer"><code>Seq</code> — Step sequencer</a></h2>
-<p>Advances through a list of note steps on each rising edge of the <code>clock</code>
-input. Each step is a note name, a rest (<code>-</code>), or a tie (<code>_</code>).</p>
-<h3 id="pitch-output-convention"><a class="header" href="#pitch-output-convention">Pitch output convention</a></h3>
-<p>The <code>pitch</code> output carries a <strong>V/oct signal referenced to C0 (≈ 16.35 Hz)</strong>,
-matching the convention used by <code>Osc</code>, <code>PolyOsc</code>, <code>Lfo</code>, and the filter
-<code>cutoff</code>/<code>center</code> parameters:</p>
+<h2 id="hosttransport--daw-transport-readback"><a class="header" href="#hosttransport--daw-transport-readback"><code>HostTransport</code> — DAW transport readback</a></h2>
+<p>Exposes the host DAW’s transport state as CV signals. In standalone mode
+the player synthesises a static transport (tempo from <code>--bpm</code>, no
+playhead motion).</p>
+<p><strong>Outputs</strong></p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Note</th><th>V/oct value</th></tr>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td>C0</td><td><code>0.0</code></td></tr>
-<tr><td>C1</td><td><code>1.0</code></td></tr>
-<tr><td>C4 (middle C)</td><td><code>4.0</code></td></tr>
-<tr><td>A4 (concert A)</td><td><code>4.75</code></td></tr>
-<tr><td>C0 + 1 semitone (C#0)</td><td><code>≈ 0.083</code></td></tr>
+<tr><td><code>playing</code></td><td>mono</td><td><code>1.0</code> while the host is playing, otherwise <code>0.0</code></td></tr>
+<tr><td><code>tempo</code></td><td>mono</td><td>Current tempo in BPM</td></tr>
+<tr><td><code>beat</code></td><td>mono</td><td>Position within the bar as fractional beats</td></tr>
+<tr><td><code>bar</code></td><td>mono</td><td>Bar index (integer-valued, increments at each bar boundary)</td></tr>
+<tr><td><code>beat_trigger</code></td><td>trigger</td><td>Fires once per beat boundary</td></tr>
+<tr><td><code>bar_trigger</code></td><td>trigger</td><td>Fires once per bar boundary</td></tr>
+<tr><td><code>tsig_num</code></td><td>mono</td><td>Time signature numerator</td></tr>
+<tr><td><code>tsig_denom</code></td><td>mono</td><td>Time signature denominator</td></tr>
 </tbody>
 </table>
 </div>
-<p>This is the same scale that results from writing a note literal directly as a
-parameter value (e.g. <code>frequency: C4</code> in a module declaration).</p>
-<h3 id="step-syntax"><a class="header" href="#step-syntax">Step syntax</a></h3>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Step string</th><th>Meaning</th></tr>
-</thead>
-<tbody>
-<tr><td><code>C4</code>, <code>A#3</code>, <code>Bb2</code></td><td>Note: sets pitch, gate=1, trigger=1 for one sample</td></tr>
-<tr><td><code>-</code></td><td>Rest: gate=0, trigger=0; pitch holds its previous value</td></tr>
-<tr><td><code>_</code></td><td>Tie: gate=1, trigger=0; pitch holds its previous value</td></tr>
-</tbody>
-</table>
-</div>
-<p>Note names are case-sensitive. Sharps use <code>#</code>; flats use <code>b</code>. Octave digits
-<code>0</code>–<code>9</code> are supported.</p>
+<hr>
+<h2 id="temposync--bpm--subdivision--milliseconds"><a class="header" href="#temposync--bpm--subdivision--milliseconds"><code>TempoSync</code> — BPM + subdivision → milliseconds</a></h2>
+<p>Converts a tempo (in BPM) and a fixed musical subdivision into a duration
+in milliseconds. Drives <code>delay_ms</code>-style inputs on <code>Delay</code>, <code>MsTicker</code>,
+etc. for tempo-locked timing.</p>
 <p><strong>Parameters</strong></p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>steps</code></td><td>string array</td><td><code>[]</code></td><td>Ordered list of step strings</td></tr>
+<tr><td><code>subdivision</code></td><td>enum</td><td><code>1/4</code></td><td>Subdivision: <code>1/1</code>, <code>1/2</code>, <code>1/4</code>, <code>1/8</code>, <code>1/16</code>, <code>1/32</code>, plus dotted (<code>1/4d</code>) and triplet (<code>1/4t</code>) variants</td></tr>
 </tbody>
 </table>
 </div>
@@ -273,13 +262,10 @@ parameter value (e.g. <code>frequency: C4</code> in a module declaration).</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Port</th><th>Description</th></tr>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>clock</code></td><td>Rising edge (≥ 0.5, from below) advances to the next step</td></tr>
-<tr><td><code>start</code></td><td>Rising edge resumes playback</td></tr>
-<tr><td><code>stop</code></td><td>Rising edge pauses playback (gate and trigger go to 0)</td></tr>
-<tr><td><code>reset</code></td><td>Rising edge returns to step 0 without advancing</td></tr>
+<tr><td><code>bpm</code></td><td>mono</td><td>Tempo in BPM</td></tr>
 </tbody>
 </table>
 </div>
@@ -287,20 +273,47 @@ parameter value (e.g. <code>frequency: C4</code> in a module declaration).</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Port</th><th>Description</th></tr>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>pitch</code></td><td>Current pitch as V/oct above C0</td></tr>
-<tr><td><code>trigger</code></td><td><code>1.0</code> for one sample on each note step advance, otherwise <code>0.0</code></td></tr>
-<tr><td><code>gate</code></td><td><code>1.0</code> while a note or tie step is current and playback is active</td></tr>
+<tr><td><code>ms</code></td><td>mono</td><td>Duration of one subdivision in milliseconds</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="hot-reload-behaviour"><a class="header" href="#hot-reload-behaviour">Hot-reload behaviour</a></h3>
-<p>When the <code>steps</code> list is updated by a hot-reload, the current step index is
-preserved so playback continues from the same position without an audible
-jump. If the new list is shorter, the sequencer treats the out-of-range
-position as a rest until the next clock edge wraps the index back in bounds.</p>
+<hr>
+<h2 id="msticker--millisecond-paced-trigger"><a class="header" href="#msticker--millisecond-paced-trigger"><code>MsTicker</code> — Millisecond-paced trigger</a></h2>
+<p>Fires a trigger every <code>ms</code> milliseconds with a corresponding gate.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ms</code></td><td>mono</td><td>Inter-trigger interval in milliseconds</td></tr>
+<tr><td><code>reset</code></td><td>trigger</td><td>Resets the internal phase to zero</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>trigger</td><td>Sub-sample trigger at each tick boundary</td></tr>
+<tr><td><code>gate</code></td><td>mono</td><td>High between trigger and next reset; useful as a duty signal</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="triggertosync--synctotrigger"><a class="header" href="#triggertosync--synctotrigger"><code>TriggerToSync</code> / <code>SyncToTrigger</code></a></h2>
+<p>A pair of converters between the two trigger encodings: legacy mono level
+pulses (≥ 0.5 high) and the sub-sample sync cable. Use when
+bridging modules that expect different encodings.</p>
+<p><strong><code>TriggerToSync</code></strong> — mono <code>in</code> → trigger <code>out</code>.
+<strong><code>SyncToTrigger</code></strong> — trigger <code>in</code> → mono <code>out</code> (rising-edge pulse).</p>
 
                     </main>
 
@@ -310,7 +323,7 @@ position as a rest until the next clock edge wraps the index back in bounds.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../modules/midi.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../modules/tracker.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -324,7 +337,7 @@ position as a rest until the next clock edge wraps the index back in bounds.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../modules/midi.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../modules/tracker.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

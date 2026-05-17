@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>MIDI - Patches Manual — v0.5.1</title>
+        <title>MIDI - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -186,9 +186,27 @@
 <code>patches-modules/src/</code> define the canonical port names, parameter
 ranges, and behaviour. This page is kept in sync with those comments.</p>
 </blockquote>
-<p>MIDI modules consume from the first available system MIDI input port. Connect
-your device before starting the player.</p>
-<h2 id="midiin--mono-midi-note-input"><a class="header" href="#midiin--mono-midi-note-input"><code>MidiIn</code> — Mono MIDI note input</a></h2>
+<p>MIDI events arrive on the engine-level <code>GLOBAL_MIDI</code> backplane (carrying up
+to 5 packed events per sample). Modules that need MIDI either read the
+backplane directly (<code>MidiToCv</code>, <code>PolyMidiToCv</code>, <code>MidiCC</code>) or sit downstream
+of a <code>MidiIn</code> module which exposes the backplane as a <code>midi</code> cable so
+other MIDI-processing modules can be chained.</p>
+<h2 id="midiin--backplane--midi-cable"><a class="header" href="#midiin--backplane--midi-cable"><code>MidiIn</code> — Backplane → MIDI cable</a></h2>
+<p>Exposes the engine’s <code>GLOBAL_MIDI</code> backplane as a <code>midi</code> output cable so
+that <code>MidiSplit</code>, <code>MidiTranspose</code>, <code>MidiArp</code>, <code>MidiDelay</code>, etc. can be
+chained from it.</p>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>midi</code></td><td>midi</td><td>MIDI events from the system input</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="miditocv--mono-midi-note-input"><a class="header" href="#miditocv--mono-midi-note-input"><code>MidiToCv</code> — Mono MIDI note input</a></h2>
 <p>Monophonic: only one note active at a time (last-note priority). Pressing a
 new key updates pitch immediately; releasing the top key falls back to the
 previously held key without retriggering. Up to 16 simultaneously held keys
@@ -217,15 +235,28 @@ semitone:</p>
 </thead>
 <tbody>
 <tr><td><code>voct</code></td><td>Pitch in V/oct above C0 (MIDI note 0 = 0.0, 1/12 V per semitone)</td></tr>
-<tr><td><code>trigger</code></td><td><code>1.0</code> for one sample after each note-on, then <code>0.0</code></td></tr>
+<tr><td><code>trigger</code></td><td>Sub-sample trigger on each note-on</td></tr>
 <tr><td><code>gate</code></td><td><code>1.0</code> while any note is held or sustain pedal (CC 64) is active</td></tr>
 <tr><td><code>mod</code></td><td>CC 1 (mod wheel) normalised to [0.0, 1.0]</td></tr>
 <tr><td><code>pitch</code></td><td>Pitchbend normalised to [−1.0, 1.0] (centre = 0.0)</td></tr>
+<tr><td><code>velocity</code></td><td>Most-recent note-on velocity normalised to [0.0, 1.0]</td></tr>
+<tr><td><code>slur</code></td><td><code>1.0</code> while a held key falls back to a still-held lower key without retriggering, otherwise <code>0.0</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>legato</code></td><td>bool</td><td><code>false</code></td><td>When <code>true</code>, holding through a note change suppresses the per-note <code>trigger</code> (gate stays high; only the first key triggers)</td></tr>
 </tbody>
 </table>
 </div>
 <hr>
-<h2 id="polymidiin--polyphonic-midi-input"><a class="header" href="#polymidiin--polyphonic-midi-input"><code>PolyMidiIn</code> — Polyphonic MIDI input</a></h2>
+<h2 id="polymiditocv--polyphonic-midi-input"><a class="header" href="#polymiditocv--polyphonic-midi-input"><code>PolyMidiToCv</code> — Polyphonic MIDI input</a></h2>
 <p>Distributes incoming notes across up to 16 voices with LIFO voice stealing.
 When all voices are occupied the most-recently-allocated voice is stolen.</p>
 <p><strong>Outputs</strong></p>
@@ -236,19 +267,64 @@ When all voices are occupied the most-recently-allocated voice is stolen.</p>
 </thead>
 <tbody>
 <tr><td><code>voct</code></td><td>Poly</td><td>Per-voice pitch in V/oct above C0</td></tr>
-<tr><td><code>trigger</code></td><td>Poly</td><td><code>1.0</code> for one sample after each note-on per voice, then <code>0.0</code></td></tr>
+<tr><td><code>trigger</code></td><td>Poly</td><td>Per-voice sub-sample trigger on note-on</td></tr>
 <tr><td><code>gate</code></td><td>Poly</td><td><code>1.0</code> while the note for that voice is physically held</td></tr>
+<tr><td><code>velocity</code></td><td>Poly</td><td>Per-voice note-on velocity normalised to [0.0, 1.0]</td></tr>
 <tr><td><code>mod</code></td><td>Mono</td><td>CC 1 (mod wheel) normalised to [0.0, 1.0]</td></tr>
 <tr><td><code>pitch</code></td><td>Mono</td><td>Pitchbend normalised to [−1.0, 1.0]</td></tr>
 </tbody>
 </table>
 </div>
+<hr>
+<h2 id="midicc--control-change-reader"><a class="header" href="#midicc--control-change-reader"><code>MidiCC</code> — Control-change reader</a></h2>
+<p>Reads a configured MIDI CC number from the backplane and emits its
+normalised value as a mono signal.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cc</code></td><td>int (0–127)</td><td><code>1</code></td><td>MIDI CC number to read</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>Most-recent CC value for <code>cc</code>, normalised to [0.0, 1.0]</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="midiarp--arpeggiator"><a class="header" href="#midiarp--arpeggiator"><code>MidiArp</code> — Arpeggiator</a></h2>
+<p>Arpeggiates held notes, clocked by an external trigger (e.g. <code>Clock</code>).
+Refer to the module doc comment in <code>patches-modules/src/midi_arp.rs</code> for
+the current parameter set and port list.</p>
+<h2 id="mididelay--midi-note-delay"><a class="header" href="#mididelay--midi-note-delay"><code>MidiDelay</code> — MIDI note delay</a></h2>
+<p>Delays incoming MIDI events by a configurable number of samples or beats,
+with optional feedback for repeating echoes. See
+<code>patches-modules/src/midi_delay.rs</code> for ports and parameters.</p>
+<h2 id="midisplit--midi-splitter"><a class="header" href="#midisplit--midi-splitter"><code>MidiSplit</code> — MIDI splitter</a></h2>
+<p>Routes incoming MIDI notes to one of several outputs based on channel,
+velocity, or pitch range. See <code>patches-modules/src/midi_split.rs</code>.</p>
+<h2 id="miditranspose--midi-pitch-transposer"><a class="header" href="#miditranspose--midi-pitch-transposer"><code>MidiTranspose</code> — MIDI pitch transposer</a></h2>
+<p>Transposes note-on / note-off events by a configurable number of
+semitones. See <code>patches-modules/src/midi_transpose.rs</code>.</p>
+<h2 id="mididrumset--midi-note-to-drum-mapper"><a class="header" href="#mididrumset--midi-note-to-drum-mapper"><code>MidiDrumset</code> — MIDI note-to-drum mapper</a></h2>
+<p>Maps incoming MIDI notes to trigger outputs for drum-voice modules
+(<code>Kick</code>, <code>Snare</code>, etc). See <code>patches-modules/src/midi_drumset.rs</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../modules/sequencers.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../modules/drum-synthesis.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -262,7 +338,7 @@ When all voices are occupied the most-recently-allocated voice is stolen.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../modules/sequencers.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../modules/drum-synthesis.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

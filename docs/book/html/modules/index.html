@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Module reference - Patches Manual — v0.5.1</title>
+        <title>Overview - Patches Manual — v0.7.3-rc.1</title>
 
 
         <!-- Custom HTML head -->
@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-3e19e0f7.js";
+            window.path_to_searchindex_js = "../searchindex-328d5810.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-4a680bed.js"></script>
+        <script src="../toc-f5b402d7.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -137,7 +137,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">Patches Manual — v0.5.1</h1>
+                    <h1 class="menu-title">Patches Manual — v0.7.3-rc.1</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -188,18 +188,20 @@
 <tr><th>Category</th><th>Modules</th><th>Purpose</th></tr>
 </thead>
 <tbody>
-<tr><td><a href="oscillators.html">Oscillators</a></td><td><code>Osc</code>, <code>PolyOsc</code>, <code>Lfo</code></td><td>Waveform generation</td></tr>
+<tr><td><a href="oscillators.html">Oscillators</a></td><td><code>Osc</code>, <code>PolyOsc</code>, <code>Lfo</code>, <code>PolyLfo</code></td><td>Waveform generation</td></tr>
 <tr><td><a href="envelopes.html">Envelopes</a></td><td><code>Adsr</code>, <code>PolyAdsr</code></td><td>Amplitude and modulation shaping</td></tr>
-<tr><td><a href="filters.html">Filters</a></td><td><code>Lowpass</code>, <code>Highpass</code>, <code>PolyLowpass</code>, <code>PolyHighpass</code></td><td>Frequency-dependent attenuation</td></tr>
-<tr><td><a href="vcas.html">Amplifiers &amp; VCAs</a></td><td><code>Vca</code>, <code>PolyVca</code>, <code>StereoVca</code></td><td>Voltage-controlled amplitude</td></tr>
-<tr><td><a href="mixers.html">Mixers</a></td><td><code>Sum</code>, <code>PolySum</code>, <code>StereoMixer</code>, <code>MonoToMono</code></td><td>Signal summing and routing</td></tr>
-<tr><td><a href="noise.html">Noise</a></td><td><code>Noise</code></td><td>White, pink, brown, and red noise</td></tr>
-<tr><td><a href="sequencers.html">Sequencers &amp; clocks</a></td><td><code>Clock</code></td><td>Tempo-locked trigger generation</td></tr>
-<tr><td><a href="midi.html">MIDI</a></td><td><code>MidiIn</code>, <code>PolyMidiIn</code></td><td>MIDI keyboard and controller input</td></tr>
-<tr><td><a href="delays.html">Delays &amp; reverb</a></td><td><code>Delay</code></td><td>Multi-tap delay with feedback</td></tr>
-<tr><td><a href="dynamics.html">Dynamics</a></td><td><code>Limiter</code></td><td>Lookahead peak limiting</td></tr>
-<tr><td><a href="utilities.html">Utilities</a></td><td><code>Glide</code>, <code>MonoToPoly</code>, <code>PolyToMono</code></td><td>Signal conversion and smoothing</td></tr>
-<tr><td><a href="output.html">Output</a></td><td><code>AudioOut</code></td><td>Stereo audio output (required)</td></tr>
+<tr><td><a href="filters.html">Filters</a></td><td><code>Lowpass</code>, <code>Highpass</code>, <code>Bandpass</code>, <code>Svf</code>, and poly variants</td><td>Frequency-dependent attenuation</td></tr>
+<tr><td><a href="vcas.html">Amplifiers &amp; VCAs</a></td><td><code>Vca</code>, <code>PolyVca</code></td><td>Voltage-controlled amplitude</td></tr>
+<tr><td><a href="mixers.html">Mixers</a></td><td><code>Sum</code>, <code>PolySum</code>, <code>Mixer</code>, <code>StereoMixer</code>, <code>PolyMixer</code>, <code>StereoPolyMixer</code></td><td>Signal summing and routing</td></tr>
+<tr><td><a href="noise.html">Noise</a></td><td><code>Noise</code>, <code>PolyNoise</code></td><td>White, pink, brown, and red noise</td></tr>
+<tr><td><a href="sequencers.html">Sequencers &amp; clocks</a></td><td><code>Clock</code>, <code>TempoSync</code>, <code>MsTicker</code>, <code>TriggerToSync</code>, <code>SyncToTrigger</code></td><td>Tempo-locked trigger generation</td></tr>
+<tr><td><a href="tracker.html">Tracker sequencer</a></td><td><code>MasterSequencer</code>, <code>PatternPlayer</code></td><td>Song-driven pattern sequencing</td></tr>
+<tr><td><a href="drum-synthesis.html">Drum synthesis</a></td><td><code>Kick</code>, <code>Snare</code>, <code>ClosedHiHat</code>, <code>OpenHiHat</code>, <code>Tom</code>, <code>Cymbal</code>, <code>Clap</code>, <code>Claves</code></td><td>808-style electronic drum synthesis</td></tr>
+<tr><td><a href="midi.html">MIDI</a></td><td><code>MidiToCv</code>, <code>PolyMidiToCv</code>, <code>MidiCC</code>, <code>MidiArp</code>, <code>MidiDelay</code>, <code>MidiSplit</code>, <code>MidiTranspose</code>, <code>MidiDrumset</code></td><td>MIDI input and processing</td></tr>
+<tr><td><a href="delays.html">Delays &amp; reverb</a></td><td><code>Delay</code>, <code>StereoDelay</code>, <code>FdnReverb</code>, <code>ConvReverb</code>, <code>StereoConvReverb</code></td><td>Delay and reverb</td></tr>
+<tr><td><a href="dynamics.html">Dynamics</a></td><td><code>Limiter</code>, <code>StereoLimiter</code>, <code>Bitcrusher</code>, <code>Drive</code>, <code>TransientShaper</code>, <code>RingMod</code>, <code>PitchShift</code></td><td>Dynamics and nonlinear effects</td></tr>
+<tr><td><a href="utilities.html">Utilities</a></td><td><code>Glide</code>, <code>Tuner</code>, <code>PolyTuner</code>, <code>Quant</code>, <code>PolyQuant</code>, <code>Sah</code>, <code>PolySah</code>, <code>MonoToPoly</code>, <code>PolyToMono</code></td><td>Conversion, smoothing, quantisation</td></tr>
+<tr><td><a href="output.html">Output</a></td><td><code>AudioOut</code>, <code>AudioIn</code>, <code>HostTransport</code></td><td>Audio I/O and host transport</td></tr>
 </tbody>
 </table>
 </div>
@@ -208,7 +210,7 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../dsl-reference.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../authoring-visualising.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -222,7 +224,7 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../dsl-reference.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../authoring-visualising.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

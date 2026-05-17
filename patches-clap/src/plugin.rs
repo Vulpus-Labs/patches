@@ -52,9 +52,9 @@ use patches_plugin_common::host_control_registry::{
     HostControlRegistry, RescanLevel, StandardHostControlRegistry,
 };
 use patches_plugin_common::{
-    xdg_list_presets, xdg_load_preset, xdg_preset_path, xdg_save_preset, Action, CompileFailure,
-    CompileSuccess, Controller, DiagnosticView, Env, MeterTap, PersistedSettings, RescanProbe,
-    ScanDetails, StateDelta, TapSummary,
+    default_global_config_path, xdg_list_presets, xdg_load_preset, xdg_preset_path,
+    xdg_save_preset, Action, CompileFailure, CompileSuccess, Controller, DiagnosticView, Env,
+    GlobalConfig, MeterTap, PersistedSettings, RescanProbe, ScanDetails, StateDelta, TapSummary,
 };
 
 /// CLAP cap on published host-control parameters (ADR 0057 §6 ties this
@@ -255,8 +255,38 @@ pub(crate) fn make_clap_plugin(
 
 // ── Vtable callbacks ────────────────────────────────────────────────
 
-unsafe extern "C" fn plugin_init(_plugin: *const clap_plugin) -> bool {
+unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
     dlog!("init");
+    // ADR 0075 / ticket 0899: pull bundle dirs from the host-scoped
+    // `settings.toml` so the plugin sees user-installed `.pxm` bundles
+    // without any env var. Failure is non-fatal — fall back to the in-
+    // memory list and log so a sandboxed host (Logic) loads cleanly.
+    let p = plugin_mut(plugin);
+    let host_ptr: *const clap_host = p.host;
+    let mut env_runtime: Option<HostRuntime> = None;
+    let mut env = ClapEnv {
+        runtime: &mut env_runtime,
+        host_control_registry: &mut p.host_control_registry,
+        host: host_ptr,
+    };
+    match Env::load_global_config(&mut env) {
+        Ok(Some(cfg)) => {
+            for dir in cfg.bundle_dirs {
+                if !p.controller.module_paths.iter().any(|x| x == &dir) {
+                    p.controller.module_paths.push(dir);
+                }
+            }
+            dlog!("init: bundle dirs from settings.toml: {} entries", p.controller.module_paths.len());
+        }
+        Ok(None) => {
+            dlog!("init: no settings.toml — using in-memory defaults");
+        }
+        Err(e) => {
+            p.controller
+                .push_status(format!("global config load failed: {e}"));
+            dlog!("init: settings.toml load failed: {e}");
+        }
+    }
     true
 }
 
@@ -656,6 +686,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     let mut needs_restart = false;
     let mut needs_dirty = false;
     let mut compiled = false;
+    let mut needs_global_save = false;
     for action in actions {
         let delta = apply_action(p, action);
         if delta.persistable_changed {
@@ -666,6 +697,9 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
         }
         if delta.plan_recompile {
             compiled = true;
+        }
+        if delta.global_config_changed {
+            needs_global_save = true;
         }
     }
     if compiled {
@@ -716,6 +750,29 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
     }
     if needs_dirty {
         p.mark_state_dirty();
+    }
+    if needs_global_save {
+        // CLAP UI bundle-dir edits flush to `settings.toml`
+        // immediately — no debounce (ticket 0899 acceptance). Failure
+        // surfaces in the status log; the in-memory list still holds.
+        let cfg = GlobalConfig {
+            schema_version: patches_plugin_common::GLOBAL_CONFIG_SCHEMA_VERSION,
+            bundle_dirs: p.controller.module_paths.clone(),
+        };
+        let mut env_runtime = p.runtime.take();
+        let save_result = {
+            let mut env = ClapEnv {
+                runtime: &mut env_runtime,
+                host_control_registry: &mut p.host_control_registry,
+                host: p.host,
+            };
+            Env::save_global_config(&mut env, &cfg)
+        };
+        p.runtime = env_runtime;
+        if let Err(e) = save_result {
+            p.controller
+                .push_status(format!("global config save failed: {e}"));
+        }
     }
     if needs_restart {
         p.request_restart();
@@ -935,6 +992,61 @@ impl<'a> Env for ClapEnv<'a> {
             }
         }
     }
+    fn global_config_path(&self) -> Option<PathBuf> {
+        default_global_config_path()
+    }
+
+    fn load_global_config(&mut self) -> std::io::Result<Option<GlobalConfig>> {
+        let Some(path) = default_global_config_path() else {
+            return Ok(None);
+        };
+        let bytes = match std::fs::read_to_string(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        match GlobalConfig::from_toml_str(&bytes) {
+            Ok(cfg) => Ok(Some(cfg)),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn save_global_config(&mut self, cfg: &GlobalConfig) -> std::io::Result<()> {
+        let path = default_global_config_path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "global config path unavailable on this platform",
+            )
+        })?;
+        // ADR 0075 §"Sandbox compatibility": never auto-create the
+        // parent directory from CLAP. Sandboxed hosts (Logic on macOS)
+        // may forbid `mkdir`; patches-player is the canonical first-
+        // run populator. Read-only fs / missing parent → surface as an
+        // error and let the caller log via the status pathway.
+        let parent_exists = path
+            .parent()
+            .map(|p| p.is_dir())
+            .unwrap_or(true);
+        if !parent_exists {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "global config parent directory missing (run patch_player once to create it)",
+            ));
+        }
+        let serialised = cfg.to_toml_string().map_err(std::io::Error::from)?;
+        let mut tmp = path.clone();
+        match tmp.file_name() {
+            Some(n) => {
+                let mut name = n.to_os_string();
+                name.push(".tmp");
+                tmp.set_file_name(name);
+            }
+            None => return Err(std::io::Error::other("global config path has no filename")),
+        }
+        std::fs::write(&tmp, serialised.as_bytes())?;
+        std::fs::rename(&tmp, &path)
+    }
+
     fn probe_paths(&mut self, paths: &[PathBuf], registry: &Registry) -> RescanProbe {
         let mut probe = RescanProbe::default();
         if paths.is_empty() {
