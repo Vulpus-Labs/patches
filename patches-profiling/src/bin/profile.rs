@@ -205,7 +205,7 @@ fn main() {
     let total_ns: u64 = by_name.values().map(|e| e.proc_ns + e.per_ns).sum();
 
     let mut type_rows: Vec<(&'static str, TypeStats)> = by_name.into_iter().collect();
-    type_rows.sort_by(|a, b| (b.1.proc_ns + b.1.per_ns).cmp(&(a.1.proc_ns + a.1.per_ns)));
+    type_rows.sort_by_key(|row| std::cmp::Reverse(row.1.proc_ns + row.1.per_ns));
 
     println!("── Per-type summary ──────────────────────────────────────────────────");
     println!(
