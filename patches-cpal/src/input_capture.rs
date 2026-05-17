@@ -84,7 +84,7 @@ where
         .build_input_stream(
             config,
             move |data: &[T], _info: &cpal::InputCallbackInfo| {
-                let frame_count = if channels > 0 { data.len() / channels } else { 0 };
+                let frame_count = data.len().checked_div(channels).unwrap_or(0);
                 for i in 0..frame_count {
                     let left: f32 = cpal::FromSample::from_sample_(data[i * channels]);
                     let right: f32 = if channels >= 2 {
