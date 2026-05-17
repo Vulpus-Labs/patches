@@ -23,8 +23,12 @@ jobs:
       - name: System audio deps
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      - name: Build patches-vintage dylib
-        run: cargo build -p patches-vintage
+      - name: Build test-gain-plugin dylib
+        # soak_randomised_params + ffi_alloc_trap_cycles dlopen this
+        # cdylib as their FFI subject. Bundle cdylibs (patches-vintage,
+        # patches-drums, ...) ship from the patches-bundles repo now
+        # and are no longer workspace members.
+        run: cargo build -p test-gain-plugin
 
       - name: Build with trap feature
         run: |
