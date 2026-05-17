@@ -1,0 +1,11 @@
+# Local cargo overrides. Committed as template; actual .cargo/config.toml is
+# gitignored so machines without lld don't break.
+#
+# Bootstrap with: ./tools/setup-dev.sh
+# (Copies this file into place if `ld64.lld` is on PATH.)
+#
+# Linker: lld (Homebrew) drops `just push` link time by ~60× vs system ld64.
+# Requires `brew install lld` (provides /opt/homebrew/bin/ld64.lld).
+[target.aarch64-apple-darwin]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

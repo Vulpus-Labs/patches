@@ -10,23 +10,37 @@
 
 inner_crates := "-p patches-core -p patches-modules -p patches-dsp -p patches-engine"
 
-# Fast inner loop: per-iteration unit tests. No clippy.
+# Fast inner loop: per-iteration unit tests. No clippy. No doctests.
 inner *EXTRA:
-    cargo test {{inner_crates}} {{EXTRA}}
+    cargo test --tests {{inner_crates}} {{EXTRA}}
 
-# Pre-commit: inner + clippy on the touched scope.
+# Pre-commit: inner + clippy on the touched scope. No doctests.
 commit *EXTRA:
-    cargo test {{inner_crates}} {{EXTRA}}
+    cargo test --tests {{inner_crates}} {{EXTRA}}
     cargo clippy {{inner_crates}} {{EXTRA}} -- -D warnings
+    @just _sweep
 
 # Pre-push: full workspace gate.
 # Phase wall times + per-crate cargo --timings, assembled into
 # target/cargo-timings/push-report.html.
 push:
     ./tools/run-push.sh
+    @just _sweep
 
 # Smoke: push + slow / integration / plugin scanner / LSP / CLAP suites.
+# No doctests anywhere.
 smoke: push
-    cargo test -p patches-integration-tests
-    cargo test -p patches-clap
-    cargo test -p patches-lsp
+    cargo test --tests -p patches-integration-tests
+    cargo test --tests -p patches-clap
+    cargo test --tests -p patches-lsp
+    @just _sweep
+
+# Manual sweep: drop target/ artefacts not touched in 7 days.
+# Keeps hot incremental cache; reclaims stale test-bin churn.
+sweep:
+    @just _sweep
+
+_sweep:
+    @command -v cargo-sweep >/dev/null 2>&1 \
+        && cargo sweep --time 7 \
+        || echo "cargo-sweep not installed — skipping. Install: cargo install cargo-sweep"

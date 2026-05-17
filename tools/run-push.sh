@@ -45,8 +45,8 @@ if run_phase build cargo build --workspace --timings; then
   cp "$DIR/cargo-timing.html" "$DIR/cargo-timing-build.html"
 fi
 
-# Phase 2: test (only if build passed)
-if [[ $EXIT -eq 0 ]] && run_phase test cargo test --workspace --timings; then
+# Phase 2: test (only if build passed). --tests skips doctests workspace-wide.
+if [[ $EXIT -eq 0 ]] && run_phase test cargo test --workspace --tests --timings; then
   cp "$DIR/cargo-timing.html" "$DIR/cargo-timing-test.html"
 fi
 
