@@ -42,7 +42,7 @@ pub(super) fn hover_at_call_site(
     if grouped.is_empty() {
         return None;
     }
-    grouped.sort_by(|a, b| a.id.to_string().cmp(&b.id.to_string()));
+    grouped.sort_by_key(|a| a.id.to_string());
 
     let mut lines = Vec::new();
     lines.push(format!("**expansion** — {} modules", grouped.len()));
