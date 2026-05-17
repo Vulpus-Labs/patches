@@ -199,9 +199,9 @@ jobs:
       - name: Stage MSI inputs
         # MSI sources are resolved relative to candle.exe's cwd (the
         # patches-player package dir), so everything is staged under
-        # patches-player/wix/staging/. CLAUDE.md sits next to the
-        # example .patches files but is editor scaffolding, not user
-        # content — strip it so it doesn't end up in Public Documents.
+        # patches-player/wix/staging/. Only the curated synth presets
+        # under examples/synths/ ship in the installer (matches the
+        # zip/tarball stage_common policy).
         shell: bash
         run: |
           set -e
@@ -211,8 +211,8 @@ jobs:
           cp artifacts/windows/Patches.clap     "$STAGE/"
           cp artifacts/docs/patches-manual.pdf  "$STAGE/"
           cp LICENSE                            "$STAGE/LICENSE.txt"
-          cp -r examples/. "$STAGE/examples/"
-          rm -f "$STAGE/examples/CLAUDE.md"
+          cp examples/synths/*.patches          "$STAGE/examples/"
+          cp examples/synths/*.patches.state    "$STAGE/examples/" 2>/dev/null || true
 
       - name: Harvest examples with heat
         # Generates patches-player/wix/examples.wxs containing the
@@ -322,7 +322,11 @@ jobs:
             local DIR="$1"
             mkdir -p "${DIR}/examples"
             cp artifacts/release-docs-pdf/patches-manual.pdf "${DIR}/"
-            cp -r examples/* "${DIR}/examples/"
+            # Ship only the curated synth presets — the top-level
+            # examples/ tree contains scratchpads we don't want to
+            # surface in the release bundle.
+            cp examples/synths/*.patches       "${DIR}/examples/"
+            cp examples/synths/*.patches.state "${DIR}/examples/" 2>/dev/null || true
           }
 
           # Windows zip
