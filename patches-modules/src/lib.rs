@@ -47,6 +47,7 @@ pub mod poly_tuner;
 pub mod quant_util;
 pub mod quant;
 pub mod poly_quant;
+pub mod dynamics;
 pub mod limiter;
 pub mod stereo_limiter;
 pub mod master_sequencer;
@@ -109,6 +110,7 @@ pub use sah::Sah;
 pub use poly_sah::PolySah;
 pub use quant::Quant;
 pub use poly_quant::PolyQuant;
+pub use dynamics::{CompDetectMode, Compressor, Gate, StereoCompressor, StereoGate};
 pub use limiter::Limiter;
 pub use stereo_limiter::StereoLimiter;
 pub use master_sequencer::MasterSequencer;
@@ -181,6 +183,10 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<PolyQuant>();
     r.register::<Limiter>();
     r.register::<StereoLimiter>();
+    r.register::<Compressor>();
+    r.register::<StereoCompressor>();
+    r.register::<Gate>();
+    r.register::<StereoGate>();
     r.register::<MasterSequencer>();
     r.register::<PatternPlayer>();
     r.register::<MidiDrumset>();
@@ -262,6 +268,10 @@ mod tests {
             "Quant",
             "PolyQuant",
             "Limiter",
+            "Compressor",
+            "StereoCompressor",
+            "Gate",
+            "StereoGate",
             "MasterSequencer",
             "PatternPlayer",
             "MidiDrumset",

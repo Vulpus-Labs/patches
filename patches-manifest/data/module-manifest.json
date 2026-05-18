@@ -438,6 +438,129 @@
       }
     },
     {
+      "name": "Compressor",
+      "template": {
+        "name": "Compressor",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "sidechain",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "ratio",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 100.0,
+                "default": 4.0
+              }
+            }
+          },
+          {
+            "name": "knee_width",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 6.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.1,
+                "max": 1000.0,
+                "default": 10.0
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 5000.0,
+                "default": 100.0
+              }
+            }
+          },
+          {
+            "name": "makeup",
+            "kind": {
+              "Float": {
+                "min": -24.0,
+                "max": 24.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "detect",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "peak",
+                  "rms"
+                ],
+                "default": "peak"
+              }
+            }
+          },
+          {
+            "name": "mix",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Delay",
       "template": {
         "name": "Delay",
@@ -819,6 +942,97 @@
                   "cathedral"
                 ],
                 "default": "hall"
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "Gate",
+      "template": {
+        "name": "Gate",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "sidechain",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -80.0,
+                "max": 0.0,
+                "default": -40.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.01,
+                "max": 1000.0,
+                "default": 1.0
+              }
+            }
+          },
+          {
+            "name": "hold",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 5000.0,
+                "default": 10.0
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 5000.0,
+                "default": 100.0
               }
             }
           }
@@ -4271,6 +4485,129 @@
       }
     },
     {
+      "name": "StereoCompressor",
+      "template": {
+        "name": "StereoCompressor",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "sidechain",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "ratio",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 100.0,
+                "default": 4.0
+              }
+            }
+          },
+          {
+            "name": "knee_width",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 6.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.1,
+                "max": 1000.0,
+                "default": 10.0
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 5000.0,
+                "default": 100.0
+              }
+            }
+          },
+          {
+            "name": "makeup",
+            "kind": {
+              "Float": {
+                "min": -24.0,
+                "max": 24.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "detect",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "peak",
+                  "rms"
+                ],
+                "default": "peak"
+              }
+            }
+          },
+          {
+            "name": "mix",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "StereoDelay",
       "template": {
         "name": "StereoDelay",
@@ -4473,6 +4810,97 @@
             }
           ]
         ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "StereoGate",
+      "template": {
+        "name": "StereoGate",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "sidechain",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -80.0,
+                "max": 0.0,
+                "default": -40.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          },
+          {
+            "name": "attack",
+            "kind": {
+              "Float": {
+                "min": 0.01,
+                "max": 1000.0,
+                "default": 1.0
+              }
+            }
+          },
+          {
+            "name": "hold",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 5000.0,
+                "default": 10.0
+              }
+            }
+          },
+          {
+            "name": "release",
+            "kind": {
+              "Float": {
+                "min": 1.0,
+                "max": 5000.0,
+                "default": 100.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
         "per_axis_structural_params": []
       }
     },

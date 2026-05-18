@@ -1,5 +1,15 @@
 //! Lookahead peak limiter with inter-sample peak detection.
 //!
+//! # Sidechain exemption (ADR 0076)
+//!
+//! Dynamics modules in this bundle wear a `sidechain` input by convention,
+//! with self-key fallback when unconnected. `Limiter` is exempt: its purpose
+//! is to bound output by `threshold`, and a sidechain-driven detector would
+//! let the dry path exceed that ceiling whenever the keyed source decoupled
+//! from `in`. Ducking and gating belong on `Compressor` and `Gate`, which
+//! follow the convention. The self-key helper for those modules lives at
+//! [`crate::common::sidechain`].
+//!
 //! # Inputs
 //!
 //! | Port | Kind | Description |

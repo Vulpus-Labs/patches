@@ -6,6 +6,13 @@
 //! This prevents the stereo image from shifting when only one channel has a
 //! transient.
 //!
+//! # Sidechain exemption (ADR 0076)
+//!
+//! Exempt from the ADR 0076 `sidechain` convention for the same reason as
+//! [`Limiter`](super::Limiter): the limiter's job is to bound the output
+//! ceiling, and an external detector source breaks that guarantee. The
+//! `sidechain` here refers to internal L/R linking, not a routed input.
+//!
 //! # Inputs
 //!
 //! | Port | Kind | Description |
