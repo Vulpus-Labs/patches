@@ -8,8 +8,9 @@ Most software modular systems present a graphical reproduction of a Eurorack-sty
 
 Patches sets the visual interface aside and concentrates on two things: a clear language for describing patches, and a fast, real-time-stable engine for running them. The language is supported by a full Language Server Protocol implementation, so any compatible editor can offer autocomplete, inline hints, and navigation between definitions.
 
-Working in text makes some abstractions natural that would be awkward in a visual environment. Two examples:
+Working in text makes some abstractions natural that would be awkward in a visual environment. Three examples:
 
+* Per-cable scaling, offset and clipping. Signals can be amplified, offset, or mapped into and bounded within a constant range with an annotation on the cable connection.
 * Templates. Define a sub-patch once with parameters, then instantiate it multiple times with different values.
 * Multi-channel modules. A mixing desk or multi-tap delay can be declared with whatever number of channels you need, each with its own parameters, inputs, and outputs.
 
