@@ -73,7 +73,7 @@ fn stereo_module_on_multi_channel_type_surfaces_st0043() {
     // multi-channel type") at the type-name token.
     let src = "\
 patch {
-    stereo module mix : Mixer(channels: 4)
+    stereo module mix : Sum(channels: 4)
 }
 ";
     let tmp = TempDir::new("st0043");
@@ -87,7 +87,7 @@ patch {
             Some(tower_lsp::lsp_types::NumberOrString::String(c)) if c == "ST0043"))
         .unwrap_or_else(|| panic!("ST0043 missing in {diags:?}"));
     assert!(
-        st.message.contains("stereo") && st.message.contains("Mixer"),
+        st.message.contains("stereo") && st.message.contains("Sum"),
         "ST0043 message should name keyword + type: {}",
         st.message
     );

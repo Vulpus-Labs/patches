@@ -25,7 +25,7 @@ fn positive_unit_literals() {
 fn fan_in_with_backward_arrow_parses() {
     use patches_dsl::ast::{Direction, Statement};
     let src = "patch {
-        module mix : Mixer
+        module mix : StereoMixer
         module del : Delay
         mix.return_a_right, ~meter(bar) <- del.out
     }";
@@ -43,7 +43,7 @@ fn fan_in_with_backward_arrow_parses() {
 #[test]
 fn fan_in_rejects_list_on_rhs_with_backward_arrow() {
     let src = "patch {
-        module mix : Mixer
+        module mix : StereoMixer
         module del : Delay
         mix.in <- del.a, del.b
     }";

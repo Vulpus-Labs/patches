@@ -18,6 +18,219 @@ module_params! {
     }
 }
 
+/// Borrowed view of the per-channel parameter caches, keyed by original
+/// channel id. Lanes consult this for mute/solo gating and (in the CV
+/// lane) per-sample base level / pan / send values.
+struct ChannelParams<'a> {
+    levels: &'a [f32],
+    pans: &'a [f32],
+    send_a: &'a [f32],
+    send_b: &'a [f32],
+    mutes: &'a [bool],
+    solos: &'a [bool],
+    any_solo: bool,
+}
+
+/// Shared bus accumulators threaded through both lanes' inner loops.
+#[derive(Default)]
+struct BusAcc {
+    out_l: f32, out_r: f32,
+    sa_l:  f32, sa_r:  f32,
+    sb_l:  f32, sb_r:  f32,
+}
+
+/// Lane of channels with no CV inputs wired. Per-channel gains are
+/// precomputed at control rate via [`FastLane::recompute`]; the per-sample
+/// inner loop is one `read_mono` plus six FMAs against contiguous SoA gain
+/// streams (autovectorizable).
+struct FastLane {
+    /// Original channel id for each lane entry; used by `recompute` to
+    /// look up the parent's per-channel parameter caches.
+    orig: Vec<usize>,
+    in_ports: Vec<MonoInput>,
+    gain_out_l: Vec<f32>,
+    gain_out_r: Vec<f32>,
+    gain_sa_l:  Vec<f32>,
+    gain_sa_r:  Vec<f32>,
+    gain_sb_l:  Vec<f32>,
+    gain_sb_r:  Vec<f32>,
+}
+
+impl FastLane {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            orig:       Vec::with_capacity(n),
+            in_ports:   Vec::with_capacity(n),
+            gain_out_l: Vec::with_capacity(n),
+            gain_out_r: Vec::with_capacity(n),
+            gain_sa_l:  Vec::with_capacity(n),
+            gain_sa_r:  Vec::with_capacity(n),
+            gain_sb_l:  Vec::with_capacity(n),
+            gain_sb_r:  Vec::with_capacity(n),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.orig.clear();
+        self.in_ports.clear();
+        self.gain_out_l.clear();
+        self.gain_out_r.clear();
+        self.gain_sa_l.clear();
+        self.gain_sa_r.clear();
+        self.gain_sb_l.clear();
+        self.gain_sb_r.clear();
+    }
+
+    fn push(&mut self, orig: usize, in_port: MonoInput) {
+        self.orig.push(orig);
+        self.in_ports.push(in_port);
+        self.gain_out_l.push(0.0);
+        self.gain_out_r.push(0.0);
+        self.gain_sa_l.push(0.0);
+        self.gain_sa_r.push(0.0);
+        self.gain_sb_l.push(0.0);
+        self.gain_sb_r.push(0.0);
+    }
+
+    /// Fold active mask, level, pan and sends into per-entry L/R gains.
+    /// Muted / non-soloed channels collapse to zero gains so the inner
+    /// loop stays branchless.
+    fn recompute(&mut self, p: &ChannelParams<'_>) {
+        for k in 0..self.orig.len() {
+            let i = self.orig[k];
+            let active = !p.mutes[i] && (!p.any_solo || p.solos[i]);
+            if !active {
+                self.gain_out_l[k] = 0.0;
+                self.gain_out_r[k] = 0.0;
+                self.gain_sa_l[k]  = 0.0;
+                self.gain_sa_r[k]  = 0.0;
+                self.gain_sb_l[k]  = 0.0;
+                self.gain_sb_r[k]  = 0.0;
+                continue;
+            }
+            let level  = p.levels[i].clamp(0.0, 1.0);
+            let pan    = p.pans[i].clamp(-1.0, 1.0);
+            let send_a = p.send_a[i].clamp(0.0, 1.0);
+            let send_b = p.send_b[i].clamp(0.0, 1.0);
+            let half_pan = pan * 0.5;
+            let lg = level * (0.5 - half_pan);
+            let rg = level * (0.5 + half_pan);
+            self.gain_out_l[k] = lg;
+            self.gain_out_r[k] = rg;
+            self.gain_sa_l[k]  = lg * send_a;
+            self.gain_sa_r[k]  = rg * send_a;
+            self.gain_sb_l[k]  = lg * send_b;
+            self.gain_sb_r[k]  = rg * send_b;
+        }
+    }
+
+    #[inline(always)]
+    fn accumulate(&self, pool: &CablePool<'_>, acc: &mut BusAcc) {
+        let n = self.orig.len();
+        let in_ports = &self.in_ports[..n];
+        let g_ol  = &self.gain_out_l[..n];
+        let g_or  = &self.gain_out_r[..n];
+        let g_sal = &self.gain_sa_l[..n];
+        let g_sar = &self.gain_sa_r[..n];
+        let g_sbl = &self.gain_sb_l[..n];
+        let g_sbr = &self.gain_sb_r[..n];
+        for k in 0..n {
+            let s = pool.read_mono(&in_ports[k]);
+            acc.out_l += s * g_ol[k];
+            acc.out_r += s * g_or[k];
+            acc.sa_l  += s * g_sal[k];
+            acc.sa_r  += s * g_sar[k];
+            acc.sb_l  += s * g_sbl[k];
+            acc.sb_r  += s * g_sbr[k];
+        }
+    }
+}
+
+/// Lane of channels with at least one CV input wired. All gain math runs
+/// per sample; the active gate is sampled from [`ChannelParams`] via the
+/// stored original channel id.
+struct CvLane {
+    orig: Vec<usize>,
+    in_ports:  Vec<MonoInput>,
+    level_cv:  Vec<MonoInput>,
+    pan_cv:    Vec<MonoInput>,
+    send_a_cv: Vec<MonoInput>,
+    send_b_cv: Vec<MonoInput>,
+}
+
+impl CvLane {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            orig:      Vec::with_capacity(n),
+            in_ports:  Vec::with_capacity(n),
+            level_cv:  Vec::with_capacity(n),
+            pan_cv:    Vec::with_capacity(n),
+            send_a_cv: Vec::with_capacity(n),
+            send_b_cv: Vec::with_capacity(n),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.orig.clear();
+        self.in_ports.clear();
+        self.level_cv.clear();
+        self.pan_cv.clear();
+        self.send_a_cv.clear();
+        self.send_b_cv.clear();
+    }
+
+    fn push(
+        &mut self,
+        orig: usize,
+        in_port: MonoInput,
+        level_cv: MonoInput,
+        pan_cv: MonoInput,
+        send_a_cv: MonoInput,
+        send_b_cv: MonoInput,
+    ) {
+        self.orig.push(orig);
+        self.in_ports.push(in_port);
+        self.level_cv.push(level_cv);
+        self.pan_cv.push(pan_cv);
+        self.send_a_cv.push(send_a_cv);
+        self.send_b_cv.push(send_b_cv);
+    }
+
+    #[inline(always)]
+    fn accumulate(&self, pool: &CablePool<'_>, p: &ChannelParams<'_>, acc: &mut BusAcc) {
+        for k in 0..self.orig.len() {
+            let i = self.orig[k];
+            let active = !p.mutes[i] && (!p.any_solo || p.solos[i]);
+            if !active { continue; }
+
+            let sig       = pool.read_mono(&self.in_ports[k]);
+            let level_cv  = pool.read_mono(&self.level_cv[k]);
+            let pan_cv    = pool.read_mono(&self.pan_cv[k]);
+            let send_a_cv = pool.read_mono(&self.send_a_cv[k]);
+            let send_b_cv = pool.read_mono(&self.send_b_cv[k]);
+
+            let eff_level  = (p.levels[i] + level_cv ).clamp(0.0, 1.0);
+            let eff_pan    = (p.pans[i]   + pan_cv   ).clamp(-1.0, 1.0);
+            let eff_send_a = (p.send_a[i] + send_a_cv).clamp(0.0, 1.0);
+            let eff_send_b = (p.send_b[i] + send_b_cv).clamp(0.0, 1.0);
+
+            let half_pan   = eff_pan * 0.5;
+            let left_gain  = 0.5 - half_pan;
+            let right_gain = 0.5 + half_pan;
+
+            let sig_level = sig * eff_level;
+            acc.out_l += sig_level * left_gain;
+            acc.out_r += sig_level * right_gain;
+            let sa_base = sig_level * eff_send_a;
+            acc.sa_l += sa_base * left_gain;
+            acc.sa_r += sa_base * right_gain;
+            let sb_base = sig_level * eff_send_b;
+            acc.sb_l += sb_base * left_gain;
+            acc.sb_r += sb_base * right_gain;
+        }
+    }
+}
+
 /// Stereo N-channel mixer with per-channel level, pan, send A/B, mute, and solo.
 ///
 /// Pan law: linear equal-gain (`left = (1-pan)/2`, `right = (1+pan)/2`).
@@ -57,7 +270,6 @@ pub struct StereoMixer {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     channels: usize,
-    // Cached params
     levels: Vec<f32>,
     pans: Vec<f32>,
     send_a_levels: Vec<f32>,
@@ -65,17 +277,30 @@ pub struct StereoMixer {
     mutes: Vec<bool>,
     solos: Vec<bool>,
     any_solo: bool,
-    // Port fields
-    in_ports: Vec<MonoInput>,
-    level_cv_ports: Vec<MonoInput>,
-    pan_cv_ports: Vec<MonoInput>,
-    send_a_cv_ports: Vec<MonoInput>,
-    send_b_cv_ports: Vec<MonoInput>,
+    fast: FastLane,
+    cv: CvLane,
     return_a:  StereoInput,
     return_b:  StereoInput,
     out_stereo:    StereoOutput,
     send_a_stereo: StereoOutput,
     send_b_stereo: StereoOutput,
+}
+
+/// Build a `ChannelParams` view from a `StereoMixer`'s param fields with
+/// disjoint field-level borrows, so the caller can still mutably borrow
+/// `self.fast` / `self.cv` on the same expression.
+macro_rules! channel_params {
+    ($self:expr) => {
+        ChannelParams {
+            levels:   &$self.levels,
+            pans:     &$self.pans,
+            send_a:   &$self.send_a_levels,
+            send_b:   &$self.send_b_levels,
+            mutes:    &$self.mutes,
+            solos:    &$self.solos,
+            any_solo: $self.any_solo,
+        }
+    };
 }
 
 impl Module for StereoMixer {
@@ -139,20 +364,17 @@ impl Module for StereoMixer {
             instance_id,
             descriptor,
             channels,
-            levels:       vec![1.0; channels],
-            pans:         vec![0.0; channels],
+            levels:        vec![1.0; channels],
+            pans:          vec![0.0; channels],
             send_a_levels: vec![0.0; channels],
             send_b_levels: vec![0.0; channels],
-            mutes:        vec![false; channels],
-            solos:        vec![false; channels],
-            any_solo:     false,
-            in_ports:       vec![MonoInput::default(); channels],
-            level_cv_ports: vec![MonoInput::default(); channels],
-            pan_cv_ports:   vec![MonoInput::default(); channels],
-            send_a_cv_ports: vec![MonoInput::default(); channels],
-            send_b_cv_ports: vec![MonoInput::default(); channels],
-            return_a:  StereoInput::default(),
-            return_b:  StereoInput::default(),
+            mutes:         vec![false; channels],
+            solos:         vec![false; channels],
+            any_solo:      false,
+            fast:          FastLane::with_capacity(channels),
+            cv:            CvLane::with_capacity(channels),
+            return_a:      StereoInput::default(),
+            return_b:      StereoInput::default(),
             out_stereo:    StereoOutput::default(),
             send_a_stereo: StereoOutput::default(),
             send_b_stereo: StereoOutput::default(),
@@ -170,6 +392,7 @@ impl Module for StereoMixer {
             self.solos[i]         = p.get(params::solo.at(idx));
         }
         self.any_solo = (0..self.channels).any(|i| self.solos[i] && !self.mutes[i]);
+        self.fast.recompute(&channel_params!(self));
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -181,67 +404,47 @@ impl Module for StereoMixer {
         // in[0..n], level_cv[0..n], pan_cv[0..n], send_a_cv[0..n], send_b_cv[0..n].
         self.return_a = StereoInput::from_ports(inputs, 0);
         self.return_b = StereoInput::from_ports(inputs, 1);
+
+        self.fast.clear();
+        self.cv.clear();
         for i in 0..n {
-            self.in_ports[i]        = MonoInput::from_ports(inputs, 2 + i);
-            self.level_cv_ports[i]  = MonoInput::from_ports(inputs, 2 + n + i);
-            self.pan_cv_ports[i]    = MonoInput::from_ports(inputs, 2 + 2 * n + i);
-            self.send_a_cv_ports[i] = MonoInput::from_ports(inputs, 2 + 3 * n + i);
-            self.send_b_cv_ports[i] = MonoInput::from_ports(inputs, 2 + 4 * n + i);
+            let in_port   = MonoInput::from_ports(inputs, 2 + i);
+            let level_cv  = MonoInput::from_ports(inputs, 2 + n + i);
+            let pan_cv    = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            let send_a_cv = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            let send_b_cv = MonoInput::from_ports(inputs, 2 + 4 * n + i);
+            let has_cv = level_cv.connected
+                      || pan_cv.connected
+                      || send_a_cv.connected
+                      || send_b_cv.connected;
+            if has_cv {
+                self.cv.push(i, in_port, level_cv, pan_cv, send_a_cv, send_b_cv);
+            } else {
+                self.fast.push(i, in_port);
+            }
         }
 
         self.out_stereo    = StereoOutput::from_ports(outputs, 0);
         self.send_a_stereo = StereoOutput::from_ports(outputs, 1);
         self.send_b_stereo = StereoOutput::from_ports(outputs, 2);
+
+        self.fast.recompute(&channel_params!(self));
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        let any_solo = self.any_solo;
-
-        let mut out_l    = 0.0f32;
-        let mut out_r    = 0.0f32;
-        let mut sa_l     = 0.0f32;
-        let mut sa_r     = 0.0f32;
-        let mut sb_l     = 0.0f32;
-        let mut sb_r     = 0.0f32;
-
-        for i in 0..self.channels {
-            let active = !self.mutes[i] && (!any_solo || self.solos[i]);
-            if !active { continue; }
-
-            let sig       = pool.read_mono(&self.in_ports[i]);
-            let level_cv  = pool.read_mono(&self.level_cv_ports[i]);
-            let pan_cv    = pool.read_mono(&self.pan_cv_ports[i]);
-            let send_a_cv = pool.read_mono(&self.send_a_cv_ports[i]);
-            let send_b_cv = pool.read_mono(&self.send_b_cv_ports[i]);
-
-            let eff_level  = (self.levels[i]       + level_cv ).clamp(0.0, 1.0);
-            let eff_pan    = (self.pans[i]          + pan_cv   ).clamp(-1.0, 1.0);
-            let eff_send_a = (self.send_a_levels[i] + send_a_cv).clamp(0.0, 1.0);
-            let eff_send_b = (self.send_b_levels[i] + send_b_cv).clamp(0.0, 1.0);
-
-            let half_pan   = eff_pan * 0.5;
-            let left_gain  = 0.5 - half_pan;
-            let right_gain = 0.5 + half_pan;
-
-            let sig_level = sig * eff_level;
-            out_l += sig_level * left_gain;
-            out_r += sig_level * right_gain;
-            let sa_base = sig_level * eff_send_a;
-            sa_l += sa_base * left_gain;
-            sa_r += sa_base * right_gain;
-            let sb_base = sig_level * eff_send_b;
-            sb_l += sb_base * left_gain;
-            sb_r += sb_base * right_gain;
-        }
+        let params = channel_params!(self);
+        let mut acc = BusAcc::default();
+        self.fast.accumulate(pool, &mut acc);
+        self.cv.accumulate(pool, &params, &mut acc);
 
         let (ra_l, ra_r) = pool.read_stereo(&self.return_a);
         let (rb_l, rb_r) = pool.read_stereo(&self.return_b);
-        out_l += ra_l + rb_l;
-        out_r += ra_r + rb_r;
+        acc.out_l += ra_l + rb_l;
+        acc.out_r += ra_r + rb_r;
 
-        pool.write_stereo(&self.out_stereo,    out_l, out_r);
-        pool.write_stereo(&self.send_a_stereo, sa_l,  sa_r);
-        pool.write_stereo(&self.send_b_stereo, sb_l,  sb_r);
+        pool.write_stereo(&self.out_stereo,    acc.out_l, acc.out_r);
+        pool.write_stereo(&self.send_a_stereo, acc.sa_l,  acc.sa_r);
+        pool.write_stereo(&self.send_b_stereo, acc.sb_l,  acc.sb_r);
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

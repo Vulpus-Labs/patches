@@ -2,7 +2,7 @@ use patches_core::{AUDIO_OUT_L, CablePool, CableValue, ModuleGraph, ModuleShape,
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_planner::PlannerState;
 use patches_engine::{build_patch, ExecutionPlan, ReadyState, StaleState, ModulePool};
-use patches_modules::{AudioOut, Mixer, Oscillator, Sum};
+use patches_modules::{AudioOut, StereoMixer, Oscillator, Sum};
 use patches_integration_tests::{p, pi, env, POOL_CAP, MODULE_CAP};
 
 /// Oscillator → AudioOut (sine output).
@@ -427,11 +427,11 @@ fn initial_plan_uses_provided_sample_rate() {
 fn shape_change_forces_re_instantiation() {
     let registry = patches_modules::default_registry();
 
-    // First build: Mixer with 2 channels.
+    // First build: StereoMixer with 2 channels.
     let mut graph_a = patches_core::ModuleGraph::new();
     graph_a.add_module(
         "mix",
-        patches_core::describe_for::<Mixer>(&ModuleShape { channels: 2 }),
+        patches_core::describe_for::<StereoMixer>(&ModuleShape { channels: 2 }),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_a.add_module(
@@ -458,7 +458,7 @@ fn shape_change_forces_re_instantiation() {
     let mut graph_b = patches_core::ModuleGraph::new();
     graph_b.add_module(
         "mix",
-        patches_core::describe_for::<Mixer>(&ModuleShape { channels: 4 }),
+        patches_core::describe_for::<StereoMixer>(&ModuleShape { channels: 4 }),
         &patches_core::parameter_map::ParameterMap::new(),
     ).unwrap();
     graph_b.add_module(

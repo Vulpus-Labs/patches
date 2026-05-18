@@ -69,7 +69,7 @@ fn inlay_hints_template_call_with_shape_arg_renders() {
 template bus(channels: int = 4) {
 in: x
 out: y
-module mx : Mixer(<channels>)
+module mx : StereoMixer(<channels>)
 $.x -> mx.in[*channels]
 mx.out -> $.y
 }

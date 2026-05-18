@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn completions_for_at_block_aliases() {
         let source =
-            "patch {\n    module mx : Mixer([drum, bass]) {\n        @\n    }\n}";
+            "patch {\n    module mx : StereoMixer([drum, bass]) {\n        @\n    }\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find('@').unwrap() + 1;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn completions_for_port_index_aliases() {
         let source =
-            "patch {\n    module mix : Mixer([drum, bass])\n    mix.out[\n}";
+            "patch {\n    module mix : StereoMixer([drum, bass])\n    mix.out[\n}";
         let (tree, model, registry) = setup(source);
         let byte_offset = source.find("out[").unwrap() + 4;
         let items = compute_completions(&tree, source, byte_offset, &model, &registry);

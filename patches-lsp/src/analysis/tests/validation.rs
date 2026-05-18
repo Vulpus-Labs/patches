@@ -142,7 +142,7 @@ template voice(filt_cutoff: float = 600.0, filt_res: float = 0.7) {
 in: voct
 out: audio
 module filt : PolyLowpass { cutoff: <filt_cutoff>, resonance: <filt_res>, saturate: true }
-module mx : Mixer([drum, bass]) {
+module mx : StereoMixer([drum, bass]) {
     @drum { level: 0.5 }
     @bass { level: 0.3 }
 }

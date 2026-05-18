@@ -1,14 +1,10 @@
 use super::*;
-use patches_core::{AudioEnvironment, ModuleShape};
+use patches_core::ModuleShape;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::test_support::{assert_nearly, ModuleHarness};
 
 fn shape(channels: usize) -> ModuleShape {
     ModuleShape { channels }
-}
-
-fn env() -> AudioEnvironment {
-    AudioEnvironment { sample_rate: 44100.0, poly_voices: 16, periodic_update_interval: 32, hosted: false }
 }
 
 /// Build a ParameterMap with indexed entries.
@@ -18,77 +14,6 @@ fn indexed_params(entries: &[(&str, usize, ParameterValue)]) -> ParameterMap {
         map.insert_param(name.to_string(), *idx, val.clone());
     }
     map
-}
-
-// ── Mixer tests ───────────────────────────────────────────────────────────
-
-#[test]
-fn mixer_descriptor_shape_n2() {
-    let h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    let desc = h.descriptor();
-    // 4 groups × 2 + return_a + return_b = 10 inputs.
-    // Template build emits globals first (return_a, return_b), then per-axis
-    // groups (in[0..n], level_cv[0..n], send_a_cv[0..n], send_b_cv[0..n]).
-    assert_eq!(desc.inputs.len(), 10);
-    assert_eq!(desc.outputs.len(), 3);
-    assert_eq!(desc.inputs[0].name,  "return_a");
-    assert_eq!(desc.inputs[1].name,  "return_b");
-    assert_eq!(desc.inputs[2].name,  "in");
-    assert_eq!(desc.inputs[2].index, 0);
-    assert_eq!(desc.inputs[3].name,  "in");
-    assert_eq!(desc.inputs[3].index, 1);
-    assert_eq!(desc.outputs[0].name, "out");
-    assert_eq!(desc.outputs[1].name, "send_a");
-    assert_eq!(desc.outputs[2].name, "send_b");
-}
-
-/// Truth table for mute/solo on a 2-channel mixer with in[0]=1.0, in[1]=0.4.
-/// `mute_overrides_solo` is the key invariant: a soloed-but-muted channel
-/// must not contribute to `any_solo`.
-#[test]
-fn mixer_mute_solo_truth_table() {
-    // (mute0, solo0, expected out)
-    let cases: &[(bool, bool, f32)] = &[
-        (false, false, 1.4), // both active: 1.0 + 0.4
-        (true,  false, 0.4), // ch0 muted
-        (false, true,  1.0), // ch0 soloed → ch1 silent
-        (true,  true,  0.4), // mute overrides solo → ch1 active
-    ];
-    for &(mute0, solo0, expected) in cases {
-        let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-        h.update_params_map(&indexed_params(&[
-            ("mute", 0, ParameterValue::Bool(mute0)),
-            ("solo", 0, ParameterValue::Bool(solo0)),
-        ]));
-        h.set_mono_at("in", 0, 1.0);
-        h.set_mono_at("in", 1, 0.4);
-        h.tick();
-        assert_nearly!(expected, h.read_mono("out"));
-    }
-}
-
-#[test]
-fn mixer_send_buses_accumulate() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(2));
-    h.update_params_map(&indexed_params(&[
-        ("send_a", 0, ParameterValue::Float(1.0)),
-        ("send_a", 1, ParameterValue::Float(0.5)),
-    ]));
-    h.set_mono_at("in", 0, 0.4);
-    h.set_mono_at("in", 1, 0.6);
-    h.tick();
-    // send_a = 0.4*1.0 + 0.6*0.5 = 0.4 + 0.3 = 0.7
-    assert_nearly!(0.7, h.read_mono("send_a"));
-}
-
-#[test]
-fn mixer_return_added_to_output() {
-    let mut h = ModuleHarness::build_with_shape::<Mixer>(&[], shape(1));
-    h.set_mono_at("in", 0, 0.2);
-    h.set_mono("return_a", 0.1);
-    h.set_mono("return_b", 0.05);
-    h.tick();
-    assert_nearly!(0.35, h.read_mono("out"));
 }
 
 // ── StereoMixer tests ─────────────────────────────────────────────────────
@@ -146,7 +71,7 @@ fn stereo_mixer_pan_cv_clamps() {
 }
 
 #[test]
-fn stereo_mixer_mute_and_solo_mirror_mixer() {
+fn stereo_mixer_mute_and_solo() {
     let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(2));
     h.update_params_map(&indexed_params(&[("solo", 0, ParameterValue::Bool(true))]));
     h.set_mono_at("in", 0, 0.4);
@@ -158,6 +83,122 @@ fn stereo_mixer_mute_and_solo_mirror_mixer() {
 }
 
 #[test]
+fn stereo_mixer_fast_path_send_buses_pan_correctly() {
+    // No CV wired → fast path. Two channels with sends + non-centre pan;
+    // verifies precomputed send-bus L/R gains apply both pan and level.
+    let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(2));
+    h.update_params_map(&indexed_params(&[
+        ("level",  0, ParameterValue::Float(0.5)),
+        ("pan",    0, ParameterValue::Float(-1.0)), // ch0 hard left
+        ("send_a", 0, ParameterValue::Float(1.0)),
+        ("level",  1, ParameterValue::Float(0.5)),
+        ("pan",    1, ParameterValue::Float(1.0)),  // ch1 hard right
+        ("send_b", 1, ParameterValue::Float(0.5)),
+    ]));
+    h.set_mono_at("in", 0, 0.8);
+    h.set_mono_at("in", 1, 1.0);
+    h.tick();
+    // send_a: only ch0 contributes, hard-left → L=0.8*0.5*1.0=0.4, R=0
+    let (sa_l, sa_r) = h.read_stereo("send_a");
+    assert_nearly!(0.4, sa_l);
+    assert_nearly!(0.0, sa_r);
+    // send_b: only ch1 contributes, hard-right → L=0, R=1.0*0.5*0.5=0.25
+    let (sb_l, sb_r) = h.read_stereo("send_b");
+    assert_nearly!(0.0,  sb_l);
+    assert_nearly!(0.25, sb_r);
+}
+
+#[test]
+fn stereo_mixer_fast_path_mute_solo_track_param_updates() {
+    // No CV wired → fast path. Mute and solo are folded into the precomputed
+    // gain cache; flipping them between ticks must take effect without
+    // re-running set_ports. Regression for: update_validated_parameters
+    // must call FastLane::recompute after writing mute/solo + any_solo.
+    let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(2));
+    h.set_mono_at("in", 0, 0.4);
+    h.set_mono_at("in", 1, 0.6);
+
+    // Tick 1: defaults → both active, centre pan, sum then half-pan = 0.5
+    h.tick();
+    let (l, _) = h.read_stereo("out");
+    assert_nearly!(0.5, l); // (0.4 + 0.6) * 0.5
+
+    // Mute ch0 → only ch1 contributes
+    h.update_params_map(&indexed_params(&[
+        ("mute", 0, ParameterValue::Bool(true)),
+    ]));
+    h.set_mono_at("in", 0, 0.4);
+    h.set_mono_at("in", 1, 0.6);
+    h.tick();
+    let (l, _) = h.read_stereo("out");
+    assert_nearly!(0.3, l); // 0.6 * 0.5
+
+    // Unmute ch0 + solo ch1 → any_solo flips true, ch0 (unsoloed) goes
+    // silent, ch1 (soloed) plays alone. Tests that any_solo and the
+    // fast-lane gain cache both refresh on this param update.
+    h.update_params_map(&indexed_params(&[
+        ("mute", 0, ParameterValue::Bool(false)),
+        ("solo", 1, ParameterValue::Bool(true)),
+    ]));
+    h.set_mono_at("in", 0, 0.4);
+    h.set_mono_at("in", 1, 0.6);
+    h.tick();
+    let (l, _) = h.read_stereo("out");
+    assert_nearly!(0.3, l); // 0.6 * 0.5 (ch1 alone)
+
+    // Clear solo → both back
+    h.update_params_map(&indexed_params(&[
+        ("solo", 1, ParameterValue::Bool(false)),
+    ]));
+    h.set_mono_at("in", 0, 0.4);
+    h.set_mono_at("in", 1, 0.6);
+    h.tick();
+    let (l, _) = h.read_stereo("out");
+    assert_nearly!(0.5, l);
+}
+
+#[test]
+fn stereo_mixer_mixed_lanes_accumulate() {
+    // ch0 has pan_cv wired → CV lane; ch1 has no CV → fast lane.
+    // Both contribute to `out`. Verifies the two lanes share accumulators
+    // and partition correctly.
+    let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(2));
+    h.update_params_map(&indexed_params(&[
+        ("pan",   1, ParameterValue::Float(1.0)),  // ch1 hard right (fast)
+    ]));
+    h.set_mono_at("in", 0, 0.4);
+    h.set_mono_at("in", 1, 0.6);
+    h.set_mono_at("pan_cv", 0, -1.0);              // ch0 pan→-1 via CV (slow)
+    h.tick();
+    let (l, r) = h.read_stereo("out");
+    // ch0 (slow, hard-left): L += 0.4, R += 0
+    // ch1 (fast, hard-right): L += 0,   R += 0.6
+    assert_nearly!(0.4, l);
+    assert_nearly!(0.6, r);
+}
+
+#[test]
+fn stereo_mixer_fast_path_updates_on_param_change() {
+    // Fast path caches gains in update_validated_parameters; verifies the
+    // cache is refreshed when params change between ticks (no set_ports).
+    let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(1));
+    h.set_mono_at("in", 0, 1.0);
+    h.tick();
+    let (l, _) = h.read_stereo("out");
+    assert_nearly!(0.5, l); // defaults: level=1, pan=0 → L=R=0.5
+
+    h.update_params_map(&indexed_params(&[
+        ("level", 0, ParameterValue::Float(0.5)),
+        ("pan",   0, ParameterValue::Float(-1.0)),
+    ]));
+    h.set_mono_at("in", 0, 1.0);
+    h.tick();
+    let (l, r) = h.read_stereo("out");
+    assert_nearly!(0.5, l); // level=0.5 × hard-left → L=0.5, R=0
+    assert_nearly!(0.0, r);
+}
+
+#[test]
 fn stereo_mixer_returns_added_to_correct_bus() {
     let mut h = ModuleHarness::build_with_shape::<StereoMixer>(&[], shape(1));
     h.set_stereo("return_a", 0.1, 0.2);
@@ -166,162 +207,4 @@ fn stereo_mixer_returns_added_to_correct_bus() {
     let (l, r) = h.read_stereo("out");
     assert_nearly!(0.15, l);
     assert_nearly!(0.3,  r);
-}
-
-// ── PolyMixer tests ───────────────────────────────────────────────────────
-
-#[test]
-fn poly_mixer_descriptor_shape_n2() {
-    let h = ModuleHarness::build_with_shape::<PolyMixer>(&[], shape(2));
-    let desc = h.descriptor();
-    // N poly inputs + N mono cv inputs = 4, 1 poly output
-    assert_eq!(desc.inputs.len(), 4);
-    assert_eq!(desc.outputs.len(), 1);
-}
-
-#[test]
-fn poly_mixer_sums_per_voice() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-    let mut a = [0.0f32; 16];
-    let mut b = [0.0f32; 16];
-    a[0] = 0.3; b[0] = 0.7;
-    a[1] = 0.5; b[1] = 0.5;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    let out = h.read_poly("out");
-    assert_nearly!(1.0, out[0]);
-    assert_nearly!(1.0, out[1]);
-}
-
-#[test]
-fn poly_mixer_level_scales_independently() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-    h.update_params_map(&indexed_params(&[
-        ("level", 0, ParameterValue::Float(0.5)),
-        ("level", 1, ParameterValue::Float(1.0)),
-    ]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    let mut b = [0.0f32; 16]; b[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    let out = h.read_poly("out");
-    // 1.0*0.5 + 1.0*1.0 = 1.5
-    assert_nearly!(1.5, out[0]);
-}
-
-#[test]
-fn poly_mixer_level_cv_clamps() {
-    let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(1));
-    let mut a = [0.0f32; 16]; a[0] = 0.8;
-    h.set_poly_at("in", 0, a);
-    h.set_mono_at("level_cv", 0, 0.5); // level=1.0 + cv=0.5 → clamped 1.0
-    h.tick();
-    assert_nearly!(0.8, h.read_poly("out")[0]);
-}
-
-#[test]
-fn poly_mixer_mute_solo_truth_table() {
-    let cases: &[(bool, bool, f32)] = &[
-        (false, false, 1.4),
-        (true,  false, 0.4),
-        (false, true,  1.0),
-        (true,  true,  0.4),
-    ];
-    for &(mute0, solo0, expected) in cases {
-        let mut h = ModuleHarness::build_full::<PolyMixer>(&[], env(), shape(2));
-        h.update_params_map(&indexed_params(&[
-            ("mute", 0, ParameterValue::Bool(mute0)),
-            ("solo", 0, ParameterValue::Bool(solo0)),
-        ]));
-        let mut a = [0.0f32; 16]; a[0] = 1.0;
-        let mut b = [0.0f32; 16]; b[0] = 0.4;
-        h.set_poly_at("in", 0, a);
-        h.set_poly_at("in", 1, b);
-        h.tick();
-        assert_nearly!(expected, h.read_poly("out")[0]);
-    }
-}
-
-// ── StereoPolyMixer tests ─────────────────────────────────────────────────
-
-#[test]
-fn stereo_poly_mixer_descriptor_shape_n2() {
-    let h = ModuleHarness::build_with_shape::<StereoPolyMixer>(&[], shape(2));
-    let desc = h.descriptor();
-    // N poly + 2N mono cv = 6 inputs, 2 poly outputs
-    assert_eq!(desc.inputs.len(), 6);
-    assert_eq!(desc.outputs.len(), 2);
-}
-
-#[test]
-fn stereo_poly_mixer_centre_pan_splits_equally() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(1));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.tick();
-    let l = h.read_poly("out_left");
-    let r = h.read_poly("out_right");
-    assert_nearly!(0.5, l[0]);
-    assert_nearly!(0.5, r[0]);
-}
-
-#[test]
-fn stereo_poly_mixer_full_left_pan() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(1));
-    h.update_params_map(&indexed_params(&[("pan", 0, ParameterValue::Float(-1.0))]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.tick();
-    assert_nearly!(1.0, h.read_poly("out_left")[0]);
-    assert_nearly!(0.0, h.read_poly("out_right")[0]);
-}
-
-#[test]
-fn stereo_poly_mixer_full_right_pan() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(1));
-    h.update_params_map(&indexed_params(&[("pan", 0, ParameterValue::Float(1.0))]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.tick();
-    assert_nearly!(0.0, h.read_poly("out_left")[0]);
-    assert_nearly!(1.0, h.read_poly("out_right")[0]);
-}
-
-#[test]
-fn stereo_poly_mixer_pan_cv_clamps() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(1));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.set_mono_at("pan_cv", 0, 2.0); // pan=0 + cv=2 → clamped 1 → full right
-    h.tick();
-    assert_nearly!(0.0, h.read_poly("out_left")[0]);
-    assert_nearly!(1.0, h.read_poly("out_right")[0]);
-}
-
-#[test]
-fn stereo_poly_mixer_level_scales_both_buses() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(1));
-    h.update_params_map(&indexed_params(&[("level", 0, ParameterValue::Float(0.5))]));
-    let mut a = [0.0f32; 16]; a[0] = 1.0;
-    h.set_poly_at("in", 0, a);
-    h.tick();
-    // centre pan: l=r=0.5*0.5=0.25
-    assert_nearly!(0.25, h.read_poly("out_left")[0]);
-    assert_nearly!(0.25, h.read_poly("out_right")[0]);
-}
-
-#[test]
-fn stereo_poly_mixer_mute_solo_correct() {
-    let mut h = ModuleHarness::build_full::<StereoPolyMixer>(&[], env(), shape(2));
-    h.update_params_map(&indexed_params(&[("solo", 0, ParameterValue::Bool(true))]));
-    let mut a = [0.0f32; 16]; a[0] = 0.4;
-    let mut b = [0.0f32; 16]; b[0] = 0.6;
-    h.set_poly_at("in", 0, a);
-    h.set_poly_at("in", 1, b);
-    h.tick();
-    // ch0 soloed at centre pan → out_left[0] = 0.4*0.5 = 0.2
-    assert_nearly!(0.2, h.read_poly("out_left")[0]);
-    assert_nearly!(0.2, h.read_poly("out_right")[0]);
 }

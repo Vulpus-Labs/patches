@@ -400,7 +400,7 @@ fn stereo_bus_to_side_selector_is_an_error() {
 fn stereo_wrapping_explicit_multi_channel_rejected() {
     assert_expand_err_contains(
         "patch {
-            stereo module x : Mixer(channels: 8)
+            stereo module x : Sum(channels: 8)
             module out : AudioOut
             x.out -> out.in
         }",
