@@ -24,6 +24,7 @@ pub mod poly_sum;
 pub mod poly_osc;
 pub mod poly_to_mono;
 pub mod poly_vca;
+pub mod stereo;
 pub mod stereo_sum;
 pub mod sum;
 pub mod vca;
@@ -92,6 +93,7 @@ pub use poly_sum::PolySum;
 pub use poly_osc::PolyOsc;
 pub use poly_to_mono::PolyToMono;
 pub use poly_vca::PolyVca;
+pub use stereo::{Balance, MidSide, MonoBass, Pan, StereoWidth};
 pub use stereo_sum::StereoSum;
 pub use sum::Sum;
 pub use vca::Vca;
@@ -165,6 +167,11 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<PolyVca>();
     r.register::<PolySum>();
     r.register::<StereoSum>();
+    r.register::<Pan>();
+    r.register::<Balance>();
+    r.register::<StereoWidth>();
+    r.register::<MidSide>();
+    r.register::<MonoBass>();
     r.register::<PolyToMono>();
     r.register::<MonoToPoly>();
     r.register::<Console>();
@@ -251,6 +258,11 @@ mod tests {
             "PolyVca",
             "PolySum",
             "StereoSum",
+            "Pan",
+            "Balance",
+            "StereoWidth",
+            "MidSide",
+            "MonoBass",
             "PolyToMono",
             "MonoToPoly",
             "PolyLowpass",

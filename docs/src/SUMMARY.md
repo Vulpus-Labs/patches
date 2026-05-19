@@ -50,6 +50,7 @@
   - [Delays & reverb](modules/delays.md)
   - [Dynamics](modules/dynamics.md)
   - [Detectors](modules/detectors.md)
+  - [Stereo utilities](modules/stereo.md)
   - [Utilities](modules/utilities.md)
   - [Output](modules/output.md)
 
