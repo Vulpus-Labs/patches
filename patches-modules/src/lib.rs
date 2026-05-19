@@ -64,6 +64,8 @@ pub mod ms_ticker;
 pub mod trigger_sync_conv;
 pub mod tap;
 pub mod host_control;
+pub mod dc_blocker;
+pub mod comb;
 
 pub use adsr::Adsr;
 pub use console::Console;
@@ -131,6 +133,8 @@ pub use ms_ticker::MsTicker;
 pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
 pub use tap::{Tap, TapKind};
 pub use host_control::{HostControl, HostControlKind};
+pub use dc_blocker::DcBlocker;
+pub use comb::{Comb, CombMode};
 
 pub fn default_registry() -> patches_core::registry::Registry {
     let mut r = patches_core::registry::Registry::new();
@@ -212,6 +216,8 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<SyncToTrigger>();
     r.register::<Tap>();
     r.register::<HostControl>();
+    r.register::<DcBlocker>();
+    r.register::<Comb>();
     // The stdlib bundles (patches-vintage, patches-drums,
     // patches-fft-bundle — all shipped from the patches-bundles
     // repo) are not in the default registry. Hosts load their
@@ -302,6 +308,8 @@ mod tests {
             "TransientShaper",
             "TempoSync",
             "MsTicker",
+            "DcBlocker",
+            "Comb",
         ] {
             assert!(
                 r.create(name, &env, &shape, &params, &patches_core::StructuralParams::new(), InstanceId::next()).is_ok(),

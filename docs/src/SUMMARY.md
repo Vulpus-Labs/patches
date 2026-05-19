@@ -52,6 +52,7 @@
   - [Detectors](modules/detectors.md)
   - [Stereo utilities](modules/stereo.md)
   - [Utilities](modules/utilities.md)
+  - [Primitives](modules/primitives.md)
   - [Output](modules/output.md)
 
 # Extending Patches

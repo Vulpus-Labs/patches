@@ -19,4 +19,5 @@ Each module type is documented with its ports, parameters, and behaviour. The ca
 | [Detectors](detectors.md)            | `AudioToTrigger`, `PolyAudioToTrigger`, `AudioToGate`, `PolyAudioToGate`                                  | Audio → sub-sample triggers / gates      |
 | [Stereo utilities](stereo.md)        | `Pan`, `Balance`, `StereoWidth`, `MidSide`, `MonoBass`                                                    | Stereo image control                     |
 | [Utilities](utilities.md)            | `Glide`, `Tuner`, `PolyTuner`, `Quant`, `PolyQuant`, `Sah`, `PolySah`, `MonoToPoly`, `PolyToMono`         | Conversion, smoothing, quantisation      |
+| [Primitives](primitives.md)          | `DcBlocker`, `Comb`                                                                                       | Small reusable DSP building blocks       |
 | [Output](output.md)                  | `AudioOut`, `AudioIn`, `HostTransport`                                                                    | Audio I/O and host transport             |
