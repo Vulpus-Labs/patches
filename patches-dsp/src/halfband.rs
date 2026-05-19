@@ -21,6 +21,7 @@ pub struct HalfbandFir {
     taps: Vec<f32>,
     delay: Vec<f32>,
     pos: usize,
+    mask: usize,
     centre: f32,
     midpoint_offset: usize,
 }
@@ -34,11 +35,13 @@ impl HalfbandFir {
     /// Construct a `HalfbandFir` with custom taps and centre coefficient.
     pub fn new(taps: Vec<f32>, centre: f32) -> Self {
         let taps_len = taps.len();
-        let len = taps_len * 4 + 2;
+        let min_len = taps_len * 4 + 2;
+        let len = min_len.next_power_of_two();
         Self {
             taps,
             delay: vec![0.0; len],
             pos: 0,
+            mask: len - 1,
             centre,
             midpoint_offset: len - (taps_len * 2),
         }
@@ -49,21 +52,21 @@ impl HalfbandFir {
     #[inline]
     pub fn process(&mut self, first: f32, second: f32) -> f32 {
         let n_taps = self.taps.len();
-        let delay_len = self.delay.len();
+        let mask = self.mask;
 
         let newest = self.push_sample(first);
         self.push_sample(second);
 
-        let center_idx = (newest + self.midpoint_offset) % delay_len;
+        let center_idx = (newest + self.midpoint_offset) & mask;
         let mut acc = self.centre * self.delay[center_idx];
 
-        let mut offset_r = (center_idx + 1) % delay_len;
-        let mut offset_l = (center_idx + delay_len - 1) % delay_len;
+        let mut offset_r = (center_idx + 1) & mask;
+        let mut offset_l = (center_idx + mask) & mask;
 
         for t in (0..n_taps).rev() {
             acc += self.taps[t] * (self.delay[offset_l] + self.delay[offset_r]);
-            offset_r = (offset_r + 2) % delay_len;
-            offset_l = (offset_l + delay_len - 2) % delay_len;
+            offset_r = (offset_r + 2) & mask;
+            offset_l = (offset_l + mask - 1) & mask;
         }
 
         acc
@@ -81,25 +84,27 @@ impl Default for HalfbandFir {
 impl HalfbandFir {
     /// Push one sample into the delay line and evaluate the FIR, returning one output sample.
     ///
-    /// Used by [`HalfbandInterpolator`](crate::HalfbandInterpolator) to produce
-    /// one output per oversampled position (single-sample stride).
+    /// Test-only helper for extracting the raw FIR impulse response one sample
+    /// at a time. Not used by [`HalfbandInterpolator`], which factorises the
+    /// same kernel into polyphase form.
+    #[cfg(test)]
     #[inline]
     pub(crate) fn push_and_eval(&mut self, x: f32) -> f32 {
         let n_taps = self.taps.len();
-        let delay_len = self.delay.len();
+        let mask = self.mask;
 
         let newest = self.push_sample(x);
 
-        let center_idx = (newest + self.midpoint_offset) % delay_len;
+        let center_idx = (newest + self.midpoint_offset) & mask;
         let mut acc = self.centre * self.delay[center_idx];
 
-        let mut offset_r = (center_idx + 1) % delay_len;
-        let mut offset_l = (center_idx + delay_len - 1) % delay_len;
+        let mut offset_r = (center_idx + 1) & mask;
+        let mut offset_l = (center_idx + mask) & mask;
 
         for t in (0..n_taps).rev() {
             acc += self.taps[t] * (self.delay[offset_l] + self.delay[offset_r]);
-            offset_r = (offset_r + 2) % delay_len;
-            offset_l = (offset_l + delay_len - 2) % delay_len;
+            offset_r = (offset_r + 2) & mask;
+            offset_l = (offset_l + mask - 1) & mask;
         }
 
         acc
@@ -110,10 +115,7 @@ impl HalfbandFir {
     pub(crate) fn push_sample(&mut self, x: f32) -> usize {
         let idx = self.pos;
         self.delay[idx] = x;
-        self.pos += 1;
-        if self.pos == self.delay.len() {
-            self.pos = 0;
-        }
+        self.pos = (self.pos + 1) & self.mask;
         idx
     }
 }

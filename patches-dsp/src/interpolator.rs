@@ -1,19 +1,30 @@
-use crate::HalfbandFir;
+use crate::halfband::{HalfbandFir, DEFAULT_CENTRE, DEFAULT_TAPS};
 
-/// 2× halfband FIR interpolator.
+/// 2× halfband FIR interpolator (polyphase form).
 ///
-/// Given one base-rate input sample it produces two oversampled output samples
-/// via zero-insertion followed by the halfband FIR low-pass filter. Both outputs
-/// are scaled by 2.0 to compensate for the 0.5× gain introduced by zero-insertion.
+/// Given one base-rate input sample, produces two oversampled output samples.
+/// The default 33-tap halfband FIR factorises into two polyphase branches:
+/// one trivial (centre tap only, since all even off-centre halfband taps are
+/// zero) and one with the 8 non-zero off-centre tap pairs. This avoids the
+/// per-sample work that the equivalent zero-insertion form spends multiplying
+/// by zero.
 ///
 /// # Group delay
 ///
-/// The same filter kernel as `HalfbandFir` is used, so the group delay is
-/// [`GROUP_DELAY_OVERSAMPLED`](HalfbandInterpolator::GROUP_DELAY_OVERSAMPLED) samples
-/// at the oversampled rate, or
-/// [`GROUP_DELAY_BASE_RATE`](HalfbandInterpolator::GROUP_DELAY_BASE_RATE) at base rate.
+/// Group delay matches the underlying FIR:
+/// [`GROUP_DELAY_OVERSAMPLED`](HalfbandInterpolator::GROUP_DELAY_OVERSAMPLED) at
+/// the oversampled rate, [`GROUP_DELAY_BASE_RATE`](HalfbandInterpolator::GROUP_DELAY_BASE_RATE)
+/// at base rate.
 pub struct HalfbandInterpolator {
-    fir: HalfbandFir,
+    // Symmetric off-centre taps (8 pairs, halfband property). Stored × 2 to fold
+    // in the zero-insertion gain compensation.
+    taps_scaled: [f32; 8],
+    // Centre tap × 2 (also folded gain compensation).
+    centre_scaled: f32,
+    // Ring of the most recent 16 base-rate input samples.
+    ring: [f32; Self::RING_LEN],
+    // Write position (index of slot just written by the most recent push).
+    pos: usize,
 }
 
 impl HalfbandInterpolator {
@@ -23,18 +34,34 @@ impl HalfbandInterpolator {
     /// Group delay in base-rate samples (`GROUP_DELAY_OVERSAMPLED / 2`).
     pub const GROUP_DELAY_BASE_RATE: usize = HalfbandFir::GROUP_DELAY_OVERSAMPLED / 2;
 
-    /// Construct with a custom `HalfbandFir` kernel.
-    pub fn new(fir: HalfbandFir) -> Self {
-        Self { fir }
+    const N_TAPS: usize = 8;
+    const RING_LEN: usize = 16;
+    const RING_MASK: usize = Self::RING_LEN - 1;
+
+    /// Construct from raw halfband coefficients.
+    ///
+    /// `taps` are the 8 non-zero off-centre tap values (farthest-to-nearest
+    /// from centre, same convention as [`DEFAULT_TAPS`]). `centre` is the
+    /// centre tap. Pre-scales both by 2.0 internally to fold in the
+    /// interpolator's zero-insertion gain compensation.
+    pub fn new(taps: &[f32; 8], centre: f32) -> Self {
+        let mut taps_scaled = [0.0_f32; 8];
+        for i in 0..8 {
+            taps_scaled[i] = taps[i] * 2.0;
+        }
+        Self {
+            taps_scaled,
+            centre_scaled: centre * 2.0,
+            ring: [0.0; Self::RING_LEN],
+            pos: 0,
+        }
     }
 }
 
 impl Default for HalfbandInterpolator {
     /// Construct with the default halfband coefficients.
     fn default() -> Self {
-        Self {
-            fir: HalfbandFir::default(),
-        }
+        Self::new(&DEFAULT_TAPS, DEFAULT_CENTRE)
     }
 }
 
@@ -46,10 +73,30 @@ impl HalfbandInterpolator {
     /// position. Both are scaled by 2.0 to maintain unity gain at DC.
     #[inline]
     pub fn process(&mut self, x: f32) -> [f32; 2] {
-        // Zero-insertion interpolation: push x then 0, evaluate FIR at each position.
-        let a = self.fir.push_and_eval(x);
-        let b = self.fir.push_and_eval(0.0);
-        [a * 2.0, b * 2.0]
+        // Push x onto the ring.
+        self.pos = (self.pos + 1) & Self::RING_MASK;
+        self.ring[self.pos] = x;
+
+        // Even-position branch: only the centre tap is non-zero (halfband
+        // property). The centre tap aligns 8 base-rate samples in the past.
+        let centre_idx = self.pos.wrapping_sub(Self::GROUP_DELAY_BASE_RATE) & Self::RING_MASK;
+        let a = self.centre_scaled * self.ring[centre_idx];
+
+        // Odd-position branch: convolution against the 8 non-zero off-centre
+        // tap pairs. `taps_scaled[t]` is the tap at distance ±(2t+1) from the
+        // FIR centre; in base-rate samples that pairs ring[pos - t] with
+        // ring[pos - (15 - t)].
+        let pos = self.pos;
+        let r = &self.ring;
+        let h = &self.taps_scaled;
+        let mut b = 0.0_f32;
+        for t in 0..Self::N_TAPS {
+            let near = r[pos.wrapping_sub(t) & Self::RING_MASK];
+            let far  = r[pos.wrapping_sub(15 - t) & Self::RING_MASK];
+            b += h[t] * (near + far);
+        }
+
+        [a, b]
     }
 }
 

@@ -209,23 +209,23 @@ impl Module for MasterSequencer {
         };
 
         if self.core.emit_stop_sentinel {
-            for i in 0..self.core.channels {
-                let mut bus = [0.0_f32; 16];
-                bus[1] = -1.0;
-                bus[2] = 1.0;
-                pool.write_poly(&self.clock_out[i], bus);
+            let mut bus = [0.0_f32; 16];
+            bus[1] = -1.0;
+            bus[2] = 1.0;
+            for out in &self.clock_out {
+                pool.write_poly(out, bus);
             }
             self.core.emit_stop_sentinel = false;
         } else {
-            for i in 0..self.core.channels {
-                let mut bus = [0.0_f32; 16];
-                bus[0] = if result.reset_fired { 1.0 } else { 0.0 };
-                bus[1] = self.core.bank_indices.get(i).copied().unwrap_or(0.0);
-                bus[2] = if result.tick_fired { 1.0 } else { 0.0 };
-                bus[3] = result.tick_duration_seconds;
-                bus[4] = self.core.pattern_step as f32;
-                bus[5] = self.core.step_fraction;
-                pool.write_poly(&self.clock_out[i], bus);
+            let mut bus = [0.0_f32; 16];
+            bus[0] = if result.reset_fired { 1.0 } else { 0.0 };
+            bus[2] = if result.tick_fired { 1.0 } else { 0.0 };
+            bus[3] = result.tick_duration_seconds;
+            bus[4] = self.core.pattern_step as f32;
+            bus[5] = self.core.step_fraction;
+            for (i, out) in self.clock_out.iter().enumerate() {
+                bus[1] = self.core.bank_indices[i];
+                pool.write_poly(out, bus);
             }
         }
     }
@@ -267,6 +267,7 @@ impl MasterSequencer {
 impl ReceivesTrackerData for MasterSequencer {
     fn receive_tracker_data(&mut self, data: Arc<TrackerData>) {
         self.tracker_data = Some(data);
+        self.core.bank_indices_dirty = true;
     }
 }
 

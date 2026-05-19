@@ -138,14 +138,18 @@ impl Module for PatternPlayer {
             if self.cv2_out[ch].connected {
                 pool.write_mono(&self.cv2_out[ch], self.core.cv2[ch]);
             }
-            pool.write_mono(
-                &self.trigger_out[ch],
-                if self.core.trigger_pending[ch] { 1.0 } else { 0.0 },
-            );
-            pool.write_mono(
-                &self.gate_out[ch],
-                if self.core.gate[ch] { 1.0 } else { 0.0 },
-            );
+            if self.trigger_out[ch].connected {
+                pool.write_mono(
+                    &self.trigger_out[ch],
+                    if self.core.trigger_pending[ch] { 1.0 } else { 0.0 },
+                );
+            }
+            if self.gate_out[ch].connected {
+                pool.write_mono(
+                    &self.gate_out[ch],
+                    if self.core.gate[ch] { 1.0 } else { 0.0 },
+                );
+            }
         }
     }
 

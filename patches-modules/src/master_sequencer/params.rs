@@ -35,7 +35,7 @@ impl MasterSequencer {
         self.core.bpm = p.get(params::bpm);
         self.core.rows_per_beat = p.get(params::rows_per_beat);
         let song = p.get(params::song);
-        self.core.song_index = if song < 0 { None } else { Some(song as usize) };
+        self.core.set_song(if song < 0 { None } else { Some(song as usize) });
         self.core.do_loop = p.get(params_extra::LOOP);
         let autostart = p.get(params::autostart);
         self.autostart = autostart;

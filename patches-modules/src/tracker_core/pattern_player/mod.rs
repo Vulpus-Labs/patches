@@ -57,6 +57,18 @@ pub struct PatternPlayerCore {
     pub prev_tick_trigger: f32,
     /// Current active pattern bank index (set on the most recent tick edge).
     pub current_bank_index: Option<usize>,
+
+    /// Number of channels with `slide_active = true`. Lets the inter-tick
+    /// advance loop short-circuit when no channel needs slide interpolation.
+    pub slide_active_count: usize,
+    /// Number of channels with `repeat_active = true` and sub-triggers
+    /// still pending. Lets the inter-tick loop short-circuit when no
+    /// channel has unfired repeats.
+    pub repeat_active_count: usize,
+    /// Any `trigger_pending[ch]` is true and must be cleared on the next
+    /// sample. Avoids per-sample writes to a vector that is overwhelmingly
+    /// all-`false`.
+    pub trigger_clear_needed: bool,
 }
 
 impl PatternPlayerCore {
@@ -86,6 +98,9 @@ impl PatternPlayerCore {
             current_tick_duration_samples: 0.0,
             prev_tick_trigger: 0.0,
             current_bank_index: None,
+            slide_active_count: 0,
+            repeat_active_count: 0,
+            trigger_clear_needed: false,
         }
     }
 
@@ -103,6 +118,9 @@ impl PatternPlayerCore {
             self.repeat_gate_off_at[i] = f32::MAX;
         }
         self.stopped = true;
+        self.slide_active_count = 0;
+        self.repeat_active_count = 0;
+        self.trigger_clear_needed = false;
     }
 
     /// Apply one step event for a single channel.
@@ -241,12 +259,36 @@ impl PatternPlayerCore {
 
             let step_index = frame.step_index.round() as usize;
             let step_fraction = frame.step_fraction;
-            for i in 0..self.channels {
-                self.step_index[i] = step_index;
-            }
             for ch in 0..self.channels {
+                self.step_index[ch] = step_index;
                 self.apply_step(ch, bank_index, step_fraction, tracker);
             }
+
+            // Rebuild activity counts from the per-channel flags settled by
+            // apply_step. A channel's repeat is "done" if its index has
+            // already caught up with its count (can happen when entering
+            // mid-step with `step_fraction` near 1.0).
+            let mut slide_count = 0;
+            let mut repeat_count = 0;
+            let mut any_trigger = false;
+            for ch in 0..self.channels {
+                if self.slide_active[ch] {
+                    slide_count += 1;
+                }
+                if self.repeat_active[ch] {
+                    if self.repeat_index[ch] >= self.repeat_count[ch] {
+                        self.repeat_active[ch] = false;
+                    } else {
+                        repeat_count += 1;
+                    }
+                }
+                if self.trigger_pending[ch] {
+                    any_trigger = true;
+                }
+            }
+            self.slide_active_count = slide_count;
+            self.repeat_active_count = repeat_count;
+            self.trigger_clear_needed = any_trigger;
             return;
         }
 
@@ -254,23 +296,41 @@ impl PatternPlayerCore {
             return;
         }
 
-        for ch in 0..self.channels {
-            self.trigger_pending[ch] = false;
+        if self.trigger_clear_needed {
+            for ch in 0..self.channels {
+                self.trigger_pending[ch] = false;
+            }
+            self.trigger_clear_needed = false;
+        }
 
+        if self.slide_active_count == 0 && self.repeat_active_count == 0 {
+            return;
+        }
+
+        for ch in 0..self.channels {
             if self.slide_active[ch] {
                 self.slide_samples_elapsed[ch] += 1.0;
-                let t = if self.slide_samples_total[ch] > 0.0 {
-                    (self.slide_samples_elapsed[ch] / self.slide_samples_total[ch]).min(1.0)
+                let total = self.slide_samples_total[ch];
+                if total > 0.0 && self.slide_samples_elapsed[ch] >= total {
+                    // Slide complete: snap to end values, deactivate.
+                    self.cv1[ch] = self.slide_cv1_end[ch];
+                    self.cv2[ch] = self.slide_cv2_end[ch];
+                    self.slide_active[ch] = false;
+                    self.slide_active_count -= 1;
                 } else {
-                    1.0
-                };
-                self.cv1[ch] = self.slide_cv1_start[ch]
-                    + t * (self.slide_cv1_end[ch] - self.slide_cv1_start[ch]);
-                self.cv2[ch] = self.slide_cv2_start[ch]
-                    + t * (self.slide_cv2_end[ch] - self.slide_cv2_start[ch]);
+                    let t = if total > 0.0 {
+                        self.slide_samples_elapsed[ch] / total
+                    } else {
+                        1.0
+                    };
+                    self.cv1[ch] = self.slide_cv1_start[ch]
+                        + t * (self.slide_cv1_end[ch] - self.slide_cv1_start[ch]);
+                    self.cv2[ch] = self.slide_cv2_start[ch]
+                        + t * (self.slide_cv2_end[ch] - self.slide_cv2_start[ch]);
+                }
             }
 
-            if self.repeat_active[ch] && self.repeat_index[ch] < self.repeat_count[ch] {
+            if self.repeat_active[ch] {
                 self.repeat_samples_elapsed[ch] += 1.0;
                 let elapsed = self.repeat_samples_elapsed[ch];
 
@@ -282,10 +342,15 @@ impl PatternPlayerCore {
                     self.repeat_interval_samples[ch] * self.repeat_index[ch] as f32;
                 if elapsed >= next_trigger_at {
                     self.trigger_pending[ch] = true;
+                    self.trigger_clear_needed = true;
                     self.gate[ch] = true;
                     self.repeat_index[ch] += 1;
                     let interval = self.repeat_interval_samples[ch];
                     self.repeat_gate_off_at[ch] = next_trigger_at + interval * 0.8;
+                    if self.repeat_index[ch] >= self.repeat_count[ch] {
+                        self.repeat_active[ch] = false;
+                        self.repeat_active_count -= 1;
+                    }
                 }
             }
         }

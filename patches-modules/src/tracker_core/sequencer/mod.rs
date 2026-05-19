@@ -86,6 +86,12 @@ pub struct SequencerCore {
     /// Per-channel pattern-bank index for the current song row.
     pub bank_indices: Vec<f32>,
 
+    /// Set whenever `bank_indices` is out of date with respect to the current
+    /// `song_index` / `song_row` / tracker data. Cleared after the next fill.
+    /// Lets `tick_free` / `tick_host` skip the per-sample refill on the
+    /// (overwhelming) majority of samples where the row hasn't changed.
+    pub bank_indices_dirty: bool,
+
     // Free-run rising-edge detection.
     pub prev_start: f32,
     pub prev_stop: f32,
@@ -117,6 +123,7 @@ impl SequencerCore {
             song_ended: false,
             emit_stop_sentinel: false,
             bank_indices: vec![0.0; channels],
+            bank_indices_dirty: true,
             prev_start: 0.0,
             prev_stop: 0.0,
             prev_pause: 0.0,
@@ -133,6 +140,7 @@ impl SequencerCore {
 
     pub fn set_song(&mut self, song_index: Option<usize>) {
         self.song_index = song_index;
+        self.bank_indices_dirty = true;
     }
 
     pub fn set_loop(&mut self, do_loop: bool) {
@@ -149,6 +157,7 @@ impl SequencerCore {
         self.song_ended = false;
         self.emit_stop_sentinel = false;
         self.samples_until_tick = 0.0;
+        self.bank_indices_dirty = true;
     }
 
     /// Start (or restart) free-run playback from the song's beginning.
@@ -200,6 +209,7 @@ impl SequencerCore {
             self.pattern_step = 0;
             self.song_row += 1;
             self.pattern_just_reset = true;
+            self.bank_indices_dirty = true;
 
             if self.song_row >= song.order.len() {
                 if self.do_loop {
@@ -298,9 +308,6 @@ impl SequencerCore {
             tick_duration_seconds: self.base_tick_seconds(),
         };
         self.step_fraction = 0.0;
-        for v in &mut self.bank_indices {
-            *v = 0.0;
-        }
 
         let start_rose = edges.start >= 0.5 && self.prev_start < 0.5;
         let stop_rose = edges.stop >= 0.5 && self.prev_stop < 0.5;
@@ -341,23 +348,20 @@ impl SequencerCore {
             self.first_tick = false;
             result.tick_duration_seconds = self.tick_duration_seconds(self.global_step);
             self.samples_until_tick = self.tick_duration_samples(self.global_step);
-            self.fill_bank_indices(tracker);
-            return result;
-        }
-
-        self.samples_until_tick -= 1.0;
-
-        if self.samples_until_tick <= 0.0 {
-            if self.advance_step(tracker) {
+        } else {
+            self.samples_until_tick -= 1.0;
+            if self.samples_until_tick <= 0.0 && self.advance_step(tracker) {
                 result.tick_fired = true;
                 result.reset_fired = self.pattern_just_reset;
                 self.pattern_just_reset = false;
                 result.tick_duration_seconds = self.tick_duration_seconds(self.global_step);
                 self.samples_until_tick += self.tick_duration_samples(self.global_step);
-                self.fill_bank_indices(tracker);
             }
-        } else {
+        }
+
+        if self.bank_indices_dirty {
             self.fill_bank_indices(tracker);
+            self.bank_indices_dirty = false;
         }
 
         result
@@ -376,9 +380,6 @@ impl SequencerCore {
             tick_duration_seconds: self.base_tick_seconds(),
         };
         self.step_fraction = 0.0;
-        for v in &mut self.bank_indices {
-            *v = 0.0;
-        }
 
         let host_started = host.playing >= 0.5 && self.prev_host_playing < 0.5;
         let host_stopped = host.playing < 0.5 && self.prev_host_playing >= 0.5;
@@ -389,6 +390,7 @@ impl SequencerCore {
             self.first_tick = true;
             self.song_ended = false;
             self.emit_stop_sentinel = false;
+            self.bank_indices_dirty = true;
         }
         if host_stopped {
             self.state = TransportState::Paused;
@@ -415,6 +417,7 @@ impl SequencerCore {
             self.song_ended = true;
             self.emit_stop_sentinel = true;
             self.fill_bank_indices(tracker);
+            self.bank_indices_dirty = false;
             return result;
         };
 
@@ -439,15 +442,20 @@ impl SequencerCore {
             result.tick_fired = true;
             result.reset_fired = true;
             self.first_tick = false;
-            self.fill_bank_indices(tracker);
+            self.bank_indices_dirty = true;
         } else if step_changed {
             self.song_row = target_row;
             self.pattern_step = target_step;
             result.tick_fired = true;
             result.reset_fired = row_changed;
+            if row_changed {
+                self.bank_indices_dirty = true;
+            }
+        }
+
+        if self.bank_indices_dirty {
             self.fill_bank_indices(tracker);
-        } else {
-            self.fill_bank_indices(tracker);
+            self.bank_indices_dirty = false;
         }
 
         if host.tempo > 0.0 && pattern_len > 0 {
