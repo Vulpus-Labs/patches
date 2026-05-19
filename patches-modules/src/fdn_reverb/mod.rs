@@ -1,8 +1,8 @@
 //! FDN (Feedback Delay Network) reverb module.
 //!
 //! An 8-line FDN with Hadamard mixing matrix, per-line high-shelf absorption
-//! (MonoBiquad), Thiran all-pass interpolation for LFO-modulated delay reads,
-//! and stereo output via orthogonal output gain vectors.
+//! (MonoBiquad), linear interpolation for LFO-modulated delay reads, and
+//! stereo output via orthogonal output gain vectors.
 //!
 //! Defines [`FdnReverb`] (stereo in/out).
 //!
@@ -43,7 +43,7 @@ use patches_core::{InstanceId, ModuleDescriptor, MonoInput, StereoInput, StereoO
 use kernel::FdnReverbKernel;
 
 /// Stereo FDN reverb with 8 delay lines, Hadamard mixing, per-line high-shelf
-/// absorption, and Thiran all-pass interpolation for LFO-modulated reads.
+/// absorption, and linear interpolation for LFO-modulated reads.
 ///
 /// See [module-level documentation](self).
 pub struct FdnReverb {

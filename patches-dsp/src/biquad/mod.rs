@@ -89,6 +89,21 @@ impl MonoBiquad {
 
         y
     }
+
+    /// Like [`tick`] but skips the per-sample coefficient `advance()`.
+    ///
+    /// Use after [`set_static`] when no CV is driving coefficients (deltas
+    /// are zero); saves five adds per sample. Calling this after
+    /// [`begin_ramp`] would freeze the coefficient ramp.
+    #[inline]
+    pub fn tick_static(&mut self, x: f32, saturate: bool) -> f32 {
+        let c = &self.coefs.active;
+        let y = c[B0] * x + self.s1;
+        let fb = if saturate { fast_tanh(y) } else { y };
+        self.s1 = crate::flush_denormal(c[B1] * x - c[A1] * fb + self.s2);
+        self.s2 = crate::flush_denormal(c[B2] * x - c[A2] * fb);
+        y
+    }
 }
 
 /// 16-voice polyphonic biquad kernel (Transposed Direct Form II) with

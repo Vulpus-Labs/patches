@@ -10,11 +10,11 @@ use patches_core::AudioEnvironment;
 use patches_dsp::MonoBiquad;
 
 use crate::common::approximate::fast_sine;
-use crate::common::delay_buffer::{DelayBuffer, ThiranInterp};
+use crate::common::delay_buffer::DelayBuffer;
 use crate::common::phase_accumulator::MonoPhaseAccumulator;
 
 use super::line::{absorption_coeffs, BASE_MS};
-use super::matrix::{hadamard8, INV_SQRT8, LINES, OUT_L, OUT_R};
+use super::matrix::{hadamard8, INV_SQRT8, LINES};
 use super::params::{derive_params, ScaledCharacter, CHARS, MAX_LINE_SECS, MAX_PRE_DELAY_SECS};
 
 pub(super) struct FdnReverbKernel {
@@ -25,7 +25,6 @@ pub(super) struct FdnReverbKernel {
     pub(super) character: usize,
 
     pub(super) delays: [DelayBuffer; LINES],
-    pub(super) thiran: [ThiranInterp; LINES],
     pub(super) absorption: [MonoBiquad; LINES],
     pub(super) lfo_phases: [MonoPhaseAccumulator; LINES],
     pub(super) pre_l: DelayBuffer,
@@ -34,6 +33,10 @@ pub(super) struct FdnReverbKernel {
     pub(super) sc: ScaledCharacter,
 
     pub(super) absorption_dirty: bool,
+    /// True while absorption biquads are running an active coefficient ramp
+    /// (CV driving size/brightness). When false, `tick_static` is used and
+    /// the per-sample `advance()` of zero deltas is skipped.
+    pub(super) absorption_ramping: bool,
     pub(super) cached_scale: f32,
     pub(super) last_eff_size: f32,
     pub(super) last_eff_bright: f32,
@@ -52,7 +55,6 @@ impl FdnReverbKernel {
         });
 
         let delays = std::array::from_fn(|_| DelayBuffer::for_duration(MAX_LINE_SECS, sr));
-        let thiran = std::array::from_fn(|_| ThiranInterp::new());
 
         let pre_l = DelayBuffer::for_duration(MAX_PRE_DELAY_SECS, sr);
         let pre_r = DelayBuffer::for_duration(MAX_PRE_DELAY_SECS, sr);
@@ -71,13 +73,13 @@ impl FdnReverbKernel {
             interval_recip: 1.0 / env.periodic_update_interval as f32,
             character,
             delays,
-            thiran,
             absorption,
             lfo_phases,
             pre_l,
             pre_r,
             sc: ScaledCharacter::new(character, sr),
             absorption_dirty: false,
+            absorption_ramping: false,
             cached_scale: scale0,
             last_eff_size: 0.5,
             last_eff_bright: 0.5,
@@ -135,6 +137,7 @@ impl FdnReverbKernel {
         } else if cv_connected {
             self.recompute_absorption(eff_size, eff_bright);
         }
+        self.absorption_ramping = cv_connected;
     }
 
     /// One-sample DSP step. All inputs are already clamped to [0, 1] for the
@@ -171,18 +174,19 @@ impl FdnReverbKernel {
         let scale = self.cached_scale;
         let cap_max = self.delays[0].capacity() as f32 - 2.0;
 
-        let mut raw = [0.0_f32; LINES];
-        for (i, raw_i) in raw.iter_mut().enumerate() {
+        let mut damp = [0.0_f32; LINES];
+        let ramping = self.absorption_ramping;
+        for (i, damp_i) in damp.iter_mut().enumerate() {
             let lfo_val = fast_sine(self.lfo_phases[i].phase);
             self.lfo_phases[i].advance();
             let base_samp = self.sc.base_samps[i] * scale;
             let offset = (base_samp + self.sc.lfo_depth_samp * lfo_val).clamp(1.0, cap_max);
-            *raw_i = self.thiran[i].read(&self.delays[i], offset);
-        }
-
-        let mut damp = [0.0_f32; LINES];
-        for i in 0..LINES {
-            damp[i] = self.absorption[i].tick(raw[i], false);
+            let raw = self.delays[i].read_linear(offset);
+            *damp_i = if ramping {
+                self.absorption[i].tick(raw, false)
+            } else {
+                self.absorption[i].tick_static(raw, false)
+            };
         }
 
         let f = hadamard8(damp);
@@ -192,14 +196,15 @@ impl FdnReverbKernel {
             delay.push(INV_SQRT8 * inj + fi);
         }
 
+        // OUT_L pattern: + - + - + - + -  (× INV_SQRT8)
+        // OUT_R pattern: + + - - + + - -  (× INV_SQRT8)
+        // Fold INV_SQRT8 into the wet gain; the sums themselves are sign-only.
+        let wet_l_raw = (damp[0] - damp[1]) + (damp[2] - damp[3])
+                      + (damp[4] - damp[5]) + (damp[6] - damp[7]);
+        let wet_r_raw = (damp[0] + damp[1]) - (damp[2] + damp[3])
+                      + (damp[4] + damp[5]) - (damp[6] + damp[7]);
         let dry = 1.0 - eff_mix;
-        let wet = eff_mix;
-        let mut wet_l = 0.0_f32;
-        let mut wet_r = 0.0_f32;
-        for i in 0..LINES {
-            wet_l += OUT_L[i] * damp[i];
-            wet_r += OUT_R[i] * damp[i];
-        }
-        (dry * in_l + wet * wet_l, dry * in_r + wet * wet_r)
+        let wet_g = eff_mix * INV_SQRT8;
+        (dry * in_l + wet_g * wet_l_raw, dry * in_r + wet_g * wet_r_raw)
     }
 }

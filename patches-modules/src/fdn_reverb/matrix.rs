@@ -3,17 +3,13 @@
 pub(super) const LINES: usize = 8;
 
 /// 1/√8.
+///
+/// Stereo output is summed using orthogonal sign patterns, each element ±1/√8:
+///   OUT_L: + − + − + − + −
+///   OUT_R: + + − − + + − −
+/// The kernel emits these as sign-only adds, folding `INV_SQRT8` into the
+/// wet gain — see `process_sample`.
 pub(super) const INV_SQRT8: f32 = 0.353_553_4_f32;
-
-/// Stereo output gain vectors (orthogonal sign patterns, each element ±1/√8).
-pub(super) const OUT_L: [f32; LINES] = [
-     INV_SQRT8, -INV_SQRT8,  INV_SQRT8, -INV_SQRT8,
-     INV_SQRT8, -INV_SQRT8,  INV_SQRT8, -INV_SQRT8,
-];
-pub(super) const OUT_R: [f32; LINES] = [
-     INV_SQRT8,  INV_SQRT8, -INV_SQRT8, -INV_SQRT8,
-     INV_SQRT8,  INV_SQRT8, -INV_SQRT8, -INV_SQRT8,
-];
 
 #[inline]
 pub(super) fn hadamard8(mut x: [f32; 8]) -> [f32; 8] {

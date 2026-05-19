@@ -16,8 +16,16 @@ path = "src/bin/bench.rs"
 name = "profile"
 path = "src/bin/profile.rs"
 
+[[bin]]
+name = "limiter_bench"
+path = "src/bin/limiter_bench.rs"
+
+[[bin]]
+name = "fdn_reverb_bench"
+path = "src/bin/fdn_reverb_bench.rs"
+
 [dependencies]
-patches-core        = { path = "../patches-core" }
+patches-core        = { path = "../patches-core", features = ["test-support"] }
 patches-dsl         = { path = "../patches-dsl" }
 patches-engine      = { path = "../patches-engine" }
 patches-planner     = { path = "../patches-planner" }
