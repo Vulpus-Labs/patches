@@ -92,14 +92,40 @@ mono/stereo.
 | Module                 | Ports                                       | Notes                                                                                           |
 | ---------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `AudioToTrigger`       | `in: mono`, `out: trigger`                  | Rising-edge detect with sub-sample interp; threshold + hysteresis + direction + cooldown params |
-| `StereoAudioToTrigger` | `in: stereo`, `out: trigger`                | Detector on `max(abs(L), abs(R))`; single trigger output                                        |
 | `PolyAudioToTrigger`   | `in: poly`, `out: poly trigger`             | Independent detector per channel                                                                |
 | `AudioToGate`          | `in: mono`, `out: mono` (gate convention)   | Sustained gate while `in > threshold` (with hysteresis)                                         |
-| `StereoAudioToGate`    | `in: stereo`, `out: mono` (gate convention) | Linked detector; single gate output                                                             |
 | `PolyAudioToGate`      | `in: poly`, `out: poly` (gate convention)   | Per-channel gate state                                                                          |
+
+**No stereo variants in either family.** The trigger family threshold-
+crosses the **instantaneous signed sample** (this is what makes the
+sub-sample interp formula `frac = (threshold - prev) / (curr - prev)`
+well-defined). The gate family — `AudioToGate` — uses the same signed
+comparison (`signal > threshold`) so its mono semantics agree with the
+trigger family at oscillator rate. There is no consistent way to
+collapse two signed streams to one for either purpose: `(L + R) / 2`
+cancels antiphase content; `max(|L|, |R|)` is rectified magnitude (not a
+signed value, contradicting the mono semantics — a stereo gate keyed off
+`max(|L|, |R|)` would behave as "envelope above threshold", a different
+operation from the mono gate's signed schmitt at the same threshold);
+and per-channel detection contradicts a single output. A patch needing
+a stereo-bus gate or trigger derives it from per-channel detector
+instances fed by `StereoSplitter`, or from a dedicated stereo
+magnitude-summariser (peak / RMS over both channels) whose mono output
+feeds an `AudioToGate` when envelope semantics are wanted. The
+`StereoCompressor` / `StereoGate` dynamics modules can use `max(|L|, |R|)`
+linking precisely because their detector is *already* a rectified
+magnitude (envelope-following), so the linking matches their mono
+counterpart's semantics; the trigger/gate detectors compare signed
+samples, so the same trick would change their semantics.
 
 Edge detector design:
 
+- **What is detected.** A threshold-crossing of the instantaneous
+  signed sample value, *not* envelope / magnitude / onset. Use cases:
+  clock recovery from oscillator-rate audio, sub-octave division,
+  feeding hard-sync from an arbitrary audio source (the ADR 0047
+  motivating case). Drum/transient onset detection is a different
+  problem (envelope follower → threshold) and is out of scope here.
 - **Fire condition.** `armed && prev <= threshold && curr > threshold`
   (rising direction; falling and bidirectional follow symmetrically).
 - **Sub-sample position.** `frac = (threshold - prev) / (curr - prev)`,
@@ -329,8 +355,11 @@ deliberately rather than by accident.
     proof point (or document why limiter does not get one).
   - `Compressor` / `StereoCompressor`.
   - `Gate` / `StereoGate`.
-  - `AudioToTrigger` / `StereoAudioToTrigger` / `PolyAudioToTrigger`.
-  - `AudioToGate` / `StereoAudioToGate` / `PolyAudioToGate`.
+  - `AudioToTrigger` / `PolyAudioToTrigger` (no stereo variant — see
+    "no stereo variants in either family" above).
+  - `AudioToGate` / `PolyAudioToGate` (no stereo variant — see
+    "no stereo variants in either family" above; a stereo peak/RMS
+    summariser module is a follow-up if the use case appears).
   - `Pan`, `Balance`, `StereoWidth`, `MidSide`, `MonoBass`.
   - `DcBlocker`, `Comb`.
   - Source-tree reorg: one ticket per target group directory.

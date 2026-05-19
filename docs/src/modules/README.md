@@ -16,5 +16,6 @@ Each module type is documented with its ports, parameters, and behaviour. The ca
 | [MIDI](midi.md)                      | `MidiToCv`, `PolyMidiToCv`, `MidiCC`, `MidiArp`, `MidiDelay`, `MidiSplit`, `MidiTranspose`, `MidiDrumset` | MIDI input and processing                |
 | [Delays & reverb](delays.md)         | `Delay`, `StereoDelay`, `FdnReverb`, `ConvReverb`, `StereoConvReverb`                                     | Delay and reverb                         |
 | [Dynamics](dynamics.md)              | `Limiter`, `StereoLimiter`, `Bitcrusher`, `Drive`, `TransientShaper`, `RingMod`, `PitchShift`             | Dynamics and nonlinear effects           |
+| [Detectors](detectors.md)            | `AudioToTrigger`, `PolyAudioToTrigger`, `AudioToGate`, `PolyAudioToGate`                                  | Audio → sub-sample triggers / gates      |
 | [Utilities](utilities.md)            | `Glide`, `Tuner`, `PolyTuner`, `Quant`, `PolyQuant`, `Sah`, `PolySah`, `MonoToPoly`, `PolyToMono`         | Conversion, smoothing, quantisation      |
 | [Output](output.md)                  | `AudioOut`, `AudioIn`, `HostTransport`                                                                    | Audio I/O and host transport             |

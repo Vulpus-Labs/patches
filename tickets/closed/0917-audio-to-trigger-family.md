@@ -1,6 +1,6 @@
 ---
 id: "0917"
-title: AudioToTrigger (mono / stereo / poly)
+title: AudioToTrigger (mono / poly)
 priority: medium
 created: 2026-05-18
 epic: E151
@@ -8,10 +8,15 @@ epic: E151
 
 ## Summary
 
-Edge detector that converts an audio signal into ADR 0047 sub-sample
-sync events. Fire condition is `armed && prev <= threshold &&
-curr > threshold` for the rising direction (falling and bidirectional
-follow symmetrically). Sub-sample fraction
+Threshold-crossing detector that converts an audio signal's
+**instantaneous signed sample value** into ADR 0047 sub-sample sync
+events. Use case is clock recovery, sub-octave division, and feeding
+hard-sync from arbitrary audio — *not* envelope / onset / transient
+detection.
+
+Fire condition is `armed && prev <= threshold && curr > threshold`
+for the rising direction (falling and bidirectional follow
+symmetrically). Sub-sample fraction
 `frac = (threshold - prev) / (curr - prev)` is the ADR 0047 event
 fraction. The fire threshold is `threshold`, never
 `threshold - hysteresis`.
@@ -22,22 +27,24 @@ the rising direction requires `signal < threshold - hysteresis`.
 this at the interp line and in the module doc comment so a future
 reader does not "fix" the asymmetry.
 
-Stereo variant detects on `max(|L|, |R|)`. Poly variant runs an
-independent detector per channel.
+Poly variant runs an independent detector per channel. There is no
+stereo variant: collapsing two signed signal streams to a single
+threshold-crossing detector has no consistent meaning — see ADR 0076,
+"No stereo trigger detector."
 
 ## Parameters
 
-| Name | Type | Range | Default | Description |
-|------|------|-------|---------|-------------|
-| `threshold` | float | −60..0 dB or linear 0..1 | `-12` dB | Fire threshold |
-| `hysteresis` | float | 0..24 dB | `3` | Re-arm band |
-| `direction` | enum | `rising` / `falling` / `both` | `rising` | Edge polarity |
-| `cooldown` | float | 0..1000 ms | `0` | Debounce after fire |
+| Name         | Type   | Range                         | Default   | Description         |
+| ------------ | ------ | ----------------------------- | --------- | ------------------- |
+| `threshold`  | float  | −60..0 dB or linear 0..1      | `-12` dB  | Fire threshold      |
+| `hysteresis` | float  | 0..24 dB                      | `3`       | Re-arm band         |
+| `direction`  | enum   | `rising` / `falling` / `both` | `rising`  | Edge polarity       |
+| `cooldown`   | float  | 0..1000 ms                    | `0`       | Debounce after fire |
 
 ## Acceptance criteria
 
-- [ ] `AudioToTrigger`, `StereoAudioToTrigger`, `PolyAudioToTrigger`
-      registered; descriptors per ADR 0076.
+- [ ] `AudioToTrigger` and `PolyAudioToTrigger` registered; descriptors
+      per ADR 0076.
 - [ ] Kernel test: linear interpolant — synthetic signal crossing
       threshold mid-sample produces an event with the analytically
       correct fraction within `1e-6`.
@@ -51,8 +58,7 @@ independent detector per channel.
       `threshold + hysteresis` (the symmetric trap).
 - [ ] Surface test: `direction` parameter selects the right kernel
       branch.
-- [ ] Stereo / poly surface test: descriptor shape and per-channel
-      independence for the poly variant.
+- [ ] Poly surface test: descriptor shape and per-channel independence.
 - [ ] Manual page added under `docs/src/modules/`.
 - [ ] `just commit -p patches-modules` green.
 
