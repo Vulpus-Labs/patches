@@ -18,6 +18,7 @@ use patches_core::{
     ModuleDescriptor, ModuleDescriptorTemplate, MonoInput, OutputPort, ParameterKind,
     ParameterTemplate, PolyOutput, PortTemplate, StereoInput, TAP_BASE, TAP_SLOTS,
 };
+const LANES_PER_SLOT: usize = 16;
 use patches_core::{StructuralParams, BuildError};
 use patches_core::param_frame::ParamView;
 use patches_core::params::{EnumParamArray, IntParamArray};
@@ -50,6 +51,18 @@ params_enum! {
 /// |------|------|-------|---------|-------------|
 /// | `slot_offset[i]` | int | 0..MAX_TAPS-1 | `0` | Backplane slot per channel |
 /// | `kind[i]` | enum | mono/stereo/trigger | `mono` | Which input port is wired |
+/// Cached action emitted into one of the `TAP_SLOTS` slot frames.
+enum SlotAction {
+    Mono { channel: u16, lane: u8 },
+    Trigger { channel: u16, lane: u8 },
+    /// Stereo channel whose `L` and `R` both fall inside this slot.
+    Stereo { channel: u16, lane_l: u8, lane_r: u8 },
+    /// Stereo channel straddling a slot boundary: only `L` lands here.
+    StereoLOnly { channel: u16, lane_l: u8 },
+    /// Stereo channel straddling a slot boundary: only `R` lands here.
+    StereoROnly { channel: u16, lane_r: u8 },
+}
+
 pub struct Tap {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
@@ -59,6 +72,8 @@ pub struct Tap {
     trigger_ports: Vec<MonoInput>,
     slot_offsets: Vec<usize>,
     kinds: Vec<TapKind>,
+    /// Per-slot action plan rebuilt on each param update.
+    slot_actions: [Vec<SlotAction>; TAP_SLOTS],
 }
 
 const SLOT_OFFSET: IntParamArray = IntParamArray::new("slot_offset");
@@ -106,6 +121,7 @@ impl Module for Tap {
         instance_id: InstanceId, _structural: &StructuralParams,
     ) -> Result<Self, BuildError> { Ok({
         let channels = descriptor.shape.channels;
+        let slot_actions = std::array::from_fn(|_| Vec::with_capacity(channels));
         Self {
             instance_id,
             descriptor,
@@ -115,6 +131,7 @@ impl Module for Tap {
             trigger_ports: vec![MonoInput::default(); channels],
             slot_offsets: vec![0; channels],
             kinds: vec![TapKind::Mono; channels],
+            slot_actions,
         }
     })}
 
@@ -125,6 +142,7 @@ impl Module for Tap {
             self.slot_offsets[i] = v.max(0) as usize;
             self.kinds[i] = params.get(kind_array.at(i as u16));
         }
+        self.rebuild_plan();
     }
 
     fn descriptor(&self) -> &ModuleDescriptor { &self.descriptor }
@@ -140,49 +158,116 @@ impl Module for Tap {
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
-        // Accumulate per-channel reads into a flat `[f32; MAX_TAPS]`
-        // lane buffer, then write the four `Poly` slots
-        // `TAP_BASE..TAP_BASE+TAP_SLOTS` in one go. Stereo channels
-        // claim two consecutive lanes (ADR 0059 §5); the planner
-        // allocator guarantees the second lane is reserved for this
-        // channel.
-        //
-        // Out-of-range slot offsets are silently ignored: the planner
-        // keeps slots in range, but a stale plan crossing a region
-        // shrink must not corrupt other backplane state.
-        let mut lanes = [0.0_f32; MAX_TAPS];
-        for i in 0..self.channels {
-            let slot = self.slot_offsets[i];
-            match self.kinds[i] {
-                TapKind::Mono => {
-                    if slot < MAX_TAPS {
-                        lanes[slot] = pool.read_mono(&self.mono_ports[i]);
+        // Per active slot, gather the cached actions into a 16-lane
+        // frame and write it to the backplane. Empty slots are skipped:
+        // a stale plan crossing a region shrink must not corrupt other
+        // backplane state, so we do not touch slots no channel targets.
+        for s in 0..TAP_SLOTS {
+            let actions = &self.slot_actions[s];
+            if actions.is_empty() {
+                continue;
+            }
+            let mut frame = [0.0_f32; LANES_PER_SLOT];
+            for a in actions {
+                match *a {
+                    SlotAction::Mono { channel, lane } => {
+                        frame[lane as usize] =
+                            pool.read_mono(&self.mono_ports[channel as usize]);
                     }
-                }
-                TapKind::Trigger => {
-                    if slot < MAX_TAPS {
-                        lanes[slot] = pool.read_mono(&self.trigger_ports[i]);
+                    SlotAction::Trigger { channel, lane } => {
+                        frame[lane as usize] =
+                            pool.read_mono(&self.trigger_ports[channel as usize]);
                     }
-                }
-                TapKind::Stereo => {
-                    let (l, r) = pool.read_stereo(&self.stereo_ports[i]);
-                    if slot < MAX_TAPS {
-                        lanes[slot] = l;
+                    SlotAction::Stereo { channel, lane_l, lane_r } => {
+                        let (l, r) = pool.read_stereo(&self.stereo_ports[channel as usize]);
+                        frame[lane_l as usize] = l;
+                        frame[lane_r as usize] = r;
                     }
-                    if slot + 1 < MAX_TAPS {
-                        lanes[slot + 1] = r;
+                    SlotAction::StereoLOnly { channel, lane_l } => {
+                        let (l, _) = pool.read_stereo(&self.stereo_ports[channel as usize]);
+                        frame[lane_l as usize] = l;
+                    }
+                    SlotAction::StereoROnly { channel, lane_r } => {
+                        let (_, r) = pool.read_stereo(&self.stereo_ports[channel as usize]);
+                        frame[lane_r as usize] = r;
                     }
                 }
             }
-        }
-        for i in 0..TAP_SLOTS {
-            let mut frame = [0.0_f32; 16];
-            frame.copy_from_slice(&lanes[i * 16..(i + 1) * 16]);
-            pool.write_poly(&PolyOutput::backplane(TAP_BASE + i), frame);
+            pool.write_poly(&PolyOutput::backplane(TAP_BASE + s), frame);
         }
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
+}
+
+impl Tap {
+    /// Recompute the per-slot action plan from the current
+    /// `slot_offsets` / `kinds` arrays. Called from
+    /// `update_validated_parameters`; never on the per-sample hot path.
+    fn rebuild_plan(&mut self) {
+        for v in &mut self.slot_actions {
+            v.clear();
+        }
+        for i in 0..self.channels {
+            let offset = self.slot_offsets[i];
+            let channel = i as u16;
+            match self.kinds[i] {
+                TapKind::Mono => {
+                    if offset < MAX_TAPS {
+                        let (slot, lane) = (offset / LANES_PER_SLOT, offset % LANES_PER_SLOT);
+                        self.slot_actions[slot].push(SlotAction::Mono {
+                            channel,
+                            lane: lane as u8,
+                        });
+                    }
+                }
+                TapKind::Trigger => {
+                    if offset < MAX_TAPS {
+                        let (slot, lane) = (offset / LANES_PER_SLOT, offset % LANES_PER_SLOT);
+                        self.slot_actions[slot].push(SlotAction::Trigger {
+                            channel,
+                            lane: lane as u8,
+                        });
+                    }
+                }
+                TapKind::Stereo => {
+                    let l_in_range = offset < MAX_TAPS;
+                    let r_in_range = offset + 1 < MAX_TAPS;
+                    if !l_in_range && !r_in_range {
+                        continue;
+                    }
+                    let (slot_l, lane_l) = (offset / LANES_PER_SLOT, offset % LANES_PER_SLOT);
+                    let (slot_r, lane_r) = ((offset + 1) / LANES_PER_SLOT, (offset + 1) % LANES_PER_SLOT);
+                    match (l_in_range, r_in_range, slot_l == slot_r) {
+                        (true, true, true) => {
+                            self.slot_actions[slot_l].push(SlotAction::Stereo {
+                                channel,
+                                lane_l: lane_l as u8,
+                                lane_r: lane_r as u8,
+                            });
+                        }
+                        (true, true, false) => {
+                            self.slot_actions[slot_l].push(SlotAction::StereoLOnly {
+                                channel,
+                                lane_l: lane_l as u8,
+                            });
+                            self.slot_actions[slot_r].push(SlotAction::StereoROnly {
+                                channel,
+                                lane_r: lane_r as u8,
+                            });
+                        }
+                        (true, false, _) => {
+                            self.slot_actions[slot_l].push(SlotAction::StereoLOnly {
+                                channel,
+                                lane_l: lane_l as u8,
+                            });
+                        }
+                        (false, _, _) => {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +334,29 @@ mod tests {
         let bp = h.tap_backplane();
         assert_eq!(bp[2], 0.6);
         assert_eq!(bp[3], -0.3);
+    }
+
+    #[test]
+    fn stereo_straddling_slot_boundary_writes_to_both_slots() {
+        // L in lane 15 of slot 0, R in lane 0 of slot 1.
+        let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(1));
+        h.update_params_map(&slots_and_kinds(&[15], &["stereo"]));
+        h.set_stereo_at("stereo_in", 0, 0.8, -0.5);
+        h.tick();
+        let bp = h.tap_backplane();
+        assert_eq!(bp[15], 0.8);
+        assert_eq!(bp[16], -0.5);
+    }
+
+    #[test]
+    fn empty_tap_zeroes_no_slots() {
+        // Channel with kind=mono but a disconnected mono_in reads as
+        // 0.0 from the sink; we still write the slot frame so the
+        // backplane is well-defined at that slot.
+        let mut h = ModuleHarness::build_with_shape::<Tap>(params![], shape(1));
+        h.update_params_map(&slots_and_kinds(&[0], &["mono"]));
+        h.tick();
+        assert_eq!(h.tap_backplane()[0], 0.0);
     }
 
     #[test]
