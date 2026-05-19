@@ -9,9 +9,7 @@
 use patches_core::AudioEnvironment;
 use patches_dsp::BiquadN;
 
-use crate::common::approximate::fast_sine;
 use crate::common::delay_buffer::DelayBuffer;
-use crate::common::phase_accumulator::MonoPhaseAccumulator;
 
 use super::line::{absorption_coeffs, BASE_MS};
 use super::matrix::{hadamard8, INV_SQRT8, LINES};
@@ -29,7 +27,10 @@ pub(super) struct FdnReverbKernel {
     /// per-sample tick runs the TDFII recurrence as four loops over N=8,
     /// which LLVM auto-vectorises (NEON 4-lane × 2 passes, AVX2 8-lane × 1).
     pub(super) absorption: BiquadN<LINES>,
-    pub(super) lfo_phases: [MonoPhaseAccumulator; LINES],
+    /// SoA LFO phase state — `[f32; 8]` so the per-sample sine, advance, and
+    /// offset-compute loops auto-vectorise alongside the biquad stage.
+    pub(super) lfo_phase: [f32; LINES],
+    pub(super) lfo_inc: f32,
     pub(super) pre_l: DelayBuffer,
     pub(super) pre_r: DelayBuffer,
 
@@ -60,12 +61,7 @@ impl FdnReverbKernel {
         let pre_r = DelayBuffer::for_duration(MAX_PRE_DELAY_SECS, sr);
 
         let lfo_inc = CHARS[character].lfo_rate_hz / sr;
-        let lfo_phases = std::array::from_fn(|i| {
-            let mut acc = MonoPhaseAccumulator::new();
-            acc.phase = i as f32 / LINES as f32;
-            acc.phase_increment = lfo_inc;
-            acc
-        });
+        let lfo_phase = std::array::from_fn(|i| i as f32 / LINES as f32);
 
         Self {
             sample_rate: sr,
@@ -74,7 +70,8 @@ impl FdnReverbKernel {
             character,
             delays,
             absorption,
-            lfo_phases,
+            lfo_phase,
+            lfo_inc,
             pre_l,
             pre_r,
             sc: ScaledCharacter::new(character, sr),
@@ -97,10 +94,7 @@ impl FdnReverbKernel {
         self.character = new_char;
         self.sc = ScaledCharacter::new(new_char, self.sample_rate);
         self.absorption_dirty = true;
-        let new_inc = CHARS[new_char].lfo_rate_hz / self.sample_rate;
-        for acc in &mut self.lfo_phases {
-            acc.phase_increment = new_inc;
-        }
+        self.lfo_inc = CHARS[new_char].lfo_rate_hz / self.sample_rate;
     }
 
     fn recompute_absorption(&mut self, size: f32, bright: f32) {
@@ -174,13 +168,45 @@ impl FdnReverbKernel {
         let scale = self.cached_scale;
         let cap_max = self.delays[0].capacity() as f32 - 2.0;
 
+        // SoA LFO sine: Bhaskara-with-Moser, expressed as independent per-lane
+        // ops so LLVM autovectorises (NEON 4-lane × 2 passes for N=8).
+        // The plain `for i in 0..N` indexing matches the pattern used by
+        // BiquadN::tick_all and produces the cleanest auto-vectorised code.
+        #[allow(clippy::needless_range_loop)]
+        let lfo_val: [f32; LINES] = {
+            let mut out = [0.0_f32; LINES];
+            for i in 0..LINES {
+                let x1 = self.lfo_phase[i] - 0.5;
+                let x2 = x1 * 16.0 * (x1.abs() - 0.5);
+                out[i] = x2 + 0.225 * x2 * (x2.abs() - 1.0);
+            }
+            out
+        };
+        // SoA phase advance with branchless wrap (single conditional subtract).
+        // Increment is shared across lines and < 1.0, so one wrap suffices.
+        let inc = self.lfo_inc;
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..LINES {
+            let next = self.lfo_phase[i] + inc;
+            let wrap = if next >= 1.0 { 1.0 } else { 0.0 };
+            self.lfo_phase[i] = next - wrap;
+        }
+        // SoA offset compute.
+        #[allow(clippy::needless_range_loop)]
+        let offset: [f32; LINES] = {
+            let mut out = [0.0_f32; LINES];
+            for i in 0..LINES {
+                let base_samp = self.sc.base_samps[i] * scale;
+                out[i] = (base_samp + self.sc.lfo_depth_samp * lfo_val[i])
+                    .clamp(1.0, cap_max);
+            }
+            out
+        };
+        // Per-line delay reads remain serial — each line owns its own buffer
+        // with an offset that's already computed.
         let mut raw = [0.0_f32; LINES];
         for (i, raw_i) in raw.iter_mut().enumerate() {
-            let lfo_val = fast_sine(self.lfo_phases[i].phase);
-            self.lfo_phases[i].advance();
-            let base_samp = self.sc.base_samps[i] * scale;
-            let offset = (base_samp + self.sc.lfo_depth_samp * lfo_val).clamp(1.0, cap_max);
-            *raw_i = self.delays[i].read_linear(offset);
+            *raw_i = self.delays[i].read_linear(offset[i]);
         }
         let damp = self.absorption.tick_all(&raw, false, self.absorption.has_cv);
 
