@@ -8,7 +8,7 @@
 //! span exactly [0.9, 1.1]; at `spread = 0.0` all voices run at the same rate.
 //! The `rate` parameter is shared across voices; `rate_cv` is per-voice.
 //!
-//! Waveforms and modes match [`Lfo`](crate::lfo::Lfo). The `sync`, `rate_cv`,
+//! Waveforms and modes match [`Lfo`](super::lfo::Lfo). The `sync`, `rate_cv`,
 //! and `sync_ms` inputs are all poly.
 //!
 //! # Inputs
@@ -51,7 +51,7 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
 use crate::common::approximate::lookup_sine;
-use crate::lfo::LfoMode;
+use super::lfo::LfoMode;
 use patches_dsp::xorshift64;
 
 module_params! {

@@ -204,6 +204,190 @@
       }
     },
     {
+      "name": "AudioToGate",
+      "template": {
+        "name": "AudioToGate",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "AudioToTrigger",
+      "template": {
+        "name": "AudioToTrigger",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Trigger",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          },
+          {
+            "name": "direction",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "rising",
+                  "falling",
+                  "both"
+                ],
+                "default": "rising"
+              }
+            }
+          },
+          {
+            "name": "cooldown",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1000.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "Balance",
+      "template": {
+        "name": "Balance",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "balance",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "balance",
+            "kind": {
+              "Float": {
+                "min": -1.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Bandpass",
       "template": {
         "name": "Bandpass",
@@ -428,6 +612,84 @@
                 "min": 1,
                 "max": 4,
                 "default": 2
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "Comb",
+      "template": {
+        "name": "Comb",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "mode",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "ff",
+                  "fb",
+                  "both"
+                ],
+                "default": "fb"
+              }
+            }
+          },
+          {
+            "name": "delay_ms",
+            "kind": {
+              "Float": {
+                "min": 0.1,
+                "max": 500.0,
+                "default": 10.0
+              }
+            }
+          },
+          {
+            "name": "feedback",
+            "kind": {
+              "Float": {
+                "min": -0.99,
+                "max": 0.99,
+                "default": 0.5
+              }
+            }
+          },
+          {
+            "name": "mix",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0
               }
             }
           }
@@ -730,6 +992,40 @@
             }
           ]
         ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "DcBlocker",
+      "template": {
+        "name": "DcBlocker",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
         "per_axis_structural_params": []
       }
     },
@@ -1878,6 +2174,52 @@
       }
     },
     {
+      "name": "MidSide",
+      "template": {
+        "name": "MidSide",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "stereo_in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "ms_in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "ms_out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "stereo_out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "MidiArp",
       "template": {
         "name": "MidiArp",
@@ -2453,6 +2795,51 @@
       }
     },
     {
+      "name": "MonoBass",
+      "template": {
+        "name": "MonoBass",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "cutoff",
+            "kind": {
+              "Float": {
+                "min": 20.0,
+                "max": 2000.0,
+                "default": 120.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "MonoToPoly",
       "template": {
         "name": "MonoToPoly",
@@ -2888,6 +3275,57 @@
       }
     },
     {
+      "name": "Pan",
+      "template": {
+        "name": "Pan",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "pan",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "pan",
+            "kind": {
+              "Float": {
+                "min": -1.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "PatternPlayer",
       "template": {
         "name": "PatternPlayer",
@@ -3091,6 +3529,139 @@
             }
           ]
         ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "PolyAudioToGate",
+      "template": {
+        "name": "PolyAudioToGate",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "PolyAudioToTrigger",
+      "template": {
+        "name": "PolyAudioToTrigger",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Trigger"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "threshold",
+            "kind": {
+              "Float": {
+                "min": -60.0,
+                "max": 0.0,
+                "default": -12.0
+              }
+            }
+          },
+          {
+            "name": "hysteresis",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 24.0,
+                "default": 3.0
+              }
+            }
+          },
+          {
+            "name": "direction",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "rising",
+                  "falling",
+                  "both"
+                ],
+                "default": "rising"
+              }
+            }
+          },
+          {
+            "name": "cooldown",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1000.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
         "per_axis_structural_params": []
       }
     },
@@ -5021,6 +5592,57 @@
         ],
         "per_axis_outputs": [],
         "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "StereoWidth",
+      "template": {
+        "name": "StereoWidth",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "in",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "width",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "width",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 2.0,
+                "default": 1.0
+              }
+            }
+          }
+        ],
         "structural_params": [],
         "per_axis_realtime_params": [],
         "per_axis_structural_params": []

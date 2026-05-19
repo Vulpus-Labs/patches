@@ -25,8 +25,10 @@ pub mod audio_to_gate;
 pub mod audio_to_trigger;
 pub mod poly_audio_to_gate;
 pub mod poly_audio_to_trigger;
+pub mod trigger_sync_conv;
 
 pub use audio_to_gate::AudioToGate;
 pub use audio_to_trigger::{AudioToTrigger, EdgeDirectionParam};
 pub use poly_audio_to_gate::PolyAudioToGate;
 pub use poly_audio_to_trigger::PolyAudioToTrigger;
+pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};

@@ -9,11 +9,11 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::{AdsrCore, AdsrShape};
 
-use crate::adsr::AdsrShapeParam;
+use super::adsr::AdsrShapeParam;
 use crate::common::frequency::{C0_FREQ, FMMode, PolyFrequencyConverter, PolyFrequencyChangeTracker};
 use crate::common::phase_accumulator::PolyPhaseAccumulator;
-use crate::op::{op_waveform, OpPhaseReset, OpWaveform};
-use crate::oscillator::OscFmType;
+use super::op::{op_waveform, OpPhaseReset, OpWaveform};
+use crate::osc::OscFmType;
 
 module_params! {
     PolyOp {
@@ -31,7 +31,7 @@ module_params! {
     }
 }
 
-/// Polyphonic FM operator: 16-voice [`Op`](crate::op::Op).
+/// Polyphonic FM operator: 16-voice [`Op`](super::op::Op).
 ///
 /// One phase accumulator and one [`AdsrCore`] per voice; channel `i` of every
 /// poly input drives voice `i`. See `Op` for the per-voice semantics — phase

@@ -10,10 +10,10 @@ use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 use patches_dsp::{AdsrCore, lookup_sine};
 
-use crate::adsr::AdsrShapeParam;
+use super::adsr::AdsrShapeParam;
 use crate::common::frequency::{C0_FREQ, FMMode, MonoFrequencyConverter, MonoFrequencyChangeTracker};
 use crate::common::phase_accumulator::MonoPhaseAccumulator;
-use crate::oscillator::OscFmType;
+use crate::osc::OscFmType;
 
 params_enum! {
     pub enum OpWaveform {

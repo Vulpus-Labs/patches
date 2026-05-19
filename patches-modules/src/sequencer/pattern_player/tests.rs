@@ -31,7 +31,7 @@ fn repeat_step(cv1: f32, repeat: u8) -> TrackerStep {
 /// rising edges and gate drops as the core schedules repeat sub-notes.
 ///
 /// Core logic for repeat-scheduling is covered by pure tests in
-/// `crate::tracker_core::pattern_player`. This test's job
+/// `crate::sequencer::tracker_core::pattern_player`. This test's job
 /// is the module shell: the poly clock-bus decode, the `CablePool`
 /// read/write, and the per-sample port encoding of the core's output
 /// fields.

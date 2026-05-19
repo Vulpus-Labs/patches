@@ -1,140 +1,60 @@
-pub mod tracker_core;
-
-pub mod adsr;
-pub mod audio_in;
+pub mod host;
 pub mod console;
-pub mod mono_to_poly;
-pub mod audio_out;
-pub mod clock;
 pub mod filter;
-pub mod midi_cc;
-pub mod midi_to_cv;
-pub mod midi_source;
-pub mod midi_split;
-pub mod midi_transpose;
-pub mod midi_arp;
-pub mod midi_delay;
-pub mod op;
-pub mod oscillator;
-pub mod poly_adsr;
-pub mod poly_op;
+pub mod midi;
+pub mod modulators;
+pub mod osc;
 pub mod poly_filter;
-pub mod poly_midi_to_cv;
-pub mod poly_sum;
-pub mod poly_osc;
-pub mod poly_to_mono;
-pub mod poly_vca;
 pub mod stereo;
-pub mod stereo_sum;
-pub mod sum;
-pub mod vca;
-pub mod glide;
-pub mod lfo;
-pub mod poly_lfo;
-pub mod tuner;
 pub mod common;
-pub mod noise;
 
-pub mod ring_mod;
 pub mod svf;
 pub mod poly_svf;
-pub mod fdn_reverb;
+pub mod reverb;
 pub mod delay;
-pub mod stereo_delay;
-pub mod stereo_split;
-pub mod sah;
-pub mod poly_sah;
-pub mod poly_tuner;
-pub mod quant_util;
-pub mod quant;
-pub mod poly_quant;
 pub mod detectors;
 pub mod dynamics;
-pub mod limiter;
-pub mod stereo_limiter;
-pub mod master_sequencer;
-pub mod pattern_player;
-pub mod midi_drumset;
-pub mod bitcrusher;
-pub mod drive;
-pub mod transient_shaper;
-pub mod host_transport;
-pub mod tempo_sync;
-pub mod ms_ticker;
-pub mod trigger_sync_conv;
-pub mod tap;
-pub mod host_control;
-pub mod dc_blocker;
-pub mod comb;
+pub mod sequencer;
+pub mod effects;
+pub mod utils;
+pub mod primitives;
 
-pub use adsr::Adsr;
 pub use console::Console;
-pub use audio_in::AudioIn;
-pub use audio_out::AudioOut;
-pub use clock::Clock;
+pub use host::{AudioIn, AudioOut, Clock, HostControl, HostControlKind, HostTransport, MsTicker, TempoSync};
 pub use filter::ResonantLowpass;
 pub use filter::ResonantHighpass;
 pub use filter::ResonantBandpass;
 pub use poly_filter::PolyResonantLowpass;
 pub use poly_filter::PolyResonantHighpass;
 pub use poly_filter::PolyResonantBandpass;
-pub use mono_to_poly::MonoToPoly;
-pub use midi_cc::MidiCc;
-pub use midi_to_cv::MidiToCv;
-pub use midi_source::MidiIn;
-pub use midi_split::MidiSplit;
-pub use midi_transpose::MidiTranspose;
-pub use midi_arp::MidiArp;
-pub use midi_delay::MidiDelay;
-pub use op::Op;
-pub use oscillator::Oscillator;
-pub use poly_adsr::PolyAdsr;
-pub use poly_op::PolyOp;
-pub use poly_midi_to_cv::PolyMidiToCv;
-pub use poly_sum::PolySum;
-pub use poly_osc::PolyOsc;
-pub use poly_to_mono::PolyToMono;
-pub use poly_vca::PolyVca;
-pub use stereo::{Balance, MidSide, MonoBass, Pan, StereoWidth};
-pub use stereo_sum::StereoSum;
-pub use sum::Sum;
-pub use vca::Vca;
-pub use glide::Glide;
-pub use lfo::Lfo;
-pub use poly_lfo::PolyLfo;
-pub use tuner::Tuner;
-pub use poly_tuner::PolyTuner;
-pub use noise::{Noise, PolyNoise};
-pub use ring_mod::RingMod;
+pub use midi::{
+    MidiArp, MidiCc, MidiDelay, MidiDrumset, MidiIn, MidiSplit, MidiToCv, MidiTranspose,
+    PolyMidiToCv,
+};
+pub use modulators::{
+    Adsr, Glide, Lfo, Op, PolyAdsr, PolyLfo, PolyOp, PolyQuant, PolySah, PolyTuner, Quant, RingMod,
+    Sah, Tuner,
+};
+pub use osc::{Noise, Oscillator, PolyNoise, PolyOsc};
+pub use stereo::{
+    Balance, MidSide, MonoBass, Pan, StereoJoiner, StereoSplitter, StereoSum, StereoWidth,
+};
+pub use utils::{MonoToPoly, PolySum, PolyToMono, PolyVca, Sum, Tap, TapKind, Vca};
 pub use svf::Svf;
 pub use poly_svf::PolySvf;
-pub use fdn_reverb::FdnReverb;
-pub use delay::Delay;
-pub use stereo_delay::StereoDelay;
-pub use sah::Sah;
-pub use poly_sah::PolySah;
-pub use quant::Quant;
-pub use poly_quant::PolyQuant;
+pub use reverb::FdnReverb;
+pub use delay::{Delay, StereoDelay};
 pub use detectors::{
     AudioToGate, AudioToTrigger, EdgeDirectionParam, PolyAudioToGate, PolyAudioToTrigger,
+    SyncToTrigger, TriggerToSync,
 };
-pub use dynamics::{CompDetectMode, Compressor, Gate, StereoCompressor, StereoGate};
-pub use limiter::Limiter;
-pub use stereo_limiter::StereoLimiter;
-pub use master_sequencer::MasterSequencer;
-pub use pattern_player::PatternPlayer;
-pub use midi_drumset::MidiDrumset;
-pub use bitcrusher::Bitcrusher;
-pub use drive::Drive;
-pub use transient_shaper::TransientShaper;
-pub use host_transport::HostTransport;
-pub use tempo_sync::TempoSync;
-pub use ms_ticker::MsTicker;
-pub use trigger_sync_conv::{SyncToTrigger, TriggerToSync};
-pub use tap::{Tap, TapKind};
-pub use host_control::{HostControl, HostControlKind};
-pub use dc_blocker::DcBlocker;
-pub use comb::{Comb, CombMode};
+pub use dynamics::{
+    CompDetectMode, Compressor, Gate, Limiter, StereoCompressor, StereoGate, StereoLimiter,
+    TransientShaper,
+};
+pub use sequencer::{MasterSequencer, PatternPlayer};
+pub use effects::{Bitcrusher, Drive};
+pub use primitives::{Comb, CombMode, DcBlocker};
 
 pub fn default_registry() -> patches_core::registry::Registry {
     let mut r = patches_core::registry::Registry::new();
@@ -187,8 +107,8 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<FdnReverb>();
     r.register::<Delay>();
     r.register::<StereoDelay>();
-    r.register::<crate::stereo_split::StereoSplitter>();
-    r.register::<crate::stereo_split::StereoJoiner>();
+    r.register::<StereoSplitter>();
+    r.register::<StereoJoiner>();
     r.register::<Sah>();
     r.register::<PolySah>();
     r.register::<Quant>();

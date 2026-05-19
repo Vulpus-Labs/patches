@@ -71,22 +71,22 @@ pub mod bench_support {
 ///
 /// See [module-level documentation](self).
 pub struct FdnReverb {
-    pub(in crate::fdn_reverb) instance_id: InstanceId,
-    pub(in crate::fdn_reverb) descriptor:  ModuleDescriptor,
+    pub(in crate::reverb::fdn_reverb) instance_id: InstanceId,
+    pub(in crate::reverb::fdn_reverb) descriptor:  ModuleDescriptor,
     // Ports
-    pub(in crate::fdn_reverb) in_stereo:        StereoInput,
-    pub(in crate::fdn_reverb) in_size_cv:       MonoInput,
-    pub(in crate::fdn_reverb) in_brightness_cv: MonoInput,
-    pub(in crate::fdn_reverb) in_pre_delay_cv:  MonoInput,
-    pub(in crate::fdn_reverb) in_mix_cv:        MonoInput,
-    pub(in crate::fdn_reverb) out_stereo:       StereoOutput,
+    pub(in crate::reverb::fdn_reverb) in_stereo:        StereoInput,
+    pub(in crate::reverb::fdn_reverb) in_size_cv:       MonoInput,
+    pub(in crate::reverb::fdn_reverb) in_brightness_cv: MonoInput,
+    pub(in crate::reverb::fdn_reverb) in_pre_delay_cv:  MonoInput,
+    pub(in crate::reverb::fdn_reverb) in_mix_cv:        MonoInput,
+    pub(in crate::reverb::fdn_reverb) out_stereo:       StereoOutput,
     // Parameters (resolved into effective values per-tick before kernel call)
-    pub(in crate::fdn_reverb) size_param:      f32,
-    pub(in crate::fdn_reverb) bright_param:    f32,
-    pub(in crate::fdn_reverb) pre_delay_param: f32,
-    pub(in crate::fdn_reverb) mix_param:       f32,
+    pub(in crate::reverb::fdn_reverb) size_param:      f32,
+    pub(in crate::reverb::fdn_reverb) bright_param:    f32,
+    pub(in crate::reverb::fdn_reverb) pre_delay_param: f32,
+    pub(in crate::reverb::fdn_reverb) mix_param:       f32,
     // Pure DSP state.
-    pub(in crate::fdn_reverb) kernel: FdnReverbKernel,
+    pub(in crate::reverb::fdn_reverb) kernel: FdnReverbKernel,
 }
 
 #[cfg(test)]

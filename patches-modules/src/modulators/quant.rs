@@ -15,7 +15,7 @@ module_params! {
     }
 }
 
-use crate::quant_util::{parse_pitches, quantise_note};
+use crate::utils::quant_util::{parse_pitches, quantise_note};
 
 /// Mono V/OCT quantiser.
 ///

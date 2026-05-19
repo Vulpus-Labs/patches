@@ -8,7 +8,7 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
-use crate::oscillator::OscFmType;
+use super::oscillator::OscFmType;
 
 module_params! {
     PolyOsc {

@@ -15,11 +15,11 @@ module_params! {
     }
 }
 
-use crate::quant_util::{parse_pitches, quantise_note};
+use crate::utils::quant_util::{parse_pitches, quantise_note};
 
 /// Polyphonic V/OCT quantiser.
 ///
-/// Applies the same quantisation logic as [`Quant`](crate::quant::Quant)
+/// Applies the same quantisation logic as [`Quant`](super::quant::Quant)
 /// independently to each of 16 voices. The scale is declared via `channels`
 /// and one `pitch[i]` parameter per scale degree.
 ///

@@ -2,7 +2,7 @@
 //!
 //! Core logic (tempo math, swing, transport edges, advance_step, loop
 //! behaviour, host-sync position mapping) lives in
-//! [`crate::tracker_core::SequencerCore`] and is covered by pure tests
+//! [`crate::sequencer::tracker_core::SequencerCore`] and is covered by pure tests
 //! in that module. The tests here cover only the module-shell concerns
 //! that the core does not see:
 //!
@@ -92,7 +92,7 @@ fn sync_resolution_table() {
 ///
 /// Core-side position mapping is covered by
 /// `host_sync_mid_song_start_positions_at_target_row` in
-/// `crate::tracker_core::sequencer`. This test verifies the module wrapper's
+/// `crate::sequencer::tracker_core::sequencer`. This test verifies the module wrapper's
 /// `process` method assembles the poly output voices in the right
 /// positions.
 #[test]

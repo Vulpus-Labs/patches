@@ -7,7 +7,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use patches_core::AudioEnvironment;
-use patches_modules::fdn_reverb::bench_support::{new_kernel, process_sample};
+use patches_modules::reverb::fdn_reverb::bench_support::{new_kernel, process_sample};
 
 const SR: f32 = 48_000.0;
 const ENV: AudioEnvironment = AudioEnvironment {
