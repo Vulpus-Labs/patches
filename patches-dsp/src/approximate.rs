@@ -29,6 +29,33 @@ pub fn fast_tanh(x: f32) -> f32 {
         / (10395.0 + 4725.0 * x2 + 210.0 * x4 + 4.0 * x6)
 }
 
+/// `tan(angle)` for `angle ∈ [0, atan(g_max)]`, output clamped to `g_max`.
+///
+/// 5th-order Taylor in Horner form: `tan(x) ≈ x · (1 + x²·(1/3 + x²·(2/15)))`.
+/// 3 mul + 2 add + 1 min versus libm `tan` ≈ 30–50 cycles.
+///
+/// Intended for TPT-SVF coefficient `g = tan(π·fc/sr)` where the caller
+/// already constrains `g ≤ g_max ≤ 0.4`. On `[0, atan(0.4)] ≈ [0, 0.3805]`
+/// the max absolute error vs `f32::tan` is ~1.3e-4 (≈ 0.6 cents of pitch).
+///
+/// Caller must keep `angle` non-negative; the saturation guard clamps the
+/// input to `ANGLE_MAX` and the output to `g_max`, so out-of-range positive
+/// inputs return exactly `g_max`.
+///
+/// Single in-tree consumer at landing time (`patches-drums::primitives::tpt_svf`);
+/// promoted here ahead of the second-consumer gate because the polynomial
+/// shape is stable and a private copy in `patches-drums` would be churn.
+#[inline]
+pub fn fast_tan_small(angle: f32, g_max: f32) -> f32 {
+    const ANGLE_MAX: f32 = 0.380_506_4; // atan(0.4)
+    if angle >= ANGLE_MAX {
+        return g_max;
+    }
+    let x2 = angle * angle;
+    let y = angle * (1.0 + x2 * (1.0 / 3.0 + x2 * (2.0 / 15.0)));
+    y.min(g_max)
+}
+
 static SINE_TABLE: std::sync::LazyLock<Vec<f32>> = std::sync::LazyLock::new(|| {
     (0..1024).map(|i| (i as f32 / 1024.0 * TAU).sin()).collect()
 });
@@ -340,6 +367,67 @@ mod tests {
                 "monotonicity violated at x={x}: fast_tanh({x}) = {cur} < previous {prev}"
             );
             prev = cur;
+        }
+    }
+
+    // ── fast_tan_small tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_fast_tan_small_accuracy() {
+        // Max abs error over [0, atan(0.4)] must stay below 2e-4.
+        let g_max = 0.4f32;
+        let angle_max = g_max.atan(); // ≈ 0.380506
+        let steps = 1024u32;
+        let mut max_abs_err = 0.0f32;
+        let mut worst_angle = 0.0f32;
+
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let angle = t * angle_max;
+            let approx = fast_tan_small(angle, g_max);
+            let exact = angle.tan();
+            let err = (approx - exact).abs();
+            if err > max_abs_err {
+                max_abs_err = err;
+                worst_angle = angle;
+            }
+        }
+
+        println!("fast_tan_small max abs error: {max_abs_err:.2e} at angle={worst_angle:.6}");
+        assert!(
+            max_abs_err < 2e-4,
+            "fast_tan_small max abs error {max_abs_err:.2e} exceeds 2e-4"
+        );
+    }
+
+    #[test]
+    fn test_fast_tan_small_monotone() {
+        let g_max = 0.4f32;
+        let angle_max = g_max.atan();
+        let steps = 1024u32;
+        let mut prev = fast_tan_small(0.0, g_max);
+        for i in 1..=steps {
+            let angle = angle_max * (i as f32 / steps as f32);
+            let cur = fast_tan_small(angle, g_max);
+            assert!(
+                cur >= prev,
+                "monotonicity violated at angle={angle}: {cur} < previous {prev}"
+            );
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn test_fast_tan_small_saturation() {
+        let g_max = 0.4f32;
+        let angle_max = g_max.atan();
+        // Inputs strictly above atan(g_max) must return exactly g_max.
+        for &angle in &[angle_max + 1e-3, 0.5_f32, 1.0_f32, 10.0_f32] {
+            let y = fast_tan_small(angle, g_max);
+            assert_eq!(
+                y, g_max,
+                "fast_tan_small({angle}, {g_max}) = {y}, expected exact {g_max}"
+            );
         }
     }
 
