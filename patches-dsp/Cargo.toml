@@ -1,6 +1,6 @@
 [package]
 name = "patches-dsp"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.80"
 description = "Pure DSP kernels (filters, oscillators, delay, resampling, fast math) for the Patches modular-audio framework."
