@@ -1,7 +1,7 @@
 template Inner() {
     in:  x
     out: y
-    module m : StereoMixer([kick])
+    module m : Console([kick])
     m.in[kick] <- $.x
     $.y <- m.out
 }

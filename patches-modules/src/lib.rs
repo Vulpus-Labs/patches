@@ -2,7 +2,7 @@ pub mod tracker_core;
 
 pub mod adsr;
 pub mod audio_in;
-pub mod mixer;
+pub mod console;
 pub mod mono_to_poly;
 pub mod audio_out;
 pub mod clock;
@@ -64,7 +64,7 @@ pub mod tap;
 pub mod host_control;
 
 pub use adsr::Adsr;
-pub use mixer::StereoMixer;
+pub use console::Console;
 pub use audio_in::AudioIn;
 pub use audio_out::AudioOut;
 pub use clock::Clock;
@@ -163,7 +163,7 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<StereoSum>();
     r.register::<PolyToMono>();
     r.register::<MonoToPoly>();
-    r.register::<StereoMixer>();
+    r.register::<Console>();
     r.register::<Noise>();
     r.register::<PolyNoise>();
     r.register::<RingMod>();
@@ -248,7 +248,7 @@ mod tests {
             "PolyLowpass",
             "PolyHighpass",
             "PolyBandpass",
-            "StereoMixer",
+            "Console",
             "RingMod",
             "Noise",
             "PolyNoise",

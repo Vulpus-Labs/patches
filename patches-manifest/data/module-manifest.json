@@ -561,6 +561,179 @@
       }
     },
     {
+      "name": "Console",
+      "template": {
+        "name": "Console",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "return_a",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "return_b",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [
+          [
+            "channels",
+            {
+              "name": "in",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "level_cv",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "pan_cv",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "send_a_cv",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "send_b_cv",
+              "kind": "Mono",
+              "mono_layout": "Audio",
+              "poly_layout": "Audio"
+            }
+          ]
+        ],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "send_a",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "send_b",
+            "kind": "Stereo",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [],
+        "structural_params": [],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "level",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 1.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "pan",
+              "kind": {
+                "Float": {
+                  "min": -1.0,
+                  "max": 1.0,
+                  "default": 0.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "send_a",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 0.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "send_b",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 0.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "mute",
+              "kind": {
+                "Bool": {
+                  "default": false
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "solo",
+              "kind": {
+                "Bool": {
+                  "default": false
+                }
+              }
+            }
+          ]
+        ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Delay",
       "template": {
         "name": "Delay",
@@ -4773,179 +4946,6 @@
         ],
         "structural_params": [],
         "per_axis_realtime_params": [],
-        "per_axis_structural_params": []
-      }
-    },
-    {
-      "name": "StereoMixer",
-      "template": {
-        "name": "StereoMixer",
-        "axes": [
-          {
-            "id": "channels",
-            "name": "channels"
-          }
-        ],
-        "global_inputs": [
-          {
-            "name": "return_a",
-            "kind": "Stereo",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          },
-          {
-            "name": "return_b",
-            "kind": "Stereo",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          }
-        ],
-        "per_axis_inputs": [
-          [
-            "channels",
-            {
-              "name": "in",
-              "kind": "Mono",
-              "mono_layout": "Audio",
-              "poly_layout": "Audio"
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "level_cv",
-              "kind": "Mono",
-              "mono_layout": "Audio",
-              "poly_layout": "Audio"
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "pan_cv",
-              "kind": "Mono",
-              "mono_layout": "Audio",
-              "poly_layout": "Audio"
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "send_a_cv",
-              "kind": "Mono",
-              "mono_layout": "Audio",
-              "poly_layout": "Audio"
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "send_b_cv",
-              "kind": "Mono",
-              "mono_layout": "Audio",
-              "poly_layout": "Audio"
-            }
-          ]
-        ],
-        "global_outputs": [
-          {
-            "name": "out",
-            "kind": "Stereo",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          },
-          {
-            "name": "send_a",
-            "kind": "Stereo",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          },
-          {
-            "name": "send_b",
-            "kind": "Stereo",
-            "mono_layout": "Audio",
-            "poly_layout": "Audio"
-          }
-        ],
-        "per_axis_outputs": [],
-        "realtime_params": [],
-        "structural_params": [],
-        "per_axis_realtime_params": [
-          [
-            "channels",
-            {
-              "name": "level",
-              "kind": {
-                "Float": {
-                  "min": 0.0,
-                  "max": 1.0,
-                  "default": 1.0
-                }
-              }
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "pan",
-              "kind": {
-                "Float": {
-                  "min": -1.0,
-                  "max": 1.0,
-                  "default": 0.0
-                }
-              }
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "send_a",
-              "kind": {
-                "Float": {
-                  "min": 0.0,
-                  "max": 1.0,
-                  "default": 0.0
-                }
-              }
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "send_b",
-              "kind": {
-                "Float": {
-                  "min": 0.0,
-                  "max": 1.0,
-                  "default": 0.0
-                }
-              }
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "mute",
-              "kind": {
-                "Bool": {
-                  "default": false
-                }
-              }
-            }
-          ],
-          [
-            "channels",
-            {
-              "name": "solo",
-              "kind": {
-                "Bool": {
-                  "default": false
-                }
-              }
-            }
-          ]
-        ],
         "per_axis_structural_params": []
       }
     },

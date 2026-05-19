@@ -12,7 +12,7 @@
 #   tuner      — PolyTuner(octave: 1): shifts kbd.voct up by one octave for the hi layer
 #   lo         — voice instance: warm sine/square layer at keyboard pitch
 #   hi         — noise_voice instance: pitched noise, one octave higher
-#   sum        — StereoMixer(channels: [lo, hi]): panned stereo mix
+#   sum        — Console(channels: [lo, hi]): panned stereo mix
 #   out        — AudioOut: stereo output
 #
 # voice template internals:
@@ -168,7 +168,7 @@ patch {
     )
 
     # ── Output ──────────────────────────────────────────────────────────────────
-    module sum : StereoMixer([lo, hi]) {
+    module sum : Console([lo, hi]) {
         level[lo]: 1.0,
         level[hi]: 0.5,
         pan[lo]: -0.5,

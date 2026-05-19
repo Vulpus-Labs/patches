@@ -10,7 +10,7 @@
 //! ## No descriptor lookup
 //!
 //! The DSL crate has no descriptor registry, so this pass cannot ask
-//! whether a non-stereo-module port (e.g. `StereoMixer.out`) carries a
+//! whether a non-stereo-module port (e.g. `Console.out`) carries a
 //! mono or stereo cable. The trick: **always insert a `StereoSplitter`
 //! at a stereo module's bus input, regardless of source kind.** The
 //! existing `CableKind::Mono → CableKind::Stereo` broadcast rule in the

@@ -1,14 +1,14 @@
 template UsesKick() {
     in:  x
     out: y
-    module m : StereoMixer([kick])
+    module m : Console([kick])
     m.in[kick] <- $.x
     $.y <- m.out
 }
 template UsesSnare() {
     in:  x
     out: y
-    module m : StereoMixer([snare])
+    module m : Console([snare])
     m.in[snare] <- $.x
     $.y <- m.out
 }

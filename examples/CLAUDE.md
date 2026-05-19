@@ -139,7 +139,7 @@ applied seriously.
 For anything with >2 channels, name them:
 
 ```
-module mix : StereoMixer([lo, hi, noise]) {
+module mix : Console([lo, hi, noise]) {
     level[lo]: 0.7, level[hi]: 0.5, level[noise]: 0.3,
     pan[lo]: -0.4, pan[hi]: 0.4,
     send_a[hi]: 0.5
@@ -215,7 +215,7 @@ outputs and is the default choice when you want multimode.
 
 **Envelopes / shaping:** `Adsr`, `PolyAdsr`, `Vca`, `PolyVca`, `Glide`.
 
-**Mixing / routing:** `Sum`, `PolySum`, `Mixer`, `StereoMixer`,
+**Mixing / routing:** `Sum`, `PolySum`, `Mixer`, `Console`,
 `MonoToPoly`, `PolyToMono`.
 
 **Pitch:** `Tuner`, `PolyTuner` (octave/semi/cent offset on V/oct),
@@ -318,7 +318,7 @@ cargo run -q -p patches-tools --bin patches-manifest
 Dumps every module in the registry with its `ModuleDescriptor`: shape,
 inputs (with cable kind: `mono` / `poly` / `trigger` / `poly_trigger`),
 outputs, and parameters (with type, range, and default). Shape-varying
-modules (e.g. `Sum`, `Delay`, `StereoMixer`) print both a `channels = 1`
+modules (e.g. `Sum`, `Delay`, `Console`) print both a `channels = 1`
 and `channels = 2` section so the indexed-port pattern is visible.
 
 Use this when:

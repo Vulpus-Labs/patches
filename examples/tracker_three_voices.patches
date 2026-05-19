@@ -158,7 +158,7 @@ patch {
     lead2_pp.cv1[vel]      -> lead2_v.velocity
 
     # ── Mixer: 3 channels, bass centre, leads panned ─────────────────────
-    module mix: StereoMixer(3) {
+    module mix: Console(3) {
         @0: { level: 0.7, pan: 0.0 },
         @1: { level: 0.5, pan: -0.4, send_a: 0.3 },
         @2: { level: 0.5, pan: 0.4,  send_a: 0.3 }

@@ -250,7 +250,7 @@ patch {
     fn db_unit_conversion() {
         let source = r#"
 patch {
-    module mix : StereoMixer { level: -6dB }
+    module mix : Console { level: -6dB }
 }
 "#;
         let (file, diags) = parse(source);
@@ -326,7 +326,7 @@ patch {
     fn shape_args_with_alias_list() {
         let source = r#"
 patch {
-    module mix : StereoMixer([drums, bass, synth])
+    module mix : Console([drums, bass, synth])
 }
 "#;
         let (file, diags) = parse(source);
@@ -349,7 +349,7 @@ patch {
     fn at_block_without_colon() {
         let source = r#"
 patch {
-    module mixer : StereoMixer([drum, bass]) {
+    module mixer : Console([drum, bass]) {
         @drum { level: 1.0 }
         @bass { level: 0.5 }
     }

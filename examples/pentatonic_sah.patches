@@ -112,7 +112,7 @@ patch {
         pingpong[0]: true
     }
 
-    module mix : StereoMixer(1) {
+    module mix : Console(1) {
         level[0]: 0.7,
         send_a[0]: 0.4,
         send_b[0]: 0.4

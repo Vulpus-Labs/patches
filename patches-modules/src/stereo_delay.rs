@@ -316,7 +316,7 @@ impl Module for StereoDelay {
             let toned_l = self.tone_filters_l[i].process(sig_l);
             let toned_r = self.tone_filters_r[i].process(sig_r);
 
-            // Pan law: sum to mono, apply equal-gain pan (consistent with StereoMixer).
+            // Pan law: sum to mono, apply equal-gain pan (consistent with Console).
             // Merge the two * 0.5 factors into a single * 0.25 to save one mul per tap.
             let eff_gain = (self.gains[i] + pool.read_mono(&self.gain_cv[i])).clamp(0.0, 1.0);
             let eff_pan  = (self.pans[i]  + pool.read_mono(&self.pan_cv[i])).clamp(-1.0, 1.0);

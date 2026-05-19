@@ -252,7 +252,7 @@ fn stereo_module_to_stereo_module_pairs_directly_without_join_split() {
 #[test]
 fn known_stereo_external_to_bus_inserts_splitter() {
     let src = "patch {
-        module mix : StereoMixer
+        module mix : Console
         stereo module crush : Bitcrusher
         module out : AudioOut
         mix.out -> crush.in
@@ -276,7 +276,7 @@ fn known_stereo_external_to_bus_inserts_splitter() {
 #[test]
 fn splitter_cse_one_per_source_across_multiple_consumers() {
     let src = "patch {
-        module mix : StereoMixer
+        module mix : Console
         stereo module a : Foo
         stereo module b : Bar
         module out : AudioOut
@@ -411,7 +411,7 @@ fn stereo_wrapping_explicit_multi_channel_rejected() {
 // ─── Drum-shape snapshot (ADR 0070 §"Worked example") ───────────────────────
 
 /// Mirrors the worked example from ADR 0070: a `stereo module` wrapping
-/// `Bitcrusher`, fed by a `StereoMixer` bus output and feeding an
+/// `Bitcrusher`, fed by a `Console` bus output and feeding an
 /// `AudioOut` bus input, with a mono LFO going into the per-channel
 /// `rate_cv`. With the always-insert design every cable into a stereo
 /// module's bus port goes through a `StereoSplitter`, so this patch
@@ -421,7 +421,7 @@ fn stereo_wrapping_explicit_multi_channel_rejected() {
 fn drum_worked_example_topology() {
     let src = "patch {
         module rate_lfo : Osc
-        module mix      : StereoMixer
+        module mix      : Console
         stereo module out_crush : Bitcrusher { depth: 8, rate: 0.8 }
         module out      : AudioOut
 
