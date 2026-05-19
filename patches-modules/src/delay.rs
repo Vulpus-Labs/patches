@@ -64,6 +64,32 @@ module_params! {
 
 // ─── Delay ────────────────────────────────────────────────────────────────────
 
+/// All per-tap state: ports, params, filters, carried feedback. Packed AoS so
+/// `taps.iter_mut()` gives the compiler bounds-check elision + cache locality.
+struct Tap {
+    // Ports
+    sync_ms:   MonoInput,
+    delay_cv:  MonoInput,
+    gain_cv:   MonoInput,
+    fb_cv:     MonoInput,
+    return_in: MonoInput,
+    send_out:  MonoOutput,
+
+    // Params
+    delay_ms: f32,   // stored as f32 for cheap ms→samples conversion
+    gain:     f32,
+    feedback: f32,
+    tone:     f32,
+    drive:    f32,
+
+    // Filters
+    fb_filter:   TapFeedbackFilter,
+    tone_filter: ToneFilter,
+
+    /// Carried feedback from previous tick.
+    carried_fb: f32,
+}
+
 /// Mono N-tap delay.  See [module-level documentation](self).
 pub struct Delay {
     instance_id: InstanceId,
@@ -73,33 +99,18 @@ pub struct Delay {
     sr_ms: f32,
 
     // Audio state
-    buffer:   DelayBuffer,
-    /// Feedback values carried from the previous tick (pre-allocated, no alloc on audio thread).
-    feedback: Vec<f32>,
+    buffer: DelayBuffer,
 
-    // Per-tap audio state
-    fb_filters:   Vec<TapFeedbackFilter>,
-    tone_filters: Vec<ToneFilter>,
-
-    // Cached parameters
-    dry_wet:    f32,
-    delay_ms:   Vec<f32>,   // stored as f32 for cheap ms→samples conversion
-    gains:      Vec<f32>,
-    feedbacks:  Vec<f32>,
-    tones:      Vec<f32>,
-    drives:     Vec<f32>,
+    // Cached global parameter
+    dry_wet: f32,
 
     // Port fields (global)
-    in_port:    MonoInput,
-    drywet_cv:  MonoInput,
-    out_port:   MonoOutput,
-    // Port fields (per tap)
-    sync_ms:    Vec<MonoInput>,
-    delay_cv:   Vec<MonoInput>,
-    gain_cv:    Vec<MonoInput>,
-    fb_cv:      Vec<MonoInput>,
-    return_in:  Vec<MonoInput>,
-    send_out:   Vec<MonoOutput>,
+    in_port:   MonoInput,
+    drywet_cv: MonoInput,
+    out_port:  MonoOutput,
+
+    // Per-tap state, packed AoS.
+    tap_state: Vec<Tap>,
 }
 
 impl Module for Delay {
@@ -163,21 +174,28 @@ impl Module for Delay {
 
         let buffer = DelayBuffer::for_duration(4.0, sr);
 
-        let fb_filters: Vec<TapFeedbackFilter> = (0..taps)
-            .map(|_| {
-                let mut f = TapFeedbackFilter::new();
-                f.prepare(sr);
-                f
-            })
-            .collect();
-
-        let tone_filters: Vec<ToneFilter> = (0..taps)
-            .map(|_| {
-                let mut f = ToneFilter::new();
-                f.prepare(sr);
-                f
-            })
-            .collect();
+        let tap_state = (0..taps).map(|_| {
+            let mut fb_filter = TapFeedbackFilter::new();
+            fb_filter.prepare(sr);
+            let mut tone_filter = ToneFilter::new();
+            tone_filter.prepare(sr);
+            Tap {
+                sync_ms:   MonoInput::default(),
+                delay_cv:  MonoInput::default(),
+                gain_cv:   MonoInput::default(),
+                fb_cv:     MonoInput::default(),
+                return_in: MonoInput::default(),
+                send_out:  MonoOutput::default(),
+                delay_ms:  500.0,
+                gain:      1.0,
+                feedback:  0.0,
+                tone:      1.0,
+                drive:     1.0,
+                fb_filter,
+                tone_filter,
+                carried_fb: 0.0,
+            }
+        }).collect();
 
         Self {
             instance_id,
@@ -186,40 +204,27 @@ impl Module for Delay {
             high_quality,
             sr_ms,
             buffer,
-            feedback:     vec![0.0; taps],
-            fb_filters,
-            tone_filters,
-            dry_wet:   1.0,
-            delay_ms:  vec![500.0; taps],
-            gains:     vec![1.0; taps],
-            feedbacks: vec![0.0; taps],
-            tones:     vec![1.0; taps],
-            drives:    vec![1.0; taps],
+            dry_wet: 1.0,
             in_port:   MonoInput::default(),
             drywet_cv: MonoInput::default(),
             out_port:  MonoOutput::default(),
-            sync_ms:   vec![MonoInput::default(); taps],
-            delay_cv:  vec![MonoInput::default(); taps],
-            gain_cv:   vec![MonoInput::default(); taps],
-            fb_cv:     vec![MonoInput::default(); taps],
-            return_in: vec![MonoInput::default(); taps],
-            send_out:  vec![MonoOutput::default(); taps],
+            tap_state,
         }
     })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.dry_wet = p.get(params::dry_wet);
-        for i in 0..self.taps {
+        for (i, tap) in self.tap_state.iter_mut().enumerate() {
             let idx = i as u16;
-            self.delay_ms[i]  = (p.get(params::delay_ms.at(idx))).clamp(0, 2000) as f32;
-            self.gains[i]     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
-            self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
-            let tone          = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
-            if (tone - self.tones[i]).abs() > f32::EPSILON {
-                self.tones[i] = tone;
-                self.tone_filters[i].set_tone(tone);
+            tap.delay_ms = p.get(params::delay_ms.at(idx)).clamp(0, 2000) as f32;
+            tap.gain     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
+            tap.feedback = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
+            let tone     = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
+            if (tone - tap.tone).abs() > f32::EPSILON {
+                tap.tone = tone;
+                tap.tone_filter.set_tone(tone);
             }
-            self.drives[i]    = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
+            tap.drive    = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
         }
     }
 
@@ -232,18 +237,16 @@ impl Module for Delay {
         self.in_port   = MonoInput::from_ports(inputs, 0);
         self.drywet_cv = MonoInput::from_ports(inputs, 1);
         // Per-tap inputs: sync_ms[0..n], delay_cv[0..n], gain_cv[0..n], fb_cv[0..n], return[0..n]
-        for i in 0..n {
-            self.sync_ms[i]   = MonoInput::from_ports(inputs, 2 + i);
-            self.delay_cv[i]  = MonoInput::from_ports(inputs, 2 + n + i);
-            self.gain_cv[i]   = MonoInput::from_ports(inputs, 2 + 2 * n + i);
-            self.fb_cv[i]     = MonoInput::from_ports(inputs, 2 + 3 * n + i);
-            self.return_in[i] = MonoInput::from_ports(inputs, 2 + 4 * n + i);
+        for (i, tap) in self.tap_state.iter_mut().enumerate() {
+            tap.sync_ms   = MonoInput::from_ports(inputs, 2 + i);
+            tap.delay_cv  = MonoInput::from_ports(inputs, 2 + n + i);
+            tap.gain_cv   = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            tap.fb_cv     = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            tap.return_in = MonoInput::from_ports(inputs, 2 + 4 * n + i);
+            tap.send_out  = MonoOutput::from_ports(outputs, 1 + i);
         }
-        // Outputs: out(0), send[0..n]
+        // Global output: out(0).
         self.out_port = MonoOutput::from_ports(outputs, 0);
-        for i in 0..n {
-            self.send_out[i] = MonoOutput::from_ports(outputs, 1 + i);
-        }
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -251,51 +254,70 @@ impl Module for Delay {
 
         // ── Write: input + all tap feedbacks from previous tick ───────────────
         let mut write_val = in_val;
-        for &fb in &self.feedback {
-            write_val += fb;
+        for tap in &self.tap_state {
+            write_val += tap.carried_fb;
         }
         self.buffer.push(fast_tanh(write_val));
 
         // ── Per-tap reads ─────────────────────────────────────────────────────
         let cap_max = self.buffer.capacity() as f32 - 2.0;
         let mut wet_sum = 0.0_f32;
+        let sr_ms = self.sr_ms;
+        let high_quality = self.high_quality;
 
-        for i in 0..self.taps {
-            // sync_ms overrides the tap's delay_ms when connected
-            let base_ms = if self.sync_ms[i].is_connected() {
-                pool.read_mono(&self.sync_ms[i]).clamp(0.0, 4000.0)
+        for tap in self.tap_state.iter_mut() {
+            // sync_ms overrides the tap's delay_ms when connected.
+            let base_ms = if tap.sync_ms.connected {
+                pool.read_mono(&tap.sync_ms).clamp(0.0, 4000.0)
             } else {
-                self.delay_ms[i]
+                tap.delay_ms
             };
-            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
-            let offset = (base_ms * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
+            // Skip CV pool dispatch when unconnected — the typical case for
+            // per-tap CVs in a deployed patch.
+            let cv = if tap.delay_cv.connected {
+                pool.read_mono(&tap.delay_cv).clamp(-1.0, 2.0)
+            } else {
+                0.0
+            };
+            let offset = (base_ms * (1.0 + cv) * sr_ms).clamp(1.0, cap_max);
 
-            let tap_raw = if self.high_quality {
+            let tap_raw = if high_quality {
                 self.buffer.read_cubic(offset)
             } else {
                 self.buffer.read_linear(offset)
             };
 
-            // Send output (pre-gain, pre-return)
-            pool.write_mono(&self.send_out[i], tap_raw);
+            // Send output (pre-gain, pre-return). Skip the store when no
+            // consumer is wired — sends are opt-in routing.
+            if tap.send_out.connected {
+                pool.write_mono(&tap.send_out, tap_raw);
+            }
 
-            // Mix in return
-            let tap_sig = tap_raw + pool.read_mono(&self.return_in[i]);
+            // Mix in return. Disconnected return reads the zero sink; the add
+            // is harmless but the read still costs a pool dispatch — skip it.
+            let tap_sig = if tap.return_in.connected {
+                tap_raw + pool.read_mono(&tap.return_in)
+            } else {
+                tap_raw
+            };
 
             // Tone filter (no allocation, coefficient pre-computed)
-            let tap_toned = self.tone_filters[i].process(tap_sig);
+            let tap_toned = tap.tone_filter.process(tap_sig);
 
             // Gain
-            let eff_gain = (self.gains[i] + pool.read_mono(&self.gain_cv[i])).clamp(0.0, 1.0);
+            let gain_cv = if tap.gain_cv.connected { pool.read_mono(&tap.gain_cv) } else { 0.0 };
+            let eff_gain = (tap.gain + gain_cv).clamp(0.0, 1.0);
             wet_sum += tap_toned * eff_gain;
 
             // Feedback for next tick
-            let eff_fb  = (self.feedbacks[i] + pool.read_mono(&self.fb_cv[i])).clamp(0.0, 1.0);
-            self.feedback[i] = self.fb_filters[i].process(tap_toned * eff_fb, self.drives[i]);
+            let fb_cv  = if tap.fb_cv.connected { pool.read_mono(&tap.fb_cv) } else { 0.0 };
+            let eff_fb = (tap.feedback + fb_cv).clamp(0.0, 1.0);
+            tap.carried_fb = tap.fb_filter.process(tap_toned * eff_fb, tap.drive);
         }
 
         // ── Dry/wet mix ───────────────────────────────────────────────────────
-        let eff_dw  = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);
+        let drywet_cv = if self.drywet_cv.connected { pool.read_mono(&self.drywet_cv) } else { 0.0 };
+        let eff_dw  = (self.dry_wet + drywet_cv).clamp(0.0, 1.0);
         let out_val = in_val + eff_dw * (wet_sum - in_val);
         pool.write_mono(&self.out_port, out_val);
     }

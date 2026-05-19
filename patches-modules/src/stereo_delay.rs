@@ -69,6 +69,37 @@ module_params! {
 
 // ─── StereoDelay ──────────────────────────────────────────────────────────────
 
+/// All per-tap state: ports, params, filters, routed feedback. Packed AoS so
+/// `taps.iter_mut()` gives the compiler bounds-check elision + cache locality.
+struct Tap {
+    // Ports
+    delay_cv:  MonoInput,
+    gain_cv:   MonoInput,
+    fb_cv:     MonoInput,
+    pan_cv:    MonoInput,
+    return_st: StereoInput,
+    send_st:   StereoOutput,
+
+    // Params
+    delay_ms: f32,
+    gain:     f32,
+    feedback: f32,
+    tone:     f32,
+    drive:    f32,
+    pan:      f32,
+    pingpong: bool,
+
+    // Filters (L + R)
+    fb_filter_l:   TapFeedbackFilter,
+    fb_filter_r:   TapFeedbackFilter,
+    tone_filter_l: ToneFilter,
+    tone_filter_r: ToneFilter,
+
+    /// Pre-routed L/R feedback for next tick's buffer write (pingpong already applied).
+    routed_l: f32,
+    routed_r: f32,
+}
+
 /// Stereo N-tap delay.  See [module-level documentation](self).
 pub struct StereoDelay {
     instance_id: InstanceId,
@@ -80,39 +111,17 @@ pub struct StereoDelay {
     // Audio state
     buf_l: DelayBuffer,
     buf_r: DelayBuffer,
-    /// Pre-routed L feedback for next tick's buffer write (pingpong already applied).
-    routed_l: Vec<f32>,
-    /// Pre-routed R feedback for next tick's buffer write (pingpong already applied).
-    routed_r: Vec<f32>,
 
-    // Per-tap audio state (two channels each)
-    fb_filters_l:   Vec<TapFeedbackFilter>,
-    fb_filters_r:   Vec<TapFeedbackFilter>,
-    tone_filters_l: Vec<ToneFilter>,
-    tone_filters_r: Vec<ToneFilter>,
-
-    // Cached parameters
-    dry_wet:   f32,
-    delay_ms:  Vec<f32>,
-    gains:     Vec<f32>,
-    feedbacks: Vec<f32>,
-    tones:     Vec<f32>,
-    drives:    Vec<f32>,
-    pans:      Vec<f32>,
-    pingpong:  Vec<bool>,
+    // Cached global parameter
+    dry_wet: f32,
 
     // Global port fields
-    in_stereo: StereoInput,
-    drywet_cv: MonoInput,
+    in_stereo:  StereoInput,
+    drywet_cv:  MonoInput,
     out_stereo: StereoOutput,
 
-    // Per-tap port fields
-    delay_cv:   Vec<MonoInput>,
-    gain_cv:    Vec<MonoInput>,
-    fb_cv:      Vec<MonoInput>,
-    pan_cv:     Vec<MonoInput>,
-    return_st:  Vec<StereoInput>,
-    send_st:    Vec<StereoOutput>,
+    // Per-tap state, packed AoS.
+    tap_state: Vec<Tap>,
 }
 
 impl Module for StereoDelay {
@@ -185,20 +194,38 @@ impl Module for StereoDelay {
         let buf_l = DelayBuffer::for_duration(4.0, sr);
         let buf_r = DelayBuffer::for_duration(4.0, sr);
 
-        let make_fb_filters = || -> Vec<TapFeedbackFilter> {
-            (0..taps).map(|_| {
-                let mut f = TapFeedbackFilter::new();
-                f.prepare(sr);
-                f
-            }).collect()
+        let make_fb_filter = || {
+            let mut f = TapFeedbackFilter::new();
+            f.prepare(sr);
+            f
         };
-        let make_tone_filters = || -> Vec<ToneFilter> {
-            (0..taps).map(|_| {
-                let mut f = ToneFilter::new();
-                f.prepare(sr);
-                f
-            }).collect()
+        let make_tone_filter = || {
+            let mut f = ToneFilter::new();
+            f.prepare(sr);
+            f
         };
+
+        let tap_state = (0..taps).map(|_| Tap {
+            delay_cv:  MonoInput::default(),
+            gain_cv:   MonoInput::default(),
+            fb_cv:     MonoInput::default(),
+            pan_cv:    MonoInput::default(),
+            return_st: StereoInput::default(),
+            send_st:   StereoOutput::default(),
+            delay_ms:  500.0,
+            gain:      1.0,
+            feedback:  0.0,
+            tone:      1.0,
+            drive:     1.0,
+            pan:       0.0,
+            pingpong:  false,
+            fb_filter_l:   make_fb_filter(),
+            fb_filter_r:   make_fb_filter(),
+            tone_filter_l: make_tone_filter(),
+            tone_filter_r: make_tone_filter(),
+            routed_l: 0.0,
+            routed_r: 0.0,
+        }).collect();
 
         Self {
             instance_id,
@@ -208,48 +235,30 @@ impl Module for StereoDelay {
             sr_ms,
             buf_l,
             buf_r,
-            routed_l: vec![0.0; taps],
-            routed_r: vec![0.0; taps],
-            fb_filters_l:   make_fb_filters(),
-            fb_filters_r:   make_fb_filters(),
-            tone_filters_l: make_tone_filters(),
-            tone_filters_r: make_tone_filters(),
-            dry_wet:   1.0,
-            delay_ms:  vec![500.0; taps],
-            gains:     vec![1.0; taps],
-            feedbacks: vec![0.0; taps],
-            tones:     vec![1.0; taps],
-            drives:    vec![1.0; taps],
-            pans:      vec![0.0; taps],
-            pingpong:  vec![false; taps],
-            in_stereo: StereoInput::default(),
-            drywet_cv: MonoInput::default(),
+            dry_wet: 1.0,
+            in_stereo:  StereoInput::default(),
+            drywet_cv:  MonoInput::default(),
             out_stereo: StereoOutput::default(),
-            delay_cv:  vec![MonoInput::default(); taps],
-            gain_cv:   vec![MonoInput::default(); taps],
-            fb_cv:     vec![MonoInput::default(); taps],
-            pan_cv:    vec![MonoInput::default(); taps],
-            return_st: vec![StereoInput::default(); taps],
-            send_st:   vec![StereoOutput::default(); taps],
+            tap_state,
         }
     })}
 
     fn update_validated_parameters(&mut self, p: &ParamView<'_>) {
         self.dry_wet = p.get(params::dry_wet);
-        for i in 0..self.taps {
+        for (i, tap) in self.tap_state.iter_mut().enumerate() {
             let idx = i as u16;
-            self.delay_ms[i]  = p.get(params::delay_ms.at(idx)).clamp(0, 2000) as f32;
-            self.gains[i]     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
-            self.feedbacks[i] = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
-            let tone          = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
-            if (tone - self.tones[i]).abs() > f32::EPSILON {
-                self.tones[i] = tone;
-                self.tone_filters_l[i].set_tone(tone);
-                self.tone_filters_r[i].set_tone(tone);
+            tap.delay_ms = p.get(params::delay_ms.at(idx)).clamp(0, 2000) as f32;
+            tap.gain     = p.get(params::gain.at(idx)).clamp(0.0, 1.0);
+            tap.feedback = p.get(params::feedback.at(idx)).clamp(0.0, 1.0);
+            let tone     = p.get(params::tone.at(idx)).clamp(0.0, 1.0);
+            if (tone - tap.tone).abs() > f32::EPSILON {
+                tap.tone = tone;
+                tap.tone_filter_l.set_tone(tone);
+                tap.tone_filter_r.set_tone(tone);
             }
-            self.drives[i]   = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
-            self.pans[i]     = p.get(params::pan.at(idx)).clamp(-1.0, 1.0);
-            self.pingpong[i] = p.get(params::pingpong.at(idx));
+            tap.drive    = p.get(params::drive.at(idx)).clamp(0.1, 10.0);
+            tap.pan      = p.get(params::pan.at(idx)).clamp(-1.0, 1.0);
+            tap.pingpong = p.get(params::pingpong.at(idx));
         }
     }
 
@@ -262,18 +271,16 @@ impl Module for StereoDelay {
         self.in_stereo = StereoInput::from_ports(inputs, 0);
         self.drywet_cv = MonoInput::from_ports(inputs, 1);
         // Per-tap inputs: delay_cv, gain_cv, fb_cv, pan_cv, return (stereo)
-        for i in 0..n {
-            self.delay_cv[i]  = MonoInput::from_ports(inputs, 2 + i);
-            self.gain_cv[i]   = MonoInput::from_ports(inputs, 2 + n + i);
-            self.fb_cv[i]     = MonoInput::from_ports(inputs, 2 + 2 * n + i);
-            self.pan_cv[i]    = MonoInput::from_ports(inputs, 2 + 3 * n + i);
-            self.return_st[i] = StereoInput::from_ports(inputs, 2 + 4 * n + i);
+        for (i, tap) in self.tap_state.iter_mut().enumerate() {
+            tap.delay_cv  = MonoInput::from_ports(inputs, 2 + i);
+            tap.gain_cv   = MonoInput::from_ports(inputs, 2 + n + i);
+            tap.fb_cv     = MonoInput::from_ports(inputs, 2 + 2 * n + i);
+            tap.pan_cv    = MonoInput::from_ports(inputs, 2 + 3 * n + i);
+            tap.return_st = StereoInput::from_ports(inputs, 2 + 4 * n + i);
+            tap.send_st   = StereoOutput::from_ports(outputs, 1 + i);
         }
-        // Outputs: out(0, stereo), send[0..n] (stereo)
+        // Global output: out(0, stereo).
         self.out_stereo = StereoOutput::from_ports(outputs, 0);
-        for i in 0..n {
-            self.send_st[i] = StereoOutput::from_ports(outputs, 1 + i);
-        }
     }
 
     fn process(&mut self, pool: &mut CablePool<'_>) {
@@ -281,9 +288,15 @@ impl Module for StereoDelay {
 
         // ── Write: input + pre-routed feedbacks from previous tick ────────────
         // Routing (pingpong or straight) was applied when storing routed_l/r at
-        // the end of the previous tick's per-tap loop, so this sum is branchless.
-        let write_l = fast_tanh(in_l + self.routed_l.iter().sum::<f32>());
-        let write_r = fast_tanh(in_r + self.routed_r.iter().sum::<f32>());
+        // the end of the previous tick's per-tap loop, so this accumulation is
+        // branchless. Fuse the two sums into one pass over taps.
+        let (mut fb_sum_l, mut fb_sum_r) = (0.0_f32, 0.0_f32);
+        for tap in &self.tap_state {
+            fb_sum_l += tap.routed_l;
+            fb_sum_r += tap.routed_r;
+        }
+        let write_l = fast_tanh(in_l + fb_sum_l);
+        let write_r = fast_tanh(in_r + fb_sum_r);
 
         self.buf_l.push(write_l);
         self.buf_r.push(write_r);
@@ -292,54 +305,73 @@ impl Module for StereoDelay {
         let cap_max = self.buf_l.capacity() as f32 - 2.0;
         let mut wet_l = 0.0_f32;
         let mut wet_r = 0.0_f32;
+        let sr_ms = self.sr_ms;
+        let high_quality = self.high_quality;
 
-        for i in 0..self.taps {
-            // Effective delay
-            let cv     = pool.read_mono(&self.delay_cv[i]).clamp(-1.0, 2.0);
-            let offset = (self.delay_ms[i] * (1.0 + cv) * self.sr_ms).clamp(1.0, cap_max);
+        for tap in self.tap_state.iter_mut() {
+            // Effective delay. Skip CV pool dispatch when unconnected — the
+            // typical case for per-tap CVs in a deployed patch.
+            let cv = if tap.delay_cv.connected {
+                pool.read_mono(&tap.delay_cv).clamp(-1.0, 2.0)
+            } else {
+                0.0
+            };
+            let offset = (tap.delay_ms * (1.0 + cv) * sr_ms).clamp(1.0, cap_max);
 
-            let (tap_raw_l, tap_raw_r) = if self.high_quality {
+            let (tap_raw_l, tap_raw_r) = if high_quality {
                 (self.buf_l.read_cubic(offset), self.buf_r.read_cubic(offset))
             } else {
                 (self.buf_l.read_linear(offset), self.buf_r.read_linear(offset))
             };
 
-            // Send outputs (pre-gain, pre-pan, pre-return)
-            pool.write_stereo(&self.send_st[i], tap_raw_l, tap_raw_r);
+            // Send outputs (pre-gain, pre-pan, pre-return).
+            // Skip the 16-lane store when no consumer is wired — sends are an
+            // opt-in routing facility and most patches leave them unconnected.
+            if tap.send_st.connected {
+                pool.write_stereo(&tap.send_st, tap_raw_l, tap_raw_r);
+            }
 
-            // Mix in returns
-            let (ret_l, ret_r) = pool.read_stereo(&self.return_st[i]);
-            let sig_l = tap_raw_l + ret_l;
-            let sig_r = tap_raw_r + ret_r;
+            // Mix in returns. Disconnected return reads the zero sink; the add
+            // is harmless but the read still costs a pool dispatch — skip it.
+            let (sig_l, sig_r) = if tap.return_st.connected {
+                let (ret_l, ret_r) = pool.read_stereo(&tap.return_st);
+                (tap_raw_l + ret_l, tap_raw_r + ret_r)
+            } else {
+                (tap_raw_l, tap_raw_r)
+            };
 
             // Tone filter
-            let toned_l = self.tone_filters_l[i].process(sig_l);
-            let toned_r = self.tone_filters_r[i].process(sig_r);
+            let toned_l = tap.tone_filter_l.process(sig_l);
+            let toned_r = tap.tone_filter_r.process(sig_r);
 
             // Pan law: sum to mono, apply equal-gain pan (consistent with Console).
             // Merge the two * 0.5 factors into a single * 0.25 to save one mul per tap.
-            let eff_gain = (self.gains[i] + pool.read_mono(&self.gain_cv[i])).clamp(0.0, 1.0);
-            let eff_pan  = (self.pans[i]  + pool.read_mono(&self.pan_cv[i])).clamp(-1.0, 1.0);
+            let gain_cv = if tap.gain_cv.connected { pool.read_mono(&tap.gain_cv) } else { 0.0 };
+            let pan_cv  = if tap.pan_cv.connected  { pool.read_mono(&tap.pan_cv)  } else { 0.0 };
+            let eff_gain = (tap.gain + gain_cv).clamp(0.0, 1.0);
+            let eff_pan  = (tap.pan  + pan_cv ).clamp(-1.0, 1.0);
             let half     = (toned_l + toned_r) * (0.25 * eff_gain);
             wet_l += half * (1.0 - eff_pan);
             wet_r += half * (1.0 + eff_pan);
 
             // Feedback for next tick: apply pingpong routing now so the write
             // accumulation at the top of the next tick can be a branchless sum.
-            let eff_fb = (self.feedbacks[i] + pool.read_mono(&self.fb_cv[i])).clamp(0.0, 1.0);
-            let fb_l = self.fb_filters_l[i].process(toned_l * eff_fb, self.drives[i]);
-            let fb_r = self.fb_filters_r[i].process(toned_r * eff_fb, self.drives[i]);
-            if self.pingpong[i] {
-                self.routed_l[i] = fb_r;
-                self.routed_r[i] = fb_l;
+            let fb_cv  = if tap.fb_cv.connected { pool.read_mono(&tap.fb_cv) } else { 0.0 };
+            let eff_fb = (tap.feedback + fb_cv).clamp(0.0, 1.0);
+            let fb_l = tap.fb_filter_l.process(toned_l * eff_fb, tap.drive);
+            let fb_r = tap.fb_filter_r.process(toned_r * eff_fb, tap.drive);
+            if tap.pingpong {
+                tap.routed_l = fb_r;
+                tap.routed_r = fb_l;
             } else {
-                self.routed_l[i] = fb_l;
-                self.routed_r[i] = fb_r;
+                tap.routed_l = fb_l;
+                tap.routed_r = fb_r;
             }
         }
 
         // ── Dry/wet mix ───────────────────────────────────────────────────────
-        let eff_dw = (self.dry_wet + pool.read_mono(&self.drywet_cv)).clamp(0.0, 1.0);
+        let drywet_cv = if self.drywet_cv.connected { pool.read_mono(&self.drywet_cv) } else { 0.0 };
+        let eff_dw = (self.dry_wet + drywet_cv).clamp(0.0, 1.0);
         pool.write_stereo(
             &self.out_stereo,
             in_l + eff_dw * (wet_l - in_l),
