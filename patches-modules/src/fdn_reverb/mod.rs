@@ -42,6 +42,30 @@ use patches_core::{InstanceId, ModuleDescriptor, MonoInput, StereoInput, StereoO
 
 use kernel::FdnReverbKernel;
 
+/// Opaque kernel handle re-exported for microbenchmarks in `patches-profiling`.
+/// Not part of the stable public API.
+#[doc(hidden)]
+pub mod bench_support {
+    use patches_core::AudioEnvironment;
+    use super::kernel::FdnReverbKernel;
+
+    pub struct KernelHandle(FdnReverbKernel);
+
+    pub fn new_kernel(env: &AudioEnvironment, character: usize) -> KernelHandle {
+        KernelHandle(FdnReverbKernel::new(env, character))
+    }
+
+    #[inline]
+    pub fn process_sample(
+        k: &mut KernelHandle,
+        in_l: f32, in_r: f32,
+        eff_size: f32, eff_bright: f32,
+        eff_pre_delay: f32, eff_mix: f32,
+    ) -> (f32, f32) {
+        k.0.process_sample(in_l, in_r, eff_size, eff_bright, eff_pre_delay, eff_mix)
+    }
+}
+
 /// Stereo FDN reverb with 8 delay lines, Hadamard mixing, per-line high-shelf
 /// absorption, and linear interpolation for LFO-modulated reads.
 ///

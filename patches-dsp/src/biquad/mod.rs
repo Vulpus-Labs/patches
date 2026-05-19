@@ -106,45 +106,47 @@ impl MonoBiquad {
     }
 }
 
-/// 16-voice polyphonic biquad kernel (Transposed Direct Form II) with
+/// N-voice polyphonic biquad kernel (Transposed Direct Form II) with
 /// per-sample coefficient interpolation for smooth CV modulation.
 ///
 /// ## Layout
 ///
-/// All fields are Structure-of-Arrays (`[f32; 16]`), so each field's 16 values
+/// All fields are Structure-of-Arrays (`[f32; N]`), so each field's N values
 /// are contiguous in memory.  This allows `tick_all` to process all voices in
 /// independent per-step loops that LLVM can auto-vectorise with SIMD (e.g. AVX2:
-/// 8 × f32 per instruction, two passes over 16 voices).
+/// 8 × f32 per instruction, two passes over 16 voices; one pass for N=8).
 ///
 /// ## Cold vs hot
 ///
 /// The five target arrays (inside `CoefTargets`) are accessed only at update
 /// boundaries and sit after the hot fields so they don't pollute the cache
 /// lines read every sample.
-pub struct PolyBiquad {
+pub struct BiquadN<const N: usize> {
     // ── Hot: active coefficients + per-sample deltas ─────────────────────
-    pub coefs: PolyCoefRamp<5, 16>,
+    pub coefs: PolyCoefRamp<5, N>,
     // ── Hot: TDFII filter state ───────────────────────────────────────────
-    pub s1: [f32; 16],
-    pub s2: [f32; 16],
+    pub s1: [f32; N],
+    pub s2: [f32; N],
     // ── Cold: target coefficients (read only at update boundaries) ────────
-    pub targets: PolyCoefTargets<5, 16>,
-    /// True when at least one CV input is connected and per-sample coefficient
-    /// interpolation is active.  When false all deltas are 0 and the delta
-    /// advances in `tick_all` are skipped entirely.
+    pub targets: PolyCoefTargets<5, N>,
+    /// True when at least one voice has a CV-driven ramp active. When false
+    /// all deltas are 0 and the delta advances in `tick_all` are skipped.
     pub has_cv: bool,
 }
 
-impl PolyBiquad {
-    /// Create a new `PolyBiquad` with all 16 voices initialised to the given
-    /// static coefficients.  All deltas, filter state, and target arrays are
-    /// zeroed; `has_cv` is false.
+/// Backwards-compatible 16-voice alias.
+pub type PolyBiquad = BiquadN<16>;
+
+impl<const N: usize> BiquadN<N> {
+    /// Create a new biquad with every voice initialised to the given static
+    /// coefficients. All deltas, filter state, and target arrays are zeroed;
+    /// `has_cv` is false.
     pub fn new_static(b0: f32, b1: f32, b2: f32, a1: f32, a2: f32) -> Self {
         let values = [b0, b1, b2, a1, a2];
         Self {
             coefs: PolyCoefRamp::new_static(values),
-            s1: [0.0; 16],
-            s2: [0.0; 16],
+            s1: [0.0; N],
+            s2: [0.0; N],
             targets: PolyCoefTargets::new_static(values),
             has_cv: false,
         }
@@ -158,8 +160,27 @@ impl PolyBiquad {
         let values = [b0, b1, b2, a1, a2];
         self.coefs.set_static(values);
         for (slot, v) in self.targets.target.iter_mut().zip(values.iter()) {
-            *slot = [*v; 16];
+            *slot = [*v; N];
         }
+    }
+
+    /// Install per-voice static coefficients into one slot. Does not change
+    /// the `has_cv` flag — call `clear_has_cv()` when no voice is ramping.
+    /// Use when each voice carries different fixed coefficients (e.g. the
+    /// FDN's per-line absorption filters).
+    #[inline]
+    pub fn set_static_voice(&mut self, i: usize, b0: f32, b1: f32, b2: f32, a1: f32, a2: f32) {
+        let values = [b0, b1, b2, a1, a2];
+        self.coefs.set_static_voice(i, values);
+        for (slot, v) in self.targets.target.iter_mut().zip(values.iter()) {
+            slot[i] = *v;
+        }
+    }
+
+    /// Clear the `has_cv` flag — skips per-sample delta advances in `tick_all`.
+    #[inline]
+    pub fn clear_has_cv(&mut self) {
+        self.has_cv = false;
     }
 
     /// Snap voice `i`'s active coefficients to its current targets, store the
@@ -190,58 +211,47 @@ impl PolyBiquad {
         );
     }
 
-    /// Run one sample of the TDFII recurrence for **all 16 voices** and return
+    /// Run one sample of the TDFII recurrence for **all N voices** and return
     /// the per-voice output array.
     ///
-    /// Each step of the recurrence is a separate loop over 16 independent
-    /// elements, enabling auto-vectorisation (e.g. AVX2: 8 × f32 per
-    /// instruction, 2 passes per step).
+    /// Each step of the recurrence is a separate loop over N independent
+    /// elements, enabling auto-vectorisation.
     ///
     /// - `saturate`: when true the feedback path passes through `fast_tanh`.
-    ///   This is a loop-invariant branch; LLVM eliminates it at the call site
-    ///   when the boolean is a compile-time constant.
+    ///   Loop-invariant; LLVM eliminates the branch at the call site when
+    ///   the boolean is a compile-time constant.
     /// - `ramp`: when true (i.e. `has_cv`) the active coefficients are advanced
     ///   by their per-sample deltas after the filter update.  Pass `self.has_cv`.
-    pub fn tick_all(&mut self, x: &[f32; 16], saturate: bool, ramp: bool) -> [f32; 16] {
+    pub fn tick_all(&mut self, x: &[f32; N], saturate: bool, ramp: bool) -> [f32; N] {
         let b0 = &self.coefs.active[B0];
         let b1 = &self.coefs.active[B1];
         let b2 = &self.coefs.active[B2];
         let a1 = &self.coefs.active[A1];
         let a2 = &self.coefs.active[A2];
 
-        // Step 1: y = b0*x + s1  — reads b0, x, s1; writes y
-        let mut y = [0.0f32; 16];
-        for i in 0..16 {
+        let mut y = [0.0f32; N];
+        for i in 0..N {
             y[i] = b0[i] * x[i] + self.s1[i];
         }
 
         if saturate {
-            // Saturated path: compute fb for all voices first, then update
-            // state in separate loops — same split structure as the linear path
-            // so LLVM can vectorise each step (vdivps is a valid SIMD op).
-            let fb: [f32; 16] = std::array::from_fn(|i| fast_tanh(y[i]));
-            // Step 2: new_s1 = b1*x - a1*fb + s2  — reads s2 (old), writes s1
-            for i in 0..16 {
+            let fb: [f32; N] = std::array::from_fn(|i| fast_tanh(y[i]));
+            for i in 0..N {
                 self.s1[i] = b1[i] * x[i] - a1[i] * fb[i] + self.s2[i];
             }
-            // Step 3: new_s2 = b2*x - a2*fb
-            for i in 0..16 {
+            for i in 0..N {
                 self.s2[i] = b2[i] * x[i] - a2[i] * fb[i];
             }
         } else {
-            // Linear path: separate loops so LLVM can vectorise each step.
-            // Step 2: new_s1 = b1*x - a1*y + s2  — reads s2 (old), writes s1
-            for i in 0..16 {
+            for i in 0..N {
                 self.s1[i] =
                     crate::flush_denormal(b1[i] * x[i] - a1[i] * y[i] + self.s2[i]);
             }
-            // Step 3: new_s2 = b2*x - a2*y  — reads x, y; writes s2
-            for i in 0..16 {
+            for i in 0..N {
                 self.s2[i] = crate::flush_denormal(b2[i] * x[i] - a2[i] * y[i]);
             }
         }
 
-        // Step 4 (CV path only): advance active coefficients by per-sample deltas
         if ramp {
             self.coefs.advance();
         }

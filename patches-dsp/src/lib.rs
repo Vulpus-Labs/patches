@@ -24,7 +24,7 @@ pub mod wavetable;
 pub use wavetable::{SineTable, SINE_TABLE};
 
 pub mod biquad;
-pub use biquad::{MonoBiquad, PolyBiquad};
+pub use biquad::{BiquadN, MonoBiquad, PolyBiquad};
 
 pub mod svf;
 pub use svf::{SvfCoeffs, SvfKernel, SvfState, PolySvfKernel, svf_f, q_to_damp, stability_clamp};

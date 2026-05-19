@@ -127,6 +127,17 @@ impl<const K: usize, const N: usize> PolyCoefRamp<K, N> {
         }
     }
 
+    /// Install a per-voice static value into both active and delta slots
+    /// (delta zeroed). The caller is responsible for writing the same value
+    /// into the matching `PolyCoefTargets` slot to keep snap-on-begin coherent.
+    #[inline]
+    pub fn set_static_voice(&mut self, i: usize, values: [f32; K]) {
+        for (k, &v) in values.iter().enumerate() {
+            self.active[k][i] = v;
+            self.delta[k][i] = 0.0;
+        }
+    }
+
     /// Snap voice `i` active ← previous targets, store new per-voice
     /// targets, compute deltas.
     #[inline]

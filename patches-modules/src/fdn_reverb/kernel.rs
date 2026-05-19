@@ -7,7 +7,7 @@
 //! summation; everything DSP lives here.
 
 use patches_core::AudioEnvironment;
-use patches_dsp::MonoBiquad;
+use patches_dsp::BiquadN;
 
 use crate::common::approximate::fast_sine;
 use crate::common::delay_buffer::DelayBuffer;
@@ -25,7 +25,10 @@ pub(super) struct FdnReverbKernel {
     pub(super) character: usize,
 
     pub(super) delays: [DelayBuffer; LINES],
-    pub(super) absorption: [MonoBiquad; LINES],
+    /// 8-voice SoA biquad covering all line absorption filters. Each
+    /// per-sample tick runs the TDFII recurrence as four loops over N=8,
+    /// which LLVM auto-vectorises (NEON 4-lane × 2 passes, AVX2 8-lane × 1).
+    pub(super) absorption: BiquadN<LINES>,
     pub(super) lfo_phases: [MonoPhaseAccumulator; LINES],
     pub(super) pre_l: DelayBuffer,
     pub(super) pre_r: DelayBuffer,
@@ -33,10 +36,6 @@ pub(super) struct FdnReverbKernel {
     pub(super) sc: ScaledCharacter,
 
     pub(super) absorption_dirty: bool,
-    /// True while absorption biquads are running an active coefficient ramp
-    /// (CV driving size/brightness). When false, `tick_static` is used and
-    /// the per-sample `advance()` of zero deltas is skipped.
-    pub(super) absorption_ramping: bool,
     pub(super) cached_scale: f32,
     pub(super) last_eff_size: f32,
     pub(super) last_eff_bright: f32,
@@ -48,11 +47,12 @@ impl FdnReverbKernel {
         let sr = env.sample_rate;
         let sr_recip = sr.recip();
         let (scale0, rt60_lf0, rt60_hf0, cross0) = derive_params(0.5, 0.5, character);
-        let absorption = std::array::from_fn(|i| {
+        let mut absorption = BiquadN::<LINES>::new_static(0.0, 0.0, 0.0, 0.0, 0.0);
+        for (i, &base_ms) in BASE_MS.iter().enumerate() {
             let (b0, b1, b2, a1, a2) =
-                absorption_coeffs(BASE_MS[i], scale0, rt60_lf0, rt60_hf0, cross0, sr, sr_recip);
-            MonoBiquad::new(b0, b1, b2, a1, a2)
-        });
+                absorption_coeffs(base_ms, scale0, rt60_lf0, rt60_hf0, cross0, sr, sr_recip);
+            absorption.set_static_voice(i, b0, b1, b2, a1, a2);
+        }
 
         let delays = std::array::from_fn(|_| DelayBuffer::for_duration(MAX_LINE_SECS, sr));
 
@@ -79,7 +79,6 @@ impl FdnReverbKernel {
             pre_r,
             sc: ScaledCharacter::new(character, sr),
             absorption_dirty: false,
-            absorption_ramping: false,
             cached_scale: scale0,
             last_eff_size: 0.5,
             last_eff_bright: 0.5,
@@ -110,7 +109,8 @@ impl FdnReverbKernel {
             let (b0, b1, b2, a1, a2) = absorption_coeffs(
                 base_ms, scale, rt60_lf, rt60_hf, crossover, self.sample_rate, self.sr_recip,
             );
-            self.absorption[i].begin_ramp(b0, b1, b2, a1, a2, self.interval_recip);
+            self.absorption
+                .begin_ramp_voice(i, b0, b1, b2, a1, a2, self.interval_recip);
         }
     }
 
@@ -120,8 +120,9 @@ impl FdnReverbKernel {
             let (b0, b1, b2, a1, a2) = absorption_coeffs(
                 base_ms, scale, rt60_lf, rt60_hf, crossover, self.sample_rate, self.sr_recip,
             );
-            self.absorption[i].set_static(b0, b1, b2, a1, a2);
+            self.absorption.set_static_voice(i, b0, b1, b2, a1, a2);
         }
+        self.absorption.clear_has_cv();
     }
 
     /// Periodic absorption recompute. `cv_connected` distinguishes the static
@@ -137,7 +138,6 @@ impl FdnReverbKernel {
         } else if cv_connected {
             self.recompute_absorption(eff_size, eff_bright);
         }
-        self.absorption_ramping = cv_connected;
     }
 
     /// One-sample DSP step. All inputs are already clamped to [0, 1] for the
@@ -174,20 +174,15 @@ impl FdnReverbKernel {
         let scale = self.cached_scale;
         let cap_max = self.delays[0].capacity() as f32 - 2.0;
 
-        let mut damp = [0.0_f32; LINES];
-        let ramping = self.absorption_ramping;
-        for (i, damp_i) in damp.iter_mut().enumerate() {
+        let mut raw = [0.0_f32; LINES];
+        for (i, raw_i) in raw.iter_mut().enumerate() {
             let lfo_val = fast_sine(self.lfo_phases[i].phase);
             self.lfo_phases[i].advance();
             let base_samp = self.sc.base_samps[i] * scale;
             let offset = (base_samp + self.sc.lfo_depth_samp * lfo_val).clamp(1.0, cap_max);
-            let raw = self.delays[i].read_linear(offset);
-            *damp_i = if ramping {
-                self.absorption[i].tick(raw, false)
-            } else {
-                self.absorption[i].tick_static(raw, false)
-            };
+            *raw_i = self.delays[i].read_linear(offset);
         }
+        let damp = self.absorption.tick_all(&raw, false, self.absorption.has_cv);
 
         let f = hadamard8(damp);
 
