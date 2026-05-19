@@ -1,6 +1,6 @@
 //! Pure DSP kernel for the FDN reverb.
 //!
-//! Holds all per-sample state (delay lines, Thiran interps, absorption biquads,
+//! Holds all per-sample state (delay lines, absorption biquads,
 //! LFO accumulators, pre-delay buffers) and exposes a per-sample entry point
 //! that consumes already-effective parameter values. The `Module` wrapper in
 //! `processor.rs` is responsible for cable I/O, parameter resolution, and CV
@@ -15,6 +15,54 @@ use super::line::{absorption_coeffs, BASE_MS};
 use super::matrix::{hadamard8, INV_SQRT8, LINES};
 use super::params::{derive_params, ScaledCharacter, CHARS, MAX_LINE_SECS, MAX_PRE_DELAY_SECS};
 
+/// AoS storage for the 8 feedback delay lines: one row of 8 voices per
+/// time slot, packed into a single contiguous buffer. A per-tick write
+/// is one 32-byte (half cache-line) row store covering all voices.
+///
+/// Reads remain per-voice scalar with linear interpolation — each line
+/// reads at a different LFO-modulated offset, so there's no SIMD payoff
+/// available on the read side.
+pub(super) struct InterleavedDelays {
+    data: Box<[[f32; LINES]]>,
+    mask: usize,
+    write: usize,
+}
+
+impl InterleavedDelays {
+    fn for_duration(secs: f32, sr: f32) -> Self {
+        let min_samples = (secs * sr).ceil() as usize;
+        let size = min_samples.max(1).next_power_of_two();
+        Self {
+            data: vec![[0.0_f32; LINES]; size].into_boxed_slice(),
+            mask: size - 1,
+            write: 0,
+        }
+    }
+
+    #[inline]
+    fn capacity(&self) -> usize { self.mask + 1 }
+
+    /// Write one row of all 8 voices, advancing the shared write head.
+    #[inline]
+    fn push(&mut self, row: [f32; LINES]) {
+        self.write = self.write.wrapping_add(1) & self.mask;
+        self.data[self.write] = row;
+    }
+
+    /// Read voice `i` at fractional `offset` from the write head, linearly
+    /// interpolated between the two surrounding rows.
+    ///
+    /// `offset` must satisfy `0.0 ≤ offset < capacity() as f32 − 1.0`.
+    #[inline]
+    fn read_one_linear(&self, i: usize, offset: f32) -> f32 {
+        let k = offset as usize;
+        let f = offset - k as f32;
+        let x0 = self.data[self.write.wrapping_sub(k) & self.mask][i];
+        let x1 = self.data[self.write.wrapping_sub(k + 1) & self.mask][i];
+        x0 + f * (x1 - x0)
+    }
+}
+
 pub(super) struct FdnReverbKernel {
     pub(super) sample_rate: f32,
     pub(super) sr_recip: f32,
@@ -22,7 +70,7 @@ pub(super) struct FdnReverbKernel {
 
     pub(super) character: usize,
 
-    pub(super) delays: [DelayBuffer; LINES],
+    pub(super) delays: InterleavedDelays,
     /// 8-voice SoA biquad covering all line absorption filters. Each
     /// per-sample tick runs the TDFII recurrence as four loops over N=8,
     /// which LLVM auto-vectorises (NEON 4-lane × 2 passes, AVX2 8-lane × 1).
@@ -55,7 +103,7 @@ impl FdnReverbKernel {
             absorption.set_static_voice(i, b0, b1, b2, a1, a2);
         }
 
-        let delays = std::array::from_fn(|_| DelayBuffer::for_duration(MAX_LINE_SECS, sr));
+        let delays = InterleavedDelays::for_duration(MAX_LINE_SECS, sr);
 
         let pre_l = DelayBuffer::for_duration(MAX_PRE_DELAY_SECS, sr);
         let pre_r = DelayBuffer::for_duration(MAX_PRE_DELAY_SECS, sr);
@@ -166,7 +214,7 @@ impl FdnReverbKernel {
         let x_r = self.pre_r.read_nearest(pre_s);
 
         let scale = self.cached_scale;
-        let cap_max = self.delays[0].capacity() as f32 - 2.0;
+        let cap_max = self.delays.capacity() as f32 - 2.0;
 
         // SoA LFO sine: Bhaskara-with-Moser, expressed as independent per-lane
         // ops so LLVM autovectorises (NEON 4-lane × 2 passes for N=8).
@@ -202,20 +250,27 @@ impl FdnReverbKernel {
             }
             out
         };
-        // Per-line delay reads remain serial — each line owns its own buffer
-        // with an offset that's already computed.
+        // Per-voice delay reads remain serial — each voice has its own
+        // LFO-driven offset, so there's no SoA payoff. The interleaved
+        // storage costs one wasted cache-line read per voice but the
+        // per-tick miss count is unchanged from independent buffers.
         let mut raw = [0.0_f32; LINES];
         for (i, raw_i) in raw.iter_mut().enumerate() {
-            *raw_i = self.delays[i].read_linear(offset[i]);
+            *raw_i = self.delays.read_one_linear(i, offset[i]);
         }
         let damp = self.absorption.tick_all(&raw, false, self.absorption.has_cv);
 
         let f = hadamard8(damp);
 
-        for (i, (&fi, delay)) in f.iter().zip(self.delays.iter_mut()).enumerate() {
-            let inj = if i % 2 == 0 { x_l } else { x_r };
-            delay.push(INV_SQRT8 * inj + fi);
+        // Build one row of 8 new line values and push as a single
+        // 32-byte contiguous store. Injection alternates L/R per voice.
+        let inj = [x_l, x_r, x_l, x_r, x_l, x_r, x_l, x_r];
+        let mut new_row = [0.0_f32; LINES];
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..LINES {
+            new_row[i] = INV_SQRT8 * inj[i] + f[i];
         }
+        self.delays.push(new_row);
 
         // OUT_L pattern: + - + - + - + -  (× INV_SQRT8)
         // OUT_R pattern: + + - - + + - -  (× INV_SQRT8)
