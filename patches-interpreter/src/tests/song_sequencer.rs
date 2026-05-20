@@ -200,6 +200,195 @@ fn song_channel_count_mismatch_is_error() {
     assert!(err.message.contains("channels"));
 }
 
+// ── E152 tie-spread annotation (ticket 0939) ──────────────────────────
+
+fn tie_step() -> Step {
+    Step { gate: true, ..Step::default() }
+}
+
+fn roll_step(repeat: u8) -> Step {
+    Step { trigger: true, gate: true, repeat, ..Step::default() }
+}
+
+#[test]
+fn tie_spread_annotates_anchor_and_absorbed_ties() {
+    // x*3 ~ ~  → anchor span=3, both ties absorbed.
+    let mut flat = empty_flat();
+    flat.song_data.patterns = vec![FlatPatternDef {
+        name: "roll".into(),
+        channels: vec![FlatPatternChannel {
+            name: "kick".to_string(),
+            steps: vec![roll_step(3), tie_step(), tie_step()],
+        }],
+        provenance: Provenance::root(span()),
+    }];
+    let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row[0].repeat_span, 3);
+    assert!(!row[0].absorbed_by_roll);
+    assert!(row[1].absorbed_by_roll);
+    assert!(row[2].absorbed_by_roll);
+    // Plain anchor without ties still has span 1.
+    assert_eq!(row[1].repeat_span, 1);
+}
+
+#[test]
+fn tie_spread_transparent_across_row_continuation() {
+    // Source: `kick: x*3 | ~ ~`  — `|` is a row-continuation marker; the
+    // parser concatenates both halves into one Vec<Step>. The span must
+    // therefore extend across the join transparently.
+    let src = r#"
+        pattern roll {
+            kick: x*3
+                | ~ ~
+        }
+        patch {}
+    "#;
+    let file = patches_dsl::parse(src).expect("parse failed");
+    let result = patches_dsl::expand(&file).expect("expand failed");
+    let td = build(&result.patch, &registry(), &env())
+        .expect("build failed")
+        .tracker_data
+        .expect("tracker_data missing");
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row.len(), 3);
+    assert_eq!(row[0].repeat_span, 3);
+    assert!(row[1].absorbed_by_roll);
+    assert!(row[2].absorbed_by_roll);
+}
+
+#[test]
+fn tie_spread_plain_tie_unchanged() {
+    // note ~  → anchor repeat=1, neither field changes.
+    let mut flat = empty_flat();
+    flat.song_data.patterns = vec![FlatPatternDef {
+        name: "hold".into(),
+        channels: vec![FlatPatternChannel {
+            name: "vox".to_string(),
+            steps: vec![trigger_step(), tie_step()],
+        }],
+        provenance: Provenance::root(span()),
+    }];
+    let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row[0].repeat_span, 1);
+    assert_eq!(row[1].repeat_span, 1);
+    assert!(!row[1].absorbed_by_roll, "plain tie sustains, not absorbed");
+}
+
+#[test]
+fn tie_spread_chained_anchors() {
+    // x*3 ~ ~ ~ note*2 ~  → anchor1 span=4, anchor2 span=2.
+    let mut flat = empty_flat();
+    flat.song_data.patterns = vec![FlatPatternDef {
+        name: "chain".into(),
+        channels: vec![FlatPatternChannel {
+            name: "snare".to_string(),
+            steps: vec![
+                roll_step(3),
+                tie_step(),
+                tie_step(),
+                tie_step(),
+                roll_step(2),
+                tie_step(),
+            ],
+        }],
+        provenance: Provenance::root(span()),
+    }];
+    let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row[0].repeat_span, 4);
+    assert!(row[1].absorbed_by_roll);
+    assert!(row[2].absorbed_by_roll);
+    assert!(row[3].absorbed_by_roll);
+    assert_eq!(row[4].repeat_span, 2);
+    assert!(row[5].absorbed_by_roll);
+}
+
+#[test]
+fn tie_spread_truncates_at_row_end() {
+    // x*5 ~ ~  → all consumed, span=3 (truncated at row end, not 5).
+    let mut flat = empty_flat();
+    flat.song_data.patterns = vec![FlatPatternDef {
+        name: "edge".into(),
+        channels: vec![FlatPatternChannel {
+            name: "hi".to_string(),
+            steps: vec![roll_step(5), tie_step(), tie_step()],
+        }],
+        provenance: Provenance::root(span()),
+    }];
+    let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row[0].repeat_span, 3);
+    assert_eq!(row[0].repeat, 5);
+}
+
+// ── E153 (ticket 0943): StepEffect resolution at row-build ───────────
+
+#[test]
+fn step_effect_value_x_n_tie_tie_lowers_to_start_note_plus_absorbed() {
+    // `x*3 ~ ~` channel: StartNote{roll{count=3, span=3}} then two AbsorbedRoll.
+    let mut flat = empty_flat();
+    flat.song_data.patterns = vec![FlatPatternDef {
+        name: "roll".into(),
+        channels: vec![FlatPatternChannel {
+            name: "kick".to_string(),
+            steps: vec![roll_step(3), tie_step(), tie_step()],
+        }],
+        provenance: Provenance::root(span()),
+    }];
+    let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
+    let row = &td.patterns.patterns[0].data[0];
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), slide, .. } => {
+            assert_eq!(r.count, 3);
+            assert_eq!(r.span, 3);
+            assert!(slide.is_none());
+        }
+        other => panic!("expected StartNote+roll(span=3), got {other:?}"),
+    }
+    assert!(matches!(row[1].effect, patches_core::StepEffect::AbsorbedRoll));
+    assert!(matches!(row[2].effect, patches_core::StepEffect::AbsorbedRoll));
+    // Legacy annotation still present and matches the new effect.
+    assert_eq!(row[0].repeat_span, 3);
+    assert!(row[1].absorbed_by_roll);
+    assert!(row[2].absorbed_by_roll);
+}
+
+#[test]
+fn step_effect_slide_macro_lowers_to_start_note_plus_slide_flow() {
+    // slide(2, A4, C5) lowers to head + one tail with the same close target.
+    let src = r#"
+        pattern p {
+            ch: slide(2, A4, C5)
+        }
+        patch {}
+    "#;
+    let file = patches_dsl::parse(src).expect("parse failed");
+    let result = patches_dsl::expand(&file).expect("expand failed");
+    let td = build(&result.patch, &registry(), &env())
+        .expect("build failed")
+        .tracker_data
+        .expect("tracker_data missing");
+    let row = &td.patterns.patterns[0].data[0];
+    assert_eq!(row.len(), 2);
+    // Final endpoint = C5 = 5.0 v/oct.
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { slide: Some(so), cv1, roll, .. } => {
+            assert!((*cv1 - 4.75).abs() < 1e-6, "A4 head cv1 = {cv1}");
+            assert!(
+                (so.close_cv1 - 5.0).abs() < 1e-6,
+                "head close target should be C5 (final endpoint), got {}",
+                so.close_cv1,
+            );
+            assert!(so.closes_at_boundary);
+            assert!(roll.is_none());
+        }
+        other => panic!("expected StartNote+slide, got {other:?}"),
+    }
+    assert!(matches!(row[1].effect, patches_core::StepEffect::SlideFlow));
+}
+
 #[test]
 fn shorter_channels_padded_with_rests() {
     let mut flat = empty_flat();

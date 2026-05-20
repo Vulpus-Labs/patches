@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 
 use patches_core::{
-    ParameterValue, Pattern, PatternBank, Song, SongBank, TrackerData, TrackerStep,
+    annotate_repeat_spans, resolve_step_effects, ParameterValue, Pattern, PatternBank, Song,
+    SongBank, StepEffect, TrackerData, TrackerStep,
 };
 use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::SongData;
@@ -38,13 +39,15 @@ pub(crate) fn build_tracker_data(
             }
             // Pad shorter channels with rest steps.
             while steps.len() < max_steps {
-                steps.push(TrackerStep {
-                    cv1: 0.0, cv2: 0.0,
-                    trigger: false, gate: false,
-                    cv1_end: None, cv2_end: None,
-                    repeat: 1,
-                });
+                steps.push(TrackerStep::default());
             }
+            // Derive E152 tie-spread span annotations now that the channel's
+            // step run is final. No-op on channels with no `*N` anchors.
+            annotate_repeat_spans(&mut steps);
+            // E153 (0943): resolve each cell into a StepEffect. The pattern
+            // player still reads the legacy flag fields until 0944 flips
+            // dispatch onto `step.effect`; resolution is purely additive.
+            resolve_step_effects(&mut steps);
             data.push(steps);
         }
         patterns.push(Pattern {
@@ -135,6 +138,12 @@ pub(crate) fn build_tracker_data(
 }
 
 /// Convert a DSL [`patches_dsl::ast::Step`] to a runtime [`TrackerStep`].
+///
+/// `repeat_span` / `absorbed_by_roll` start at their defaults and are
+/// filled in by [`annotate_repeat_spans`] once the channel's full step
+/// run is in place. `effect` is similarly resolved by
+/// [`resolve_step_effects`] (ticket 0943) and starts at
+/// [`StepEffect::Silent`].
 fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
     TrackerStep {
         cv1: dsl_step.cv1,
@@ -144,6 +153,9 @@ fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
         cv1_end: dsl_step.cv1_end,
         cv2_end: dsl_step.cv2_end,
         repeat: dsl_step.repeat,
+        repeat_span: 1,
+        absorbed_by_roll: false,
+        effect: StepEffect::Silent,
     }
 }
 
