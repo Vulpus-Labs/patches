@@ -11,6 +11,14 @@ module.exports = grammar({
 
   word: ($) => $.ident,
 
+  // GLR conflicts. `step_valued`'s cv2 sugar (`:cv2[>cv2_end]`) and
+  // `step_slide_open`'s `:cv2` tail (`value[:cv2]>`) both match the
+  // same `value:cv2` prefix; the choice between them depends on what
+  // follows. Let GLR explore both and resolve at the next token.
+  conflicts: ($) => [
+    [$.step_cv2, $.step_cv2_tail],
+  ],
+
   rules: {
     // ─── File root ──────────────────────────────────────────────────────
     file: ($) =>
@@ -287,26 +295,39 @@ module.exports = grammar({
 
     // Pest exposes channel_row_cont as a wrapper for "| step …" continuations
     // and uses zero-or-more cardinality for steps. Mirror that here.
-    channel_row_cont: ($) => seq("|", repeat($.step_or_generator)),
+    //
+    // Ticket 0948 removed the `slide(n, A, B)` macro generator (and
+    // the `step_or_generator` wrapper that distinguished it from
+    // `step`); rows are now flat sequences of `step` cells.
+    channel_row_cont: ($) => seq("|", repeat($.step)),
     channel_row: ($) =>
       seq(
         field("label", $.ident),
         ":",
-        repeat($.step_or_generator),
+        repeat($.step),
         repeat($.channel_row_cont)
       ),
 
-    // ─── Step notation ──────────────────────────────────────────────────
-    // Pest decomposes step values into typed sub-rules so the AST sees
-    // unit/note/float/int distinctly. Mirror that structure. Tree-sitter
-    // regex has no `\b` so we rely on longest-match; in pattern row
-    // contexts steps are whitespace-separated by `extras`, matching pest's
-    // implicit-WHITESPACE behaviour.
+    // ─── Step notation (ADR 0077 unified grammar) ──────────────────────
+    // Eight cell shapes:
+    //   .            rest
+    //   _            tie / continuation (channel-stateful)
+    //   value        triggered note (`value`, `value:cv2`, `value*N`)
+    //   value>value  one-tick slide sugar
+    //   value>       open multi-tick slide
+    //   /value       change cv1 without retrigger (`StepTo`)
+    //   >_           explicit slide-flow / open-from-current
+    //   >value       close an open slide within this tick
+    //
+    // The `~` step-tie token from epic E152 has been retired (ADR 0077
+    // § "Token ambiguity"). `~tap(...)` / `~name` cable endpoints are
+    // unaffected.
     step_note: (_) =>
       token(prec(2, seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/))),
     step_trigger: (_) => token(prec(3, "x")),
     step_rest: (_) => token(prec(3, ".")),
-    step_tie: (_) => token(prec(3, "~")),
+    step_tie: (_) => token(prec(3, "_")),
+    step_tie_flow: (_) => token(prec(4, ">_")),
     step_float: (_) =>
       token(prec(2, seq(optional("-"), /\d+/, ".", /\d*/))),
     step_int: (_) =>
@@ -319,34 +340,78 @@ module.exports = grammar({
         /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/,
       ))),
 
-    // Slide target for cv1: ">value".
+    // Slide target for cv1 (used inside `step_valued` for the
+    // `value>value` sugar form): ">value".
     step_slide_target: ($) =>
       seq(">", choice($.step_unit, $.step_note, $.step_float, $.step_int)),
 
     // cv2 part: ":value" with optional slide ">value".
+    // `prec.right` mirrors `step_valued` — bias toward shifting an
+    // adjacent `>value` slide_target into the cv2 cell rather than
+    // reducing and parsing `>` as the start of a new cell.
     step_cv2: ($) =>
-      seq(":", choice($.step_unit, $.step_float, $.step_int), optional($.step_slide_target)),
+      prec.right(seq(":", choice($.step_unit, $.step_float, $.step_int), optional($.step_slide_target))),
 
     step_repeat: ($) => seq("*", $.nat),
 
-    // A full valued step: cv1 (with optional slide) + optional cv2 + optional repeat.
+    // A full valued step: cv1 (with optional slide-sugar target) +
+    // optional cv2 + optional repeat. `/value` cannot carry `*N`.
+    //
+    // `prec.right` biases the GLR parser toward eating an immediately
+    // following `>value` slide_target rather than reducing step_valued
+    // and parsing `>` as the start of a new step_slide_close cell.
+    // For the unsugared `value>` (no value after `>`), step_slide_open
+    // wins via the explicit conflict declared above.
     step_valued: ($) =>
-      seq(
+      prec.right(seq(
         choice($.step_unit, $.step_note, $.step_trigger, $.step_float, $.step_int),
         optional($.step_slide_target),
         optional($.step_cv2),
         optional($.step_repeat),
+      )),
+
+    // New cell shapes (ADR 0077; ticket 0948 adds the optional `:cv2`
+    // tail on slide open / step-to / close-in-tick). step_slide_open
+    // uses a token-merge trick: `value[:cv2]>` adjacent (no
+    // whitespace) where the next non-whitespace character is not a
+    // value-primary (so `value>value` falls through to `step_valued`).
+    step_cv2_tail: ($) =>
+      seq(":", choice($.step_unit, $.step_float, $.step_int)),
+    step_step_to: ($) =>
+      prec(2, seq(
+        "/",
+        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        optional($.step_cv2_tail),
+      )),
+    step_slide_close: ($) =>
+      prec(1, seq(
+        ">",
+        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        optional($.step_cv2_tail),
+      )),
+    step_slide_open: ($) =>
+      prec(3, seq(
+        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        optional($.step_cv2_tail),
+        ">",
+      )),
+
+    // Order matters: tie_flow before slide_close (both lead with `>`);
+    // slide_open ahead of step_valued so `value>` is recognised before
+    // step_valued tries to match it with a missing slide target.
+    step: ($) =>
+      choice(
+        $.step_rest,
+        $.step_tie_flow,
+        $.step_step_to,
+        $.step_slide_close,
+        $.step_slide_open,
+        $.step_tie,
+        $.step_valued,
       ),
 
-    step: ($) => choice($.step_rest, $.step_tie, $.step_valued),
-
-    // Pest wraps slide_generator alongside step under step_or_generator.
-    step_or_generator: ($) => choice($.slide_generator, $.step),
-
-    // slide(count, start, end) — endpoints may be unit/note/float/int.
-    slide_endpoint: ($) => choice($.step_unit, $.step_note, $.step_float, $.step_int),
-    slide_generator: ($) =>
-      seq("slide", "(", $.nat, ",", $.slide_endpoint, ",", $.slide_endpoint, ")"),
+    // The `slide(n, A, B)` macro generator was removed in ticket
+    // 0948; authors write the cells inline.
 
     // ─── Song block (ADR 0035) ───────────────────────────────────────────
     // song name(lane, ...) { section | pattern | play | @loop ... }

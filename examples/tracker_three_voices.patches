@@ -7,8 +7,8 @@
 
 song demo(bass, lead1, lead2) {
     pattern bass_verse {
-        note: C2  .  .  ~  Eb2 .  G1  .  C2  .  .  ~  Ab1 .  .  .
-        vel:  1.0 .  .  ~  0.8 .  0.9 .  1.0 .  .  ~  0.7 .  .  .
+        note: C2  .  .  _   Eb2 .  G1  .  C2  .  .  _   Ab1 .  .  .
+        vel:  1.0 .  .  _   0.8 .  0.9 .  1.0 .  .  _   0.7 .  .  .
     }
 
     pattern bass_chorus {
@@ -17,13 +17,13 @@ song demo(bass, lead1, lead2) {
     }
 
     pattern lead1_verse {
-        note: .   .   Eb4 .   .   .   C4  ~   .   .   G4  .   .   .   F4  .
-        vel:  .   .   0.7 .   .   .   0.8 ~   .   .   0.6 .   .   .   0.7 .
+        note: .   .   Eb4 .   .   .   C4  _   .   .   G4  .   .   .   F4  .
+        vel:  .   .   0.7 .   .   .   0.8 _   .   .   0.6 .   .   .   0.7 .
     }
 
     pattern lead1_chorus {
-        note: G4*2  .   Eb4*2 .   F4  ~   ~   .   Ab4 .   G4  .   F4>Eb4  .   .   .
-        vel:  0.9 .   0.8 .   0.7 ~   ~   .   1.0 .   0.8 .   0.7     .   .   .
+        note: G4*2  .   Eb4*2 .   F4  _   _   .   Ab4 .   G4  .   F4>Eb4  .   .   .
+        vel:  0.9 .   0.8 .   0.7 _   _   .   1.0 .   0.8 .   0.7     .   .   .
     }
 
     pattern lead2_verse {
@@ -32,8 +32,8 @@ song demo(bass, lead1, lead2) {
     }
 
     pattern lead2_chorus {
-        note: Eb5 .   .   .   C5  .   .   ~   Bb4 .   .   .   Ab4 .   .   .
-        vel:  0.8 .   .   .   0.9 .   .   ~   0.7 .   .   .   0.6 .   .   .
+        note: Eb5 .   .   .   C5  .   .   _   Bb4 .   .   .   Ab4 .   .   .
+        vel:  0.8 .   .   .   0.9 .   .   _   0.7 .   .   .   0.6 .   .   .
     }
 
     pattern lead2_fill {

@@ -1,0 +1,70 @@
+# Syntax corpus — tracker tie-spread roll (E152, migrated to E153 syntax).
+#
+# Tie (`_` — was `~` before ADR 0077) and `*N` repeat marker exist in the
+# grammar; epic E152 introduced the row-build interpretation that absorbs
+# a tie following a `*N` anchor into the roll's spread schedule. ADR
+# 0077 (ticket 0946) renames the tie token from `~` to `_` and keeps the
+# absorption behaviour exactly as before. Per syntax-corpus policy
+# (memory: feedback_syntax_corpus_policy), any change to a syntactic
+# construct's parse shape gets a corpus entry so future grammar work
+# does not silently regress the annotation this depends on.
+#
+# Behavioural assertions live in patches-core / patches-interpreter /
+# patches-modules tests; this file only locks in parse-acceptance
+# shape. The `|` row-continuation case below verifies that the parser
+# merges continuation steps into one Vec<Step> before row-build, so a
+# `*N _` span can straddle the join.
+#
+# Each body ends with an empty `patch {}` because the file grammar
+# requires a trailing patch block. The auto-wrap path skips bodies
+# starting with `pattern `.
+
+=== ok plain repeat anchor without ties
+pattern p {
+    kick: x*3
+}
+patch {}
+
+=== ok repeat anchor followed by one tie (span 2)
+pattern p {
+    kick: x*3 _
+}
+patch {}
+
+=== ok repeat anchor followed by two ties (span 3)
+pattern p {
+    kick: x*5 _ _
+}
+patch {}
+
+=== ok chained anchors interleaved with ties
+pattern p {
+    snare: x*3 _ _ _ x*2 _ .
+}
+patch {}
+
+=== ok plain tie after a non-repeat note keeps sustain shape
+pattern p {
+    vox: A3 _ _
+}
+patch {}
+
+=== ok tie-spread across the row-continuation pipe
+pattern p {
+    kick: x*3
+        | _ _
+}
+patch {}
+
+=== ok multi-channel mix of sustain and spread ties
+pattern p {
+    kick:  x*3 _      x*5 _ _     x*3
+    snare: .   x _    .   .   x*2 _
+}
+patch {}
+
+=== ok repeat anchor with cv2 plus slide plus tie
+pattern p {
+    bass: A3:0.5>B3 x*3 _
+}
+patch {}

@@ -424,11 +424,8 @@ mod drift {
         }
     }
 
-    fn step_or_generator_map(s: &dsl::StepOrGenerator) -> &'static str {
-        match s {
-            dsl::StepOrGenerator::Step(_) => "LSP: collapsed — pattern channel step_count only",
-            dsl::StepOrGenerator::Slide { .. } => "LSP: collapsed — pattern channel step_count only",
-        }
+    fn step_map(_s: &dsl::Step) -> &'static str {
+        "LSP: collapsed — pattern channel step_count only"
     }
 
     fn song_cell_map(c: &dsl::SongCell) -> &'static str {
@@ -499,7 +496,7 @@ mod drift {
             direction_map as fn(&_) -> _ as usize,
             statement_map as fn(&_) -> _ as usize,
             param_type_map as fn(&_) -> _ as usize,
-            step_or_generator_map as fn(&_) -> _ as usize,
+            step_map as fn(&_) -> _ as usize,
             song_cell_map as fn(&_) -> _ as usize,
             row_group_map as fn(&_) -> _ as usize,
             play_atom_map as fn(&_) -> _ as usize,

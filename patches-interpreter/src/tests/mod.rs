@@ -76,11 +76,17 @@ pub(super) fn empty_flat() -> FlatPatch {
 }
 
 pub(super) fn trigger_step() -> Step {
-    Step { cv1: 0.0, cv2: 0.0, trigger: true, gate: true, cv1_end: None, cv2_end: None, repeat: 1 }
+    Step {
+        cv1: 0.0,
+        cv2: 0.0,
+        trigger: true,
+        gate: true,
+        kind: patches_core::StepKind::Note { repeat: 1 },
+    }
 }
 
 pub(super) fn rest_step() -> Step {
-    Step { cv1: 0.0, cv2: 0.0, trigger: false, gate: false, cv1_end: None, cv2_end: None, repeat: 1 }
+    Step::default()
 }
 
 pub(super) fn ident(name: &str) -> Ident {

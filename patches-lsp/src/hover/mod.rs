@@ -7,6 +7,7 @@ mod host_control;
 mod module;
 mod param;
 mod port;
+mod step;
 mod tap;
 mod template;
 
@@ -64,6 +65,27 @@ pub(crate) fn compute_hover(
         }
         crate::tree_nav::CursorContext::HostControlRef { node } => {
             host_control::hover_for_ref(node, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepTie { node, channel_row } => {
+            step::hover_for_tie(node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepRepeat { repeat_node, channel_row } => {
+            step::hover_for_repeat(repeat_node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepCv { node, channel_row } => {
+            step::hover_for_step_to(node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepSlideOpen { node, channel_row } => {
+            step::hover_for_slide_open(node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepTieFlow { node, channel_row } => {
+            step::hover_for_tie_flow(node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepSlideClose { node, channel_row } => {
+            step::hover_for_slide_close(node, channel_row, source, line_index)
+        }
+        crate::tree_nav::CursorContext::StepNote { node, channel_row } => {
+            step::hover_for_note(node, channel_row, source, line_index)
         }
         _ => None,
     }
@@ -321,6 +343,129 @@ mod tests {
         assert!(s.contains("level"));
         assert!(s.contains("meter") && s.contains("spectrum"), "should list components: {s}");
         assert!(s.contains("osc.out"), "should show source cable: {s}");
+    }
+
+    // ── E152 tie-spread hover ────────────────────────────────────────
+
+    #[test]
+    fn hover_on_plain_tie_says_sustain() {
+        // `note _` — anchor has no `*N`, so the tie sustains.
+        let source = "pattern p {\n    kick: A3 _\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find(" _").unwrap() + 1;
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for sustain tie");
+        let s = markup(h);
+        assert!(s.contains("sustain tie"), "expected sustain wording: {s}");
+        assert!(!s.contains("roll continuation"), "must not call it a roll: {s}");
+    }
+
+    #[test]
+    fn hover_on_absorbed_tie_says_roll_continuation() {
+        // `x*3 _` — tie is absorbed by the preceding `*3` anchor.
+        let source = "pattern p {\n    kick: x*3 _\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find(" _").unwrap() + 1;
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for absorbed tie");
+        let s = markup(h);
+        assert!(s.contains("roll continuation"), "expected roll wording: {s}");
+        assert!(s.contains("*3"), "should reference the anchor: {s}");
+        assert!(s.contains("2 ticks"), "should report span=2: {s}");
+    }
+
+    #[test]
+    fn hover_on_repeat_anchor_with_span_reports_span() {
+        // `x*3 _` — anchor hover shows span=2.
+        let source = "pattern p {\n    kick: x*3 _\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("*3").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for *3 anchor");
+        let s = markup(h);
+        assert!(s.contains("rolled across 2 ticks"), "expected span wording: {s}");
+        assert!(s.contains("`*3`"), "should show repeat count: {s}");
+    }
+
+    // ── ADR 0077 unified step-event grammar (ticket 0947) ────────────
+
+    #[test]
+    fn hover_on_step_to_reports_step_cv() {
+        // `/G4` — step cv to G4, no retrigger.
+        let source = "pattern p {\n    vox: E4 /G4\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("/G4").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for /G4 step-to");
+        let s = markup(h);
+        assert!(s.contains("step cv to G4"), "expected step-to wording: {s}");
+        assert!(s.contains("no retrigger"), "must say no retrigger: {s}");
+    }
+
+    #[test]
+    fn hover_on_slide_open_reports_close_rule() {
+        // `C4>` — trigger + open slide; closes at next non-`_` cell.
+        let source = "pattern p {\n    vox: C4> _ /E4\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("C4>").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for C4> slide-open");
+        let s = markup(h);
+        assert!(s.contains("trigger + open slide"), "expected open-slide wording: {s}");
+        assert!(s.contains("non-`_`"), "must reference close rule: {s}");
+    }
+
+    #[test]
+    fn hover_on_slide_flow_says_slide_flow() {
+        // `>_` — slide flow.
+        let source = "pattern p {\n    vox: C4> >_ /E4\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find(">_").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for >_ tie-flow");
+        let s = markup(h);
+        assert!(s.contains("slide flow"), "expected slide-flow wording: {s}");
+    }
+
+    #[test]
+    fn hover_on_slide_close_in_tick_reports_ramp() {
+        // `>G4` — ramp to G4 within this tick, no retrigger.
+        let source = "pattern p {\n    vox: C4> >G4\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.rfind(">G4").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for >G4 close-in-tick");
+        let s = markup(h);
+        assert!(s.contains("ramp to G4"), "expected ramp wording: {s}");
+        assert!(s.contains("within this tick"), "must call out close-in-tick: {s}");
+        assert!(s.contains("no retrigger"), "must say no retrigger: {s}");
+    }
+
+    #[test]
+    fn hover_on_bare_value_after_open_slide_explains_close() {
+        // `C4> _ G4` — bare G4 fires fresh trigger and closes the preceding
+        // open slide at the boundary.
+        let source = "pattern p {\n    vox: C4> _ G4\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.rfind("G4").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for bare G4 closing slide");
+        let s = markup(h);
+        assert!(s.contains("fresh trigger"), "expected fresh-trigger wording: {s}");
+        assert!(s.contains("preceding slide"), "must reference preceding slide: {s}");
+        assert!(s.contains("G4"), "must mention the close value: {s}");
+    }
+
+    #[test]
+    fn hover_on_single_tick_repeat_anchor_describes_subdivision() {
+        // `x*3` alone — span=1, the single-tick subdivision message.
+        let source = "pattern p {\n    kick: x*3\n}\npatch {}\n";
+        let (tree, model, registry, line_index) = setup(source);
+        let off = source.find("*3").unwrap();
+        let h = compute_hover(&tree, source, off, &model, &registry, &line_index)
+            .expect("hover for *3 anchor without span");
+        let s = markup(h);
+        assert!(s.contains("single-tick roll"), "expected single-tick wording: {s}");
     }
 
     #[test]

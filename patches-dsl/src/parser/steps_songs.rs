@@ -1,14 +1,14 @@
 //! Pest-tree walkers for step/pattern/song/row/play nodes.
 //!
-//! Covers `step`, `slide_generator`, `step_or_generator`, `channel_row`,
-//! `pattern_block`, `song_row`/`row_group`/`repeat_group`/`row_seq`, and the
+//! Covers `step`, `channel_row`, `pattern_block`,
+//! `song_row`/`row_group`/`repeat_group`/`row_seq`, and the
 //! play-expression hierarchy plus `song_block`.
 
 use pest::iterators::Pair;
 
 use crate::ast::{
     Ident, PatternChannel, PatternDef, PlayAtom, PlayBody, PlayExpr, PlayTerm, RowGroup, SongCell,
-    SongDef, SongItem, SongRow, Step, StepOrGenerator,
+    SongDef, SongItem, SongRow, Step, StepKind,
 };
 
 use super::decls::build_section_def;
@@ -41,28 +41,84 @@ fn parse_slide_target_value(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
     }
 }
 
+/// Parse the `:value` cv2 tail on a slide cell (`step_cv2_tail`).
+/// Inner pair is `step_unit | step_float | step_int`.
+fn parse_cv2_tail(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
+    let inner = pair.into_inner().next().unwrap();
+    let span = span_of(&inner);
+    match inner.as_rule() {
+        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), span),
+        Rule::step_unit => parse_step_unit(inner.as_str(), span),
+        _ => unreachable!("unexpected cv2 tail rule: {:?}", inner.as_rule()),
+    }
+}
+
 fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
     // pair.as_rule() == Rule::step
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
-        Rule::step_rest => Ok(Step {
-            cv1: 0.0,
-            cv2: 0.0,
-            trigger: false,
-            gate: false,
-            cv1_end: None,
-            cv2_end: None,
-            repeat: 1,
-        }),
+        Rule::step_rest => Ok(Step::default()),
         Rule::step_tie => Ok(Step {
-            cv1: 0.0,
-            cv2: 0.0,
-            trigger: false,
             gate: true,
-            cv1_end: None,
-            cv2_end: None,
-            repeat: 1,
+            kind: StepKind::Tie,
+            ..Step::default()
         }),
+        Rule::step_tie_flow => Ok(Step {
+            gate: true,
+            kind: StepKind::TieFlow,
+            ..Step::default()
+        }),
+        Rule::step_step_to => {
+            // step_step_to = ${ "/" ~ primary ~ step_cv2_tail? }
+            let mut it = inner.into_inner();
+            let val_pair = it.next().unwrap();
+            let cv1 = parse_cv1_value(&val_pair)?;
+            let cv2 = match it.next() {
+                Some(tail) => Some(parse_cv2_tail(tail)?),
+                None => None,
+            };
+            Ok(Step {
+                cv1,
+                cv2: cv2.unwrap_or(0.0),
+                gate: true,
+                kind: StepKind::StepTo { cv2 },
+                ..Step::default()
+            })
+        }
+        Rule::step_slide_close => {
+            // step_slide_close = ${ ">" ~ primary ~ step_cv2_tail? }
+            let mut it = inner.into_inner();
+            let val_pair = it.next().unwrap();
+            let cv1 = parse_cv1_value(&val_pair)?;
+            let cv2 = match it.next() {
+                Some(tail) => Some(parse_cv2_tail(tail)?),
+                None => None,
+            };
+            Ok(Step {
+                cv1,
+                cv2: cv2.unwrap_or(0.0),
+                gate: true,
+                kind: StepKind::SlideCloseInTick { cv2 },
+                ..Step::default()
+            })
+        }
+        Rule::step_slide_open => {
+            // step_slide_open = ${ primary ~ step_cv2_tail? ~ ">" ~ !primary }
+            let mut it = inner.into_inner();
+            let val_pair = it.next().unwrap();
+            let cv1 = parse_cv1_value(&val_pair)?;
+            let cv2 = match it.next() {
+                Some(tail) => parse_cv2_tail(tail)?,
+                None => 0.0,
+            };
+            Ok(Step {
+                cv1,
+                cv2,
+                trigger: true,
+                gate: true,
+                kind: StepKind::SlideOpen,
+            })
+        }
         Rule::step_valued => {
             let mut it = inner.into_inner();
             // First child: the cv1 primary value
@@ -112,76 +168,52 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
                 }
             }
 
+            // Classify: `value>value` sugar (slide-target present) is
+            // SlideSugar; otherwise it's a Note (with optional `*N` /
+            // `:cv2`). `value*N` with a slide target is rejected by the
+            // grammar (step_slide_target precedes step_repeat in the
+            // chain, but the grammar allows them — defensively reject
+            // mixing slide-target + roll here as the semantics are
+            // undefined).
+            let kind = if let Some(end) = cv1_end {
+                if repeat > 1 {
+                    return Err(ParseError {
+                        span: span_of(&cv1_pair),
+                        message: "slide sugar `value>value` cannot also \
+                                  carry a `*N` repeat suffix"
+                            .to_owned(),
+                    });
+                }
+                StepKind::SlideSugar { cv1_end: end, cv2_end }
+            } else {
+                StepKind::Note { repeat }
+            };
+
             Ok(Step {
                 cv1,
                 cv2,
                 trigger: true,
                 gate: true,
-                cv1_end,
-                cv2_end,
-                repeat,
+                kind,
             })
         }
         _ => unreachable!("unexpected rule in step: {:?}", inner.as_rule()),
     }
 }
 
-fn build_slide_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
-    // slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ slide_endpoint ~ "," ~ slide_endpoint ~ ")" }
-    let mut it = pair.into_inner();
-    let count_pair = it.next().unwrap();
-    let count_span = span_of(&count_pair);
-    let count: u32 = count_pair.as_str().parse().map_err(|_| ParseError {
-        span: count_span,
-        message: format!("invalid slide count: {:?}", count_pair.as_str()),
-    })?;
-    let start = parse_slide_endpoint(it.next().unwrap())?;
-    let end = parse_slide_endpoint(it.next().unwrap())?;
-    Ok(StepOrGenerator::Slide { count, start, end })
-}
-
-fn parse_slide_endpoint(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
-    // slide_endpoint wraps step_unit | step_note | step_float | step_int.
-    let span = span_of(&pair);
-    let inner = pair.into_inner().next().ok_or_else(|| ParseError {
-        span,
-        message: "empty slide endpoint".to_string(),
-    })?;
-    let inner_span = span_of(&inner);
-    match inner.as_rule() {
-        Rule::step_unit => parse_step_unit(inner.as_str(), inner_span),
-        Rule::step_note => parse_step_note(inner.as_str(), inner_span),
-        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), inner_span),
-        _ => Err(ParseError {
-            span: inner_span,
-            message: format!("unexpected slide endpoint: {:?}", inner.as_rule()),
-        }),
-    }
-}
-
-fn build_step_or_generator(pair: Pair<'_, Rule>) -> Result<StepOrGenerator, ParseError> {
-    // step_or_generator = { slide_generator | step }
-    let inner = pair.into_inner().next().unwrap();
-    match inner.as_rule() {
-        Rule::slide_generator => build_slide_generator(inner),
-        Rule::step => Ok(StepOrGenerator::Step(build_step(inner)?)),
-        _ => unreachable!("unexpected rule in step_or_generator: {:?}", inner.as_rule()),
-    }
-}
-
 fn build_channel_row(pair: Pair<'_, Rule>) -> Result<PatternChannel, ParseError> {
-    // channel_row = { ident ~ ":" ~ step_or_generator* ~ channel_row_cont* }
+    // channel_row = { ident ~ ":" ~ step* ~ channel_row_cont* }
     let mut it = pair.into_inner();
     let name = build_ident(it.next().unwrap());
-    let mut steps = Vec::new();
+    let mut steps: Vec<Step> = Vec::new();
 
     for child in it {
         match child.as_rule() {
-            Rule::step_or_generator => steps.push(build_step_or_generator(child)?),
+            Rule::step => steps.push(build_step(child)?),
             Rule::channel_row_cont => {
-                // channel_row_cont = { "|" ~ step_or_generator* }
-                for sg in child.into_inner() {
-                    steps.push(build_step_or_generator(sg)?);
+                // channel_row_cont = { "|" ~ step* }
+                for s in child.into_inner() {
+                    steps.push(build_step(s)?);
                 }
             }
             _ => unreachable!("unexpected rule in channel_row: {:?}", child.as_rule()),

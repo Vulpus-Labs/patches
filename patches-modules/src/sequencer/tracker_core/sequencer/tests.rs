@@ -4,15 +4,7 @@ use patches_core::{Pattern, PatternBank, Song, SongBank, TrackerStep};
 const SR: f32 = 44100.0;
 
 fn simple_step(cv1: f32) -> TrackerStep {
-    TrackerStep {
-        cv1,
-        cv2: 0.0,
-        trigger: true,
-        gate: true,
-        cv1_end: None,
-        cv2_end: None,
-        repeat: 1,
-    }
+    TrackerStep { cv1, trigger: true, gate: true, ..TrackerStep::default() }
 }
 
 fn single_pattern(steps: usize) -> Pattern {

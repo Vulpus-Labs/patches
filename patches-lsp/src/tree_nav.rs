@@ -138,6 +138,53 @@ pub(crate) enum CursorContext<'tree> {
         #[allow(dead_code)]
         node: Node<'tree>,
     },
+    /// Cursor sits on a tie cell (`_`) in a pattern channel row.
+    /// `node` is the `step_tie` token; `channel_row` is the enclosing
+    /// `channel_row` rule (with any `channel_row_cont` continuations).
+    StepTie {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a `*N` repeat marker in a pattern channel row.
+    /// `repeat_node` is the `step_repeat` rule; `channel_row` is the
+    /// enclosing `channel_row`.
+    StepRepeat {
+        repeat_node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a `/value` step-to cell (ADR 0077). `node` is the
+    /// `step_step_to` rule; `channel_row` is the enclosing row.
+    StepCv {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a `value>` slide-open cell (ADR 0077). `node` is
+    /// the `step_slide_open` rule; `channel_row` is the enclosing row.
+    StepSlideOpen {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a `>_` tie-flow cell (ADR 0077). `node` is the
+    /// `step_tie_flow` token; `channel_row` is the enclosing row.
+    StepTieFlow {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a `>value` slide-close-in-tick cell (ADR 0077).
+    /// `node` is the `step_slide_close` rule; `channel_row` is the row.
+    StepSlideClose {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
+    /// Cursor sits on a bare-value triggered cell (`value`, `value*N`,
+    /// `value:cv2`, `value>value` sugar). `node` is the `step_valued`
+    /// rule; `channel_row` is the enclosing row. Only classified when
+    /// the cell is the close of an open slide (so hover has something
+    /// useful to say about the channel-state lead-in).
+    StepNote {
+        node: Node<'tree>,
+        channel_row: Node<'tree>,
+    },
     /// Could not classify (cursor on whitespace, inside a comment, or on
     /// a node kind the helper doesn't recognise).
     Unknown,
@@ -280,6 +327,13 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
         }
     }
 
+    // Pattern step cells: tie (`_`) and `*N` repeat marker. Both need
+    // the enclosing `channel_row` so the hover handler can scan
+    // sibling steps for the row's anchor/tie shape (E152/E153).
+    if let Some(ctx) = classify_step_node(node) {
+        return Some(ctx);
+    }
+
     // Song block: pattern-name completion target.
     if let Some(song_node) = std::iter::successors(Some(node), |n| n.parent())
         .find(|n| SONG_KINDS.contains(&n.kind()))
@@ -288,6 +342,54 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
     }
 
     None
+}
+
+/// Detect a cursor landing on a pattern-row step cell that has hover
+/// content. Walks up from `node` looking for the innermost cell-shape
+/// rule (`step_tie`, `step_tie_flow`, `step_step_to`, `step_slide_open`,
+/// `step_slide_close`, `step_valued`, `step_repeat`) and returns the
+/// matching [`CursorContext`] variant. `step_repeat` is checked before
+/// its enclosing `step_valued` so cursor on `*3` resolves to the repeat
+/// marker rather than the surrounding note. Cursor on the `step`
+/// wrapper descends to its inner cell.
+fn classify_step_node(node: Node<'_>) -> Option<CursorContext<'_>> {
+    let start = if node.kind() == "step" {
+        node.named_child(0).unwrap_or(node)
+    } else {
+        node
+    };
+
+    let mut cur = Some(start);
+    let shape = loop {
+        let Some(n) = cur else { break None };
+        match n.kind() {
+            "step_repeat"
+            | "step_tie"
+            | "step_tie_flow"
+            | "step_step_to"
+            | "step_slide_close"
+            | "step_slide_open"
+            | "step_valued" => break Some(n),
+            "channel_row" => break None,
+            _ => cur = n.parent(),
+        }
+    };
+    let shape = shape?;
+    let channel_row = find_ancestor(shape, "channel_row")?;
+
+    Some(match shape.kind() {
+        "step_tie" => CursorContext::StepTie { node: shape, channel_row },
+        "step_tie_flow" => CursorContext::StepTieFlow { node: shape, channel_row },
+        "step_step_to" => CursorContext::StepCv { node: shape, channel_row },
+        "step_slide_close" => CursorContext::StepSlideClose { node: shape, channel_row },
+        "step_slide_open" => CursorContext::StepSlideOpen { node: shape, channel_row },
+        "step_valued" => CursorContext::StepNote { node: shape, channel_row },
+        "step_repeat" => CursorContext::StepRepeat {
+            repeat_node: shape,
+            channel_row,
+        },
+        _ => unreachable!(),
+    })
 }
 
 /// Tap-target sub-tokens.

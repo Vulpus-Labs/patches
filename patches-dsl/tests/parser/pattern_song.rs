@@ -1,6 +1,6 @@
 //! Pattern and song block parsing.
 
-use patches_dsl::{parse, StepOrGenerator};
+use patches_dsl::parse;
 
 // ─── Pattern block parsing ──────────────────────────────────────────────────
 
@@ -25,22 +25,14 @@ fn pattern_step_values() {
     let kick = &file.patterns[0].channels[0];
 
     // First step: x → trigger=true, gate=true, cv1=0.0
-    match &kick.steps[0] {
-        StepOrGenerator::Step(s) => {
-            assert!(s.trigger);
-            assert!(s.gate);
-            assert!((s.cv1 - 0.0).abs() < 1e-6);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s0 = &kick.steps[0];
+    assert!(s0.trigger);
+    assert!(s0.gate);
+    assert!((s0.cv1 - 0.0).abs() < 1e-6);
     // Second step: . → rest
-    match &kick.steps[1] {
-        StepOrGenerator::Step(s) => {
-            assert!(!s.trigger);
-            assert!(!s.gate);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s1 = &kick.steps[1];
+    assert!(!s1.trigger);
+    assert!(!s1.gate);
 }
 
 #[test]
@@ -51,21 +43,13 @@ fn pattern_notes_parse() {
     assert_eq!(pat.name.name, "melody");
     let note_ch = &pat.channels[0];
     // C4 → v/oct 4.0
-    match &note_ch.steps[0] {
-        StepOrGenerator::Step(s) => {
-            assert!((s.cv1 - 4.0).abs() < 1e-6, "C4 should be 4.0 v/oct, got {}", s.cv1);
-            assert!(s.trigger);
-            assert!(s.gate);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s0 = &note_ch.steps[0];
+    assert!((s0.cv1 - 4.0).abs() < 1e-6, "C4 should be 4.0 v/oct, got {}", s0.cv1);
+    assert!(s0.trigger);
+    assert!(s0.gate);
     // Eb4 → v/oct = (4*12 + 3) / 12 = 51/12 = 4.25
-    match &note_ch.steps[1] {
-        StepOrGenerator::Step(s) => {
-            assert!((s.cv1 - 4.25).abs() < 1e-6, "Eb4 should be 4.25 v/oct, got {}", s.cv1);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s1 = &note_ch.steps[1];
+    assert!((s1.cv1 - 4.25).abs() < 1e-6, "Eb4 should be 4.25 v/oct, got {}", s1.cv1);
 }
 
 #[test]
@@ -83,14 +67,10 @@ fn pattern_tie_step() {
     let src = include_str!("../fixtures/pattern_continuation.patches");
     let file = parse(src).unwrap();
     let note_ch = &file.patterns[0].channels[0];
-    // Step index 3 is ~ (tie)
-    match &note_ch.steps[3] {
-        StepOrGenerator::Step(s) => {
-            assert!(!s.trigger, "tie should have trigger=false");
-            assert!(s.gate, "tie should have gate=true");
-        }
-        _ => panic!("expected Step"),
-    }
+    // Step index 3 is _ (tie)
+    let s = &note_ch.steps[3];
+    assert!(!s.trigger, "tie should have trigger=false");
+    assert!(s.gate, "tie should have gate=true");
 }
 
 #[test]
@@ -99,88 +79,45 @@ fn pattern_cv2_parsing() {
     let src = "pattern p { ch: x:0.7 . }\npatch { module o : AudioOut }";
     let file = parse(src).unwrap();
     let ch = &file.patterns[0].channels[0];
-    match &ch.steps[0] {
-        StepOrGenerator::Step(s) => {
-            assert!((s.cv2 - 0.7).abs() < 1e-6, "cv2 should be 0.7, got {}", s.cv2);
-            assert!(s.trigger);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s = &ch.steps[0];
+    assert!((s.cv2 - 0.7).abs() < 1e-6, "cv2 should be 0.7, got {}", s.cv2);
+    assert!(s.trigger);
 }
 
 #[test]
 fn pattern_repeat_parsing() {
     let src = "pattern p { ch: x*3 . }\npatch { module o : AudioOut }";
     let file = parse(src).unwrap();
-    match &file.patterns[0].channels[0].steps[0] {
-        StepOrGenerator::Step(s) => {
-            assert_eq!(s.repeat, 3);
-            assert!(s.trigger);
-        }
-        _ => panic!("expected Step"),
-    }
+    let s = &file.patterns[0].channels[0].steps[0];
+    assert!(matches!(s.kind, patches_dsl::ast::StepKind::Note { repeat: 3 }));
+    assert!(s.trigger);
 }
 
 #[test]
 fn pattern_slide_step() {
     let src = "pattern p { ch: C4>E4 . }\npatch { module o : AudioOut }";
     let file = parse(src).unwrap();
-    match &file.patterns[0].channels[0].steps[0] {
-        StepOrGenerator::Step(s) => {
-            assert!((s.cv1 - 4.0).abs() < 1e-6, "slide start should be C4=4.0");
-            // E4 = (4*12 + 4) / 12 = 52/12 ≈ 4.3333
-            assert!(s.cv1_end.is_some(), "should have slide target");
-            let end = s.cv1_end.unwrap();
-            assert!((end - 4.333_333).abs() < 1e-3, "slide end should be E4≈4.333, got {end}");
+    let s = &file.patterns[0].channels[0].steps[0];
+    assert!((s.cv1 - 4.0).abs() < 1e-6, "slide start should be C4=4.0");
+    // E4 = (4*12 + 4) / 12 = 52/12 ≈ 4.3333
+    match s.kind {
+        patches_dsl::ast::StepKind::SlideSugar { cv1_end, .. } => {
+            assert!(
+                (cv1_end - 4.333_333).abs() < 1e-3,
+                "slide end should be E4≈4.333, got {cv1_end}",
+            );
         }
-        _ => panic!("expected Step"),
+        ref other => panic!("expected SlideSugar, got {other:?}"),
     }
 }
 
 #[test]
-fn pattern_slide_generator() {
-    let src = include_str!("../fixtures/pattern_slides.patches");
-    let file = parse(src).expect("pattern_slides should parse");
-    let auto_ch = &file.patterns[0].channels[1];
-    // slide(4, 0.0, 1.0) should be a single Slide generator
-    assert_eq!(auto_ch.steps.len(), 1);
-    match &auto_ch.steps[0] {
-        StepOrGenerator::Slide { count, start, end } => {
-            assert_eq!(*count, 4);
-            assert!((start - 0.0).abs() < 1e-6);
-            assert!((end - 1.0).abs() < 1e-6);
-        }
-        _ => panic!("expected Slide generator"),
-    }
-}
-
-#[test]
-fn slide_generator_accepts_note_endpoints() {
-    // G2 = v/oct -1.0 + 7/12 ≈ -0.4167; F2 ≈ -0.5833.
-    let src = "pattern p { bass: slide(2, G2, F2) }\npatch { module osc : Osc }\n";
-    let file = parse(src).expect("slide with note endpoints should parse");
-    let ch = &file.patterns[0].channels[0];
-    assert_eq!(ch.steps.len(), 1);
-    match &ch.steps[0] {
-        StepOrGenerator::Slide { count, start, end } => {
-            assert_eq!(*count, 2);
-            // v/oct relative to C0: G2 = 2 + 7/12, F2 = 2 + 5/12.
-            assert!((*start - (2.0 + 7.0 / 12.0)).abs() < 1e-4, "start={start}");
-            assert!((*end - (2.0 + 5.0 / 12.0)).abs() < 1e-4, "end={end}");
-        }
-        _ => panic!("expected Slide generator"),
-    }
-}
-
-#[test]
-fn slide_generator_accepts_hz_endpoints() {
-    let src = "pattern p { cut: slide(2, 500Hz, 2kHz) }\npatch { module osc : Osc }\n";
-    let file = parse(src).expect("slide with Hz endpoints should parse");
-    let ch = &file.patterns[0].channels[0];
-    match &ch.steps[0] {
-        StepOrGenerator::Slide { count, .. } => assert_eq!(*count, 2),
-        _ => panic!("expected Slide generator"),
-    }
+fn old_slide_macro_no_longer_parses() {
+    // Ticket 0948: `slide(n, A, B)` was removed in favour of writing
+    // the cells inline. The bare identifier `slide` is no longer
+    // recognised as a step generator.
+    assert!(parse("pattern p { ch: slide(4, 0.0, 1.0) }\npatch {}\n").is_err());
+    assert!(parse("pattern p { bass: slide(2, G2, F2) }\npatch {}\n").is_err());
 }
 
 // ─── Song block parsing ─────────────────────────────────────────────────────
@@ -373,4 +310,123 @@ fn patterns_and_templates_coexist() {
     assert_eq!(file.templates.len(), 1);
     assert_eq!(file.patterns.len(), 1);
     assert_eq!(file.songs.len(), 1);
+}
+
+// ─── ADR 0077 step grammar (ticket 0946) ─────────────────────────────
+
+/// Helper: parse a pattern row of step cells, return the kinds in order.
+fn kinds_of(src: &str) -> Vec<patches_dsl::ast::StepKind> {
+    let file = parse(src).expect("parse failed");
+    file.patterns[0].channels[0]
+        .steps
+        .iter()
+        .map(|s| s.kind)
+        .collect()
+}
+
+#[test]
+fn step_tie_underscore_parses_as_tie() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4 _ }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::Tie));
+}
+
+#[test]
+fn step_step_to_slash_value_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4 /B4 }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::StepTo { cv2: None }));
+}
+
+#[test]
+fn step_slide_open_value_gt_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4> /B4 }\npatch{}\n");
+    assert!(matches!(kinds[0], StepKind::SlideOpen));
+    assert!(matches!(kinds[1], StepKind::StepTo { .. }));
+}
+
+#[test]
+fn step_tie_flow_gt_underscore_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4 >_ /B4 }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::TieFlow));
+}
+
+#[test]
+fn step_slide_close_gt_value_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4> >B4 }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::SlideCloseInTick { .. }));
+}
+
+#[test]
+fn step_value_gt_value_still_parses_as_slide_sugar() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4>B4 }\npatch{}\n");
+    assert!(matches!(kinds[0], StepKind::SlideSugar { .. }));
+}
+
+#[test]
+fn step_step_to_with_unit_literal_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: 440Hz /880Hz }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::StepTo { .. }));
+}
+
+#[test]
+fn step_slide_close_with_unit_literal_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: 0.0> >1.0 }\npatch{}\n");
+    assert!(matches!(kinds[1], StepKind::SlideCloseInTick { .. }));
+}
+
+#[test]
+fn old_tilde_tie_no_longer_parses_in_step_row() {
+    // ADR 0077 retired `~` as a step-tie token.
+    let err = parse("pattern p { ch: A4 ~ }\npatch{}\n");
+    assert!(err.is_err(), "old ~ tie should be rejected post-ADR-0077");
+}
+
+// ─── Ticket 0948: :cv2 on multi-cell slide cells ─────────────────────
+
+#[test]
+fn step_slide_open_carries_cv2() {
+    use patches_dsl::ast::StepKind;
+    let file = parse("pattern p { ch: A4:0.5> /B4 }\npatch{}\n").expect("parse");
+    let s = &file.patterns[0].channels[0].steps[0];
+    assert!(matches!(s.kind, StepKind::SlideOpen));
+    assert!(s.trigger);
+    assert!((s.cv1 - (4.0 + 9.0 / 12.0)).abs() < 1e-4, "A4 cv1={}", s.cv1);
+    assert!((s.cv2 - 0.5).abs() < 1e-6, "cv2 = 0.5 from :cv2 tail, got {}", s.cv2);
+}
+
+#[test]
+fn step_step_to_carries_cv2() {
+    use patches_dsl::ast::StepKind;
+    let file = parse("pattern p { ch: A4 /B4:0.8 }\npatch{}\n").expect("parse");
+    let s = &file.patterns[0].channels[0].steps[1];
+    match s.kind {
+        StepKind::StepTo { cv2: Some(c) } => assert!((c - 0.8).abs() < 1e-6),
+        other => panic!("expected StepTo with cv2, got {other:?}"),
+    }
+}
+
+#[test]
+fn step_slide_close_carries_cv2() {
+    use patches_dsl::ast::StepKind;
+    let file = parse("pattern p { ch: A4> >B4:0.8 }\npatch{}\n").expect("parse");
+    let s = &file.patterns[0].channels[0].steps[1];
+    match s.kind {
+        StepKind::SlideCloseInTick { cv2: Some(c) } => assert!((c - 0.8).abs() < 1e-6),
+        other => panic!("expected SlideCloseInTick with cv2, got {other:?}"),
+    }
+}
+
+#[test]
+fn step_slide_close_without_cv2_leaves_kind_cv2_none() {
+    use patches_dsl::ast::StepKind;
+    let file = parse("pattern p { ch: A4> >B4 }\npatch{}\n").expect("parse");
+    let s = &file.patterns[0].channels[0].steps[1];
+    assert!(matches!(s.kind, StepKind::SlideCloseInTick { cv2: None }));
 }

@@ -197,17 +197,33 @@ template = { "template" ~ ident ~ param_decls? ~ "{" ~ port_decls ~ statement* ~
 patch = { "patch" ~ "{" ~ statement* ~ "}" }
 
 // ─── Step notation (inside pattern channel rows) ─────────────────────────────
-// A step value: the cv1 part of a step (note, trigger, float, rest, or tie).
-// Order: float_unit before float_lit/int_lit; note_lit before ident.
+// ADR 0077 unified grammar (ticket 0946). Eight cell shapes:
+//   .            rest
+//   _            tie / continuation (channel-stateful: sustain, absorbed,
+//                  or slide-flow depending on the open modifier)
+//   value        triggered note (`value`, `value:cv2`, `value*N`)
+//   value>value  one-tick slide sugar (legacy form)
+//   value>       open a multi-tick slide (no close target — supplied later)
+//   /value       change cv1 (and optionally cv2) without retrigger
+//   >_           explicit slide-flow / open-from-current cv
+//   >value       close an open slide within this tick (no trigger)
+//
+// The `~` tie token from epic E152 has been retired in favour of `_`
+// (ADR 0077 § "Token ambiguity"). The `~tap(...)` / `~name`
+// cable-endpoint forms are unaffected.
+//
+// Trailing word-boundary lookaheads on the single-char tokens prevent
+// `_foo` / `.5` / etc. from accidentally matching.
 step_note     = @{ note_letter ~ note_accidental? ~ note_octave }
 step_trigger  = @{ "x" ~ !(ASCII_ALPHANUMERIC | "_") }
 step_rest     = @{ "." }
-step_tie      = @{ "~" }
+step_tie      = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
 step_float    = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
 step_int      = @{ "-"? ~ ASCII_DIGIT+ }
 step_unit     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix }
 
 // Slide target: ">value" where value is a note, float, or unit literal.
+// Used inside the `value>value` sugar form (`step_valued`).
 step_slide_target = { ">" ~ (step_unit | step_note | step_float | step_int) }
 
 // cv2 part: ":value" with optional slide ">value"
@@ -216,23 +232,45 @@ step_cv2      = { ":" ~ (step_unit | step_float | step_int) ~ step_slide_target?
 // Repeat suffix: "*N"
 step_repeat   = ${ "*" ~ nat }
 
-// A full step: cv1 (with optional slide) + optional cv2 + optional repeat
-// Rest and tie are standalone (no cv2/slide/repeat).
+// A full valued step: cv1 (with optional one-tick slide sugar) + optional
+// cv2 + optional repeat. Note: `/value` cannot carry `*N` (rejected at
+// grammar level), so `step_repeat` lives only on `step_valued`.
 step_valued   = { (step_unit | step_note | step_trigger | step_float | step_int) ~ step_slide_target? ~ step_cv2? ~ step_repeat? }
-step          = { step_rest | step_tie | step_valued }
 
-// ─── Slide generator ─────────────────────────────────────────────────────────
-// slide(count, start, end) — expands to `count` slide steps. Endpoints
-// may be note literals, unit-suffixed numbers, or plain floats/ints.
-slide_endpoint  = { step_unit | step_note | step_float | step_int }
-slide_generator = { "slide" ~ "(" ~ nat ~ "," ~ slide_endpoint ~ "," ~ slide_endpoint ~ ")" }
+// New cell shapes (ADR 0077, extended by ticket 0948 to carry an
+// optional `:cv2` tail on the three slide cells so cv2 can ramp
+// through a slide alongside cv1).
+//
+// `step_tie_flow` is matched before `step_slide_close` so the `>_` form
+// is not consumed as a `>` slide-close with leftover `_`.
+//
+// `step_cv2_tail` is the `:cv2` modifier that attaches to the three
+// slide cells (open / step-to / close-in-tick). Uses the same primary
+// set as `step_cv2` (no note literals).
+step_tie_flow    = @{ ">_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+step_cv2_tail    = ${ ":" ~ (step_unit | step_float | step_int) }
+step_step_to     = ${ "/" ~ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? }
+step_slide_close = ${ ">" ~ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? }
+// `value[:cv2]>` with no value after the `>`. The negative lookahead
+// ensures the slide-open shape does not consume the head of a
+// `value>value` sugar form (which falls through to `step_valued`).
+step_slide_open  = ${ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? ~ ">" ~ !(step_unit | step_note | step_float | step_int) }
+
+// Order: tie_flow before slide_close (both start with `>`); slide_open
+// before step_valued (so `value>` is recognised as the open shape
+// before step_valued's optional slide_target).
+step             = { step_rest | step_tie_flow | step_step_to | step_slide_close | step_slide_open | step_tie | step_valued }
 
 // ─── Pattern blocks ──────────────────────────────────────────────────────────
 // A channel row: "label: step step ... [| continuation ...]"
 // The trailing "|" continues the row on the next line.
-step_or_generator  = { slide_generator | step }
-channel_row_cont   = { "|" ~ step_or_generator* }
-channel_row        = { ident ~ ":" ~ step_or_generator* ~ channel_row_cont* }
+//
+// The `slide(n, A, B)` macro generator was removed in ticket 0948;
+// authors write slides inline as `A> >_* >B` cells. The row builder
+// in `patches-core::resolve_step_effects` resolves the multi-cell
+// shape into a single continuous slide schedule.
+channel_row_cont   = { "|" ~ step* }
+channel_row        = { ident ~ ":" ~ step* ~ channel_row_cont* }
 pattern_block      = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
 
 // ─── Song composition (ADR 0035) ─────────────────────────────────────────────

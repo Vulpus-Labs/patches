@@ -88,6 +88,13 @@ pub(crate) fn compute_completions(
         | CursorContext::TapName { .. }
         | CursorContext::HostControlDecl { .. }
         | CursorContext::HostControlRef { .. }
+        | CursorContext::StepTie { .. }
+        | CursorContext::StepRepeat { .. }
+        | CursorContext::StepCv { .. }
+        | CursorContext::StepSlideOpen { .. }
+        | CursorContext::StepTieFlow { .. }
+        | CursorContext::StepSlideClose { .. }
+        | CursorContext::StepNote { .. }
         | CursorContext::Unknown => {}
     }
 

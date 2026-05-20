@@ -1,0 +1,196 @@
+# Syntax corpus — tracker step event grammar (ADR 0077, epic E153,
+# ticket 0946).
+#
+# Locks in the parse shape of the five new cell forms introduced by
+# ADR 0077 (`_`, `/value`, `value>`, `>_`, `>value`) plus the existing
+# `value>value` sugar, and covers every close-rule combination:
+#
+#   value>value      single-cell one-tick slide (sugar)
+#   value> /value    open + step-to close at boundary
+#   value> _ /value  open + flow + step-to close
+#   value> >value    open + close-in-tick
+#   value> _ >value  open + flow + close-in-tick
+#   value> _ value   open + flow + fresh trigger close at boundary
+#   value> value     open + fresh trigger close at boundary (1-cell flow)
+#   _ >_ /value      hold + tie-flow open + step-to close
+#   /value           bare step-to (changes cv without slide)
+#
+# Behavioural assertions for these shapes live in patches-core (the
+# row-build resolver tests) and patches-interpreter; this corpus only
+# locks in parse-acceptance shape so pest/tree-sitter stay in lockstep.
+
+=== ok bare step-to cell
+pattern p {
+    vox: A3 /B3 .
+}
+patch {}
+
+=== ok slide sugar one-tick
+pattern p {
+    vox: A3>B3 .
+}
+patch {}
+
+=== ok slide open then step-to close at boundary
+pattern p {
+    vox: A3> /B3 .
+}
+patch {}
+
+=== ok slide open then flow tie then step-to close
+pattern p {
+    vox: A3> _ /B3
+}
+patch {}
+
+=== ok slide open then close-in-tick
+pattern p {
+    vox: A3> >B3 .
+}
+patch {}
+
+=== ok slide open then flow then close-in-tick
+pattern p {
+    vox: A3> _ >B3
+}
+patch {}
+
+=== ok slide open then flow then fresh trigger close
+pattern p {
+    vox: A3> _ B3 .
+}
+patch {}
+
+=== ok slide open then immediate fresh trigger close
+pattern p {
+    vox: A3> B3 .
+}
+patch {}
+
+=== ok hold then tie-flow opens slide then step-to close
+pattern p {
+    vox: A3 _ >_ /B3
+}
+patch {}
+
+=== ok tie-flow opens slide then close-in-tick
+pattern p {
+    vox: A3 >_ >B3
+}
+patch {}
+
+=== ok new tie token across row-continuation pipe
+pattern p {
+    vox: A3 _
+       | _ B3
+}
+patch {}
+
+=== ok mixed roll and slide on different channels
+pattern p {
+    kick:  x*3 _ . .
+    vox:   A3> _ /B3 .
+}
+patch {}
+
+=== ok slide on numeric (non-note) endpoints
+pattern p {
+    cv: 0.0> _ >1.0
+}
+patch {}
+
+=== ok step-to with unit literal
+pattern p {
+    f: 440Hz /880Hz .
+}
+patch {}
+
+# ── Ticket 0948: `:cv2` tail on multi-cell slide cells ──────────────
+
+=== ok slide open carries cv2
+pattern p {
+    vox: A3:0.5> _ /B3
+}
+patch {}
+
+=== ok step-to carries cv2 modifier
+pattern p {
+    vox: A3 /B3:0.8 .
+}
+patch {}
+
+=== ok slide-close-in-tick carries cv2
+pattern p {
+    vox: A3:0.5> >B3:1.0
+}
+patch {}
+
+=== ok cv1 and cv2 ramp together across three ticks
+pattern p {
+    vox: C4:0.5> _ >C4:1.0
+}
+patch {}
+
+=== ok cv2 holds through a slide when close has no :cv2
+pattern p {
+    vox: A3:0.7> _ >B3
+}
+patch {}
+
+=== both_error bare slide macro no longer parses
+pattern p {
+    auto: slide(4, 0.0, 1.0)
+}
+patch {}
+
+# ── Ticket 0947: cross-cell composition combinations ────────────────
+
+=== ok slide and roll on consecutive cells of the same channel
+pattern p {
+    vox: A3> _ /B3 . B3*3 _
+}
+patch {}
+
+=== ok slide-close-in-tick carries cv2 followed by step-to with cv2
+pattern p {
+    vox: A3:0.5> >B3:0.8 /C4:1.0
+}
+patch {}
+
+=== ok back-to-back slides on one channel (close, retrigger, re-open)
+pattern p {
+    vox: A3> _ B3> _ /C4
+}
+patch {}
+
+=== ok slide flow then close-in-tick then step-to chain
+pattern p {
+    vox: A3 >_ _ >B3 /C4
+}
+patch {}
+
+=== ok roll followed by slide open after rest
+pattern p {
+    vox: A3*3 _ . B3> _ /C4
+}
+patch {}
+
+=== ok step-to with cv2 modifier chained with slide and close
+pattern p {
+    vox: A3 /B3:0.6 _ C4> _ >D4:1.0
+}
+patch {}
+
+=== ok long slide via repeated tie-flow cells
+pattern p {
+    vox: C4> _ _ _ /G4
+}
+patch {}
+
+=== ok mixed channels: roll + slide + step-to interleaved
+pattern p {
+    kick: x*3 _ . . . .
+    bass: C2 /D2 _ E2> _ /G2
+    vox:  C4>D4 . E4> _ /G4 _
+}
+patch {}

@@ -469,45 +469,169 @@ pattern bass_line {
 - All channels in a pattern must have the **same number of steps**.
 - Steps are separated by whitespace.
 
-### Step notation
+### Step events
 
-Each step produces up to four signals: `cv1`, `cv2`, `trigger`, and `gate`.
+The step grammar is a unified taxonomy of cell shapes (ADR 0077). Each
+cell of a channel row parses into one shape; the row-build pass walks
+each channel left-to-right tracking `(slide_open, roll_active)` channel
+state and emits a resolved effect per cell. The pattern player
+dispatches on the resolved effect.
 
-| Syntax      | cv1   | cv2   | trigger   | gate   | Description                      |
-| ----------- | ----- | ----- | --------- | ------ | -------------------------------- |
-| `C4`, `A#3` | V/oct | —     | yes       | yes    | Note (pitch to cv1)              |
-| `x`         | —     | —     | yes       | yes    | Trigger hit                      |
-| `x:0.8`     | —     | 0.8   | yes       | yes    | Trigger with cv2 (velocity)      |
-| `0.5`       | 0.5   | —     | yes       | yes    | Float value to cv1               |
-| `0.5:0.3`   | 0.5   | 0.3   | yes       | yes    | Float cv1 and cv2                |
-| `.`         | —     | —     | no        | no     | Rest                             |
-| `~`         | —     | —     | no        | yes    | Tie (sustain gate, no retrigger) |
+#### Cell taxonomy
 
-Values support the same unit suffixes as module parameters: `440Hz`,
-`2.5kHz`, `-6dB`, and note names are all valid.
+A cell produces up to four signals: `cv1`, `cv2`, `trigger`, `gate`.
 
-### Slides
+| Cell           | Trigger? | Lead-in effect on this tick    | Outgoing slide / roll state              |
+| -------------- | -------- | ------------------------------ | ---------------------------------------- |
+| `value`        | yes      | snap cv1 (and cv2) at start    | closes any open slide at the boundary    |
+| `value:cv2`    | yes      | snap cv1 + cv2 at start        | closes any open slide at the boundary    |
+| `value*N`      | yes      | snap cv1; fires N sub-triggers | opens a roll                             |
+| `value>value`  | yes      | snap cv1 at start              | one-tick slide that lands at end value   |
+| `value>`       | yes      | snap cv1 at start              | opens a multi-tick slide                 |
+| `/value`       | no       | snap cv1 at the tick boundary  | closes any open slide at the boundary    |
+| `>_`           | no       | continues / opens a slide      | extends or opens slide flow              |
+| `>value`       | no       | ramps to value within the tick | closes the slide inside this tick        |
+| `_`            | no       | depends on the channel's state | absorbed by roll / slide, else sustains  |
+| `.`            | no       | rest — gate drops              | resets channel state                     |
 
-A slide interpolates cv1 (and optionally cv2) linearly over the tick
-duration:
+`value` is any of: note name (`C4`, `A#3`), float (`0.5`), int (`2`),
+unit literal (`440Hz`, `-6dB`). The optional `:cv2` tail attaches to
+`value`, `value>`, `/value`, and `>value` (cv2 endpoints on close
+cells ramp through the slide). Cv2 on `value>value` sugar is
+`A:0.5>B:0.8`.
 
-```patches
-note: C4>E4  .  G4:0.5>0.8  .
+#### Unified close rule
+
+A slide opened by `value>` or `>_` closes when the row-build pass
+encounters a non-`_`, non-`>_`, non-`value>` cell:
+
+- `value` close — slide lands at `value` at the tick boundary entering
+  the cell; cell then fires a fresh trigger on its own tick.
+- `/value` close — slide lands at `value` at the tick boundary; cell
+  holds without retrigger.
+- `>value` close — slide ramps to `value` *inside* this tick (no
+  trigger); the close-tick is itself a slide-flow tick.
+
+The lead-in shape (flat hold vs ramp) is determined by prior cells,
+not by anything on the close cell. Bare `value` is therefore always
+locally readable as a fresh trigger.
+
+#### Continuation absorption
+
+A `_` cell takes its meaning from whichever modifier was last open on
+the channel:
+
+- After a non-roll, non-slide anchor: sustain (gate held, cv unchanged).
+- After a `value*N` anchor: absorbed into the roll's spread schedule
+  (the N sub-triggers spread across the anchor tick + the absorbed-tie
+  run). Span `S = 1 + consecutive_underscores`; sub-triggers fall at
+  `k * S / N` of the span for `k = 0..N-1`; gate articulates at ~80%
+  of each interval. Swing within the span is respected per-tick.
+- After a `value>` or `>_`: absorbed into the slide's ramp.
+
+`>_` is the explicit-flow form for slides that start on a non-value
+cell ("hold this note for a bit, then start ramping").
+
+#### Worked-example timelines
+
+Each five-tick figure below shows trigger placement (`!`), gate
+articulation (`-` = high, `.` = low), and cv shape across ticks.
+
+```text
+Pattern:  E4 . . . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- .  .  .  .
+cv1:      E4 E4 E4 E4 E4   (held after gate drops; analog convention)
+
+Pattern:  E4 /G4 . . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  .  .  .   (only the E4 fires)
+Gate:     --- -- .  .  .
+cv1:      E4  G4 G4 G4 G4  (snap at the 1→2 boundary)
+
+Pattern:  E4 _ /G4 . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- .  .
+cv1:      E4 E4 G4 G4 G4  (snap at the 2→3 boundary)
+
+Pattern:  E4> _ G4 . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  !  .  .   (fresh G4 trigger at start of tick 3)
+Gate:     --- -- -- .  .
+cv1:      E4→ →G4 G4 G4 G4 (ramp through ticks 1+2; lands at boundary)
+
+Pattern:  E4 _ >_ /G4 .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- -- .
+cv1:      E4 E4 E4→ G4 G4   (slide opens at tick 3 via >_; closes at
+                              tick-3→tick-4 boundary)
+
+Pattern:  E4> _ >G4 . .
+Tick:     1   2  3   4  5
+Trigger:  !   .  .   .  .
+Gate:     --- -- --- .  .
+cv1:      E4→ →  →G4 G4 G4  (continuous ramp across ticks 1-3; lands
+                              at end of tick 3)
+
+Pattern:  x*3 _ . . .
+Tick:     1   2 3 4 5
+Trigger:  !!!!! . . . .     (3 sub-triggers spread across ticks 1+2,
+                              `*0/3`, `*2/3`, `*4/3` of T each)
+Gate:     -..-..-.. . . .   (~80% duty per sub-interval)
+cv1:      anchor cv1 held across the span
 ```
 
-The `>` separates start and end values. The gate stays high through the
-slide. Slides work with notes, floats, and cv1:cv2 pairs.
+The `value>value` sugar is the common one-tick case: it packs an
+open-and-close into a single cell. It is exactly equivalent in effect
+to `value> /value` *except* that the unsugared form takes two ticks
+(slide tick 1, hold tick 2). Use the sugar when the timing fits.
 
-### Repeats
+#### Row-continuation across `|`
 
-A repeat subdivides a single tick into multiple sub-triggers:
+Channel state and slide / roll spans flow through the `|`
+row-continuation marker — the parser merges continuations into one
+logical row before the row-build pass, so a span can cross the join:
 
 ```patches
-hit: x*3  .  x*2  .
+hit: x*3
+   | _ _
+vox: A3>
+   | _ /B3
 ```
 
-`x*3` fires three evenly-spaced triggers within the tick, each with an ~80%
-duty cycle gate.
+#### Migration from `~`
+
+The `~` tie token was retired in favour of `_` (ADR 0077). Old
+patches using `~` in step rows do not parse; mechanically replace
+`~` → `_` inside pattern bodies. The cable-endpoint forms (`~tap(…)`,
+`~host_control`) are unaffected.
+
+#### `slide(…)` macro retired
+
+The `slide(n, A, B)` macro generator was removed in ticket 0948.
+Authors write slides inline using the cell shapes above. Mechanical
+equivalences:
+
+- `slide(1, A, B)` → `A>B`
+- `slide(2, A, B)` → `A> >B`
+- `slide(n, A, B)` (n ≥ 3) → `A>` + (n−2)×`>_` + `>B`
+
+#### Known limitations
+
+- **Row-end truncation**: a slide or roll never extends past the end
+  of a channel row. `x*5 _ _` at the end of a 3-step row still fires
+  5 sub-triggers across those 3 ticks. A `value>` with no close cell
+  in the row is degraded to a no-op (close target = open value); the
+  row-build pass emits a diagnostic.
+- **Cross-loop / cross-bank**: spans don't wrap past a pattern loop
+  or bank boundary; trailing sub-events are dropped rather than
+  wrapping.
+- **Mid-span live edit**: if a `_` cell is edited to a non-tie
+  mid-roll or mid-slide, the new content takes over on its own tick
+  rise and the prior span is replaced (no overrun).
 
 ## Songs
 

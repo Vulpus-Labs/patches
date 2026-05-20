@@ -119,15 +119,52 @@ For note channels, `cv1` carries the V/oct pitch (same convention as `Osc`)
 and `trigger`/`gate` signal note-on events. For drum/trigger
 channels, `trigger` fires on each hit and `cv2` carries the velocity value.
 
-### Slides and repeats
+### Step events (ADR 0077 unified grammar)
 
-The PatternPlayer supports two per-step modifiers from the pattern syntax:
+The PatternPlayer consumes the row-build pass's resolved `StepEffect`
+per cell — a single typed dispatch covering rests, triggered notes,
+rolls, slides, step-cv changes, and continuation cells. See the
+[DSL reference — Step events](../dsl-reference.md#step-events) for the
+full cell taxonomy, close rule, and worked-example timelines. The
+player-side behaviour is:
 
-- **Slides** (`C4>E4`): interpolates `cv1` (and optionally `cv2`) linearly
-  over the tick duration. The gate stays high through the slide.
-- **Repeats** (`x*3`): subdivides the tick into N equal sub-triggers, each
-  with an ~80% duty cycle gate so downstream envelopes get clear
-  attack transients.
+- **Triggered cell** (`value`, `value*N`, `value:cv2`, `value>value`,
+  `value>`): snap cv1/cv2 at the start of the tick and fire `trigger`.
+  `*N` opens a roll; `value>value` opens-and-closes a one-tick slide;
+  `value>` opens a multi-tick slide whose close target is resolved
+  when the close cell arrives.
+- **Step-cv** (`/value`): snap cv1 (and `:cv2` if present) at the tick
+  boundary; no trigger. Gate stays high.
+- **Slide flow** (`>_`, `_` absorbed by a slide): no trigger; cv ramps
+  per the slide's per-channel schedule. Gate stays high.
+- **Slide close-in-tick** (`>value`): cv1 (and `:cv2` if present) ramp
+  to the close value across this tick; no trigger.
+- **Tie sustain** (`_` with no open modifier): gate stays high; cv
+  held.
+- **Tie-spread roll** (`_` absorbed by a `*N` anchor): the N
+  sub-triggers spread evenly across the anchor tick plus the absorbed
+  run. Per-tick sub-event placement respects swung tick durations —
+  each sub-event's sample offset is computed against the *current*
+  tick's duration, not the anchor's, so swing within a span sits
+  precisely on the swung beats.
+- **Rest** (`.`): gate drops; channel state resets (any open slide is
+  closed at its current cv).
+
+```patches
+# tie-spread roll across two ticks then a fresh hit
+hit: x*3 _ x .
+
+# slide opens at tick 1, ramps through ticks 1+2, lands on G4 at the
+# boundary, holds tick 3
+note: E4> _ /G4
+
+# slide opens, ramps continuously across three ticks, finishes inside
+# tick 3
+note: E4> _ >G4
+
+# step cv without retrigger
+note: E4 /G4 _
+```
 
 ---
 

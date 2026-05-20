@@ -25,14 +25,14 @@ fn build_pattern_channel(node: tree_sitter::Node, source: &str, diags: &mut Vec<
 
     let label = node.child_by_field_name("label").map(|n| build_ident(n, source));
 
-    // Pest shape (mirrored by tree-sitter):
-    //   channel_row = ident ":" step_or_generator* channel_row_cont*
-    //   channel_row_cont = "|" step_or_generator*
-    // Count step_or_generator nodes (each is one tick), including those
-    // inside continuation rows.
-    let mut step_count = named_children_of_kind(node, "step_or_generator").len();
+    // Pest shape (mirrored by tree-sitter), post-ticket-0948:
+    //   channel_row = ident ":" step* channel_row_cont*
+    //   channel_row_cont = "|" step*
+    // Count step nodes (each is one tick), including those inside
+    // continuation rows.
+    let mut step_count = named_children_of_kind(node, "step").len();
     for cont in named_children_of_kind(node, "channel_row_cont") {
-        step_count += named_children_of_kind(cont, "step_or_generator").len();
+        step_count += named_children_of_kind(cont, "step").len();
     }
 
     PatternChannel {

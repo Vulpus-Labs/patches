@@ -1,6 +1,6 @@
 pattern long_bass {
-    note: C2 . . ~ E2 . G2 . |
-          C2 . E2 ~ G2 . . .
+    note: C2 . . _ E2 . G2 . |
+          C2 . E2 _ G2 . . .
 }
 
 patch {

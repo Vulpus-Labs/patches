@@ -144,8 +144,8 @@ pub use midi::{MidiEvent, MidiMessage};
 pub use midi_io::{MidiInput, MidiOutput, MidiSlice, MAX_STASH};
 pub use qname::{QName, AUTOCONV_PREFIX, AUTOSUM_PREFIX};
 pub use tracker::{
-    annotate_repeat_spans, resolve_step_effects, Pattern, PatternBank, ReceivesTrackerData,
-    RollSpec, SlideOpen, Song, SongBank, StepEffect, TrackerData,
+    resolve_step_effects, Pattern, PatternBank, ReceivesTrackerData, RollSpec, RowBuildError,
+    SlideOpen, Song, SongBank, StepEffect, StepKind, TrackerData,
 };
 pub use tracker::Step as TrackerStep;
 pub use modules::{describe_for, validate_and_pack, validate_parameters, Module, PortConnectivity, ValidatedParamFrame};

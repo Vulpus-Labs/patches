@@ -1,8 +1,9 @@
 ---
 id: E152
 title: Tracker tie-span repeats (roll *N across multiple ticks)
-status: in-progress
+status: closed
 created: 2026-05-19
+closed: 2026-05-20
 ---
 
 ## Goal

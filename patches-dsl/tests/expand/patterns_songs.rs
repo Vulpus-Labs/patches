@@ -29,20 +29,24 @@ fn expand_preserves_songs() {
 }
 
 #[test]
-fn expand_slide_generator_produces_steps() {
+fn expand_in_row_slide_passes_through() {
+    use patches_dsl::ast::StepKind;
     let src = include_str!("../fixtures/pattern_slides.patches");
     let flat = parse_expand(src);
-    // The "auto" channel had slide(4, 0.0, 1.0) — should expand to 4 concrete steps.
+    // Ticket 0948 removed the `slide(n, …)` macro; the `auto` channel
+    // is now written inline as `0.0> >_ >_ >1.0` — four cells: one
+    // SlideOpen at 0.0, two TieFlow continuations, one
+    // SlideCloseInTick at 1.0. The expander passes the cells through
+    // verbatim; the row-build pass resolves the continuous ramp.
     let auto_ch = flat.song_data.patterns[0].channels.iter().find(|c| c.name == "auto").unwrap();
-    assert_eq!(auto_ch.steps.len(), 4, "slide(4,...) should produce 4 steps");
+    assert_eq!(auto_ch.steps.len(), 4);
 
-    // Check first step: 0.0 → 0.25
     assert!((auto_ch.steps[0].cv1 - 0.0).abs() < 1e-6);
-    assert!((auto_ch.steps[0].cv1_end.unwrap() - 0.25).abs() < 1e-6);
-
-    // Check last step: 0.75 → 1.0
-    assert!((auto_ch.steps[3].cv1 - 0.75).abs() < 1e-6);
-    assert!((auto_ch.steps[3].cv1_end.unwrap() - 1.0).abs() < 1e-6);
+    assert!(matches!(auto_ch.steps[0].kind, StepKind::SlideOpen));
+    assert!(matches!(auto_ch.steps[1].kind, StepKind::TieFlow));
+    assert!(matches!(auto_ch.steps[2].kind, StepKind::TieFlow));
+    assert!(matches!(auto_ch.steps[3].kind, StepKind::SlideCloseInTick { .. }));
+    assert!((auto_ch.steps[3].cv1 - 1.0).abs() < 1e-6);
 }
 
 #[test]

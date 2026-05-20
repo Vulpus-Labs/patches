@@ -1,6 +1,8 @@
 use super::*;
 use patches_core::{AudioEnvironment, ModuleShape, StructuralParams};
-use patches_core::{PatternBank, Pattern, SongBank, TrackerStep};
+use patches_core::{
+    resolve_step_effects, Pattern, PatternBank, SongBank, StepKind, TrackerStep,
+};
 
 const SR: f32 = 44100.0;
 const ENV: AudioEnvironment = AudioEnvironment {
@@ -17,12 +19,10 @@ fn shape(channels: usize) -> ModuleShape {
 fn repeat_step(cv1: f32, repeat: u8) -> TrackerStep {
     TrackerStep {
         cv1,
-        cv2: 0.0,
         trigger: true,
         gate: true,
-        cv1_end: None,
-        cv2_end: None,
-        repeat,
+        kind: StepKind::Note { repeat },
+        ..TrackerStep::default()
     }
 }
 
@@ -43,12 +43,14 @@ fn repeat_via_process_produces_triggers_and_gate_cycles() {
     use patches_core::cable_pool::CablePool;
     let cidx = |i: usize| SCRATCH_CAPACITY + i;
 
+    let mut steps = vec![repeat_step(1.0, 3)];
+    let _ = resolve_step_effects(&mut steps);
     let data = Arc::new(TrackerData {
         patterns: PatternBank {
             patterns: vec![Pattern {
                 channels: 1,
                 steps: 1,
-                data: vec![vec![repeat_step(1.0, 3)]],
+                data: vec![steps],
             }],
         },
         songs: SongBank { songs: vec![] },

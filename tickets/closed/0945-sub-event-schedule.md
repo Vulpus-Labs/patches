@@ -3,6 +3,7 @@ id: "0945"
 title: Per-channel sub-event schedule respecting per-tick swung durations
 priority: medium
 created: 2026-05-20
+closed: 2026-05-20
 epic: E153
 depends_on: ["0944"]
 ---
@@ -89,3 +90,42 @@ slides.
 - Sub-events allocate `Vec<SubEvent>` per channel at construction;
   reset (don't reallocate) on each new `StartNote` with rolls.
   Realtime-safe.
+
+## Resolution
+
+Landed. `PatternPlayerCore` carries `sub_events: Vec<Vec<SubEvent>>`
+(preallocated to `SUB_EVENT_CAPACITY = 16` per channel) and a
+`sub_event_head: Vec<usize>` cursor. `apply_step` for
+`StartNote { roll: Some(_) }` clears the channel's schedule and
+pushes one entry per `k = 0..N-1` with `t_k = k / N * span` split
+into `(floor, frac)`; the anchor (k = 0) is consumed inline and
+the cursor starts at 1. The inter-tick path's `advance_roll_one_sample`
+ticks the gate-off countdown and calls a new `check_sub_event_fire`
+helper, which fires the head when `current_tick_elapsed_samples >=
+head.fraction * current_tick_duration_samples`. On an absorbed-roll
+tick rise we update `current_tick_duration_samples` from the bus,
+decrement every unfired sub-event's `tick_idx_in_span` (cap-16 vec —
+trivial), and call `check_sub_event_fire` once to catch fraction-0
+boundary firings.
+
+Cross-tick gate-off distances approximate with the current tick
+duration, so non-swung patterns stay bit-identical with the prior
+formula. New unit tests cover the swung path:
+
+- `non_swung_x3_tilde_bit_identical_to_e152`
+- `non_swung_x3_alone_bit_identical_to_pre_e152`
+- `swung_x3_tilde_uses_per_tick_durations` (396/204 ticks; triggers
+  at samples `[0, 264, 464]`)
+- `swung_x5_tilde_tilde_per_tick_durations` (396/204/396 ticks;
+  triggers at `[0, 238, 437, 560, 759]`)
+
+E152 had no committed swung audio goldens — the integration suite's
+`pattern_with_tie_spread_*` tests run at `swing = 0.5` (uniform
+ticks), so non-swung remains bit-identical and no WAV regeneration
+was required. `cargo test -p patches-modules` (458 unit tests) and
+`cargo test -p patches-integration-tests --test tracker` (14 tests)
+both green.
+
+Memory note saved: [`project_sub_event_schedule.md`] — schedule is
+authoritative; future tracker timing work reasons about it, not about
+interval captures.

@@ -200,19 +200,30 @@ fn song_channel_count_mismatch_is_error() {
     assert!(err.message.contains("channels"));
 }
 
-// ── E152 tie-spread annotation (ticket 0939) ──────────────────────────
+// ── E153 (ticket 0946): unified row-build pass via StepEffect ─────────
+//
+// The dedicated `annotate_repeat_spans` pass from ticket 0939 has been
+// removed; its tie-spread semantics are now an arm of
+// `resolve_step_effects`. The tests below cover the same fan of
+// scenarios but assert against `step.effect` instead of the dropped
+// `repeat_span` / `absorbed_by_roll` legacy fields.
 
 fn tie_step() -> Step {
-    Step { gate: true, ..Step::default() }
+    Step { gate: true, kind: patches_core::StepKind::Tie, ..Step::default() }
 }
 
 fn roll_step(repeat: u8) -> Step {
-    Step { trigger: true, gate: true, repeat, ..Step::default() }
+    Step {
+        trigger: true,
+        gate: true,
+        kind: patches_core::StepKind::Note { repeat },
+        ..Step::default()
+    }
 }
 
 #[test]
 fn tie_spread_annotates_anchor_and_absorbed_ties() {
-    // x*3 ~ ~  → anchor span=3, both ties absorbed.
+    // x*3 _ _  → anchor StartNote+roll(span=3), both ties absorbed.
     let mut flat = empty_flat();
     flat.song_data.patterns = vec![FlatPatternDef {
         name: "roll".into(),
@@ -224,23 +235,26 @@ fn tie_spread_annotates_anchor_and_absorbed_ties() {
     }];
     let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
     let row = &td.patterns.patterns[0].data[0];
-    assert_eq!(row[0].repeat_span, 3);
-    assert!(!row[0].absorbed_by_roll);
-    assert!(row[1].absorbed_by_roll);
-    assert!(row[2].absorbed_by_roll);
-    // Plain anchor without ties still has span 1.
-    assert_eq!(row[1].repeat_span, 1);
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), .. } => {
+            assert_eq!(r.count, 3);
+            assert_eq!(r.span, 3);
+        }
+        other => panic!("expected StartNote+roll, got {other:?}"),
+    }
+    assert!(matches!(row[1].effect, patches_core::StepEffect::AbsorbedRoll));
+    assert!(matches!(row[2].effect, patches_core::StepEffect::AbsorbedRoll));
 }
 
 #[test]
 fn tie_spread_transparent_across_row_continuation() {
-    // Source: `kick: x*3 | ~ ~`  — `|` is a row-continuation marker; the
+    // Source: `kick: x*3 | _ _`  — `|` is a row-continuation marker; the
     // parser concatenates both halves into one Vec<Step>. The span must
     // therefore extend across the join transparently.
     let src = r#"
         pattern roll {
             kick: x*3
-                | ~ ~
+                | _ _
         }
         patch {}
     "#;
@@ -252,14 +266,19 @@ fn tie_spread_transparent_across_row_continuation() {
         .expect("tracker_data missing");
     let row = &td.patterns.patterns[0].data[0];
     assert_eq!(row.len(), 3);
-    assert_eq!(row[0].repeat_span, 3);
-    assert!(row[1].absorbed_by_roll);
-    assert!(row[2].absorbed_by_roll);
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), .. } => {
+            assert_eq!(r.span, 3);
+        }
+        other => panic!("expected StartNote+roll, got {other:?}"),
+    }
+    assert!(matches!(row[1].effect, patches_core::StepEffect::AbsorbedRoll));
+    assert!(matches!(row[2].effect, patches_core::StepEffect::AbsorbedRoll));
 }
 
 #[test]
 fn tie_spread_plain_tie_unchanged() {
-    // note ~  → anchor repeat=1, neither field changes.
+    // note _  → plain tie after a non-roll note is a Hold (sustain).
     let mut flat = empty_flat();
     flat.song_data.patterns = vec![FlatPatternDef {
         name: "hold".into(),
@@ -271,14 +290,13 @@ fn tie_spread_plain_tie_unchanged() {
     }];
     let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
     let row = &td.patterns.patterns[0].data[0];
-    assert_eq!(row[0].repeat_span, 1);
-    assert_eq!(row[1].repeat_span, 1);
-    assert!(!row[1].absorbed_by_roll, "plain tie sustains, not absorbed");
+    assert!(matches!(row[0].effect, patches_core::StepEffect::StartNote { .. }));
+    assert!(matches!(row[1].effect, patches_core::StepEffect::Hold));
 }
 
 #[test]
 fn tie_spread_chained_anchors() {
-    // x*3 ~ ~ ~ note*2 ~  → anchor1 span=4, anchor2 span=2.
+    // x*3 _ _ _ note*2 _  → first roll spans 4 ticks, second spans 2.
     let mut flat = empty_flat();
     flat.song_data.patterns = vec![FlatPatternDef {
         name: "chain".into(),
@@ -297,17 +315,23 @@ fn tie_spread_chained_anchors() {
     }];
     let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
     let row = &td.patterns.patterns[0].data[0];
-    assert_eq!(row[0].repeat_span, 4);
-    assert!(row[1].absorbed_by_roll);
-    assert!(row[2].absorbed_by_roll);
-    assert!(row[3].absorbed_by_roll);
-    assert_eq!(row[4].repeat_span, 2);
-    assert!(row[5].absorbed_by_roll);
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), .. } => assert_eq!(r.span, 4),
+        other => panic!("anchor 1: {other:?}"),
+    }
+    assert!(matches!(row[1].effect, patches_core::StepEffect::AbsorbedRoll));
+    assert!(matches!(row[2].effect, patches_core::StepEffect::AbsorbedRoll));
+    assert!(matches!(row[3].effect, patches_core::StepEffect::AbsorbedRoll));
+    match &row[4].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), .. } => assert_eq!(r.span, 2),
+        other => panic!("anchor 2: {other:?}"),
+    }
+    assert!(matches!(row[5].effect, patches_core::StepEffect::AbsorbedRoll));
 }
 
 #[test]
 fn tie_spread_truncates_at_row_end() {
-    // x*5 ~ ~  → all consumed, span=3 (truncated at row end, not 5).
+    // x*5 _ _  → all consumed, span=3 (truncated at row end, not 5).
     let mut flat = empty_flat();
     flat.song_data.patterns = vec![FlatPatternDef {
         name: "edge".into(),
@@ -319,15 +343,18 @@ fn tie_spread_truncates_at_row_end() {
     }];
     let td = build(&flat, &registry(), &env()).unwrap().tracker_data.unwrap();
     let row = &td.patterns.patterns[0].data[0];
-    assert_eq!(row[0].repeat_span, 3);
-    assert_eq!(row[0].repeat, 5);
+    match &row[0].effect {
+        patches_core::StepEffect::StartNote { roll: Some(r), .. } => {
+            assert_eq!(r.count, 5);
+            assert_eq!(r.span, 3);
+        }
+        other => panic!("expected StartNote+roll, got {other:?}"),
+    }
 }
-
-// ── E153 (ticket 0943): StepEffect resolution at row-build ───────────
 
 #[test]
 fn step_effect_value_x_n_tie_tie_lowers_to_start_note_plus_absorbed() {
-    // `x*3 ~ ~` channel: StartNote{roll{count=3, span=3}} then two AbsorbedRoll.
+    // `x*3 _ _` channel: StartNote{roll{count=3, span=3}} then two AbsorbedRoll.
     let mut flat = empty_flat();
     flat.song_data.patterns = vec![FlatPatternDef {
         name: "roll".into(),
@@ -349,18 +376,17 @@ fn step_effect_value_x_n_tie_tie_lowers_to_start_note_plus_absorbed() {
     }
     assert!(matches!(row[1].effect, patches_core::StepEffect::AbsorbedRoll));
     assert!(matches!(row[2].effect, patches_core::StepEffect::AbsorbedRoll));
-    // Legacy annotation still present and matches the new effect.
-    assert_eq!(row[0].repeat_span, 3);
-    assert!(row[1].absorbed_by_roll);
-    assert!(row[2].absorbed_by_roll);
 }
 
 #[test]
 fn step_effect_slide_macro_lowers_to_start_note_plus_slide_flow() {
-    // slide(2, A4, C5) lowers to head + one tail with the same close target.
+    // Ticket 0948 removed `slide(n, …)`. The equivalent in-row form
+    // for a 2-tick A4→C5 slide is `A4> >C5` — open on tick 1,
+    // close-in-tick on tick 2, ramp covers both ticks landing at C5
+    // inside tick 2.
     let src = r#"
         pattern p {
-            ch: slide(2, A4, C5)
+            ch: A4> >C5
         }
         patch {}
     "#;
@@ -372,7 +398,11 @@ fn step_effect_slide_macro_lowers_to_start_note_plus_slide_flow() {
         .expect("tracker_data missing");
     let row = &td.patterns.patterns[0].data[0];
     assert_eq!(row.len(), 2);
-    // Final endpoint = C5 = 5.0 v/oct.
+    // Under ADR 0077 the macro lowers to `A4> >C5`: tick 1 opens the
+    // slide with a trigger, tick 2 is a `SlideCloseInTick` cell. The
+    // ramp runs continuously across both ticks ending inside the close
+    // cell (`closes_at_boundary = false`). Final endpoint = C5 = 5.0
+    // v/oct.
     match &row[0].effect {
         patches_core::StepEffect::StartNote { slide: Some(so), cv1, roll, .. } => {
             assert!((*cv1 - 4.75).abs() < 1e-6, "A4 head cv1 = {cv1}");
@@ -381,12 +411,18 @@ fn step_effect_slide_macro_lowers_to_start_note_plus_slide_flow() {
                 "head close target should be C5 (final endpoint), got {}",
                 so.close_cv1,
             );
-            assert!(so.closes_at_boundary);
+            assert_eq!(so.span, 2, "slide spans both ticks");
+            assert!(!so.closes_at_boundary, "close cell is `>value`, not `/value`");
             assert!(roll.is_none());
         }
         other => panic!("expected StartNote+slide, got {other:?}"),
     }
-    assert!(matches!(row[1].effect, patches_core::StepEffect::SlideFlow));
+    match &row[1].effect {
+        patches_core::StepEffect::SlideCloseInTick { cv1, .. } => {
+            assert!((*cv1 - 5.0).abs() < 1e-6);
+        }
+        other => panic!("expected SlideCloseInTick, got {other:?}"),
+    }
 }
 
 #[test]

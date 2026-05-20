@@ -295,6 +295,152 @@ classifiers continue to recognise `~`.
   removes the visual ambiguity of `~` with cable-endpoint
   decoration.
 
+## Amendment 2026-05-20 — abolish `slide()`; cv2 on multi-cell slides
+
+Drop the `slide(n, A, B)` macro generator and extend the multi-cell
+slide shapes (`value>`, `/value`, `>value`) with an optional `:cv2`
+modifier so velocity / volume can ramp across a slide alongside cv1.
+
+### Context (amendment)
+
+Ticket 0946 retained two shapes only as sugar:
+
+1. The `slide(n, A, B)` macro generator, lowered at expand time to
+   `A>` + (n−2)·`>_` + `>B` cells (n ≥ 2) or to `A>B` (n = 1).
+2. The `value>value` one-cell cv1 slide (`StepKind::SlideSugar`).
+
+Both forms predate the unified row-build pass and only ramp **cv1**.
+A user writing a velocity slide alongside a pitch slide
+(`C4:0.5> _ >C4:1.0`) gets a parse error: the multi-cell `value>`
+shape carries no cv2 endpoint, and the cv2 sugar (`:cv2>cv2_end`)
+only attaches to single-cell `step_valued` cells.
+
+### Decision (amendment)
+
+Drop the `slide()` macro. Keep the `value>value` cell sugar — it
+packs an open+close into one tick and has no drop-in unsugared
+replacement (see "Trade-offs declined"). Extend the three multi-cell
+slide shapes to accept `:cv2` so cv2 can ramp through them.
+
+#### Surface grammar (amendment)
+
+- **Remove** `slide(n, A, B)` generator. Authors write the cells
+  inline. The migration is mechanical:
+  - `slide(1, A, B)` → `A>B` (the existing one-cell sugar; same
+    semantics: ramp A→B over tick 1, land at B at the boundary).
+  - `slide(2, A, B)` → `A> >B` (close-in-tick; ramp covers both
+    ticks landing at B inside tick 2).
+  - `slide(n, A, B)` for n ≥ 3 → `A>` + (n−2)·`>_` + `>B`.
+
+- **Keep** the `value>value` cell form. The sugar is the only shape
+  that puts a triggered open + close in a single tick, which is
+  semantically distinct from `value> /value` (latter takes two
+  cells and holds the close value through tick 2).
+
+- **Extend** the three multi-cell slide shapes to accept an optional
+  `:cv2` tail. Updated forms:
+
+| Cell                | New shape      | Effect                                                                                                                              |
+| ------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| slide open          | `value[:cv2]>` | trigger; cv1 ← value; cv2 ← `:cv2` (or 0); records open cv2 as ramp start                                                           |
+| step-to             | `/value[:cv2]` | no trigger; cv1 ← value at boundary; cv2 ← `:cv2` at boundary (or unchanged); closes any open slide at boundary                     |
+| slide close in tick | `>value[:cv2]` | no trigger; cv1 ramps to value across this tick; cv2 ramps to `:cv2` across this tick (or holds open's cv2); closes inside the tick |
+
+  `>_` (TieFlow) carries no values — it inherits whatever the open
+  cell set. The existing `value>value` sugar already supports cv2
+  (`A:0.5>B:0.8`) via `step_cv2`'s nested `step_slide_target`; no
+  change there.
+
+#### Row-build resolution (amendment)
+
+`StepKind` keeps `SlideSugar` and adds optional `cv2` to `StepTo`
+and `SlideCloseInTick`:
+
+```rust
+pub enum StepKind {
+    Rest,
+    Tie,
+    Note { repeat: u8 },
+    SlideSugar { cv1_end: f32, cv2_end: Option<f32> },  // unchanged
+    SlideOpen,                                          // cv1, cv2 from Step.cv1/cv2
+    StepTo { cv2: Option<f32> },                        // unchanged shape
+    TieFlow,
+    SlideCloseInTick { cv2: Option<f32> },              // gains cv2
+}
+```
+
+`resolve_step_effects` patches both `close_cv1` and `close_cv2` on
+the open `SlideOpen` struct when the close cell arrives. If the
+close cell's `:cv2` is `None`, `close_cv2` stays at `None` and the
+runtime falls back to the open's cv2 (constant cv2 through the
+slide). If the open had no `:cv2` modifier either, `Step.cv2` is
+`0.0` and that's the ramp.
+
+#### Pattern player (amendment)
+
+`apply_step` already reads `SlideOpen.close_cv2` (its `Option<f32>`
+lets the runtime fall back to the open's cv2 when `None`). The
+`SlideCloseInTick` arm needs a `cv2` read alongside the existing
+`cv1` to drive the cv2 ramp inside the close tick.
+
+#### LSP / hover (amendment)
+
+- `decode_step` drops the `slide_generator` branch; adds parsing
+  for the new `:cv2` tail on the three slide cells.
+- Hover text on a slide cell can mention the cv2 endpoint when one
+  is set (polish, not required).
+
+### Consequences (amendment)
+
+#### Authoring (amendment)
+
+- Velocity / volume slides become first-class: `C4:0.5> _ >C4:1.0`
+  ramps both pitch and velocity across three ticks.
+- `slide(n, …)` is removed. The in-row form is the only way to
+  spread a slide across many ticks; the `value>value` sugar
+  remains for the common one-tick case.
+
+#### Runtime (amendment)
+
+- `SlideOpen.close_cv2` was already `Option<f32>`; only the row-
+  build pass needs to populate it from the close cell's `:cv2`,
+  and the `SlideCloseInTick` runtime arm needs to read the
+  optional cv2 endpoint.
+- No audio-thread changes that would affect existing patterns.
+  No golden regeneration required; cv2-sliding patterns are new,
+  no prior golden exists.
+
+#### Compatibility (amendment)
+
+- Every in-tree `slide(n, …)` invocation must be rewritten by hand
+  to the equivalent in-row form. Survey shows: 4 sites (1 fixture,
+  3 inline test strings).
+- `value>value` sugar is unchanged.
+
+#### Trade-offs declined (amendment)
+
+- **Abolish `value>value` sugar too (full uniformity).** Declined.
+  The sugar's "open+close in one tick" cannot be reproduced
+  unsugared without consuming an extra cell (`A> /B` is two cells;
+  `A>B` is one), so every existing use would shift its row's
+  subsequent cells by +1 tick. The grammar irregularity is the
+  lesser cost vs. forcing content reshuffles in every patch using
+  one-tick slides.
+- **Keep `slide()` for very long ramps.** Declined — `A>` +
+  many `>_` + `>B` is verbose but parses identically to other in-
+  row content and lets the author tap intermediate ticks. A user
+  who really wants the one-liner can define a template that emits
+  the expanded cells.
+- **Add `:cv2` to `>_` (TieFlow).** Declined — `>_` is the "flow
+  through, no new info" cell. Adding cv2 there means two ways to
+  set the same value (cv2 on the open + cv2 on the flow), with
+  unclear precedence. The close cell carries the close cv2; that's
+  enough.
+- **Allow cv1-less close (`/:cv2`, `>:cv2`) for cv2-only slides.**
+  Declined — the close cell's cv1 always closes the cv1 slide. To
+  hold cv1 steady through the slide, write `cv1> _ >cv1:cv2_end`
+  with the same cv1 on both endpoints. Redundant but explicit.
+
 ## References
 
 - E152 closed epic: tracker tie-span repeats, ADR 0072 fusion

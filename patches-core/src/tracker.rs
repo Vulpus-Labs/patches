@@ -4,43 +4,70 @@
 //! audio thread. All structures are optimised for read access: flat arrays,
 //! integer indexing, no strings in the hot path.
 //!
-//! See ADR 0029 for the full design.
+//! See ADR 0029 for the original design and ADR 0077 for the unified
+//! step-event grammar (epic E153) that drives the current shape of
+//! [`Step`], [`StepKind`], and [`StepEffect`].
 
 use std::sync::Arc;
 
+/// Surface cell shape carried from the parser into the row-build pass.
+///
+/// Each [`Step`] cell parses into exactly one variant. The row-build
+/// pass [`resolve_step_effects`] consumes the kind (plus channel state)
+/// to emit a [`StepEffect`]; the audio thread reads only the effect.
+///
+/// Variants mirror the seven cell shapes in ADR 0077 § "Surface grammar"
+/// plus the rest cell.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum StepKind {
+    /// `.` — rest.
+    #[default]
+    Rest,
+    /// `_` — continuation tie. Meaning depends on the channel's open
+    /// modifier (sustain / absorbed-roll / slide flow).
+    Tie,
+    /// Plain triggered note (`value`, `value*N`, `value:cv2`).
+    /// `repeat` is the `*N` count (`1` = no roll).
+    Note { repeat: u8 },
+    /// `value>value` sugar — single-tick slide that snaps to `cv1` at
+    /// tick start and lands at the close value at tick boundary.
+    /// `cv1_end` / `cv2_end` carry the close values.
+    SlideSugar { cv1_end: f32, cv2_end: Option<f32> },
+    /// `value>` — opens a multi-tick slide. Triggers on this tick;
+    /// close value resolved by the later close cell.
+    SlideOpen,
+    /// `/value` — sets cv1 (and optionally cv2) without retriggering.
+    /// Closes any open slide at the tick boundary.
+    StepTo { cv2: Option<f32> },
+    /// `>_` — explicit slide-flow / open-from-current. Opens a slide
+    /// from the channel's current cv when none is open, otherwise
+    /// extends the open slide.
+    TieFlow,
+    /// `>value[:cv2]` — closes an open slide within this tick (ramp
+    /// finishes at `value` at end of tick rather than at the tick
+    /// boundary). When `cv2` is `Some`, cv2 also ramps to that
+    /// endpoint inside the same tick.
+    SlideCloseInTick { cv2: Option<f32> },
+}
+
 /// A single step in a pattern channel.
 ///
-/// Every step produces four values: `cv1`, `cv2`, `trigger`, and `gate`.
-/// Optional `cv1_end` / `cv2_end` specify slide targets; `repeat` subdivides
-/// the tick into multiple evenly-spaced triggers.
+/// The audio thread dispatches on [`Step::effect`]; `cv1` / `cv2` /
+/// `trigger` / `gate` are carried for diagnostics and module-shell
+/// reads but the apply path reads its operands out of the effect
+/// variant. `kind` records the surface cell shape so the row-build
+/// pass [`resolve_step_effects`] can classify the cell against the
+/// channel's open modifiers (slide / roll).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Step {
     pub cv1: f32,
     pub cv2: f32,
     pub trigger: bool,
     pub gate: bool,
-    /// Slide target for cv1 (interpolates from `cv1` to `cv1_end` over the tick).
-    pub cv1_end: Option<f32>,
-    /// Slide target for cv2 (interpolates from `cv2` to `cv2_end` over the tick).
-    pub cv2_end: Option<f32>,
-    /// Repeat count: 1 = normal, >1 = subdivide the tick into `repeat` triggers.
-    pub repeat: u8,
-    /// Tick span across which a `*N` roll is spread (epic E152). For an
-    /// anchor with `repeat > 1` followed by `k` consecutive tie cells
-    /// absorbed by the roll, `repeat_span = 1 + k`. Default `1` (no
-    /// spread). Always `1` when `repeat == 1`.
-    pub repeat_span: u8,
-    /// True if this tie cell has been absorbed by a preceding `*N` roll
-    /// anchor. The pattern player suppresses the cell's normal tie
-    /// handling and lets the anchor's in-flight schedule run through.
-    /// Default `false`.
-    pub absorbed_by_roll: bool,
-    /// Resolved [`StepEffect`] for this cell (ADR 0077, epic E153). Set
-    /// by [`resolve_step_effects`]. Default [`StepEffect::Silent`].
-    ///
-    /// Additive alongside the legacy `trigger` / `gate` / `cv1_end` /
-    /// `repeat` / `repeat_span` / `absorbed_by_roll` flags until ticket
-    /// 0944 flips the pattern player onto the effect-based dispatch.
+    /// Surface cell shape (ADR 0077). Default [`StepKind::Rest`].
+    pub kind: StepKind,
+    /// Resolved [`StepEffect`] for this cell, produced by
+    /// [`resolve_step_effects`]. Default [`StepEffect::Silent`].
     pub effect: StepEffect,
 }
 
@@ -51,11 +78,7 @@ impl Default for Step {
             cv2: 0.0,
             trigger: false,
             gate: false,
-            cv1_end: None,
-            cv2_end: None,
-            repeat: 1,
-            repeat_span: 1,
-            absorbed_by_roll: false,
+            kind: StepKind::Rest,
             effect: StepEffect::Silent,
         }
     }
@@ -63,10 +86,9 @@ impl Default for Step {
 
 /// Resolved per-cell effect produced by [`resolve_step_effects`].
 ///
-/// One variant per surface cell shape (ADR 0077). The pattern player
-/// dispatches on this enum instead of inspecting the legacy
-/// `trigger` / `gate` / `cv1_end` / `repeat` / `absorbed_by_roll` flag
-/// soup (ticket 0944).
+/// One variant per resolved semantic (ADR 0077). The pattern player
+/// dispatches on this enum exclusively; legacy flag fields on [`Step`]
+/// are no longer consulted at runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StepEffect {
     /// Rest cell `.` — no gate, no trigger, no cv change.
@@ -81,35 +103,45 @@ pub enum StepEffect {
         roll: Option<RollSpec>,
     },
     /// `/value`: snap cv1 (and optionally cv2) at the tick boundary, no
-    /// retrigger. Closes any open slide.
+    /// retrigger. Closes any open slide at boundary.
     StepCv {
         cv1: f32,
         cv2: Option<f32>,
     },
     /// Bare `_` with no active modifier — sustain the gate, hold cv.
     Hold,
-    /// `_` absorbed by an open slide, or explicit `>_`. The slide's
-    /// per-channel schedule (set by the prior [`SlideOpen`]) continues
-    /// to drive cv across this tick.
+    /// `_` absorbed by an open slide, or `>_` continuing an open slide.
+    /// The slide's per-channel schedule (set by the slide's owning
+    /// effect) continues to drive cv across this tick.
     SlideFlow,
-    /// `>value`: close an open slide within this tick. Cv1 ramps from
-    /// the current value to `cv1` across the tick. No trigger.
-    SlideCloseInTick { cv1: f32 },
+    /// `>_` opening a NEW slide from the channel's current cv (no
+    /// trigger). The slide's close target is patched by the later
+    /// close cell during row-build.
+    OpenSlide { slide: SlideOpen },
+    /// `>value[:cv2]`: close an open slide within this tick. Cv1
+    /// ramps from the current value to `cv1` across the tick. When
+    /// `cv2` is `Some`, cv2 ramps to that endpoint inside the same
+    /// tick alongside cv1. No trigger.
+    SlideCloseInTick { cv1: f32, cv2: Option<f32> },
     /// Tie cell absorbed by a preceding `*N` roll anchor (E152). The
     /// anchor's in-flight roll schedule owns the channel.
     AbsorbedRoll,
 }
 
-/// A slide opened by a triggered cell (`value>` / `value>value`).
+/// A slide opened by a `value>` / `value>value` / `>_` cell.
 ///
 /// `close_cv1` is the slide's final cv1 endpoint, resolved by the
-/// row-build pass once the close cell is encountered. `closes_at_boundary`
-/// is `true` when the close cell is a `value` or `/value` (slide lands at
-/// the tick boundary entering the close cell), `false` when the close is
-/// `>value` (slide finishes inside the close tick).
+/// row-build pass once the close cell is encountered. `close_cv2`
+/// mirrors it for cv2 (rare). `span` is the number of ticks the
+/// slide schedule covers. `closes_at_boundary` is `true` when the
+/// close cell is a `value` or `/value` (slide lands at the tick
+/// boundary entering the close cell), `false` when the close cell
+/// is `>value` (slide finishes inside the close tick).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlideOpen {
     pub close_cv1: f32,
+    pub close_cv2: Option<f32>,
+    pub span: u8,
     pub closes_at_boundary: bool,
 }
 
@@ -123,140 +155,261 @@ pub struct RollSpec {
     pub span: u8,
 }
 
-/// Annotate `*N` roll anchors in a channel's step sequence with the
-/// number of consecutive following tie cells they absorb, and mark each
-/// absorbed tie cell with `absorbed_by_roll = true`.
+/// A diagnostic produced by [`resolve_step_effects`].
 ///
-/// A tie is a step with `gate == true && trigger == false`. Only
-/// anchors with `repeat > 1` absorb ties; ordinary steps and ties keep
-/// `repeat_span = 1` and `absorbed_by_roll = false`. The scan never
-/// crosses an already-absorbed cell, so back-to-back `*N` anchors split
-/// their tie runs cleanly.
-///
-/// Idempotent — resets `repeat_span` to `1` and clears
-/// `absorbed_by_roll` before scanning, so calling twice on the same
-/// slice yields the same result.
-pub fn annotate_repeat_spans(steps: &mut [Step]) {
-    for s in steps.iter_mut() {
-        s.repeat_span = 1;
-        s.absorbed_by_roll = false;
-    }
-    let n = steps.len();
-    let mut i = 0;
-    while i < n {
-        if steps[i].repeat > 1 {
-            let mut j = i + 1;
-            while j < n && steps[j].gate && !steps[j].trigger && steps[j].repeat <= 1 {
-                steps[j].absorbed_by_roll = true;
-                j += 1;
-            }
-            steps[i].repeat_span = (j - i) as u8;
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
+/// Currently emitted for slide cells that never reach a close cell
+/// within the channel's step run (ADR 0077 § "Continuation
+/// absorption" — every slide-open requires a close).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowBuildError {
+    /// Index into the channel's step slice that triggered the error.
+    pub cell_index: usize,
+    /// Human-readable description (LSP / interpreter wrap with span).
+    pub message: String,
 }
 
 /// Resolve each cell of a channel's step run into a [`StepEffect`].
 ///
-/// Channel-stateful left-to-right walk (ADR 0077, ticket 0943). The pass
-/// is the single authoritative resolution of surface cell shape →
-/// runtime semantics; the pattern player consumes [`Step::effect`] and
-/// never inspects the legacy flag soup.
+/// Channel-stateful left-to-right walk (ADR 0077). The pass is the
+/// single authoritative resolution of surface cell shape → runtime
+/// semantics; the pattern player consumes [`Step::effect`] only.
+///
+/// Returns row-build diagnostics — currently the indices of
+/// slide-open cells that never reach a close cell within the slice.
+/// Such slides are degraded to no-op ramps (close to the open cv)
+/// so the runtime stays well-defined even when callers ignore the
+/// error.
 ///
 /// Idempotent — every cell's effect is reset to [`StepEffect::Silent`]
-/// before the walk, so calling twice on the same slice yields the same
-/// output. Requires `annotate_repeat_spans` to have run first so that
-/// `absorbed_by_roll` is set on the tie cells absorbed by a preceding
-/// `*N` anchor.
-///
-/// Surface forms recognised today (ticket 0946 extends this for the
-/// new `_` / `/value` / `>value` / `>_` / `value>` grammar):
-///
-/// - Rest (`!gate && !trigger`) → [`StepEffect::Silent`].
-/// - Roll anchor (`trigger && repeat > 1`) → [`StepEffect::StartNote`]
-///   with `roll = Some(RollSpec)`. Span from `repeat_span` (E152).
-/// - Slide head (`trigger && cv1_end.is_some()`) → [`StepEffect::StartNote`]
-///   with `slide = Some(SlideOpen { close_cv1, closes_at_boundary: true })`.
-///   `close_cv1` is patched as later tied-slide cells extend the run.
-/// - Plain triggered note (`trigger && !cv1_end && repeat == 1`) →
-///   [`StepEffect::StartNote`] with both `slide` and `roll` `None`.
-/// - Absorbed tie (`absorbed_by_roll`) → [`StepEffect::AbsorbedRoll`].
-/// - Tie carrying a slide target after a slide head (`!trigger && gate
-///   && cv1_end.is_some()`) → [`StepEffect::SlideFlow`], and the head's
-///   `close_cv1` is updated to this cell's `cv1_end`.
-/// - Bare tie after a non-slide note (`!trigger && gate`) →
-///   [`StepEffect::Hold`].
-pub fn resolve_step_effects(steps: &mut [Step]) {
+/// before the walk, so calling twice on the same slice yields the
+/// same output and the same error list.
+pub fn resolve_step_effects(steps: &mut [Step]) -> Vec<RowBuildError> {
     for s in steps.iter_mut() {
         s.effect = StepEffect::Silent;
     }
 
+    let mut errors = Vec::new();
     let n = steps.len();
-    let mut slide_head: Option<usize> = None;
-    let mut i = 0;
-    while i < n {
+    let mut state = ChannelState::Idle;
+
+    for i in 0..n {
+        let kind = steps[i].kind;
         let cv1 = steps[i].cv1;
         let cv2 = steps[i].cv2;
-        let trigger = steps[i].trigger;
-        let gate = steps[i].gate;
-        let cv1_end = steps[i].cv1_end;
-        let repeat = steps[i].repeat;
-        let repeat_span = steps[i].repeat_span.max(1);
-        let absorbed = steps[i].absorbed_by_roll;
 
-        let effect = if absorbed {
-            // E152 tie absorbed by a *N roll's spread schedule.
-            slide_head = None;
-            StepEffect::AbsorbedRoll
-        } else if !gate && !trigger {
-            // Rest.
-            slide_head = None;
-            StepEffect::Silent
-        } else if trigger && gate {
-            // Triggered cell — closes any prior open slide implicitly.
-            slide_head = None;
-            let roll = if repeat > 1 {
-                Some(RollSpec { count: repeat, span: repeat_span })
-            } else {
-                None
-            };
-            let slide = cv1_end.map(|end| SlideOpen {
-                close_cv1: end,
-                closes_at_boundary: true,
-            });
-            if slide.is_some() {
-                slide_head = Some(i);
+        let effect = match kind {
+            StepKind::Rest => {
+                close_open_slide_no_target(&mut steps[..], &mut state);
+                state = ChannelState::Idle;
+                StepEffect::Silent
             }
-            StepEffect::StartNote { cv1, cv2, slide, roll }
-        } else if gate && !trigger {
-            // Tie. After a slide head it's a SlideFlow that extends the
-            // open slide's close target; otherwise it's a plain Hold.
-            if let Some(head_idx) = slide_head {
-                if let Some(end) = cv1_end {
-                    if let StepEffect::StartNote {
-                        slide: Some(ref mut so),
-                        ..
-                    } = steps[head_idx].effect
-                    {
-                        so.close_cv1 = end;
+            StepKind::Tie => match state {
+                ChannelState::RollActive { head_idx } => {
+                    extend_roll_span(&mut steps[head_idx].effect);
+                    StepEffect::AbsorbedRoll
+                }
+                ChannelState::SlideOpen { head_idx } => {
+                    extend_slide_span(&mut steps[head_idx].effect);
+                    StepEffect::SlideFlow
+                }
+                ChannelState::Idle => StepEffect::Hold,
+            },
+            StepKind::TieFlow => match state {
+                ChannelState::SlideOpen { head_idx } => {
+                    extend_slide_span(&mut steps[head_idx].effect);
+                    StepEffect::SlideFlow
+                }
+                ChannelState::Idle | ChannelState::RollActive { .. } => {
+                    state = ChannelState::SlideOpen { head_idx: i };
+                    StepEffect::OpenSlide {
+                        slide: SlideOpen {
+                            close_cv1: 0.0,
+                            close_cv2: None,
+                            span: 1,
+                            closes_at_boundary: true,
+                        },
                     }
                 }
-                StepEffect::SlideFlow
-            } else {
-                StepEffect::Hold
+            },
+            StepKind::Note { repeat } => {
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        None,
+                        true,
+                    );
+                }
+                let roll = if repeat > 1 {
+                    Some(RollSpec { count: repeat, span: 1 })
+                } else {
+                    None
+                };
+                state = if roll.is_some() {
+                    ChannelState::RollActive { head_idx: i }
+                } else {
+                    ChannelState::Idle
+                };
+                StepEffect::StartNote { cv1, cv2, slide: None, roll }
             }
-        } else {
-            // `trigger && !gate` — not produced by any current cell shape;
-            // treat as Silent rather than panicking.
-            slide_head = None;
-            StepEffect::Silent
+            StepKind::SlideSugar { cv1_end, cv2_end } => {
+                // value>value — self-closing one-tick slide. Closes any
+                // prior open slide at boundary with this cell's cv1,
+                // then opens *and closes* its own slide in a single
+                // cell (close target already resolved by the sugar).
+                // Channel state returns to idle.
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        None,
+                        true,
+                    );
+                }
+                state = ChannelState::Idle;
+                StepEffect::StartNote {
+                    cv1,
+                    cv2,
+                    slide: Some(SlideOpen {
+                        close_cv1: cv1_end,
+                        close_cv2: cv2_end,
+                        span: 1,
+                        closes_at_boundary: true,
+                    }),
+                    roll: None,
+                }
+            }
+            StepKind::SlideOpen => {
+                // value> — closes any prior open slide at boundary,
+                // then opens a new multi-tick slide. Close target
+                // resolved by the later close cell.
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        None,
+                        true,
+                    );
+                }
+                state = ChannelState::SlideOpen { head_idx: i };
+                StepEffect::StartNote {
+                    cv1,
+                    cv2,
+                    slide: Some(SlideOpen {
+                        close_cv1: 0.0,
+                        close_cv2: None,
+                        span: 1,
+                        closes_at_boundary: true,
+                    }),
+                    roll: None,
+                }
+            }
+            StepKind::StepTo { cv2: cv2_opt } => {
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        cv2_opt,
+                        true,
+                    );
+                }
+                state = ChannelState::Idle;
+                StepEffect::StepCv { cv1, cv2: cv2_opt }
+            }
+            StepKind::SlideCloseInTick { cv2: cv2_opt } => {
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    // The close cell is itself a slide-ramp tick; bump
+                    // span by one before flagging closes_at_boundary
+                    // = false so the schedule covers this tick too.
+                    extend_slide_span(&mut steps[head_idx].effect);
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        cv2_opt,
+                        false,
+                    );
+                } else {
+                    errors.push(RowBuildError {
+                        cell_index: i,
+                        message: "`>value` close cell without a preceding \
+                                  slide-open"
+                            .to_owned(),
+                    });
+                }
+                state = ChannelState::Idle;
+                StepEffect::SlideCloseInTick { cv1, cv2: cv2_opt }
+            }
         };
 
         steps[i].effect = effect;
-        i += 1;
     }
+
+    // Any slide still open at end-of-run is an error: the close cell
+    // never arrived. Degrade to a no-op (ramp to current cv) so the
+    // runtime stays sane; record the diagnostic.
+    if let ChannelState::SlideOpen { head_idx } = state {
+        errors.push(RowBuildError {
+            cell_index: head_idx,
+            message: "slide opened by this cell never reaches a close cell \
+                      (`value`, `/value`, `>value`) within the channel's \
+                      step run"
+                .to_owned(),
+        });
+        let open_cv1 = steps[head_idx].cv1;
+        patch_slide_close(&mut steps[head_idx].effect, open_cv1, None, true);
+    }
+
+    errors
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ChannelState {
+    Idle,
+    SlideOpen { head_idx: usize },
+    RollActive { head_idx: usize },
+}
+
+fn extend_slide_span(effect: &mut StepEffect) {
+    if let Some(so) = slide_in_effect(effect) {
+        so.span = so.span.saturating_add(1);
+    }
+}
+
+fn extend_roll_span(effect: &mut StepEffect) {
+    if let StepEffect::StartNote { roll: Some(r), .. } = effect {
+        r.span = r.span.saturating_add(1);
+    }
+}
+
+fn patch_slide_close(
+    effect: &mut StepEffect,
+    close_cv1: f32,
+    close_cv2: Option<f32>,
+    at_boundary: bool,
+) {
+    if let Some(so) = slide_in_effect(effect) {
+        so.close_cv1 = close_cv1;
+        if close_cv2.is_some() {
+            so.close_cv2 = close_cv2;
+        }
+        so.closes_at_boundary = at_boundary;
+    }
+}
+
+fn slide_in_effect(effect: &mut StepEffect) -> Option<&mut SlideOpen> {
+    match effect {
+        StepEffect::StartNote { slide: Some(so), .. } => Some(so),
+        StepEffect::OpenSlide { slide: so } => Some(so),
+        _ => None,
+    }
+}
+
+fn close_open_slide_no_target(steps: &mut [Step], state: &mut ChannelState) {
+    // Rest cells are not legal close cells (no value); leave the
+    // SlideOpen pointed at its current placeholder. The end-of-run
+    // sweep emits the error.
+    let _ = steps;
+    let _ = state;
 }
 
 /// A multi-channel grid of step data.
@@ -353,20 +506,90 @@ mod tests {
         assert_eq!(data.songs.songs.len(), 0);
     }
 
-    #[test]
-    fn pattern_bank_indexing() {
-        let step = Step {
-            cv1: 1.0,
-            cv2: 0.5,
+    fn note(cv1: f32) -> Step {
+        Step {
+            cv1,
             trigger: true,
             gate: true,
-            cv1_end: None,
-            cv2_end: None,
-            repeat: 1,
-            repeat_span: 1,
-            absorbed_by_roll: false,
-            effect: StepEffect::Silent,
-        };
+            kind: StepKind::Note { repeat: 1 },
+            ..Step::default()
+        }
+    }
+
+    fn roll(cv1: f32, repeat: u8) -> Step {
+        Step {
+            cv1,
+            trigger: true,
+            gate: true,
+            kind: StepKind::Note { repeat },
+            ..Step::default()
+        }
+    }
+
+    fn tie() -> Step {
+        Step { gate: true, kind: StepKind::Tie, ..Step::default() }
+    }
+
+    fn rest() -> Step {
+        Step::default()
+    }
+
+    fn slide_sugar(cv1: f32, cv1_end: f32) -> Step {
+        Step {
+            cv1,
+            trigger: true,
+            gate: true,
+            kind: StepKind::SlideSugar { cv1_end, cv2_end: None },
+            ..Step::default()
+        }
+    }
+
+    fn slide_open(cv1: f32) -> Step {
+        Step {
+            cv1,
+            trigger: true,
+            gate: true,
+            kind: StepKind::SlideOpen,
+            ..Step::default()
+        }
+    }
+
+    fn step_to(cv1: f32) -> Step {
+        Step {
+            cv1,
+            gate: true,
+            kind: StepKind::StepTo { cv2: None },
+            ..Step::default()
+        }
+    }
+
+    fn tie_flow() -> Step {
+        Step { gate: true, kind: StepKind::TieFlow, ..Step::default() }
+    }
+
+    fn slide_close_in_tick(cv1: f32) -> Step {
+        Step {
+            cv1,
+            gate: true,
+            kind: StepKind::SlideCloseInTick { cv2: None },
+            ..Step::default()
+        }
+    }
+
+    fn slide_close_in_tick_with_cv2(cv1: f32, cv2: f32) -> Step {
+        Step {
+            cv1,
+            gate: true,
+            kind: StepKind::SlideCloseInTick { cv2: Some(cv2) },
+            ..Step::default()
+        }
+    }
+
+    // ── Smoke / dataflow ──────────────────────────────────────────────────
+
+    #[test]
+    fn pattern_bank_indexing() {
+        let step = note(1.0);
         let pattern = Pattern {
             channels: 1,
             steps: 2,
@@ -403,160 +626,13 @@ mod tests {
         assert_eq!(song.order[0][1], None);
     }
 
-    #[test]
-    fn step_slide_fields() {
-        let step = Step {
-            cv1: 0.0,
-            cv2: 0.0,
-            trigger: true,
-            gate: true,
-            cv1_end: Some(1.0),
-            cv2_end: Some(0.8),
-            repeat: 3,
-            repeat_span: 1,
-            absorbed_by_roll: false,
-            effect: StepEffect::Silent,
-        };
-        assert_eq!(step.cv1_end, Some(1.0));
-        assert_eq!(step.cv2_end, Some(0.8));
-        assert_eq!(step.repeat, 3);
-    }
-
-    fn trig(cv1: f32, repeat: u8) -> Step {
-        Step { cv1, trigger: true, gate: true, repeat, ..Step::default() }
-    }
-
-    fn tie() -> Step {
-        Step { gate: true, ..Step::default() }
-    }
-
-    fn rest() -> Step {
-        Step::default()
-    }
-
-    fn note() -> Step {
-        Step { cv1: 60.0, trigger: true, gate: true, ..Step::default() }
-    }
-
-    #[test]
-    fn annotate_x3_alone_span_1() {
-        let mut steps = vec![trig(1.0, 3)];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 1);
-        assert!(!steps[0].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_x3_tie_span_2() {
-        let mut steps = vec![trig(1.0, 3), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 2);
-        assert!(steps[1].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_x5_tie_tie_span_3() {
-        let mut steps = vec![trig(1.0, 5), tie(), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 3);
-        assert!(steps[1].absorbed_by_roll);
-        assert!(steps[2].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_note_tie_unchanged() {
-        let mut steps = vec![note(), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 1);
-        assert_eq!(steps[1].repeat_span, 1);
-        assert!(!steps[0].absorbed_by_roll);
-        assert!(!steps[1].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_x3_tie_note_span_2_note_untouched() {
-        let mut steps = vec![trig(1.0, 3), tie(), note()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 2);
-        assert!(steps[1].absorbed_by_roll);
-        assert_eq!(steps[2].repeat_span, 1);
-        assert!(!steps[2].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_chained_anchors() {
-        // x*3 ~ ~ ~ note*2 ~  → anchor1 span=4, anchor2 span=2
-        let mut steps = vec![trig(1.0, 3), tie(), tie(), tie(), trig(60.0, 2), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 4);
-        assert!(steps[1].absorbed_by_roll);
-        assert!(steps[2].absorbed_by_roll);
-        assert!(steps[3].absorbed_by_roll);
-        assert_eq!(steps[4].repeat_span, 2);
-        assert!(steps[5].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_rest_stops_span() {
-        // x*3 ~ . ~  → anchor span=2, rest breaks the run, trailing tie not absorbed
-        let mut steps = vec![trig(1.0, 3), tie(), rest(), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 2);
-        assert!(steps[1].absorbed_by_roll);
-        assert!(!steps[2].absorbed_by_roll);
-        assert!(!steps[3].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_truncates_at_row_end() {
-        // x*3 ~ ~  → all three consumed, span=3
-        let mut steps = vec![trig(1.0, 3), tie(), tie()];
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps[0].repeat_span, 3);
-        assert!(steps[1].absorbed_by_roll);
-        assert!(steps[2].absorbed_by_roll);
-    }
-
-    #[test]
-    fn annotate_is_idempotent() {
-        let mut steps = vec![trig(1.0, 3), tie(), tie()];
-        annotate_repeat_spans(&mut steps);
-        let snapshot = steps.clone();
-        annotate_repeat_spans(&mut steps);
-        assert_eq!(steps, snapshot);
-    }
-
-    // ── E153 (ticket 0943): StepEffect resolution ────────────────────────
-
-    fn slide_head(cv1: f32, end: f32) -> Step {
-        Step {
-            cv1,
-            trigger: true,
-            gate: true,
-            cv1_end: Some(end),
-            ..Step::default()
-        }
-    }
-
-    fn slide_tail(cv1: f32, end: f32) -> Step {
-        Step {
-            cv1,
-            trigger: false,
-            gate: true,
-            cv1_end: Some(end),
-            ..Step::default()
-        }
-    }
-
-    fn resolve(steps: &mut [Step]) {
-        annotate_repeat_spans(steps);
-        resolve_step_effects(steps);
-    }
+    // ── E153 (ticket 0946): StepKind → StepEffect resolution ────────────
 
     #[test]
     fn resolve_value_cell_is_start_note() {
-        let mut steps = vec![note()];
-        resolve(&mut steps);
+        let mut steps = vec![note(60.0)];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty());
         match &steps[0].effect {
             StepEffect::StartNote { cv1, slide, roll, .. } => {
                 assert_eq!(*cv1, 60.0);
@@ -569,8 +645,8 @@ mod tests {
 
     #[test]
     fn resolve_value_x_n_span_1_is_start_note_with_roll() {
-        let mut steps = vec![trig(60.0, 3)];
-        resolve(&mut steps);
+        let mut steps = vec![roll(60.0, 3)];
+        let _ = resolve_step_effects(&mut steps);
         match &steps[0].effect {
             StepEffect::StartNote { roll: Some(r), slide, .. } => {
                 assert_eq!(r.count, 3);
@@ -582,10 +658,10 @@ mod tests {
     }
 
     #[test]
-    fn resolve_value_x_n_with_span_absorbs_ties() {
-        // x*3 ~ ~  → anchor span=3, two absorbed ties.
-        let mut steps = vec![trig(60.0, 3), tie(), tie()];
-        resolve(&mut steps);
+    fn resolve_value_x_n_underscore_underscore_absorbs_ties() {
+        // `x*3 _ _` — anchor span=3, two absorbed ties.
+        let mut steps = vec![roll(60.0, 3), tie(), tie()];
+        let _ = resolve_step_effects(&mut steps);
         match &steps[0].effect {
             StepEffect::StartNote { roll: Some(r), .. } => {
                 assert_eq!(r.count, 3);
@@ -599,8 +675,8 @@ mod tests {
 
     #[test]
     fn resolve_tie_after_note_is_hold() {
-        let mut steps = vec![note(), tie()];
-        resolve(&mut steps);
+        let mut steps = vec![note(60.0), tie()];
+        let _ = resolve_step_effects(&mut steps);
         assert!(matches!(steps[0].effect, StepEffect::StartNote { .. }));
         assert!(matches!(steps[1].effect, StepEffect::Hold));
     }
@@ -608,59 +684,299 @@ mod tests {
     #[test]
     fn resolve_rest_is_silent() {
         let mut steps = vec![rest()];
-        resolve(&mut steps);
+        let _ = resolve_step_effects(&mut steps);
         assert!(matches!(steps[0].effect, StepEffect::Silent));
     }
 
     #[test]
-    fn resolve_slide_head_one_tick() {
-        // value> value with cv1_end Some — head only, no tail.
-        let mut steps = vec![slide_head(60.0, 72.0)];
-        resolve(&mut steps);
+    fn resolve_slide_sugar_one_tick() {
+        // value>value — span 1, closes at boundary.
+        let mut steps = vec![slide_sugar(60.0, 72.0)];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty());
         match &steps[0].effect {
             StepEffect::StartNote { slide: Some(so), cv1, .. } => {
                 assert_eq!(*cv1, 60.0);
                 assert_eq!(so.close_cv1, 72.0);
+                assert_eq!(so.span, 1);
                 assert!(so.closes_at_boundary);
             }
             other => panic!("expected StartNote+slide, got {other:?}"),
         }
     }
 
+    // ── ADR 0077 §"Continuation absorption" worked examples ─────────────
+
     #[test]
-    fn resolve_slide_macro_two_tick() {
-        // slide(2, A=60, C=72) lowers to head(60, end=66) + tail(66, end=72).
-        // Resolved as StartNote+SlideOpen{close_cv1=72} followed by SlideFlow.
-        let mut steps = vec![slide_head(60.0, 66.0), slide_tail(66.0, 72.0)];
-        resolve(&mut steps);
+    fn adr_example_e4_underscore_tieflow_step_to_g4() {
+        // E4 _ >_ /G4
+        // Tick 1: StartNote(E4) (no slide)
+        // Tick 2: Hold (E4 sustains)
+        // Tick 3: OpenSlide{close=G4, span=1, closes_at_boundary=true}
+        // Tick 4: StepCv(G4) — closes slide at boundary, holds.
+        let mut steps = vec![note(60.0), tie(), tie_flow(), step_to(67.0)];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty(), "no errors: {errs:?}");
+        assert!(matches!(steps[0].effect, StepEffect::StartNote { .. }));
+        assert!(matches!(steps[1].effect, StepEffect::Hold));
+        match &steps[2].effect {
+            StepEffect::OpenSlide { slide: so } => {
+                assert_eq!(so.close_cv1, 67.0);
+                assert_eq!(so.span, 1);
+                assert!(so.closes_at_boundary);
+            }
+            other => panic!("expected OpenSlide, got {other:?}"),
+        }
+        assert!(matches!(steps[3].effect, StepEffect::StepCv { cv1: 67.0, .. }));
+    }
+
+    #[test]
+    fn adr_example_e4_open_underscore_step_to_g4() {
+        // E4> _ /G4
+        // Tick 1: StartNote(E4) + SlideOpen{close=G4, span=2, boundary=true}
+        // Tick 2: SlideFlow
+        // Tick 3: StepCv(G4)
+        let mut steps = vec![slide_open(60.0), tie(), step_to(67.0)];
+        let _ = resolve_step_effects(&mut steps);
         match &steps[0].effect {
-            StepEffect::StartNote { slide: Some(so), cv1, .. } => {
-                assert_eq!(*cv1, 60.0);
-                assert_eq!(so.close_cv1, 72.0, "tail extends head's close_cv1 to final endpoint");
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 67.0);
+                assert_eq!(so.span, 2);
                 assert!(so.closes_at_boundary);
             }
             other => panic!("expected StartNote+slide, got {other:?}"),
         }
         assert!(matches!(steps[1].effect, StepEffect::SlideFlow));
+        assert!(matches!(steps[2].effect, StepEffect::StepCv { cv1: 67.0, .. }));
+    }
+
+    #[test]
+    fn adr_example_e4_open_underscore_close_in_tick_g4() {
+        // E4> _ >G4
+        // Tick 1: StartNote(E4) + SlideOpen{close=G4, span=3, boundary=false}
+        // Tick 2: SlideFlow
+        // Tick 3: SlideCloseInTick(G4)
+        let mut steps = vec![slide_open(60.0), tie(), slide_close_in_tick(67.0)];
+        let _ = resolve_step_effects(&mut steps);
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 67.0);
+                assert_eq!(so.span, 3);
+                assert!(!so.closes_at_boundary);
+            }
+            other => panic!("expected StartNote+slide, got {other:?}"),
+        }
+        assert!(matches!(steps[1].effect, StepEffect::SlideFlow));
+        assert!(matches!(
+            steps[2].effect,
+            StepEffect::SlideCloseInTick { cv1: 67.0, .. }
+        ));
+    }
+
+    #[test]
+    fn adr_example_e4_open_underscore_note_g4() {
+        // E4> _ G4
+        // Tick 1: StartNote(E4) + SlideOpen{close=G4, span=2, boundary=true}
+        // Tick 2: SlideFlow
+        // Tick 3: StartNote(G4) (fresh trigger, slide already closed at
+        //         tick boundary entering this cell)
+        let mut steps = vec![slide_open(60.0), tie(), note(67.0)];
+        let _ = resolve_step_effects(&mut steps);
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 67.0);
+                assert_eq!(so.span, 2);
+                assert!(so.closes_at_boundary);
+            }
+            other => panic!("expected StartNote+slide, got {other:?}"),
+        }
+        assert!(matches!(steps[1].effect, StepEffect::SlideFlow));
+        match &steps[2].effect {
+            StepEffect::StartNote { cv1, slide, .. } => {
+                assert_eq!(*cv1, 67.0);
+                assert!(slide.is_none());
+            }
+            other => panic!("expected StartNote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn adr_example_e4_step_to_g4() {
+        // E4 /G4 — bare note then StepCv.
+        let mut steps = vec![note(60.0), step_to(67.0)];
+        let _ = resolve_step_effects(&mut steps);
+        match &steps[0].effect {
+            StepEffect::StartNote { cv1, slide, .. } => {
+                assert_eq!(*cv1, 60.0);
+                assert!(slide.is_none());
+            }
+            other => panic!("expected StartNote, got {other:?}"),
+        }
+        assert!(matches!(
+            steps[1].effect,
+            StepEffect::StepCv { cv1: 67.0, .. }
+        ));
+    }
+
+    #[test]
+    fn value_close_value_sugar_equivalent_to_value_open_step_to_value() {
+        // C4>E4 _   ≡   C4> /E4
+        // The sugar form is two cells: SlideSugar + Tie (SlideFlow).
+        // The expanded form is two cells: SlideOpen + StepTo.
+        // Audibly the cv1 trajectory matches: ramp C4→E4 over tick 1, hold
+        // E4 on tick 2. Trigger only on tick 1.
+        let mut sugar = vec![slide_sugar(60.0, 64.0), tie()];
+        let mut expanded = vec![slide_open(60.0), step_to(64.0)];
+        let _ = resolve_step_effects(&mut sugar);
+        let _ = resolve_step_effects(&mut expanded);
+
+        let sugar_slide = match &sugar[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => so.clone(),
+            other => panic!("sugar tick 0: {other:?}"),
+        };
+        let expanded_slide = match &expanded[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => so.clone(),
+            other => panic!("expanded tick 0: {other:?}"),
+        };
+        assert_eq!(sugar_slide, expanded_slide);
+        // sugar's slide is self-closing, so the trailing tie is a plain
+        // Hold; the expanded form's second cell is the StepCv close.
+        // Audibly equivalent: both shapes ramp 60→64 over tick 1 and
+        // sustain 64 across tick 2.
+        assert!(matches!(sugar[1].effect, StepEffect::Hold));
+        assert!(matches!(
+            expanded[1].effect,
+            StepEffect::StepCv { cv1: 64.0, .. }
+        ));
+    }
+
+    #[test]
+    fn slide_open_without_close_emits_error_and_degrades() {
+        let mut steps = vec![slide_open(60.0), tie()];
+        let errs = resolve_step_effects(&mut steps);
+        assert_eq!(errs.len(), 1, "expected one row-build error: {errs:?}");
+        assert_eq!(errs[0].cell_index, 0);
+        // Degraded: close = open cv1 (no audible ramp).
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 60.0);
+            }
+            other => panic!("expected degraded slide, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn slide_close_in_tick_without_open_emits_error() {
+        let mut steps = vec![slide_close_in_tick(67.0)];
+        let errs = resolve_step_effects(&mut steps);
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].cell_index, 0);
+    }
+
+    // ── Ticket 0948: cv2 on multi-cell slides ──────────────────────────
+
+    fn slide_open_with_cv2(cv1: f32, cv2: f32) -> Step {
+        Step {
+            cv1,
+            cv2,
+            trigger: true,
+            gate: true,
+            kind: StepKind::SlideOpen,
+            ..Step::default()
+        }
+    }
+
+    fn step_to_with_cv2(cv1: f32, cv2: f32) -> Step {
+        Step {
+            cv1,
+            gate: true,
+            kind: StepKind::StepTo { cv2: Some(cv2) },
+            ..Step::default()
+        }
+    }
+
+    #[test]
+    fn slide_open_with_cv2_then_close_in_tick_with_cv2() {
+        // `A4:0.5> >B4:0.8` — open cv2=0.5, close cv2=0.8 inside tick 2.
+        let mut steps = vec![
+            slide_open_with_cv2(60.0, 0.5),
+            slide_close_in_tick_with_cv2(72.0, 0.8),
+        ];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty());
+        match &steps[0].effect {
+            StepEffect::StartNote { cv1, cv2, slide: Some(so), .. } => {
+                assert_eq!(*cv1, 60.0);
+                assert_eq!(*cv2, 0.5);
+                assert_eq!(so.close_cv1, 72.0);
+                assert_eq!(so.close_cv2, Some(0.8));
+                assert_eq!(so.span, 2);
+                assert!(!so.closes_at_boundary);
+            }
+            other => panic!("expected StartNote+slide, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn slide_open_with_cv2_then_step_to_with_cv2() {
+        // `A4:0.5> /B4:0.8` — open cv2=0.5, boundary close cv2=0.8.
+        let mut steps = vec![
+            slide_open_with_cv2(60.0, 0.5),
+            step_to_with_cv2(72.0, 0.8),
+        ];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty());
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 72.0);
+                assert_eq!(so.close_cv2, Some(0.8));
+                assert_eq!(so.span, 1);
+                assert!(so.closes_at_boundary);
+            }
+            other => panic!("expected StartNote+slide, got {other:?}"),
+        }
+        match &steps[1].effect {
+            StepEffect::StepCv { cv1, cv2 } => {
+                assert_eq!(*cv1, 72.0);
+                assert_eq!(*cv2, Some(0.8));
+            }
+            other => panic!("expected StepCv, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn slide_open_with_cv2_then_close_without_cv2_leaves_close_cv2_none() {
+        // `A4:0.5> >B4` — open carries cv2; close has no `:cv2`.
+        // `close_cv2` stays `None`; runtime falls back to open's cv2.
+        let mut steps = vec![
+            slide_open_with_cv2(60.0, 0.5),
+            slide_close_in_tick(72.0),
+        ];
+        let _ = resolve_step_effects(&mut steps);
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 72.0);
+                assert_eq!(so.close_cv2, None);
+            }
+            other => panic!("expected StartNote+slide, got {other:?}"),
+        }
     }
 
     #[test]
     fn resolve_is_idempotent() {
-        // Mixed channel: note, slide(2)-shaped pair, rest, value*3+ties.
         let mut steps = vec![
-            note(),
-            slide_head(60.0, 66.0),
-            slide_tail(66.0, 72.0),
+            note(60.0),
+            slide_open(60.0),
+            tie(),
+            slide_close_in_tick(72.0),
             rest(),
-            trig(48.0, 3),
+            roll(48.0, 3),
             tie(),
             tie(),
         ];
-        resolve(&mut steps);
+        let _ = resolve_step_effects(&mut steps);
         let snapshot = steps.clone();
-        // Re-run only the resolver; annotate_repeat_spans is also idempotent
-        // but we exercise resolver-only here.
-        resolve_step_effects(&mut steps);
+        let _ = resolve_step_effects(&mut steps);
         assert_eq!(steps, snapshot);
     }
 }

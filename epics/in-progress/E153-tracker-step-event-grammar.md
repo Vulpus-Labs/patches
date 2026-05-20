@@ -43,7 +43,9 @@ final rename is dropped in.
 - [0945 — Per-channel sub-event schedule; respect per-tick swung
   durations](../tickets/open/0945-sub-event-schedule.md)
 - [0946 — Grammar + parser: `_`, `/value`, `value>`, `>_`,
-  `>value`](../tickets/open/0946-step-grammar-extensions.md)
+  `>value`](../tickets/closed/0946-step-grammar-extensions.md)
+- [0948 — Abolish `slide()` macro; `:cv2` on multi-cell
+  slides](../tickets/closed/0948-abolish-slide-macro-cv2-on-slides.md)
 - [0947 — LSP hover + corpus + manual + goldens for the new
   shapes](../tickets/open/0947-step-grammar-lsp-and-docs.md)
 

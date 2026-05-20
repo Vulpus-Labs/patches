@@ -46,7 +46,7 @@ pub use ast::{
     ModuleDecl, ParamDecl, ParamEntry, ParamIndex, ParamType, Patch, PatternChannel, PatternDef,
     PlayAtom, PlayBody, PlayExpr, PlayTerm, PortGroupDecl, PortIndex, PortLabel, PortRef,
     CallArg, CallBlock, RangeEndpoint, RangeKind, RowGroup, ScaleSpec, Scalar, SectionDef, ShapeValue, SongCell, SongDef, SongItem, SongRow, UnitFamily,
-    SourceId, Span, Statement, Step, StepOrGenerator, Template, Value,
+    SourceId, Span, Statement, Step, Template, Value,
 };
 pub use expand::{expand, ExpandError, ExpandResult, Warning};
 pub use structural::{StructuralCode, StructuralError};

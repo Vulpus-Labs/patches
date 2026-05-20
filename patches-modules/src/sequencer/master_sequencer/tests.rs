@@ -44,7 +44,7 @@ fn shape(channels: usize) -> ModuleShape {
 }
 
 fn simple_step(cv1: f32, trigger: bool, gate: bool) -> TrackerStep {
-    TrackerStep { cv1, cv2: 0.0, trigger, gate, cv1_end: None, cv2_end: None, repeat: 1 }
+    TrackerStep { cv1, trigger, gate, ..TrackerStep::default() }
 }
 
 // ── sync-enum → use_host_transport resolution ───────────────────────────

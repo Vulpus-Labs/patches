@@ -17,7 +17,7 @@ use patches_core::QName;
 use super::{qualify, ExpandError, NameScope};
 use crate::ast::{
     Ident, ParamType, PatternDef, PlayAtom, PlayBody, PlayExpr, RowGroup, Scalar, SectionDef,
-    SongCell, SongDef, SongItem, SongRow, Span, Step, StepOrGenerator,
+    SongCell, SongDef, SongItem, SongRow, Span,
 };
 use crate::flat::{FlatPatternChannel, FlatPatternDef, FlatSongDef, FlatSongRow, PatternIdx};
 use crate::provenance::Provenance;
@@ -139,12 +139,9 @@ pub(super) fn expand_pattern_def(
     let channels = pattern
         .channels
         .iter()
-        .map(|ch| {
-            let steps = expand_steps(&ch.steps);
-            FlatPatternChannel {
-                name: ch.name.name.clone(),
-                steps,
-            }
+        .map(|ch| FlatPatternChannel {
+            name: ch.name.name.clone(),
+            steps: ch.steps.clone(),
         })
         .collect();
     FlatPatternDef {
@@ -152,42 +149,6 @@ pub(super) fn expand_pattern_def(
         channels,
         provenance: Provenance::with_chain(pattern.span, call_chain),
     }
-}
-
-/// Expand a sequence of `StepOrGenerator` into concrete `Step` values.
-fn expand_steps(items: &[StepOrGenerator]) -> Vec<Step> {
-    let mut out = Vec::new();
-    for item in items {
-        match item {
-            StepOrGenerator::Step(s) => out.push(s.clone()),
-            StepOrGenerator::Slide { count, start, end } => {
-                let n = *count as usize;
-                if n == 0 {
-                    continue;
-                }
-                let step_size = (end - start) / n as f32;
-                for i in 0..n {
-                    let from = start + step_size * i as f32;
-                    let to = start + step_size * (i + 1) as f32;
-                    // Only the first subdivision triggers the envelope — the
-                    // remainder are ties so the gate stays high through the
-                    // slide, matching the ADR's "gate stays high through the
-                    // slide" semantics.
-                    let trigger = i == 0;
-                    out.push(Step {
-                        cv1: from,
-                        cv2: 0.0,
-                        trigger,
-                        gate: true,
-                        cv1_end: Some(to),
-                        cv2_end: None,
-                        repeat: 1,
-                    });
-                }
-            }
-        }
-    }
-    out
 }
 
 /// Resolve one cell: pattern references are looked up through `scope`; param

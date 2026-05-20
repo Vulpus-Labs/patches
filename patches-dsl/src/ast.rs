@@ -2,7 +2,7 @@
 // (and other crates that don't depend on `patches-dsl`) can carry source
 // provenance. Re-exported here so existing `patches_dsl::ast::Span` paths
 // continue to work.
-pub use patches_core::{SourceId, Span};
+pub use patches_core::{SourceId, Span, StepKind};
 
 /// An identifier together with its source location.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -470,37 +470,42 @@ pub struct Template {
 
 /// A single step in a pattern channel row.
 ///
-/// Every step produces four values: `cv1`, `cv2`, `trigger`, and `gate`.
-/// Optional `cv1_end` / `cv2_end` specify slide targets; `repeat` subdivides
-/// the tick into multiple evenly-spaced triggers.
+/// Every step carries `cv1`, `cv2`, `trigger`, and `gate` plus a
+/// [`StepKind`] tag (ADR 0077) recording the surface cell shape. The
+/// row-build pass in `patches-core` reads `kind` to resolve channel-
+/// stateful semantics (slide open/close, roll absorption, tie flow)
+/// into a runtime `StepEffect`; this AST type is the parser-side
+/// carrier prior to that resolution.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Step {
     pub cv1: f32,
     pub cv2: f32,
     pub trigger: bool,
     pub gate: bool,
-    /// Slide target for cv1 (interpolates from `cv1` to `cv1_end` over the tick).
-    pub cv1_end: Option<f32>,
-    /// Slide target for cv2 (interpolates from `cv2` to `cv2_end` over the tick).
-    pub cv2_end: Option<f32>,
-    /// Repeat count: 1 = normal, >1 = subdivide the tick into `repeat` triggers.
-    pub repeat: u8,
+    /// Surface cell shape (ADR 0077). Default [`StepKind::Rest`].
+    pub kind: StepKind,
 }
 
-/// An element in a pattern channel row: either a concrete step or a
-/// `slide(n, start, end)` generator to be expanded.
-#[derive(Debug, Clone, PartialEq)]
-pub enum StepOrGenerator {
-    Step(Step),
-    /// `slide(n, start, end)` — expands to `n` slide steps interpolating cv1.
-    Slide { count: u32, start: f32, end: f32 },
+impl Default for Step {
+    fn default() -> Self {
+        Self {
+            cv1: 0.0,
+            cv2: 0.0,
+            trigger: false,
+            gate: false,
+            kind: StepKind::Rest,
+        }
+    }
 }
 
 /// One channel (row) within a pattern block.
+///
+/// The `slide(n, start, end)` macro generator was removed in
+/// ticket 0948; the row is now a flat sequence of [`Step`] cells.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatternChannel {
     pub name: Ident,
-    pub steps: Vec<StepOrGenerator>,
+    pub steps: Vec<Step>,
 }
 
 /// A `pattern <name> { ... }` block.

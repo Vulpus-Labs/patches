@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use patches_core::{
-    annotate_repeat_spans, resolve_step_effects, ParameterValue, Pattern, PatternBank, Song,
-    SongBank, StepEffect, TrackerData, TrackerStep,
+    resolve_step_effects, ParameterValue, Pattern, PatternBank, Song, SongBank, TrackerData,
+    TrackerStep,
 };
 use patches_dsl::ast::{Scalar, Value};
 use patches_dsl::flat::SongData;
@@ -41,13 +41,25 @@ pub(crate) fn build_tracker_data(
             while steps.len() < max_steps {
                 steps.push(TrackerStep::default());
             }
-            // Derive E152 tie-spread span annotations now that the channel's
-            // step run is final. No-op on channels with no `*N` anchors.
-            annotate_repeat_spans(&mut steps);
-            // E153 (0943): resolve each cell into a StepEffect. The pattern
-            // player still reads the legacy flag fields until 0944 flips
-            // dispatch onto `step.effect`; resolution is purely additive.
-            resolve_step_effects(&mut steps);
+            // E153 (ticket 0946): resolve each cell into a StepEffect via
+            // the channel-stateful row-build pass. The pass subsumes the
+            // E152 tie-spread annotation (`annotate_repeat_spans`) — the
+            // legacy `*N _ _` absorption is handled inline as one of the
+            // continuation-absorption arms. Diagnostics (e.g. unclosed
+            // slide-open cells) are emitted as `RowBuildError`s; we
+            // promote them to `InterpretError`s so the patch fails to
+            // build rather than running with degraded effects.
+            let errs = resolve_step_effects(&mut steps);
+            if let Some(first) = errs.first() {
+                return Err(InterpretError::new(
+                    InterpretErrorCode::TrackerShape,
+                    fp.provenance.clone(),
+                    format!(
+                        "pattern '{}' channel '{}' cell {}: {}",
+                        fp.name, ch.name, first.cell_index, first.message,
+                    ),
+                ));
+            }
             data.push(steps);
         }
         patterns.push(Pattern {
@@ -139,23 +151,18 @@ pub(crate) fn build_tracker_data(
 
 /// Convert a DSL [`patches_dsl::ast::Step`] to a runtime [`TrackerStep`].
 ///
-/// `repeat_span` / `absorbed_by_roll` start at their defaults and are
-/// filled in by [`annotate_repeat_spans`] once the channel's full step
-/// run is in place. `effect` is similarly resolved by
-/// [`resolve_step_effects`] (ticket 0943) and starts at
-/// [`StepEffect::Silent`].
+/// Carries `cv1`/`cv2`/`trigger`/`gate`/`kind` verbatim; `effect` starts
+/// at [`patches_core::StepEffect::Silent`] and is resolved by
+/// [`resolve_step_effects`] once the channel's full step run is in
+/// place (ADR 0077, ticket 0946).
 fn convert_step(dsl_step: &patches_dsl::ast::Step) -> TrackerStep {
     TrackerStep {
         cv1: dsl_step.cv1,
         cv2: dsl_step.cv2,
         trigger: dsl_step.trigger,
         gate: dsl_step.gate,
-        cv1_end: dsl_step.cv1_end,
-        cv2_end: dsl_step.cv2_end,
-        repeat: dsl_step.repeat,
-        repeat_span: 1,
-        absorbed_by_roll: false,
-        effect: StepEffect::Silent,
+        kind: dsl_step.kind,
+        effect: patches_core::StepEffect::Silent,
     }
 }
 
