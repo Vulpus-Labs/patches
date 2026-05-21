@@ -225,9 +225,24 @@ impl PluginScanner {
 }
 
 fn load_one(path: &Path, registry: &mut Registry, report: &mut ScanReport) {
+    // Diagnostic: print to stderr (unbuffered) and flush *before* the dlopen so
+    // the partial line survives if the kernel SIGKILLs the host mid-load (e.g.
+    // invalid code signature on the bundle). The line is finished with "OK"
+    // only after load_plugin returns — so the last unterminated line names the
+    // culprit bundle.
+    {
+        use std::io::Write as _;
+        let mut err = std::io::stderr().lock();
+        let _ = write!(err, "loading {} ... ", path.display());
+        let _ = err.flush();
+    }
     let builders = match load_plugin(path) {
-        Ok(b) => b,
+        Ok(b) => {
+            eprintln!("OK");
+            b
+        }
         Err(e) => {
+            eprintln!("ERR: {e}");
             report.errors.push((path.to_path_buf(), e));
             return;
         }
