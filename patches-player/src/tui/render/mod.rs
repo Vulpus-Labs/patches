@@ -139,6 +139,18 @@ pub(crate) fn truncate_name(s: &str, max_chars: usize) -> String {
     out
 }
 
+/// Compose a stereo meter label `width` columns wide: `stem` left-aligned,
+/// `tick` (`▎L`/`▎R`) flush against the right edge so both halves align.
+fn stereo_label(stem: &str, tick: &str, width: usize) -> String {
+    let tick_w = tick.chars().count();
+    if width <= tick_w {
+        return tick.to_string();
+    }
+    let stem_w = width - tick_w;
+    let stem = truncate_name(stem, stem_w);
+    format!("{stem:<stem_w$}{tick}")
+}
+
 pub(crate) enum MeterRow<'a> {
     Mono(&'a TapEntry),
     StereoLeft { stem: &'a str, tap: &'a TapEntry },
@@ -152,11 +164,15 @@ impl<'a> MeterRow<'a> {
         }
     }
 
-    pub(crate) fn label(&self) -> String {
+    /// Label for a meter row, fit to `width` display columns.
+    ///
+    /// Stereo halves right-align their `▎L`/`▎R` tick to the bar edge so the
+    /// two rows line up vertically; the stem name (if any) fills the left.
+    pub(crate) fn label(&self, width: usize) -> String {
         match self {
             MeterRow::Mono(t) => t.name.clone(),
-            MeterRow::StereoLeft { stem, .. } => format!("{stem} ▎L"),
-            MeterRow::StereoRight(_) => "  ▎R".to_string(),
+            MeterRow::StereoLeft { stem, .. } => stereo_label(stem, "▎L", width),
+            MeterRow::StereoRight(_) => stereo_label("", "▎R", width),
         }
     }
 }
@@ -239,7 +255,7 @@ fn draw_meters(f: &mut Frame, area: Rect, view: &View, handle: &SubscribersHandl
         let tap = row.tap();
         let y = inner.y + row_idx as u16;
 
-        let label = row.label();
+        let label = row.label(NAME_W as usize);
         let name = truncate_name(&label, NAME_W as usize);
         buf.set_string(inner.x, y, &name, Style::default());
 

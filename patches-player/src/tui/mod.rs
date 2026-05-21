@@ -260,8 +260,9 @@ mod tests {
         assert!(matches!(rows[1], MeterRow::StereoLeft { stem: "master", .. }));
         assert!(matches!(rows[2], MeterRow::StereoRight(_)));
         assert!(matches!(rows[3], MeterRow::Mono(_)));
-        assert_eq!(rows[1].label(), "master ▎L");
-        assert_eq!(rows[2].label(), "  ▎R");
+        // ▎L / ▎R ticks right-align to the bar edge so the two halves line up.
+        assert_eq!(rows[1].label(16), "master        ▎L");
+        assert_eq!(rows[2].label(16), "              ▎R");
     }
 
     #[test]
