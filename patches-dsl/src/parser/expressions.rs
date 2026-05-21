@@ -432,7 +432,11 @@ pub(super) fn build_host_control_block(
         let f_span = span_of(&field_pair);
         let mut fi = field_pair.into_inner();
         let f_name = build_ident(fi.next().unwrap());
-        let f_value = build_value(fi.next().unwrap())?;
+        // host_control_field's value side was narrowed from `value` to
+        // `scalar` in ticket 0950 (rejecting `file(...)` etc. at parse
+        // time). HostControlField.value stays typed as `Value` for
+        // downstream stability — wrap the scalar.
+        let f_value = Value::Scalar(build_scalar(fi.next().unwrap())?);
         fields.push(HostControlField { name: f_name, value: f_value, span: f_span });
     }
 

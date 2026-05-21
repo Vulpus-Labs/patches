@@ -137,6 +137,26 @@ pattern p {
 }
 patch {}
 
+# ── Step-to with in-tick slide (no retrigger; mirrors `value>value` sugar) ──
+
+=== ok step-to with in-tick slide
+pattern p {
+    vox: A3 /A3>B3 .
+}
+patch {}
+
+=== ok step-to with in-tick slide carries cv2 modifier
+pattern p {
+    vox: A3 /A3>B3:0.6 .
+}
+patch {}
+
+=== ok step-to with in-tick slide on unit literal
+pattern p {
+    f: 440Hz /440Hz>880Hz .
+}
+patch {}
+
 === both_error bare slide macro no longer parses
 pattern p {
     auto: slide(4, 0.0, 1.0)
@@ -193,4 +213,40 @@ pattern p {
     bass: C2 /D2 _ E2> _ /G2
     vox:  C4>D4 . E4> _ /G4 _
 }
+patch {}
+
+# ─── 0949 grammar parse bugs lock-in ─────────────────────────────────
+
+=== pest_error step_valued is compound-atomic — ws between cv1 and `:cv2` rejected
+# Pest atomicity (now `${...}`) forbids implicit WHITESPACE between the
+# cv1 primary and its `:cv2` modifier. Tree-sitter has no atomic
+# concept; its lexer treats whitespace as `extras`, so this corpus
+# entry is `pest_error` (parity-tolerated divergence) rather than
+# `both_error`.
+pattern p {
+    note: C4 : 0.5 . . .
+}
+patch {}
+
+=== ok hyphen-suffixed bool ident no longer split as bool + dangling
+patch {
+    module x : X { v: true-foo }
+}
+
+# ─── 0950 grammar consolidation lock-in ──────────────────────────────
+
+=== both_error slide sugar `value>value` cannot also carry `*N`
+# Ticket 0950 split `step_valued` into mutually-exclusive
+# `step_valued_slide` and `step_valued_note` alternatives — the
+# `value>value*N` combination has no parse path on either side now.
+pattern p {
+    note: C4>E4*3 . . .
+}
+patch {}
+
+=== both_error host_control_field value side narrowed to scalar
+# Ticket 0950 narrowed `host_control_field` from `value` to `scalar`,
+# so `file(...)` (and other compound `value` shapes) fail at parse
+# time rather than being silently broadened downstream.
+knob foo { default: file("ir.wav") }
 patch {}

@@ -1,0 +1,6 @@
+# error: `host_control_field` value side was narrowed from `value` to
+# `scalar` in ticket 0950, so `file(...)` references (and other
+# compound `value` forms) are rejected at parse time rather than
+# silently broadened downstream.
+knob foo { default: file("ir.wav") }
+patch {}

@@ -17,6 +17,9 @@ module.exports = grammar({
   // follows. Let GLR explore both and resolve at the next token.
   conflicts: ($) => [
     [$.step_cv2, $.step_cv2_tail],
+    // `/value` may stand alone or carry a trailing `>cv1_end` slide
+    // target. GLR explores both and resolves at the next token.
+    [$.step_step_to],
   ],
 
   rules: {
@@ -64,6 +67,14 @@ module.exports = grammar({
       ),
 
     // ─── Note name literals ─────────────────────────────────────────────
+    // Pest's `note_lit` has a `!(alphanum | "_" | "-")` boundary so
+    // `C4-tag` falls through to ident (ticket 0949). Tree-sitter's regex
+    // engine has no lookahead, and removing the token precedence to lean
+    // on longest-match breaks the equal-length `C4` case (ident's `word`
+    // status wins the tie). The pre-existing comment on `float_unit`
+    // already records the same accepted-language-in-delimited-contexts
+    // caveat; we tolerate the divergence here too — pest is the
+    // canonical accept/reject decision.
     note_lit: (_) =>
       token(prec(1, seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/))),
 
@@ -189,8 +200,10 @@ module.exports = grammar({
     // adjacent stage (ticket 0711) so unknown components surface a
     // structural diagnostic with a "did you mean" hint rather than a raw
     // parse error.
-    tap_component: ($) => $.ident,
-    tap_components: ($) => seq($.tap_component, repeat(seq("+", $.tap_component))),
+    //
+    // `tap_components` directly holds the component idents (no
+    // `tap_component` wrapper — inlined in ticket 0950 to mirror pest).
+    tap_components: ($) => seq($.ident, repeat(seq("+", $.ident))),
     tap_target: ($) =>
       seq("~", $.tap_components, "(", $.ident, ")"),
 
@@ -199,8 +212,11 @@ module.exports = grammar({
     // synthesised `~host_control` module instance by the expander.
     host_control_kind: (_) =>
       choice("knob", "slider", "toggle", "trigger"),
+    // Ticket 0950: value side narrowed from `value` to `scalar` to
+    // reject `file(...)` / other compound values at parse time
+    // (matches pest).
     host_control_field: ($) =>
-      seq(field("name", $.ident), ":", field("value", $.value)),
+      seq(field("name", $.ident), ":", field("value", $.scalar)),
     host_control_block: ($) =>
       seq(
         field("kind", $.host_control_kind),
@@ -313,7 +329,8 @@ module.exports = grammar({
     //   .            rest
     //   _            tie / continuation (channel-stateful)
     //   value        triggered note (`value`, `value:cv2`, `value*N`)
-    //   value>value  one-tick slide sugar
+    //   value>value  one-tick slide sugar form (ADR 0077 equivalence,
+    //                  `value>value` ≡ `value> /value`)
     //   value>       open multi-tick slide
     //   /value       change cv1 without retrigger (`StepTo`)
     //   >_           explicit slide-flow / open-from-current
@@ -322,53 +339,64 @@ module.exports = grammar({
     // The `~` step-tie token from epic E152 has been retired (ADR 0077
     // § "Token ambiguity"). `~tap(...)` / `~name` cable endpoints are
     // unaffected.
+    //
+    // Numeric primaries reuse the canonical `float_lit` / `int_lit` /
+    // `float_unit` tokens (no `step_*` numeric duplicates — collapsed
+    // in ticket 0950 to mirror pest).
     step_note: (_) =>
       token(prec(2, seq(/[A-Ga-g]/, optional(choice("#", /[bB]/)), optional("-"), /\d+/))),
     step_trigger: (_) => token(prec(3, "x")),
     step_rest: (_) => token(prec(3, ".")),
     step_tie: (_) => token(prec(3, "_")),
     step_tie_flow: (_) => token(prec(4, ">_")),
-    step_float: (_) =>
-      token(prec(2, seq(optional("-"), /\d+/, ".", /\d*/))),
-    step_int: (_) =>
-      token(prec(1, seq(optional("-"), /\d+/))),
-    step_unit: (_) =>
-      token(prec(2, seq(
-        optional("-"),
-        /\d+/,
-        optional(seq(".", /\d*/)),
-        /[kK]?[hH][zZ]|[dD][bB]|[cCsS]/,
-      ))),
 
-    // Slide target for cv1 (used inside `step_valued` for the
+    // Slide target for cv1 (used inside `step_valued_slide` for the
     // `value>value` sugar form): ">value".
     step_slide_target: ($) =>
-      seq(">", choice($.step_unit, $.step_note, $.step_float, $.step_int)),
+      seq(">", choice($.float_unit, $.step_note, $.float_lit, $.int_lit)),
 
     // cv2 part: ":value" with optional slide ">value".
-    // `prec.right` mirrors `step_valued` — bias toward shifting an
+    // `prec.right` mirrors `step_valued_*` — bias toward shifting an
     // adjacent `>value` slide_target into the cv2 cell rather than
     // reducing and parsing `>` as the start of a new cell.
     step_cv2: ($) =>
-      prec.right(seq(":", choice($.step_unit, $.step_float, $.step_int), optional($.step_slide_target))),
+      prec.right(seq(":", choice($.float_unit, $.float_lit, $.int_lit), optional($.step_slide_target))),
 
     step_repeat: ($) => seq("*", $.nat),
 
-    // A full valued step: cv1 (with optional slide-sugar target) +
-    // optional cv2 + optional repeat. `/value` cannot carry `*N`.
+    // A full valued step. Split into two mutually-exclusive
+    // alternatives in ticket 0950 so the grammar itself rules out the
+    // nonsense `value>value*N` combination (sugar slide plus repeat).
+    // `step_valued` stays as a parent so the LSP retains a stable
+    // anchor for cursor-context classification.
     //
-    // `prec.right` biases the GLR parser toward eating an immediately
-    // following `>value` slide_target rather than reducing step_valued
-    // and parsing `>` as the start of a new step_slide_close cell.
-    // For the unsugared `value>` (no value after `>`), step_slide_open
-    // wins via the explicit conflict declared above.
-    step_valued: ($) =>
+    // `prec.right` on the slide alternative biases the GLR parser
+    // toward eating an immediately following `>value` slide_target
+    // rather than reducing and parsing `>` as the start of a new
+    // step_slide_close cell. For the unsugared `value>` (no value
+    // after `>`), step_slide_open wins via the explicit conflict
+    // declared above.
+    //
+    // Pest's `step_valued_*` rules are compound-atomic (`${...}`) so
+    // they forbid implicit whitespace between the cv1 primary and its
+    // `:cv2` / `>target` / `*N` modifiers (ticket 0949). Tree-sitter
+    // has no atomic concept; its `extras: [/\s/]` permits whitespace
+    // between tokens. The corpus driver tolerates this divergence
+    // (the `step_valued_whitespace` entry is `pest_error`); pest is
+    // the canonical grammar for accept/reject decisions.
+    step_valued_slide: ($) =>
       prec.right(seq(
-        choice($.step_unit, $.step_note, $.step_trigger, $.step_float, $.step_int),
-        optional($.step_slide_target),
+        choice($.float_unit, $.step_note, $.step_trigger, $.float_lit, $.int_lit),
+        $.step_slide_target,
+        optional($.step_cv2),
+      )),
+    step_valued_note: ($) =>
+      prec.right(seq(
+        choice($.float_unit, $.step_note, $.step_trigger, $.float_lit, $.int_lit),
         optional($.step_cv2),
         optional($.step_repeat),
       )),
+    step_valued: ($) => choice($.step_valued_slide, $.step_valued_note),
 
     // New cell shapes (ADR 0077; ticket 0948 adds the optional `:cv2`
     // tail on slide open / step-to / close-in-tick). step_slide_open
@@ -376,22 +404,23 @@ module.exports = grammar({
     // whitespace) where the next non-whitespace character is not a
     // value-primary (so `value>value` falls through to `step_valued`).
     step_cv2_tail: ($) =>
-      seq(":", choice($.step_unit, $.step_float, $.step_int)),
+      seq(":", choice($.float_unit, $.float_lit, $.int_lit)),
     step_step_to: ($) =>
       prec(2, seq(
         "/",
-        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        choice($.float_unit, $.step_note, $.float_lit, $.int_lit),
+        optional($.step_slide_target),
         optional($.step_cv2_tail),
       )),
     step_slide_close: ($) =>
       prec(1, seq(
         ">",
-        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        choice($.float_unit, $.step_note, $.float_lit, $.int_lit),
         optional($.step_cv2_tail),
       )),
     step_slide_open: ($) =>
       prec(3, seq(
-        choice($.step_unit, $.step_note, $.step_float, $.step_int),
+        choice($.float_unit, $.step_note, $.float_lit, $.int_lit),
         optional($.step_cv2_tail),
         ">",
       )),

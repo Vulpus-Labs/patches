@@ -17,14 +17,16 @@ use super::expressions::build_ident;
 use super::literals::{parse_step_float, parse_step_note, parse_step_unit};
 use super::{span_of, Rule};
 
-/// Parse a cv1 value from a step primary pair (step_note, step_trigger, step_float, step_int, step_unit).
+/// Parse a cv1 value from a step primary pair (step_note, step_trigger,
+/// float_lit, int_lit, float_unit). Ticket 0950 collapsed the
+/// step-specific numeric duplicates onto the canonical `*_lit` rules.
 fn parse_cv1_value(pair: &Pair<'_, Rule>) -> Result<f32, ParseError> {
     let span = span_of(pair);
     match pair.as_rule() {
         Rule::step_note => parse_step_note(pair.as_str(), span),
         Rule::step_trigger => Ok(0.0),
-        Rule::step_float | Rule::step_int => parse_step_float(pair.as_str(), span),
-        Rule::step_unit => parse_step_unit(pair.as_str(), span),
+        Rule::float_lit | Rule::int_lit => parse_step_float(pair.as_str(), span),
+        Rule::float_unit => parse_step_unit(pair.as_str(), span),
         _ => unreachable!("unexpected cv1 rule: {:?}", pair.as_rule()),
     }
 }
@@ -35,22 +37,48 @@ fn parse_slide_target_value(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
     let span = span_of(&inner);
     match inner.as_rule() {
         Rule::step_note => parse_step_note(inner.as_str(), span),
-        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), span),
-        Rule::step_unit => parse_step_unit(inner.as_str(), span),
+        Rule::float_lit | Rule::int_lit => parse_step_float(inner.as_str(), span),
+        Rule::float_unit => parse_step_unit(inner.as_str(), span),
         _ => unreachable!("unexpected slide target rule: {:?}", inner.as_rule()),
     }
 }
 
 /// Parse the `:value` cv2 tail on a slide cell (`step_cv2_tail`).
-/// Inner pair is `step_unit | step_float | step_int`.
+/// Inner pair is `float_unit | float_lit | int_lit`.
 fn parse_cv2_tail(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
     let inner = pair.into_inner().next().unwrap();
     let span = span_of(&inner);
     match inner.as_rule() {
-        Rule::step_float | Rule::step_int => parse_step_float(inner.as_str(), span),
-        Rule::step_unit => parse_step_unit(inner.as_str(), span),
+        Rule::float_lit | Rule::int_lit => parse_step_float(inner.as_str(), span),
+        Rule::float_unit => parse_step_unit(inner.as_str(), span),
         _ => unreachable!("unexpected cv2 tail rule: {:?}", inner.as_rule()),
     }
+}
+
+/// Parse a cv2 value (no slide target) from a step_cv2's first inner
+/// primary pair (`float_unit | float_lit | int_lit`).
+fn parse_cv2_primary(pair: &Pair<'_, Rule>) -> Result<f32, ParseError> {
+    let span = span_of(pair);
+    match pair.as_rule() {
+        Rule::float_lit | Rule::int_lit => parse_step_float(pair.as_str(), span),
+        Rule::float_unit => parse_step_unit(pair.as_str(), span),
+        _ => unreachable!("unexpected cv2 rule: {:?}", pair.as_rule()),
+    }
+}
+
+/// Walk a `step_cv2` pair, returning `(cv2, cv2_end)`. cv2 is the first
+/// primary value (`float_unit | float_lit | int_lit`); `cv2_end` is the
+/// optional `>endpoint` slide target. Shared between the two
+/// `step_valued_*` arms.
+fn parse_step_cv2(child: Pair<'_, Rule>) -> Result<(f32, Option<f32>), ParseError> {
+    let mut cv2_it = child.into_inner();
+    let cv2_val_pair = cv2_it.next().unwrap();
+    let cv2 = parse_cv2_primary(&cv2_val_pair)?;
+    let cv2_end = match cv2_it.next() {
+        Some(slide_pair) => Some(parse_slide_target_value(slide_pair)?),
+        None => None,
+    };
+    Ok((cv2, cv2_end))
 }
 
 fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
@@ -69,19 +97,32 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
             ..Step::default()
         }),
         Rule::step_step_to => {
-            // step_step_to = ${ "/" ~ primary ~ step_cv2_tail? }
+            // step_step_to = ${ "/" ~ primary ~ step_slide_target? ~ step_cv2_tail? }
             let mut it = inner.into_inner();
             let val_pair = it.next().unwrap();
             let cv1 = parse_cv1_value(&val_pair)?;
-            let cv2 = match it.next() {
-                Some(tail) => Some(parse_cv2_tail(tail)?),
-                None => None,
+            let mut cv1_end: Option<f32> = None;
+            let mut cv2: Option<f32> = None;
+            for child in it {
+                match child.as_rule() {
+                    Rule::step_slide_target => {
+                        cv1_end = Some(parse_slide_target_value(child)?);
+                    }
+                    Rule::step_cv2_tail => {
+                        cv2 = Some(parse_cv2_tail(child)?);
+                    }
+                    other => unreachable!("unexpected rule in step_step_to: {other:?}"),
+                }
+            }
+            let kind = match cv1_end {
+                Some(end) => StepKind::StepToSlide { cv1_end: end, cv2 },
+                None => StepKind::StepTo { cv2 },
             };
             Ok(Step {
                 cv1,
                 cv2: cv2.unwrap_or(0.0),
                 gate: true,
-                kind: StepKind::StepTo { cv2 },
+                kind,
                 ..Step::default()
             })
         }
@@ -120,85 +161,86 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
             })
         }
         Rule::step_valued => {
-            let mut it = inner.into_inner();
-            // First child: the cv1 primary value
-            let cv1_pair = it.next().unwrap();
-            let cv1 = parse_cv1_value(&cv1_pair)?;
-            let mut cv1_end: Option<f32> = None;
-            let mut cv2: f32 = 0.0;
-            let mut cv2_end: Option<f32> = None;
-            let mut repeat: u8 = 1;
-
-            for child in it {
-                match child.as_rule() {
-                    Rule::step_slide_target => {
-                        cv1_end = Some(parse_slide_target_value(child)?);
-                    }
-                    Rule::step_cv2 => {
-                        let mut cv2_it = child.into_inner();
-                        let cv2_val_pair = cv2_it.next().unwrap();
-                        let cv2_span = span_of(&cv2_val_pair);
-                        cv2 = match cv2_val_pair.as_rule() {
-                            Rule::step_float | Rule::step_int => {
-                                parse_step_float(cv2_val_pair.as_str(), cv2_span)?
-                            }
-                            Rule::step_unit => {
-                                parse_step_unit(cv2_val_pair.as_str(), cv2_span)?
-                            }
-                            _ => unreachable!(
-                                "unexpected cv2 rule: {:?}",
-                                cv2_val_pair.as_rule()
-                            ),
-                        };
-                        // Optional cv2 slide target
-                        if let Some(slide_pair) = cv2_it.next() {
-                            cv2_end = Some(parse_slide_target_value(slide_pair)?);
-                        }
-                    }
-                    Rule::step_repeat => {
-                        // step_repeat = ${ "*" ~ nat }
-                        let nat_pair = child.into_inner().next().unwrap();
-                        let span = span_of(&nat_pair);
-                        repeat = nat_pair.as_str().parse::<u8>().map_err(|_| ParseError {
-                            span,
-                            message: format!("invalid repeat count: {:?}", nat_pair.as_str()),
-                        })?;
-                    }
-                    _ => unreachable!("unexpected rule in step_valued: {:?}", child.as_rule()),
-                }
+            // step_valued = { step_valued_slide | step_valued_note }
+            // The two alternatives are mutually exclusive at the
+            // grammar level (ticket 0950), so no post-hoc
+            // classification or defensive `cv1_end + repeat` check is
+            // needed here — the inner rule names the shape.
+            let inner = inner.into_inner().next().unwrap();
+            match inner.as_rule() {
+                Rule::step_valued_slide => build_step_valued_slide(inner),
+                Rule::step_valued_note => build_step_valued_note(inner),
+                other => unreachable!("unexpected rule in step_valued: {other:?}"),
             }
-
-            // Classify: `value>value` sugar (slide-target present) is
-            // SlideSugar; otherwise it's a Note (with optional `*N` /
-            // `:cv2`). `value*N` with a slide target is rejected by the
-            // grammar (step_slide_target precedes step_repeat in the
-            // chain, but the grammar allows them — defensively reject
-            // mixing slide-target + roll here as the semantics are
-            // undefined).
-            let kind = if let Some(end) = cv1_end {
-                if repeat > 1 {
-                    return Err(ParseError {
-                        span: span_of(&cv1_pair),
-                        message: "slide sugar `value>value` cannot also \
-                                  carry a `*N` repeat suffix"
-                            .to_owned(),
-                    });
-                }
-                StepKind::SlideSugar { cv1_end: end, cv2_end }
-            } else {
-                StepKind::Note { repeat }
-            };
-
-            Ok(Step {
-                cv1,
-                cv2,
-                trigger: true,
-                gate: true,
-                kind,
-            })
         }
         _ => unreachable!("unexpected rule in step: {:?}", inner.as_rule()),
     }
+}
+
+/// Build the `value>cv1_end[:cv2]` slide-sugar shape.
+fn build_step_valued_slide(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
+    // step_valued_slide = ${ primary ~ step_slide_target ~ step_cv2? }
+    let mut it = pair.into_inner();
+    let cv1_pair = it.next().unwrap();
+    let cv1 = parse_cv1_value(&cv1_pair)?;
+    let slide_pair = it.next().unwrap();
+    debug_assert_eq!(slide_pair.as_rule(), Rule::step_slide_target);
+    let cv1_end = parse_slide_target_value(slide_pair)?;
+    let (cv2, cv2_end) = match it.next() {
+        Some(cv2_pair) => {
+            debug_assert_eq!(cv2_pair.as_rule(), Rule::step_cv2);
+            parse_step_cv2(cv2_pair)?
+        }
+        None => (0.0, None),
+    };
+    Ok(Step {
+        cv1,
+        cv2,
+        trigger: true,
+        gate: true,
+        kind: StepKind::SlideSugar { cv1_end, cv2_end },
+    })
+}
+
+/// Build the `value[:cv2][*N]` note shape.
+fn build_step_valued_note(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
+    // step_valued_note = ${ primary ~ step_cv2? ~ step_repeat? }
+    let mut it = pair.into_inner();
+    let cv1_pair = it.next().unwrap();
+    let cv1 = parse_cv1_value(&cv1_pair)?;
+    let mut cv2: f32 = 0.0;
+    let mut repeat: u8 = 1;
+    for child in it {
+        match child.as_rule() {
+            Rule::step_cv2 => {
+                let (v, end) = parse_step_cv2(child)?;
+                cv2 = v;
+                // step_valued_note disallows a cv1 slide target, but
+                // cv2 may still ramp (`:cv2>endpoint`); the cv2_end is
+                // currently unused for the note shape because runtime
+                // semantics treat note cv2 as a static value — fall
+                // back to ignoring the ramp here to preserve existing
+                // behaviour.
+                let _ = end;
+            }
+            Rule::step_repeat => {
+                let nat_pair = child.into_inner().next().unwrap();
+                let span = span_of(&nat_pair);
+                repeat = nat_pair.as_str().parse::<u8>().map_err(|_| ParseError {
+                    span,
+                    message: format!("invalid repeat count: {:?}", nat_pair.as_str()),
+                })?;
+            }
+            other => unreachable!("unexpected rule in step_valued_note: {other:?}"),
+        }
+    }
+    Ok(Step {
+        cv1,
+        cv2,
+        trigger: true,
+        gate: true,
+        kind: StepKind::Note { repeat },
+    })
 }
 
 fn build_channel_row(pair: Pair<'_, Rule>) -> Result<PatternChannel, ParseError> {

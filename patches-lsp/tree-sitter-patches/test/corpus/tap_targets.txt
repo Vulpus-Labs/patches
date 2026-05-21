@@ -28,8 +28,7 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident)))
+              (ident))
             (ident)))))))
 
 ================================================================================
@@ -62,12 +61,9 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident))
-              (tap_component
-                (ident))
-              (tap_component
-                (ident)))
+              (ident)
+              (ident)
+              (ident))
             (ident)))))))
 
 ================================================================================
@@ -100,8 +96,7 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident)))
+              (ident))
             (ident)))))))
 
 ================================================================================
@@ -137,8 +132,7 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident)))
+              (ident))
             (ident)))))))
 
 ================================================================================
@@ -172,8 +166,7 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident)))
+              (ident))
             (ident)))))
     (statement
       (module_decl
@@ -211,8 +204,7 @@ patch {
         (cable_endpoint
           (tap_target
             (tap_components
-              (tap_component
-                (ident)))
+              (ident))
             (ident)
             (MISSING ")")))))
     (statement

@@ -177,10 +177,11 @@ pub(crate) enum CursorContext<'tree> {
         channel_row: Node<'tree>,
     },
     /// Cursor sits on a bare-value triggered cell (`value`, `value*N`,
-    /// `value:cv2`, `value>value` sugar). `node` is the `step_valued`
-    /// rule; `channel_row` is the enclosing row. Only classified when
-    /// the cell is the close of an open slide (so hover has something
-    /// useful to say about the channel-state lead-in).
+    /// `value:cv2`, `value>value` sugar). `node` is the
+    /// `step_valued_slide` or `step_valued_note` rule (post-0950
+    /// split); `channel_row` is the enclosing row. Only classified
+    /// when the cell is the close of an open slide (so hover has
+    /// something useful to say about the channel-state lead-in).
     StepNote {
         node: Node<'tree>,
         channel_row: Node<'tree>,
@@ -347,11 +348,12 @@ fn classify_node(node: Node<'_>, byte_offset: usize) -> Option<CursorContext<'_>
 /// Detect a cursor landing on a pattern-row step cell that has hover
 /// content. Walks up from `node` looking for the innermost cell-shape
 /// rule (`step_tie`, `step_tie_flow`, `step_step_to`, `step_slide_open`,
-/// `step_slide_close`, `step_valued`, `step_repeat`) and returns the
-/// matching [`CursorContext`] variant. `step_repeat` is checked before
-/// its enclosing `step_valued` so cursor on `*3` resolves to the repeat
-/// marker rather than the surrounding note. Cursor on the `step`
-/// wrapper descends to its inner cell.
+/// `step_slide_close`, `step_valued_slide`, `step_valued_note`,
+/// `step_repeat`) and returns the matching [`CursorContext`] variant.
+/// `step_repeat` is checked before its enclosing `step_valued_*` so
+/// cursor on `*3` resolves to the repeat marker rather than the
+/// surrounding note. Cursor on the `step` wrapper descends to its
+/// inner cell.
 fn classify_step_node(node: Node<'_>) -> Option<CursorContext<'_>> {
     let start = if node.kind() == "step" {
         node.named_child(0).unwrap_or(node)
@@ -369,7 +371,8 @@ fn classify_step_node(node: Node<'_>) -> Option<CursorContext<'_>> {
             | "step_step_to"
             | "step_slide_close"
             | "step_slide_open"
-            | "step_valued" => break Some(n),
+            | "step_valued_slide"
+            | "step_valued_note" => break Some(n),
             "channel_row" => break None,
             _ => cur = n.parent(),
         }
@@ -383,7 +386,9 @@ fn classify_step_node(node: Node<'_>) -> Option<CursorContext<'_>> {
         "step_step_to" => CursorContext::StepCv { node: shape, channel_row },
         "step_slide_close" => CursorContext::StepSlideClose { node: shape, channel_row },
         "step_slide_open" => CursorContext::StepSlideOpen { node: shape, channel_row },
-        "step_valued" => CursorContext::StepNote { node: shape, channel_row },
+        "step_valued_slide" | "step_valued_note" => {
+            CursorContext::StepNote { node: shape, channel_row }
+        }
         "step_repeat" => CursorContext::StepRepeat {
             repeat_node: shape,
             channel_row,
@@ -394,21 +399,22 @@ fn classify_step_node(node: Node<'_>) -> Option<CursorContext<'_>> {
 
 /// Tap-target sub-tokens.
 ///
-/// The cursor often lands on the inner `ident` rather than on the
-/// wrapper rule. Two cases:
-///   1. Inside `tap_components` → component name (`meter`, `osc`, ...).
-///   2. Direct child `ident` of `tap_target` → tap name (the identifier
-///      after the components, inside the parentheses).
+/// The cursor lands on an `ident` directly (post-0950 inlining; the
+/// pest+ts grammars no longer expose a `tap_component` wrapper).
+/// Two cases:
+///   1. Direct child `ident` of `tap_components` → component name
+///      (`meter`, `osc`, ...).
+///   2. Direct child `ident` of `tap_target` → tap name (the
+///      identifier after the components, inside the parentheses).
 ///
 /// The canonical pest grammar does not introduce a `tap_name` wrapper
 /// rule — the tap name is a bare `ident` — so we identify it positionally.
 fn classify_tap_node(node: Node<'_>) -> Option<CursorContext<'_>> {
-    if node.kind() == "tap_component" {
-        return Some(CursorContext::TapType { node });
-    }
     if let Some(parent) = node.parent() {
         match parent.kind() {
-            "tap_component" => return Some(CursorContext::TapType { node: parent }),
+            "tap_components" if node.kind() == "ident" => {
+                return Some(CursorContext::TapType { node });
+            }
             "tap_target" if node.kind() == "ident" => {
                 return Some(CursorContext::TapName { node });
             }

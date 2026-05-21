@@ -375,6 +375,30 @@ fn step_step_to_with_unit_literal_parses() {
 }
 
 #[test]
+fn step_step_to_slide_parses() {
+    use patches_dsl::ast::StepKind;
+    let kinds = kinds_of("pattern p { ch: A4 /A4>B4 }\npatch{}\n");
+    assert!(matches!(
+        kinds[1],
+        StepKind::StepToSlide { cv2: None, .. }
+    ));
+}
+
+#[test]
+fn step_step_to_slide_carries_cv2() {
+    use patches_dsl::ast::StepKind;
+    let file = parse("pattern p { ch: A4 /A4>B4:0.7 }\npatch{}\n").expect("parse");
+    let s = &file.patterns[0].channels[0].steps[1];
+    match s.kind {
+        StepKind::StepToSlide { cv2: Some(c), cv1_end } => {
+            assert!((c - 0.7).abs() < 1e-6);
+            assert!((cv1_end - (4.0 + 11.0 / 12.0)).abs() < 1e-4, "B4 cv1={}", cv1_end);
+        }
+        other => panic!("expected StepToSlide with cv2, got {other:?}"),
+    }
+}
+
+#[test]
 fn step_slide_close_with_unit_literal_parses() {
     use patches_dsl::ast::StepKind;
     let kinds = kinds_of("pattern p { ch: 0.0> >1.0 }\npatch{}\n");

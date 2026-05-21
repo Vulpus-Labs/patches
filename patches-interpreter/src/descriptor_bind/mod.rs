@@ -46,7 +46,7 @@ pub use connections::{
 pub use errors::{BindError, BindErrorCode, ParamConversionError, ParamConversionKind};
 pub use modules::{BoundModule, ResolvedModule, UnresolvedModule};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use patches_core::QName;
 use patches_core::registry::Registry;
@@ -183,6 +183,12 @@ pub fn bind_with_base_dir(
         .map(|r| (r.id.clone(), r))
         .collect();
 
+    // Every module id the patch *declared*, resolved or not. A connection
+    // endpoint missing from `by_id` but present here is a knock-on of an
+    // unresolved module, not an unknown-module reference — see
+    // `record_missing_endpoint`.
+    let declared: HashSet<QName> = flat.modules.iter().map(|m| m.id.clone()).collect();
+
     let port_aliases: HashMap<QName, HashMap<u32, String>> = flat
         .modules
         .iter()
@@ -191,12 +197,12 @@ pub fn bind_with_base_dir(
 
     let mut connections: Vec<BoundConnection> = Vec::with_capacity(flat.connections.len());
     for conn in &flat.connections {
-        connections.push(bind_connection(conn, &by_id, &port_aliases, &mut errors));
+        connections.push(bind_connection(conn, &by_id, &declared, &port_aliases, &mut errors));
     }
 
     let mut port_refs: Vec<BoundPortRef> = Vec::with_capacity(flat.port_refs.len());
     for pr in &flat.port_refs {
-        port_refs.push(bind_port_ref(pr, &by_id, &port_aliases, &mut errors));
+        port_refs.push(bind_port_ref(pr, &by_id, &declared, &port_aliases, &mut errors));
     }
 
     // Drop the borrow of `modules` held by `by_id` so the fan-in pass can
@@ -334,6 +340,52 @@ mod tests {
         let bound = bind(&flat, &registry());
         assert_eq!(bound.errors.len(), 1);
         assert_eq!(bound.errors[0].code, BindErrorCode::UnknownModule);
+    }
+
+    /// A connection endpoint that names a *declared* module whose type failed
+    /// to resolve must not also surface an `UnknownModule` error: the module
+    /// already carries its own `UnknownModuleType`, and a spurious
+    /// `UnknownModule` would trip the pipeline layering audit into a false
+    /// `PV0001` (blaming stage 3a for a reference it correctly accepted).
+    #[test]
+    fn connection_to_unresolved_module_does_not_emit_unknown_module() {
+        use patches_dsl::pipeline::PipelineAudit;
+        let mut flat = empty_flat();
+        // `verb` is declared, but its type is unknown → it resolves to an
+        // Unresolved module (UnknownModuleType), absent from `by_id`.
+        let bad = FlatModule {
+            id: "verb".into(),
+            type_name: "NoSuch".into(),
+            shape: vec![],
+            params: vec![],
+            port_aliases: vec![],
+            provenance: CoreProv::root(syn()),
+            param_block_span: None,
+            type_name_span: None,
+        };
+        flat.modules = vec![bad, sum("mix", 1)];
+        flat.connections = vec![conn("verb", "out", "mix", "in")];
+        let bound = bind(&flat, &registry());
+
+        // Exactly one error — the module's own UnknownModuleType — and no
+        // knock-on UnknownModule for the connection.
+        assert_eq!(
+            bound.errors.len(),
+            1,
+            "expected only the module-type error, got {:?}",
+            bound.errors
+        );
+        assert_eq!(bound.errors[0].code, BindErrorCode::UnknownModuleType);
+        assert!(
+            !bound.errors.iter().any(|e| e.code == BindErrorCode::UnknownModule),
+            "declared-but-unresolved endpoint must not emit UnknownModule"
+        );
+        // And the layering audit must stay silent — no false PV0001.
+        assert!(
+            bound.layering_warnings().is_empty(),
+            "declared-but-unresolved endpoint must not trip PV0001: {:?}",
+            bound.layering_warnings()
+        );
     }
 
     #[test]

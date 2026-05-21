@@ -70,7 +70,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Directories or dylib files scanned at LSP start-up for FFI module bundles (.dylib/.so/.dll). Resolves external modules such as patches-vintage's VChorus/VBbd/VFlanger/VReverb so hover and diagnostics work in .patches files that reference them."
+          "description": "Extra directories or .pxm files scanned at LSP start-up for FFI module bundles. The OS-native default bundle dir (e.g. ~/Library/Application Support/Patches/bundles on macOS) and PATCHES_PLUGIN_PATH are always scanned; these paths are added on top. Resolves external modules such as patches-vintage's VChorus/VBbd/VFlanger/VReverb so hover and diagnostics work in .patches files that reference them."
         },
         "patches.inlayStereoExpansion": {
           "type": "boolean",

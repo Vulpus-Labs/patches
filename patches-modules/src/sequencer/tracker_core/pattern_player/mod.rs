@@ -246,6 +246,32 @@ impl PatternPlayerCore {
                     self.cv2[channel] = c;
                 }
             }
+            StepEffect::StepCvSlide { cv1, cv1_end, cv2: cv2_opt } => {
+                // `/value>cv1_end[:cv2]` — snap cv1 to `cv1` at tick
+                // start (no trigger), then ramp cv1 to `cv1_end` across
+                // this tick. cv2 (when given) snaps without ramping.
+                self.gate[channel] = true;
+                self.trigger_pending[channel] = false;
+                self.repeat_active[channel] = false;
+                self.repeat_gate_off_countdown[channel] = f32::MAX;
+                if let Some(c) = cv2_opt {
+                    self.cv2[channel] = c;
+                }
+                let start_cv2 = self.cv2[channel];
+                self.slide_active[channel] = true;
+                self.slide_cv1_start[channel] = cv1;
+                self.slide_cv1_end[channel] = cv1_end;
+                self.slide_cv2_start[channel] = start_cv2;
+                self.slide_cv2_end[channel] = start_cv2;
+                self.slide_samples_total[channel] = self.current_tick_duration_samples;
+                self.slide_samples_elapsed[channel] = elapsed_samples;
+                let t = if self.current_tick_duration_samples > 0.0 {
+                    (elapsed_samples / self.current_tick_duration_samples).min(1.0)
+                } else {
+                    0.0
+                };
+                self.cv1[channel] = cv1 + t * (cv1_end - cv1);
+            }
             StepEffect::SlideCloseInTick { cv1, cv2: cv2_opt } => {
                 self.gate[channel] = true;
                 self.trigger_pending[channel] = false;

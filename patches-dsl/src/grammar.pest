@@ -13,7 +13,13 @@ nat        = @{ ASCII_DIGIT+ }
 float_lit  = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
 int_lit    = @{ "-"? ~ ASCII_DIGIT+ }
 // Word-boundary lookahead prevents "trueish" matching as bool_lit
-bool_lit   = @{ ("true" | "false") ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+bool_lit   = @{ ("true" | "false") ~ kw_end }
+
+// Trailing word-boundary lookahead used wherever a keyword/literal must
+// not be consumed in a way that leaves a dangling `-tail`/`_tail` token
+// (extracted in ticket 0950; replaces hand-inlined copies on each
+// keyword token).
+kw_end     = _{ !(ASCII_ALPHANUMERIC | "_" | "-") }
 string_lit = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 
 // Scale number inside arrow brackets (float or int, including negatives)
@@ -26,7 +32,7 @@ unit_suffix = @{ ^"khz" | ^"hz" | ^"db" | ^"c" | ^"s" }
 // Number (possibly signed) immediately followed by a unit suffix (no whitespace).
 // Trailing boundary prevents single-letter `c`/`s` from eating subsequent idents.
 // The parser rejects negative/zero Hz and kHz; dB, cents, semis may be negative.
-float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix ~ !(ASCII_ALPHANUMERIC | "_") }
+float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix ~ kw_end }
 
 // ─── Note name literals ───────────────────────────────────────────────────────
 // Examples: C1  Bb2  A#-1  f#3  db0  (all case-insensitive)
@@ -34,7 +40,7 @@ float_unit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix ~ !(A
 note_letter     = @{ ^"a" | ^"b" | ^"c" | ^"d" | ^"e" | ^"f" | ^"g" }
 note_accidental = @{ "#" | ^"b" }
 note_octave     = @{ "-"? ~ ASCII_DIGIT+ }
-note_lit        = @{ note_letter ~ note_accidental? ~ note_octave ~ !(ASCII_ALPHANUMERIC | "_") }
+note_lit        = @{ note_letter ~ note_accidental? ~ note_octave ~ kw_end }
 
 // `<param_ref_ident>` template-parameter reference.
 // Allows "/" so that group-param indexed keys like <level/0> are valid.
@@ -102,7 +108,7 @@ param_block = { "{" ~ ((param_ref | param_entry) ~ ","?)* ~ "}" }
 // inside the regular param block as `@l: { ... }` / `@r: { ... }` at_blocks
 // (no new surface needed — at_block is already a valid ParamEntry); side
 // selectors on ports reuse the existing `port[l]` / `port[r]` index form.
-stereo_kw   = @{ "stereo" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+stereo_kw   = @{ "stereo" ~ kw_end }
 module_decl = { stereo_kw? ~ "module" ~ ident ~ ":" ~ ident ~ call_block? ~ param_block? }
 
 // ─── Port references ──────────────────────────────────────────────────────────
@@ -141,16 +147,22 @@ arrow          = { forward_arrow | backward_arrow }
 // a parse-level diagnostic at the `~` site.
 // Open ident; the closed component set is enforced at validate-time so
 // the structural diagnostic can suggest valid alternatives (ticket 0711).
-tap_component  = { ident }
-tap_components = { tap_component ~ ("+" ~ tap_component)* }
+// `tap_components` directly holds the component idents (no
+// `tap_component` wrapper — inlined in 0950 since the rule was a
+// one-line `{ ident }`).
+tap_components = { ident ~ ("+" ~ ident)* }
 tap_target     = { "~" ~ tap_components ~ "(" ~ ident ~ ")" }
 
 // ─── Host control declarations (ADR 0057, Amendment 2026-04-30) ─────────────
 // `kind name { field: value, ... }` declared at top-level patch scope.
 // kind ∈ { knob, slider, toggle }. Word-boundary lookahead so identifiers
 // like `knob_count` are not consumed as the keyword.
-host_control_kind  = @{ ("knob" | "slider" | "toggle" | "trigger") ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
-host_control_field = { ident ~ ":" ~ value }
+host_control_kind  = @{ ("knob" | "slider" | "toggle" | "trigger") ~ kw_end }
+// Field value side narrowed to `scalar` (ticket 0950): `file(...)`
+// references and other compound `value` forms are not meaningful on a
+// host-control field, so reject them at parse time rather than letting
+// them through to a downstream diagnostic.
+host_control_field = { ident ~ ":" ~ scalar }
 host_control_block = { host_control_kind ~ ident ~ "{" ~ (host_control_field ~ ","?)* ~ "}" }
 
 // `~name` reference to a declared host control, used in cable endpoints.
@@ -202,7 +214,9 @@ patch = { "patch" ~ "{" ~ statement* ~ "}" }
 //   _            tie / continuation (channel-stateful: sustain, absorbed,
 //                  or slide-flow depending on the open modifier)
 //   value        triggered note (`value`, `value:cv2`, `value*N`)
-//   value>value  one-tick slide sugar (legacy form)
+//   value>value  one-tick slide sugar form (ADR 0077 equivalence:
+//                  `value>value` ≡ `value> /value`; the dominant form
+//                  in examples, docs, and fixtures)
 //   value>       open a multi-tick slide (no close target — supplied later)
 //   /value       change cv1 (and optionally cv2) without retrigger
 //   >_           explicit slide-flow / open-from-current cv
@@ -213,29 +227,40 @@ patch = { "patch" ~ "{" ~ statement* ~ "}" }
 // cable-endpoint forms are unaffected.
 //
 // Trailing word-boundary lookaheads on the single-char tokens prevent
-// `_foo` / `.5` / etc. from accidentally matching.
+// `_foo` / `.5` / etc. from accidentally matching. Numeric primaries
+// (float/int/unit) reuse the canonical `float_lit`/`int_lit`/`float_unit`
+// rules from the value hierarchy (no `step_*` duplicates — collapsed in
+// ticket 0950).
 step_note     = @{ note_letter ~ note_accidental? ~ note_octave }
-step_trigger  = @{ "x" ~ !(ASCII_ALPHANUMERIC | "_") }
+step_trigger  = @{ "x" ~ kw_end }
 step_rest     = @{ "." }
-step_tie      = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
-step_float    = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
-step_int      = @{ "-"? ~ ASCII_DIGIT+ }
-step_unit     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ unit_suffix }
+step_tie      = @{ "_" ~ kw_end }
 
 // Slide target: ">value" where value is a note, float, or unit literal.
-// Used inside the `value>value` sugar form (`step_valued`).
-step_slide_target = { ">" ~ (step_unit | step_note | step_float | step_int) }
+// Used inside the `value>value` sugar form (`step_valued_slide`).
+step_slide_target = { ">" ~ (float_unit | step_note | float_lit | int_lit) }
 
 // cv2 part: ":value" with optional slide ">value"
-step_cv2      = { ":" ~ (step_unit | step_float | step_int) ~ step_slide_target? }
+step_cv2      = { ":" ~ (float_unit | float_lit | int_lit) ~ step_slide_target? }
 
 // Repeat suffix: "*N"
 step_repeat   = ${ "*" ~ nat }
 
-// A full valued step: cv1 (with optional one-tick slide sugar) + optional
-// cv2 + optional repeat. Note: `/value` cannot carry `*N` (rejected at
-// grammar level), so `step_repeat` lives only on `step_valued`.
-step_valued   = { (step_unit | step_note | step_trigger | step_float | step_int) ~ step_slide_target? ~ step_cv2? ~ step_repeat? }
+// A full valued step. Split into two mutually-exclusive alternatives
+// in ticket 0950 so the grammar itself rules out the nonsense
+// `value>value*N` combination (slide sugar plus repeat); the parser
+// no longer needs a defensive runtime check.
+//
+//   step_valued_slide — cv1 + `>cv1_end` slide sugar + optional `:cv2`
+//   step_valued_note  — cv1 + optional `:cv2` (which may itself ramp)
+//                       + optional `*N` repeat
+//
+// `step_valued` keeps existence as a thin parent rule so the LSP / tree
+// walkers retain a stable anchor; its sole child is one of the two
+// alternatives.
+step_valued_slide = ${ (float_unit | step_note | step_trigger | float_lit | int_lit) ~ step_slide_target ~ step_cv2? }
+step_valued_note  = ${ (float_unit | step_note | step_trigger | float_lit | int_lit) ~ step_cv2? ~ step_repeat? }
+step_valued       = { step_valued_slide | step_valued_note }
 
 // New cell shapes (ADR 0077, extended by ticket 0948 to carry an
 // optional `:cv2` tail on the three slide cells so cv2 can ramp
@@ -247,14 +272,17 @@ step_valued   = { (step_unit | step_note | step_trigger | step_float | step_int)
 // `step_cv2_tail` is the `:cv2` modifier that attaches to the three
 // slide cells (open / step-to / close-in-tick). Uses the same primary
 // set as `step_cv2` (no note literals).
-step_tie_flow    = @{ ">_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
-step_cv2_tail    = ${ ":" ~ (step_unit | step_float | step_int) }
-step_step_to     = ${ "/" ~ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? }
-step_slide_close = ${ ">" ~ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? }
+step_tie_flow    = @{ ">_" ~ kw_end }
+step_cv2_tail    = ${ ":" ~ (float_unit | float_lit | int_lit) }
+// `step_step_to` carries an optional `>cv1_end` slide target — the no-retrigger
+// counterpart to the `value>value` sugar form: `/value>cv1_end` snaps cv1
+// without trigger and slides to `cv1_end` within the same tick.
+step_step_to     = ${ "/" ~ (float_unit | step_note | float_lit | int_lit) ~ step_slide_target? ~ step_cv2_tail? }
+step_slide_close = ${ ">" ~ (float_unit | step_note | float_lit | int_lit) ~ step_cv2_tail? }
 // `value[:cv2]>` with no value after the `>`. The negative lookahead
 // ensures the slide-open shape does not consume the head of a
 // `value>value` sugar form (which falls through to `step_valued`).
-step_slide_open  = ${ (step_unit | step_note | step_float | step_int) ~ step_cv2_tail? ~ ">" ~ !(step_unit | step_note | step_float | step_int) }
+step_slide_open  = ${ (float_unit | step_note | float_lit | int_lit) ~ step_cv2_tail? ~ ">" ~ !(float_unit | step_note | float_lit | int_lit) }
 
 // Order: tie_flow before slide_close (both start with `>`); slide_open
 // before step_valued (so `value>` is recognised as the open shape
@@ -277,7 +305,7 @@ pattern_block      = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
 // Lanes are declared in the song header. Song bodies contain `section`,
 // `play`, `pattern`, and `@loop` items. `section`s hold row sequences; row
 // sequences are newline-significant.
-song_silence    = @{ "_" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+song_silence    = @{ "_" ~ kw_end }
 
 // Inline whitespace only (no newlines) — used inside compound-atomic rules.
 iws             = _{ (" " | "\t" | ("#" ~ (!"\n" ~ ANY)*))+ }
@@ -314,7 +342,7 @@ named_inline    = { ident ~ "{" ~ row_seq ~ "}" }
 play_body       = { inline_block | named_inline | play_expr }
 play_stmt       = { "play" ~ play_body }
 
-loop_marker     = @{ "@loop" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+loop_marker     = @{ "@loop" ~ kw_end }
 
 // Song item: sections, patterns, play statements, and the loop marker.
 song_item       = { section_def | pattern_block | play_stmt | loop_marker }

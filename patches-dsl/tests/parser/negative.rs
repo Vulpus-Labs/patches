@@ -34,6 +34,9 @@ fn negative_fixtures_parse_err() {
         ("unknown_arrow",       include_str!("../fixtures/errors/unknown_arrow.patches")),
         ("bare_module",         include_str!("../fixtures/errors/bare_module.patches")),
         ("unclosed_param_block", include_str!("../fixtures/errors/unclosed_param_block.patches")),
+        ("step_valued_whitespace", include_str!("../fixtures/errors/step_valued_whitespace.patches")),
+        ("slide_sugar_repeat_rejected", include_str!("../fixtures/errors/slide_sugar_repeat_rejected.patches")),
+        ("host_control_file_value_rejected", include_str!("../fixtures/errors/host_control_file_value_rejected.patches")),
     ];
     for &(name, src) in fixtures {
         assert!(parse(src).is_err(), "expected Err for {name}.patches");

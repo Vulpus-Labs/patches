@@ -1,7 +1,7 @@
 //! Port-existence, cable/layout agreement, duplicate-input detection, and
 //! orphan port-ref checks.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use patches_core::{
     cables::{CableKind, MonoLayout, PolyLayout},
@@ -87,29 +87,52 @@ impl BoundPortRef {
     }
 }
 
+/// Record the error for a connection/port-ref endpoint that is absent from
+/// the resolved-module index `by_id`. A miss has two distinct causes that
+/// must be told apart:
+///
+/// - The id names a module that *was* declared but failed to resolve
+///   (unknown type, bad shape/params): it already carries its own `BN00xx`
+///   error on the module decl, so the broken connection is a knock-on. We
+///   emit **no** redundant error here — and crucially never `UnknownModule`,
+///   which the pipeline layering audit reads as a `PV0001`: stage 3a
+///   expansion having let an *undeclared* reference slip past it. The
+///   reference was perfectly well declared; only its type didn't resolve,
+///   which stage 3a cannot check (the registry lives in stage 3b).
+/// - The id was never declared at all: a genuine unknown-module reference
+///   that stage 3a's `check_module_exists` should have rejected. We emit
+///   `UnknownModule` so the audit flags the layering regression.
+fn record_missing_endpoint(
+    module: &QName,
+    provenance: &Provenance,
+    declared: &HashSet<QName>,
+    errors: &mut Vec<BindError>,
+) {
+    if !declared.contains(module) {
+        errors.push(BindError::new(
+            BindErrorCode::UnknownModule,
+            provenance.clone(),
+            format!("module '{}' not found", module),
+        ));
+    }
+}
+
 pub(super) fn bind_connection(
     conn: &FlatConnection,
     by_id: &HashMap<QName, &ResolvedModule>,
+    declared: &HashSet<QName>,
     port_aliases: &HashMap<QName, HashMap<u32, String>>,
     errors: &mut Vec<BindError>,
 ) -> BoundConnection {
     let Some(from) = by_id.get(&conn.from_module).copied() else {
-        errors.push(BindError::new(
-            BindErrorCode::UnknownModule,
-            conn.from_provenance.clone(),
-            format!("module '{}' not found", conn.from_module),
-        ));
+        record_missing_endpoint(&conn.from_module, &conn.from_provenance, declared, errors);
         return BoundConnection::Unresolved(UnresolvedConnection {
             raw: conn.clone(),
             reason: BindErrorCode::UnknownModule,
         });
     };
     let Some(to) = by_id.get(&conn.to_module).copied() else {
-        errors.push(BindError::new(
-            BindErrorCode::UnknownModule,
-            conn.to_provenance.clone(),
-            format!("module '{}' not found", conn.to_module),
-        ));
+        record_missing_endpoint(&conn.to_module, &conn.to_provenance, declared, errors);
         return BoundConnection::Unresolved(UnresolvedConnection {
             raw: conn.clone(),
             reason: BindErrorCode::UnknownModule,
@@ -287,15 +310,12 @@ pub(super) fn bind_connection(
 pub(super) fn bind_port_ref(
     pr: &FlatPortRef,
     by_id: &HashMap<QName, &ResolvedModule>,
+    declared: &HashSet<QName>,
     port_aliases: &HashMap<QName, HashMap<u32, String>>,
     errors: &mut Vec<BindError>,
 ) -> BoundPortRef {
     let Some(owner) = by_id.get(&pr.module).copied() else {
-        errors.push(BindError::new(
-            BindErrorCode::UnknownModule,
-            pr.provenance.clone(),
-            format!("module '{}' not found", pr.module),
-        ));
+        record_missing_endpoint(&pr.module, &pr.provenance, declared, errors);
         return BoundPortRef::Unresolved(UnresolvedPortRef {
             raw: pr.clone(),
             reason: BindErrorCode::UnknownModule,

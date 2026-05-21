@@ -85,19 +85,25 @@ Introduce three new step cell shapes alongside the existing
 `value`, `value>value` (one-tick slide), `value:cv2`, `value*N`, `.`
 (rest):
 
-| Cell shape    | Trigger? | Slide on this tick?                    | cv1 effect at start of tick | Cv1 effect at end of tick     |
-| ------------- | -------- | -------------------------------------- | --------------------------- | ----------------------------- |
-| `value`       | yes      | depends on prior                       | snap to `value`             | unchanged                     |
-| `_`           | no       | depends on prior                       | unchanged                   | depends on slide-open state   |
-| `/value`      | no       | no (closes any open slide at boundary) | snap to `value`             | unchanged                     |
-| `value>`      | yes      | opens                                  | snap to `value`             | (ramping; resolved at close)  |
-| `>_`          | no       | yes (opens if not open)                | unchanged                   | (ramping; resolved at close)  |
-| `>value`      | no       | yes (closes within tick)               | unchanged                   | `value`                       |
-| `value>value` | yes      | yes (one-tick slide)                   | snap to first value         | second value                  |
+| Cell shape         | Trigger? | Slide on this tick?                    | cv1 effect at start of tick | Cv1 effect at end of tick     |
+| ------------------ | -------- | -------------------------------------- | --------------------------- | ----------------------------- |
+| `value`            | yes      | depends on prior                       | snap to `value`             | unchanged                     |
+| `_`                | no       | depends on prior                       | unchanged                   | depends on slide-open state   |
+| `/value`           | no       | no (closes any open slide at boundary) | snap to `value`             | unchanged                     |
+| `value>`           | yes      | opens                                  | snap to `value`             | (ramping; resolved at close)  |
+| `>_`               | no       | yes (opens if not open)                | unchanged                   | (ramping; resolved at close)  |
+| `>value`           | no       | yes (closes within tick)               | unchanged                   | `value`                       |
+| `value>value`      | yes      | yes (one-tick slide)                   | snap to first value         | second value                  |
+| `/value>cv1_end`   | no       | yes (one-tick slide)                   | snap to `value`             | `cv1_end`                     |
 
 The `value>value` form is kept as sugar for the common single-tick
 slide-into-hold case; it is exactly equivalent to `value> /value`
-under the unified semantics.
+under the unified semantics. The `/value>cv1_end` shape is the
+no-retrigger counterpart of `value>value`: snap cv1 without trigger
+and ramp to `cv1_end` within the same tick. It is equivalent to
+`/value> />cv1_end` if such a no-retrig open form existed; lacking
+that, the row-build pass resolves the single-cell sugar to a
+dedicated `StepCvSlide` effect.
 
 ### Unified close rule
 
@@ -157,6 +163,12 @@ pub enum StepEffect {
         roll: Option<RollSpec>,                 // value*N
     },
     StepCv { cv1: f32, cv2: Option<f32> },      // /value: snap cv, no trigger
+    // /value>cv1_end: snap + in-tick ramp, no trigger
+    StepCvSlide {
+        cv1: f32,
+        cv1_end: f32,
+        cv2: Option<f32>,
+    },
     Hold,                                       // bare `_` with no active modifier
     SlideFlow,                                  // `_` absorbed by a slide; or `>_`
     SlideCloseInTick { cv1: f32 },              // >value
@@ -364,6 +376,8 @@ pub enum StepKind {
     SlideSugar { cv1_end: f32, cv2_end: Option<f32> },  // unchanged
     SlideOpen,                                          // cv1, cv2 from Step.cv1/cv2
     StepTo { cv2: Option<f32> },                        // unchanged shape
+    // /value>cv1_end[:cv2] (no-retrig counterpart to SlideSugar)
+    StepToSlide { cv1_end: f32, cv2: Option<f32> },
     TieFlow,
     SlideCloseInTick { cv2: Option<f32> },              // gains cv2
 }

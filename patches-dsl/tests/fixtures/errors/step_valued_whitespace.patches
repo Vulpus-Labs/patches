@@ -1,0 +1,6 @@
+# error: step_valued is compound-atomic — whitespace between the cv1 primary
+# and its `:cv2` modifier must reject. Locks in 0949 grammar fix.
+pattern p {
+    note: C4 : 0.5 . . .
+}
+patch {}

@@ -148,10 +148,17 @@ impl DocumentWorkspace {
 
     /// Hard-rebuild the registry from the default set plus a fresh scan of
     /// the configured module paths. Returns the [`ScanReport`].
+    ///
+    /// Uses [`PluginScanner::with_global_dirs`] so the scan covers the
+    /// OS-native default bundle dir (`$DATA/Patches/bundles/`, ADR 0075
+    /// tier 4) and `PATCHES_PLUGIN_PATH` (tier 1) in addition to the
+    /// user-supplied `patches.modulePaths` (tier 2). The LSP has no
+    /// `settings.toml` of its own, so the tier-3 global-config list is
+    /// empty — host UIs (player, CLAP) own that file.
     pub fn rescan_modules(&self) -> ScanReport {
         let paths = self.module_paths();
         let mut fresh = registry_from_manifest(bundled_manifest());
-        let report = PluginScanner::new(paths).scan(&mut fresh);
+        let report = PluginScanner::with_global_dirs(paths, &[]).scan(&mut fresh);
         *self.registry.write().expect("registry lock poisoned") = fresh;
         report
     }

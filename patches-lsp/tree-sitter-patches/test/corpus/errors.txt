@@ -69,11 +69,13 @@ patch {
 --------------------------------------------------------------------------------
 
 (file
-  (ERROR
+  (patch
     (statement
       (module_decl
         name: (ident)
         type: (ident)))
-    (module_ident
-      (ident))
-    (ident)))
+    (ERROR
+      (module_ident
+        (ident))
+      (module_ident
+        (ident)))))

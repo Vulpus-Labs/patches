@@ -12,7 +12,9 @@
 
 ; Tap component names (`meter`, `osc`, `spectrum`, `gate_led`, `trigger_led`,
 ; `stereo_meter`). The set is open at parse-time and validated post-parse.
-(tap_component (ident) @function.special)
+; Post-0950: tap_components holds ident children directly (no
+; `tap_component` wrapper).
+(tap_components (ident) @function.special)
 
 ; The tap's identifier (the bare ident inside the parens, after the
 ; components). Identified positionally as the only direct ident child of

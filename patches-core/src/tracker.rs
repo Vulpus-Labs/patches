@@ -39,6 +39,11 @@ pub enum StepKind {
     /// `/value` — sets cv1 (and optionally cv2) without retriggering.
     /// Closes any open slide at the tick boundary.
     StepTo { cv2: Option<f32> },
+    /// `/value>cv1_end[:cv2]` — no-retrigger counterpart to the
+    /// `value>value` slide-sugar form. Snaps cv1 to `value` at tick
+    /// start (no trigger), then ramps cv1 to `cv1_end` across the same
+    /// tick. Closes any prior open slide at boundary using `value`.
+    StepToSlide { cv1_end: f32, cv2: Option<f32> },
     /// `>_` — explicit slide-flow / open-from-current. Opens a slide
     /// from the channel's current cv when none is open, otherwise
     /// extends the open slide.
@@ -106,6 +111,14 @@ pub enum StepEffect {
     /// retrigger. Closes any open slide at boundary.
     StepCv {
         cv1: f32,
+        cv2: Option<f32>,
+    },
+    /// `/value>cv1_end[:cv2]`: snap cv1 to `cv1` at tick boundary, no
+    /// retrigger, then ramp cv1 to `cv1_end` across this tick. When
+    /// `cv2` is `Some`, cv2 also snaps at tick start (no ramp).
+    StepCvSlide {
+        cv1: f32,
+        cv1_end: f32,
         cv2: Option<f32>,
     },
     /// Bare `_` with no active modifier — sustain the gate, hold cv.
@@ -315,6 +328,21 @@ pub fn resolve_step_effects(steps: &mut [Step]) -> Vec<RowBuildError> {
                 }
                 state = ChannelState::Idle;
                 StepEffect::StepCv { cv1, cv2: cv2_opt }
+            }
+            StepKind::StepToSlide { cv1_end, cv2: cv2_opt } => {
+                // `/value>cv1_end[:cv2]` — close any prior open slide at
+                // boundary using this cell's start cv1, then snap cv1
+                // without trigger and ramp to cv1_end across this tick.
+                if let ChannelState::SlideOpen { head_idx } = state {
+                    patch_slide_close(
+                        &mut steps[head_idx].effect,
+                        cv1,
+                        cv2_opt,
+                        true,
+                    );
+                }
+                state = ChannelState::Idle;
+                StepEffect::StepCvSlide { cv1, cv1_end, cv2: cv2_opt }
             }
             StepKind::SlideCloseInTick { cv2: cv2_opt } => {
                 if let ChannelState::SlideOpen { head_idx } = state {
@@ -559,6 +587,15 @@ mod tests {
             cv1,
             gate: true,
             kind: StepKind::StepTo { cv2: None },
+            ..Step::default()
+        }
+    }
+
+    fn step_to_slide(cv1: f32, cv1_end: f32) -> Step {
+        Step {
+            cv1,
+            gate: true,
+            kind: StepKind::StepToSlide { cv1_end, cv2: None },
             ..Step::default()
         }
     }
@@ -871,6 +908,39 @@ mod tests {
         let errs = resolve_step_effects(&mut steps);
         assert_eq!(errs.len(), 1);
         assert_eq!(errs[0].cell_index, 0);
+    }
+
+    #[test]
+    fn step_to_slide_emits_step_cv_slide_effect() {
+        // `A3 /A3>B3 .` — bare trigger, then snap-and-ramp, then rest.
+        let mut steps = vec![note(60.0), step_to_slide(60.0, 64.0), rest()];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty(), "no row-build errors: {errs:?}");
+        assert!(matches!(
+            steps[1].effect,
+            StepEffect::StepCvSlide { cv1: 60.0, cv1_end: 64.0, cv2: None }
+        ));
+    }
+
+    #[test]
+    fn step_to_slide_closes_prior_open_slide_at_boundary() {
+        // `A3> /B3>C3` — open slide closes at tick boundary on `B3`,
+        // then the cell continues with its own snap-and-ramp to C3.
+        let mut steps = vec![slide_open(60.0), step_to_slide(64.0, 67.0)];
+        let errs = resolve_step_effects(&mut steps);
+        assert!(errs.is_empty(), "no row-build errors: {errs:?}");
+        // Prior slide closed at boundary with cv1=64.
+        match &steps[0].effect {
+            StepEffect::StartNote { slide: Some(so), .. } => {
+                assert_eq!(so.close_cv1, 64.0);
+                assert!(so.closes_at_boundary);
+            }
+            other => panic!("expected open slide closed at boundary, got {other:?}"),
+        }
+        assert!(matches!(
+            steps[1].effect,
+            StepEffect::StepCvSlide { cv1: 64.0, cv1_end: 67.0, cv2: None }
+        ));
     }
 
     // ── Ticket 0948: cv2 on multi-cell slides ──────────────────────────

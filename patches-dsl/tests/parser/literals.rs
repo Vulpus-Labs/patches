@@ -124,6 +124,19 @@ fn note_like_ident_is_string() {
     }
 }
 
+// Word-boundary lookaheads on keyword/literal rules must reject a
+// trailing `-` so the rule is not consumed in a way that leaves a
+// dangling `-tail` token. Locked in by 0949.
+#[test]
+fn keyword_hyphen_idents_parse_as_strings() {
+    for case in &["true-foo", "false-bar", "C4-tag", "c4-tag"] {
+        match parse_one_scalar(case) {
+            Scalar::Str(s) => assert_eq!(&s, case, "expected Str({case:?})"),
+            other => panic!("expected Str for {case}, got {other:?}"),
+        }
+    }
+}
+
 // ─── T-0247: scaled_and_indexed fixture AST inspection ──────────────────────
 
 #[test]

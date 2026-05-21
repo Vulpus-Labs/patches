@@ -4,6 +4,7 @@ target/
 .vscode/
 *.aiff
 *.wav
+**/*.state
 .claude
 mutants.out/
 mutants.out.old/

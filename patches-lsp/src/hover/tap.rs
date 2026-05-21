@@ -30,15 +30,14 @@ fn node_range(node: Node<'_>, source: &str, line_starts: &[usize]) -> Range {
     Range::new(start, end)
 }
 
-/// Hover for a `tap_component` token (a component name like `meter`).
+/// Hover for a tap-component ident (a component name like `meter`).
+/// Post-0950 the grammar no longer exposes a `tap_component` wrapper;
+/// the cursor lands directly on an `ident` child of `tap_components`.
 pub(crate) fn hover_for_tap_component(
     node: Node<'_>,
     source: &str,
     line_starts: &[usize],
 ) -> Option<Hover> {
-    // The grammar models `tap_component` as a wrapper over `ident` so the
-    // cursor may be on either; resolve the underlying name from the
-    // wrapper's text in both cases.
     let name = node_text(node, source);
     let summary = summary_for(name);
     if summary.is_empty() {
@@ -102,9 +101,11 @@ fn collect_component_names(tap_target: Node<'_>, source: &str) -> Vec<String> {
     let mut cursor = tap_target.walk();
     for child in tap_target.children(&mut cursor) {
         if child.kind() == "tap_components" {
+            // Post-0950: tap_components holds ident children directly
+            // (no `tap_component` wrapper).
             let mut cc = child.walk();
             for tc in child.children(&mut cc) {
-                if tc.kind() == "tap_component" {
+                if tc.kind() == "ident" {
                     out.push(node_text(tc, source).to_owned());
                 }
             }

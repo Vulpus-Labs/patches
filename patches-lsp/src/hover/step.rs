@@ -66,11 +66,22 @@ fn decode_step(step: Node<'_>, source: &str) -> TrackerStep {
             kind: StepKind::TieFlow,
             ..TrackerStep::default()
         },
-        "step_step_to" => TrackerStep {
-            gate: true,
-            kind: StepKind::StepTo { cv2: None },
-            ..TrackerStep::default()
-        },
+        "step_step_to" => {
+            // `/value` with optional `>cv1_end` slide target.
+            let has_slide = inner
+                .named_children(&mut inner.walk())
+                .any(|c| c.kind() == "step_slide_target");
+            let kind = if has_slide {
+                StepKind::StepToSlide { cv1_end: 0.0, cv2: None }
+            } else {
+                StepKind::StepTo { cv2: None }
+            };
+            TrackerStep {
+                gate: true,
+                kind,
+                ..TrackerStep::default()
+            }
+        }
         "step_slide_close" => TrackerStep {
             gate: true,
             kind: StepKind::SlideCloseInTick { cv2: None },
@@ -82,37 +93,41 @@ fn decode_step(step: Node<'_>, source: &str) -> TrackerStep {
             kind: StepKind::SlideOpen,
             ..TrackerStep::default()
         },
-        "step_valued" => {
+        "step_valued" => decode_step_valued(inner, source),
+        _ => TrackerStep::default(),
+    }
+}
+
+/// Decode a `step_valued` parent node (whose sole named child is one
+/// of `step_valued_slide` / `step_valued_note`, per ticket 0950).
+fn decode_step_valued(parent: Node<'_>, source: &str) -> TrackerStep {
+    let Some(inner) = parent.named_child(0) else {
+        return TrackerStep::default();
+    };
+    let kind = match inner.kind() {
+        "step_valued_slide" => StepKind::SlideSugar { cv1_end: 0.0, cv2_end: None },
+        "step_valued_note" => {
             let mut repeat: u8 = 1;
-            let mut has_slide_target = false;
             let mut cursor = inner.walk();
             for child in inner.children(&mut cursor) {
-                match child.kind() {
-                    "step_repeat" => {
-                        if let Some(nat) = child.named_child(0) {
-                            let text = &source[nat.start_byte()..nat.end_byte()];
-                            if let Ok(n) = text.parse::<u8>() {
-                                repeat = n;
-                            }
+                if child.kind() == "step_repeat" {
+                    if let Some(nat) = child.named_child(0) {
+                        let text = &source[nat.start_byte()..nat.end_byte()];
+                        if let Ok(n) = text.parse::<u8>() {
+                            repeat = n;
                         }
                     }
-                    "step_slide_target" => has_slide_target = true,
-                    _ => {}
                 }
             }
-            let kind = if has_slide_target {
-                StepKind::SlideSugar { cv1_end: 0.0, cv2_end: None }
-            } else {
-                StepKind::Note { repeat }
-            };
-            TrackerStep {
-                trigger: true,
-                gate: true,
-                kind,
-                ..TrackerStep::default()
-            }
+            StepKind::Note { repeat }
         }
-        _ => TrackerStep::default(),
+        _ => return TrackerStep::default(),
+    };
+    TrackerStep {
+        trigger: true,
+        gate: true,
+        kind,
+        ..TrackerStep::default()
     }
 }
 
@@ -257,7 +272,9 @@ fn find_roll_anchor(steps: &[TrackerStep], from: usize) -> Option<usize> {
 /// Falls back to the full cell text if the inner value child isn't
 /// recoverable; the hover still reads correctly in that case.
 fn cell_value_text<'a>(cell: Node<'_>, source: &'a str) -> &'a str {
-    let value_kinds = ["step_note", "step_unit", "step_float", "step_int"];
+    // Post-0950 the numeric primaries are `float_unit` / `float_lit` /
+    // `int_lit` (the `step_*` numeric duplicates were collapsed).
+    let value_kinds = ["step_note", "float_unit", "float_lit", "int_lit"];
     let mut cursor = cell.walk();
     for child in cell.named_children(&mut cursor) {
         if value_kinds.contains(&child.kind()) {
@@ -282,8 +299,10 @@ fn slide_open_leading_in(steps: &[TrackerStep], i: usize) -> Option<&SlideOpen> 
     None
 }
 
-/// Hover for a `/value` step-to cell. Renders the resolved `StepCv`
-/// effect; mentions when the cell also closes a preceding open slide.
+/// Hover for a `/value` step-to cell. Renders the resolved `StepCv` /
+/// `StepCvSlide` effect; mentions when the cell also closes a
+/// preceding open slide. When the cell carries a `>cv1_end` target,
+/// describes the snap + in-tick ramp.
 pub(crate) fn hover_for_step_to(
     cell: Node<'_>,
     channel_row: Node<'_>,
@@ -299,11 +318,22 @@ pub(crate) fn hover_for_step_to(
     } else {
         ""
     };
-    let text = format!(
-        "**`/{value}` (step cv to {value}, no retrigger)**\n\n\
-         Snap cv1 to `{value}` at the tick boundary; gate stays high; \
-         no fresh trigger.{close_note}",
-    );
+    let has_slide = matches!(steps[i].effect, StepEffect::StepCvSlide { .. });
+    let text = if has_slide {
+        let raw = &source[cell.start_byte()..cell.end_byte()];
+        format!(
+            "**`{raw}` (step cv to {value}, then ramp within this tick, no retrigger)**\n\n\
+             Snap cv1 to `{value}` at tick start (no fresh trigger), then ramp \
+             cv1 from `{value}` to the `>cv1_end` target across this tick. \
+             Mirrors the `value>value` sugar form, but without retriggering.{close_note}",
+        )
+    } else {
+        format!(
+            "**`/{value}` (step cv to {value}, no retrigger)**\n\n\
+             Snap cv1 to `{value}` at the tick boundary; gate stays high; \
+             no fresh trigger.{close_note}",
+        )
+    };
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -427,10 +457,11 @@ pub(crate) fn hover_for_slide_close(
     })
 }
 
-/// Hover for a bare `value` (`step_valued`) cell. Only renders when the
-/// cell closes a preceding open slide — that's the case where the
-/// row's lead-in shape is non-obvious from the cell alone (ADR 0077:
-/// "bare `value` is always locally readable as a fresh trigger").
+/// Hover for a bare `value` (`step_valued_note`) cell. Only renders
+/// when the cell closes a preceding open slide — that's the case
+/// where the row's lead-in shape is non-obvious from the cell alone
+/// (ADR 0077: "bare `value` is always locally readable as a fresh
+/// trigger").
 pub(crate) fn hover_for_note(
     cell: Node<'_>,
     channel_row: Node<'_>,

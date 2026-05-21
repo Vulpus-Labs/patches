@@ -1,0 +1,9 @@
+# error: `value>value*N` is rejected at the grammar level (ticket 0950).
+# `step_valued` splits into mutually-exclusive `step_valued_slide`
+# (carries `>cv1_end` + optional `:cv2`) and `step_valued_note`
+# (carries optional `:cv2` + optional `*N`); the slide alternative
+# cannot also pick up a repeat suffix.
+pattern p {
+    note: C4>E4*3 . . .
+}
+patch {}

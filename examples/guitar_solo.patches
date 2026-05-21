@@ -1,0 +1,107 @@
+pattern solo {
+    guitar: E3 E3>D3 /D3>E3 E3 |
+            E3 E3 /E3>D3 E3 |
+            G3 /G3>G#3 E3 E3 |
+            /E3>D3 E3 D3> >E3
+}
+
+pattern kick {
+    kick: x . . . x . . . x . . . x . . .
+}
+
+song song(guitar, kick) {
+    play {
+        solo, kick
+    }
+}
+
+patch {
+    # ── Sequencer ─────────────────────────────────────────────────────────
+    module seq: MasterSequencer([guitar, kick]) {
+        song: song,
+        bpm: 80,
+        rows_per_beat: 4,
+        loop: true,
+        autostart: true,
+        swing: 0.5
+    }
+
+    # ── Pattern players ───────────────────────────────────────────────────
+    module guitar_pp :  PatternPlayer
+    module kick_pp : PatternPlayer
+
+    seq.clock[guitar] -> guitar_pp.clock
+    seq.clock[kick] -> kick_pp.clock
+
+    module kick : Kick
+    kick_pp.trigger -> kick.trigger
+
+    # ── Lead voice (electric-guitar shape) ────────────────────────────────
+    # VDco (saw + a touch of pulse, curved waveshape) → swept resonant
+    # ladder with drive → tight pluck VCA → midrange body bandpass →
+    # short slapback BBD → subtle flange → reverb.
+    module lead : VDco {
+        saw_gain: 1.0,
+        pulse_gain: 0.4,
+        triangle_gain: 0.0,
+        sub_gain: 0.0,
+        curve: 0.55
+    }
+    guitar_pp.cv1 -> lead.voct
+
+    # Amp envelope — fast attack, moderate sustain (pick + held string).
+    module adsr : Adsr {
+        attack: 0.004,
+        decay: 0.6,
+        sustain: 0.55,
+        release: 0.3,
+        shape: exponential
+    }
+    guitar_pp.trigger -> adsr.trigger
+    guitar_pp.gate -> adsr.gate
+
+    # Filter envelope — sharp wah on each pluck, drops to zero fast.
+    module filt_env : Adsr {
+        attack: 0.001,
+        decay: 0.2,
+        sustain: 0.3,
+        release: 0.05,
+        shape: exponential
+    }
+    guitar_pp.trigger -> filt_env.trigger
+    guitar_pp.gate -> filt_env.gate
+
+    # Driven ladder filter = the body of the guitar tone.
+    module vcf : VLadder {
+        variant: sharp,
+        cutoff: 650.0,
+        resonance: 0.5,
+        drive: 2.4
+    }
+    lead.out -> vcf.in
+    filt_env.out -[3.2]-> vcf.cutoff_cv
+
+    module vca : Vca
+    adsr.out -> vca.cv
+    vcf.out -> vca.in
+
+    # Midrange body resonance — narrow peak around 1.7 kHz (V/oct 7.4
+    # above C0). Wired in parallel with the dry signal at the delay
+    # input so the bandpass adds pickup honk without scooping the
+    # broadband body of the tone.
+    module body : Bandpass { center: 7.4, bandwidth_q: 4.0, saturate: true }
+    vca.out -> body.in
+
+    # Slapback + subtle flange (already-loved chain, tightened).
+    module delay : VBbd { delay_ms: 95, jitter: 0.4, feedback: 0 }
+    module flange : VFlanger { depth: 0.35, jitter: 0.1, rate_hz: 0.25, mix: 0.18 }
+    vca.out  -[0.7]-> delay.in   # dry voice
+    body.out -[0.5]-> delay.in   # parallel body-resonance blend (auto-sum)
+    delay.out -> flange.in
+
+    module verb : VReverb { dry_wet: 0.3, size: 1, jitter: 0.8 }
+    module out: AudioOut
+    #kick.out -[0.0]-> out.in
+    flange.out -> verb.in
+    verb.out -> out.in
+}
