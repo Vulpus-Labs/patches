@@ -18,7 +18,7 @@ module_params! {
     }
 }
 use crate::common::approximate::lookup_sine;
-use patches_dsp::{polyblep, sync_blep_residual};
+use patches_dsp::polyblep;
 use crate::common::frequency::{C0_FREQ, FMMode, PolyFrequencyConverter, PolyFrequencyChangeTracker};
 use crate::common::phase_accumulator::PolyPhaseAccumulator;
 
@@ -86,6 +86,16 @@ pub struct PolyOsc {
     drift_counter: u8,
     /// Per-voice V/OCT offset added during frequency calculation.
     drift_voct_offsets: [f32; 16],
+    /// Deferred sync state (ticket 0955). A sub-sample sync emits the *pre*
+    /// value on the sync tick and the *post* value on the next tick
+    /// (start-of-sample convention, matching the free path), so the post value
+    /// is never duplicated. `sync_pending[i]` flags a voice whose previous tick
+    /// was a sync; `pending_saw_blep`/`pending_sq_blep` carry the trailing half
+    /// of the 2-point polyBLEP, applied on the post tick in place of the natural
+    /// wrap correction.
+    sync_pending: [bool; 16],
+    pending_saw_blep: [f32; 16],
+    pending_sq_blep: [f32; 16],
 }
 
 impl Module for PolyOsc {
@@ -160,6 +170,9 @@ impl Module for PolyOsc {
             drift_walks,
             drift_counter: 0,
             drift_voct_offsets: [0.0; 16],
+            sync_pending: [false; 16],
+            pending_saw_blep: [0.0; 16],
+            pending_sq_blep: [0.0; 16],
         }
     })}
 
@@ -311,32 +324,66 @@ impl PolyOsc {
         }
     }
 
+    /// Handle a sub-sample sync on voice `i` (ticket 0955).
+    ///
+    /// Start-of-sample convention: this tick emits the value the voice already
+    /// holds — the *pre* value, or the deferred *post* of a prior sync in the
+    /// rapid-sync case — never the post of *this* sync. The phase is reset so
+    /// the post value lands on the next tick instead, eliminating the
+    /// duplicate zero-order-hold sample. A 2-point polyBLEP smooths the
+    /// discontinuity: the leading half is applied here (distance `frac` before
+    /// the jump), the trailing half is stashed in `pending_*_blep` for the post
+    /// tick. The trailing residual replaces the natural wrap correction the
+    /// next tick would otherwise apply at the small post phase (delta = 2);
+    /// without this override the partial-cycle sync jump would be mis-scaled.
     fn process_voice_synced(
         &mut self, i: usize, frac: f32, ctx: &VoiceCtx,
         outs: &OutFlags, buf: &mut VoiceBuffers,
     ) {
         let VoiceCtx { dt, pm, duty } = *ctx;
         let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
-        let mut pre_raw = self.phase_acc.phases[i] + frac * dt;
-        if pre_raw >= 1.0 { pre_raw -= 1.0; }
-        let pre_read = wrap_unit(pre_raw + pm);
 
+        // Value the voice currently holds (start of this sample).
+        let cur = self.phase_acc.phases[i];
+        let read = wrap_unit(cur + pm);
+
+        // Value at the sync instant — sizes the discontinuity only.
+        let mut reset_raw = cur + frac * dt;
+        if reset_raw >= 1.0 { reset_raw -= 1.0; }
+        let reset_read = wrap_unit(reset_raw + pm);
+
+        // Reset; the post value is emitted on the next tick.
         self.phase_acc.sync_reset(i, frac);
         let post_raw = self.phase_acc.phases[i];
         let post_read = wrap_unit(post_raw + pm);
 
-        if outs.sine { buf.sine[i] = lookup_sine(post_read); }
-        if outs.tri  { buf.tri[i]  = 1.0 - 4.0 * (post_read - 0.5).abs(); }
+        // 2-point polyBLEP bases. `before` (this sample, `frac` before the jump)
+        // and `after` (deferred to the post sample). The correction added to a
+        // waveform is `-basis * 0.5 * delta`, matching the free path's
+        // `value - polyblep(...)` sign convention.
+        let before = polyblep(1.0 - frac * dt, dt);
+        let after = polyblep(post_raw, dt);
+        let pending = self.sync_pending[i];
+
+        if outs.sine { buf.sine[i] = lookup_sine(read); }
+        if outs.tri  { buf.tri[i]  = 1.0 - 4.0 * (read - 0.5).abs(); }
         if outs.saw {
-            let pre = 2.0 * pre_read - 1.0;
-            let post = 2.0 * post_read - 1.0;
-            buf.saw[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+            let delta = (2.0 * reset_read - 1.0) - (2.0 * post_read - 1.0);
+            let wrap = if pending { self.pending_saw_blep[i] } else { -polyblep(read, dt) };
+            buf.saw[i] = (2.0 * read - 1.0) + wrap - before * 0.5 * delta;
+            self.pending_saw_blep[i] = -after * 0.5 * delta;
         }
         if outs.sq {
-            let pre = if pre_read < duty { 1.0 } else { -1.0 };
+            let pre = if reset_read < duty { 1.0 } else { -1.0 };
             let post = if post_read < duty { 1.0 } else { -1.0 };
-            buf.sq[i] = post + sync_blep_residual(post_raw, dt, pre - post);
+            let delta = pre - post;
+            let raw = if read < duty { 1.0 } else { -1.0 };
+            let wrap = if pending { self.pending_sq_blep[i] } else { polyblep(read, dt) };
+            let duty_edge = polyblep((read - duty).rem_euclid(1.0), dt);
+            buf.sq[i] = raw + wrap - duty_edge - before * 0.5 * delta;
+            self.pending_sq_blep[i] = -after * 0.5 * delta;
         }
+        self.sync_pending[i] = true;
     }
 
     fn process_voice_free(
@@ -346,15 +393,23 @@ impl PolyOsc {
         let VoiceCtx { dt, pm, duty } = *ctx;
         let raw_phase = self.phase_acc.phases[i];
         let phase = wrap_unit(raw_phase + pm);
+        let pending = self.sync_pending[i];
 
         if outs.sine { buf.sine[i] = lookup_sine(phase); }
         if outs.tri  { buf.tri[i]  = 1.0 - 4.0 * (phase - 0.5).abs(); }
-        if outs.saw  { buf.saw[i]  = (2.0 * phase - 1.0) - polyblep(phase, dt); }
+        if outs.saw {
+            // On the tick after a sync this is the post sample: apply the
+            // deferred trailing polyBLEP instead of the natural wrap correction.
+            let wrap = if pending { self.pending_saw_blep[i] } else { -polyblep(phase, dt) };
+            buf.saw[i] = (2.0 * phase - 1.0) + wrap;
+        }
         if outs.sq {
             let raw = if phase < duty { 1.0 } else { -1.0 };
-            let blep = polyblep(phase, dt) - polyblep((phase - duty).rem_euclid(1.0), dt);
-            buf.sq[i] = raw + blep;
+            let wrap = if pending { self.pending_sq_blep[i] } else { polyblep(phase, dt) };
+            let duty_edge = polyblep((phase - duty).rem_euclid(1.0), dt);
+            buf.sq[i] = raw + wrap - duty_edge;
         }
+        self.sync_pending[i] = false;
 
         let next = self.phase_acc.phases[i] + dt;
         if next >= 1.0 {
@@ -601,6 +656,157 @@ mod tests {
         assert!(
             (after[1] - no_sync[1]).abs() < 1e-5,
             "voice 1 affected by sync[0]"
+        );
+    }
+
+    // ── 0955: post-reset duplicate / aliasing ────────────────────────────
+
+    /// A sub-sample sync must not emit the post-reset value on two consecutive
+    /// samples. The pre-fix code reset the phase and emitted the post value
+    /// without advancing, so the next free tick re-read the same phase and
+    /// emitted it again (an exact duplicate on sine/triangle, a one-sample
+    /// zero-order hold). We assert no two consecutive samples are bit-equal
+    /// across a reset at a generic sub-sample position.
+    #[test]
+    fn sync_does_not_duplicate_post_reset_sample() {
+        let sr = 48_000.0_f32;
+        let voct = (300.0_f32 / C0_FREQ).log2();
+        let mut h = ModuleHarness::build_with_env::<PolyOsc>(
+            params!["frequency" => voct],
+            env(sr, 1),
+        );
+        for inp in ["voct", "fm", "pulse_width_cv", "phase_mod"] { h.disconnect_input(inp); }
+        for outp in ["triangle", "square"] { h.disconnect_output(outp); }
+
+        let mut sine = Vec::new();
+        let mut saw = Vec::new();
+        h.set_poly("sync", [0.0; 16]);
+        for _ in 0..6 {
+            h.tick();
+            sine.push(h.read_poly("sine")[0]);
+            saw.push(h.read_poly("sawtooth")[0]);
+        }
+        // One sync at frac well away from {0, 1}.
+        let mut sync = [0.0f32; 16];
+        sync[0] = 0.37;
+        h.set_poly("sync", sync);
+        h.tick();
+        sine.push(h.read_poly("sine")[0]);
+        saw.push(h.read_poly("sawtooth")[0]);
+        h.set_poly("sync", [0.0; 16]);
+        for _ in 0..4 {
+            h.tick();
+            sine.push(h.read_poly("sine")[0]);
+            saw.push(h.read_poly("sawtooth")[0]);
+        }
+
+        for w in sine.windows(2) {
+            assert_ne!(w[0].to_bits(), w[1].to_bits(),
+                "sine: consecutive samples bit-equal — post-reset duplicate (0955): {sine:?}");
+        }
+        for w in saw.windows(2) {
+            assert_ne!(w[0].to_bits(), w[1].to_bits(),
+                "saw: consecutive samples bit-equal — post-reset duplicate (0955): {saw:?}");
+        }
+    }
+
+    /// Master-driven sync schedule: per-tick sub-sample wrap fractions, using
+    /// the same `(1 - phase/dt)` encoding the oscillator emits on `reset_out`.
+    fn sync_schedule(master_dt: f32, n: usize) -> Vec<f32> {
+        let mut ph = 0.0f32;
+        let mut out = Vec::with_capacity(n);
+        for _ in 0..n {
+            let next = ph + master_dt;
+            if next >= 1.0 {
+                ph = next - 1.0;
+                out.push((1.0 - ph / master_dt).clamp(f32::MIN_POSITIVE, 1.0));
+            } else {
+                ph = next;
+                out.push(0.0);
+            }
+        }
+        out
+    }
+
+    /// Naive (un-BLEP'd) hard-synced sawtooth following the same deferred
+    /// start-of-sample phase trajectory as the module, but with no polyBLEP
+    /// residual — the "clean reset" reference the ticket compares against.
+    fn naive_synced_saw(slave_dt: f32, sched: &[f32]) -> Vec<f32> {
+        let mut phase = 0.0f32;
+        let mut out = Vec::with_capacity(sched.len());
+        for &s in sched {
+            out.push(2.0 * phase - 1.0);
+            if s > 0.0 {
+                phase = (1.0 - s) * slave_dt;
+            } else {
+                let next = phase + slave_dt;
+                phase = if next >= 1.0 { next - 1.0 } else { next };
+            }
+        }
+        out
+    }
+
+    /// Summed magnitude in the upper quarter of the spectrum (bins
+    /// `3N/8 .. N/2`), an aliasing proxy for a band-limited synced saw.
+    fn high_band(x: &[f32]) -> f64 {
+        let n = x.len();
+        let fft = patches_dsp::RealPackedFft::new(n);
+        let mut buf = x.to_vec();
+        fft.forward(&mut buf);
+        let half = n / 2;
+        let mut s = 0.0f64;
+        for k in (half * 3) / 4..half {
+            let re = buf[2 * k] as f64;
+            let im = buf[2 * k + 1] as f64;
+            s += (re * re + im * im).sqrt();
+        }
+        s
+    }
+
+    /// The 2-point polyBLEP'd synced sawtooth must alias substantially less
+    /// than the clean (un-BLEP'd) reset reference across the same sub-sample
+    /// sync schedule. Catches both a returning post-reset duplicate (which
+    /// re-injects broadband HF) and a sign error in the residual (which would
+    /// *raise* aliasing above the naive reset). The reference is the
+    /// sub-sample-accurate naive reset, not the sample-rounded path.
+    #[test]
+    fn sync_aliasing_below_clean_reset_reference() {
+        const SR: f32 = 48_000.0;
+        const WARMUP: usize = 4096;
+        const N: usize = 4096;
+        let f_master = 468.75_f32;
+        let f_slave = f_master * 2.6;
+        let master_dt = f_master / SR;
+        let slave_dt = f_slave / SR;
+        let voct = (f_slave / C0_FREQ).log2();
+
+        let sched = sync_schedule(master_dt, WARMUP + N);
+
+        let mut h = ModuleHarness::build_with_env::<PolyOsc>(
+            params!["frequency" => voct],
+            env(SR, 1),
+        );
+        for inp in ["voct", "fm", "pulse_width_cv", "phase_mod"] { h.disconnect_input(inp); }
+        for outp in ["sine", "triangle", "square"] { h.disconnect_output(outp); }
+
+        let mut blep = Vec::with_capacity(WARMUP + N);
+        for &s in &sched {
+            let mut arr = [0.0f32; 16];
+            arr[0] = s;
+            h.set_poly("sync", arr);
+            h.tick();
+            blep.push(h.read_poly("sawtooth")[0]);
+        }
+        let naive = naive_synced_saw(slave_dt, &sched);
+
+        let blep_hi = high_band(&blep[WARMUP..]);
+        let naive_hi = high_band(&naive[WARMUP..]);
+
+        // vxn-dsp measures 1.58×–2.01× below an un-BLEP'd reset; require the
+        // BLEP path to clear a conservative 1.4× floor here.
+        assert!(
+            blep_hi * 1.4 < naive_hi,
+            "polyBLEP synced saw aliasing ({blep_hi:.4}) not >=1.4x below clean reset ({naive_hi:.4})"
         );
     }
 }
