@@ -155,16 +155,11 @@ impl Default for PolyPhaseAccumulator {
 ///
 /// Returns a correction value that smooths the discontinuity near `t = 0` (rising)
 /// and `t = 1` (falling) transitions. Only effective when `dt < 0.5`.
-/// PolyBLEP residual for a sub-sample sync reset.
 ///
-/// `post_phase` is the phase right after the reset (`(1 - frac) * dt`),
-/// `post_dt` the phase increment at that sample, `delta = pre - post` the
-/// waveform-specific value jump. Add to the post-reset waveform sample.
-#[inline]
-pub fn sync_blep_residual(post_phase: f32, post_dt: f32, delta: f32) -> f32 {
-    polyblep(post_phase, post_dt) * 0.5 * delta
-}
-
+/// Hard-sync callers build a 2-point residual directly from this function (see
+/// `Oscillator`/`PolyOsc`): the leading half at `polyblep(1 - frac·dt, dt)` and
+/// the trailing half at `polyblep((1 - frac)·dt, dt)`, each scaled by
+/// `-0.5 · (pre - post)` to match the free path's `value - polyblep(...)` sign.
 pub fn polyblep(t: f32, dt: f32) -> f32 {
     if t < dt {
         let t = t / dt;

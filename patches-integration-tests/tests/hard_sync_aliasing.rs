@@ -44,13 +44,18 @@ const C0_FREQ: f32 = 16.3516;
 /// centres under a rectangular window.
 const F_MASTER: f32 = 468.75;
 /// Minimum ratio by which the via-pulse high-band energy must exceed the
-/// direct chain's. Tuned against the committed trigger/sync pipeline: most
-/// ratios observe 1.6×, the 2:1 case ~1.3× (slave phase lands near zero at
-/// every sync event so frac discarding has the least effect there). 1.2×
-/// captures the floor with modest headroom — regressions that narrow the
-/// gap will fail, pointing at a loss of sub-sample accuracy on the typed
-/// path.
-const ALIAS_MARGIN: f64 = 1.2;
+/// direct chain's. Tuned against the committed trigger/sync pipeline: the
+/// non-integer ratios observe 1.76×–2.01×, but the 2:1 case is only ~1.11×
+/// (slave phase lands near zero at every sync event, so discarding the
+/// sub-sample frac has the least effect there). 1.08× captures that floor
+/// with modest headroom — regressions that narrow the gap will fail,
+/// pointing at a loss of sub-sample accuracy on the typed path.
+///
+/// Re-tuned in ticket 0956: fixing the mono `Oscillator` post-reset duplicate
+/// + 2-point polyBLEP widened the non-integer margins (was ~1.6×) but
+/// tightened the degenerate 2:1 case (was ~1.3×). Both chains share the fix,
+/// so the comparison still isolates frac-rounding loss.
+const ALIAS_MARGIN: f64 = 1.08;
 
 fn voct(freq_hz: f32) -> f32 {
     (freq_hz / C0_FREQ).log2()

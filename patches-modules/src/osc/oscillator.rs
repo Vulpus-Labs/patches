@@ -25,7 +25,7 @@ module_params! {
     }
 }
 
-use patches_dsp::{polyblep, sync_blep_residual};
+use patches_dsp::polyblep;
 use crate::common::approximate::lookup_sine;
 use crate::common::frequency::{C0_FREQ, FMMode, MonoFrequencyConverter, MonoFrequencyChangeTracker};
 use crate::common::phase_accumulator::MonoPhaseAccumulator;
@@ -96,6 +96,15 @@ pub struct Oscillator {
     drift_counter: u8,
     /// Current V/OCT offset added to the voct input each frequency calculation.
     drift_voct_offset: f32,
+    /// Deferred sync state (ticket 0956, mirrors 0955). A sub-sample sync emits
+    /// the *pre* value on the sync tick and the *post* value on the next tick
+    /// (start-of-sample convention), so the post value is never duplicated.
+    /// `sync_pending` flags that the previous tick was a sync; the `pending_*`
+    /// fields carry the trailing half of the 2-point polyBLEP, applied on the
+    /// post tick in place of the natural wrap correction.
+    sync_pending: bool,
+    pending_saw_blep: f32,
+    pending_sq_blep: f32,
 }
 
 impl Module for Oscillator {
@@ -167,6 +176,9 @@ impl Module for Oscillator {
             drift_walk: BoundedRandomWalk::new(seed, OSCILLATOR_DRIFT_STEP),
             drift_counter: 0,
             drift_voct_offset: 0.0,
+            sync_pending: false,
+            pending_saw_blep: 0.0,
+            pending_sq_blep: 0.0,
         }
     })}
 
@@ -224,58 +236,79 @@ impl Module for Oscillator {
 
         let dt = self.phase_acc.phase_increment;
         let mut wrap_frac = 0.0_f32;
+        let pending = self.sync_pending;
 
         if let Some(frac) = sync {
             let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
-            // Pre-sync raw phase at the event.
-            let mut pre_raw = self.phase_acc.phase + frac * dt;
-            if pre_raw >= 1.0 { pre_raw -= 1.0; }
-            let pre_read = (pre_raw + phase_mod).rem_euclid(1.0);
 
-            // Reset and advance to the remainder of the sample.
+            // Start-of-sample value: emit what the oscillator already holds (the
+            // pre value, or a deferred post in the rapid-sync case) — never the
+            // post of *this* sync. The post is deferred to the next tick so it
+            // is emitted exactly once (ticket 0956).
+            let cur = self.phase_acc.phase;
+            let read = (cur + phase_mod).rem_euclid(1.0);
+
+            // Value at the sync instant — sizes the discontinuity only.
+            let mut reset_raw = cur + frac * dt;
+            if reset_raw >= 1.0 { reset_raw -= 1.0; }
+            let reset_read = (reset_raw + phase_mod).rem_euclid(1.0);
+
+            // Reset; the post value is emitted on the next tick.
             self.phase_acc.sync_reset(frac);
             let post_raw = self.phase_acc.phase;
             let post_read = (post_raw + phase_mod).rem_euclid(1.0);
 
-            if self.out_sine.is_connected() {
-                pool.write_mono(&self.out_sine, lookup_sine(post_read));
-            }
-            if self.out_triangle.is_connected() {
-                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (post_read - 0.5).abs());
-            }
-            if self.out_sawtooth.is_connected() {
-                let pre_saw = 2.0 * pre_read - 1.0;
-                let post_saw = 2.0 * post_read - 1.0;
-                let delta = pre_saw - post_saw;
-                let y = post_saw + sync_blep_residual(post_raw, dt, delta);
-                pool.write_mono(&self.out_sawtooth, y);
-            }
-            if self.out_square.is_connected() {
-                let pre_sq = if pre_read < duty { 1.0 } else { -1.0 };
-                let post_sq = if post_read < duty { 1.0 } else { -1.0 };
-                let delta = pre_sq - post_sq;
-                let y = post_sq + sync_blep_residual(post_raw, dt, delta);
-                pool.write_mono(&self.out_square, y);
-            }
-        } else {
-            let phase = self.phase_acc.phase;
-            let read_phase = (phase + phase_mod).rem_euclid(1.0);
+            // 2-point polyBLEP: leading half here (distance `frac` before the
+            // jump), trailing half deferred. Correction is `-basis * 0.5 * delta`,
+            // matching the free path's `value - polyblep(...)` sign.
+            let before = polyblep(1.0 - frac * dt, dt);
+            let after = polyblep(post_raw, dt);
 
             if self.out_sine.is_connected() {
-                pool.write_mono(&self.out_sine, lookup_sine(read_phase));
+                pool.write_mono(&self.out_sine, lookup_sine(read));
             }
             if self.out_triangle.is_connected() {
-                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (read_phase - 0.5).abs());
+                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (read - 0.5).abs());
             }
             if self.out_sawtooth.is_connected() {
-                pool.write_mono(&self.out_sawtooth, (2.0 * read_phase - 1.0) - polyblep(read_phase, dt));
+                let delta = (2.0 * reset_read - 1.0) - (2.0 * post_read - 1.0);
+                let wrap = if pending { self.pending_saw_blep } else { -polyblep(read, dt) };
+                pool.write_mono(&self.out_sawtooth, (2.0 * read - 1.0) + wrap - before * 0.5 * delta);
+                self.pending_saw_blep = -after * 0.5 * delta;
             }
             if self.out_square.is_connected() {
-                let raw = if read_phase < duty { 1.0 } else { -1.0 };
-                let blep = polyblep(read_phase, dt)
-                    - polyblep((read_phase - duty).rem_euclid(1.0), dt);
-                pool.write_mono(&self.out_square, raw + blep);
+                let pre = if reset_read < duty { 1.0 } else { -1.0 };
+                let post = if post_read < duty { 1.0 } else { -1.0 };
+                let delta = pre - post;
+                let raw = if read < duty { 1.0 } else { -1.0 };
+                let wrap = if pending { self.pending_sq_blep } else { polyblep(read, dt) };
+                let duty_edge = polyblep((read - duty).rem_euclid(1.0), dt);
+                pool.write_mono(&self.out_square, raw + wrap - duty_edge - before * 0.5 * delta);
+                self.pending_sq_blep = -after * 0.5 * delta;
             }
+            self.sync_pending = true;
+        } else {
+            let phase = (self.phase_acc.phase + phase_mod).rem_euclid(1.0);
+
+            if self.out_sine.is_connected() {
+                pool.write_mono(&self.out_sine, lookup_sine(phase));
+            }
+            if self.out_triangle.is_connected() {
+                pool.write_mono(&self.out_triangle, 1.0 - 4.0 * (phase - 0.5).abs());
+            }
+            if self.out_sawtooth.is_connected() {
+                // On the tick after a sync this is the post sample: apply the
+                // deferred trailing polyBLEP in place of the natural wrap term.
+                let wrap = if pending { self.pending_saw_blep } else { -polyblep(phase, dt) };
+                pool.write_mono(&self.out_sawtooth, (2.0 * phase - 1.0) + wrap);
+            }
+            if self.out_square.is_connected() {
+                let raw = if phase < duty { 1.0 } else { -1.0 };
+                let wrap = if pending { self.pending_sq_blep } else { polyblep(phase, dt) };
+                let duty_edge = polyblep((phase - duty).rem_euclid(1.0), dt);
+                pool.write_mono(&self.out_square, raw + wrap - duty_edge);
+            }
+            self.sync_pending = false;
         }
 
         // Drift: every DRIFT_PERIOD samples, advance the local walk and sample
@@ -551,5 +584,140 @@ mod tests {
                 assert!(v.is_finite(), "non-finite {n} at i={i}: {v}");
             }
         }
+    }
+
+    // ── 0956: post-reset duplicate / aliasing (mirrors 0955) ─────────────
+
+    /// A sub-sample sync must not emit the post-reset value on two consecutive
+    /// samples (exact duplicate on sine/triangle pre-fix).
+    #[test]
+    fn sync_does_not_duplicate_post_reset_sample() {
+        let sr = 48_000.0_f32;
+        let voct = (300.0_f32 / C0_FREQ).log2();
+        let mut h = ModuleHarness::build_with_env::<Oscillator>(
+            params!["frequency" => voct],
+            env(sr),
+        );
+        h.disconnect_all_inputs();
+        h.disconnect_output("triangle");
+        h.disconnect_output("square");
+
+        let mut sine = Vec::new();
+        let mut saw = Vec::new();
+        h.set_mono("sync", 0.0);
+        for _ in 0..6 {
+            h.tick();
+            sine.push(h.read_mono("sine"));
+            saw.push(h.read_mono("sawtooth"));
+        }
+        h.set_mono("sync", 0.37);
+        h.tick();
+        sine.push(h.read_mono("sine"));
+        saw.push(h.read_mono("sawtooth"));
+        h.set_mono("sync", 0.0);
+        for _ in 0..4 {
+            h.tick();
+            sine.push(h.read_mono("sine"));
+            saw.push(h.read_mono("sawtooth"));
+        }
+
+        for w in sine.windows(2) {
+            assert_ne!(w[0].to_bits(), w[1].to_bits(),
+                "sine: consecutive samples bit-equal — post-reset duplicate (0956): {sine:?}");
+        }
+        for w in saw.windows(2) {
+            assert_ne!(w[0].to_bits(), w[1].to_bits(),
+                "saw: consecutive samples bit-equal — post-reset duplicate (0956): {saw:?}");
+        }
+    }
+
+    fn sync_schedule(master_dt: f32, n: usize) -> Vec<f32> {
+        let mut ph = 0.0f32;
+        let mut out = Vec::with_capacity(n);
+        for _ in 0..n {
+            let next = ph + master_dt;
+            if next >= 1.0 {
+                ph = next - 1.0;
+                out.push((1.0 - ph / master_dt).clamp(f32::MIN_POSITIVE, 1.0));
+            } else {
+                ph = next;
+                out.push(0.0);
+            }
+        }
+        out
+    }
+
+    /// Naive (un-BLEP'd) hard-synced saw on the same deferred start-of-sample
+    /// trajectory as the module — the clean reset reference.
+    fn naive_synced_saw(slave_dt: f32, sched: &[f32]) -> Vec<f32> {
+        let mut phase = 0.0f32;
+        let mut out = Vec::with_capacity(sched.len());
+        for &s in sched {
+            out.push(2.0 * phase - 1.0);
+            if s > 0.0 {
+                phase = (1.0 - s) * slave_dt;
+            } else {
+                let next = phase + slave_dt;
+                phase = if next >= 1.0 { next - 1.0 } else { next };
+            }
+        }
+        out
+    }
+
+    fn high_band(x: &[f32]) -> f64 {
+        let n = x.len();
+        let fft = patches_dsp::RealPackedFft::new(n);
+        let mut buf = x.to_vec();
+        fft.forward(&mut buf);
+        let half = n / 2;
+        let mut s = 0.0f64;
+        for k in (half * 3) / 4..half {
+            let re = buf[2 * k] as f64;
+            let im = buf[2 * k + 1] as f64;
+            s += (re * re + im * im).sqrt();
+        }
+        s
+    }
+
+    /// The 2-point polyBLEP'd synced saw must alias substantially less than the
+    /// clean (un-BLEP'd) reset reference. Catches a returning duplicate or a
+    /// residual sign error (which would raise aliasing above the naive reset).
+    #[test]
+    fn sync_aliasing_below_clean_reset_reference() {
+        const SR: f32 = 48_000.0;
+        const WARMUP: usize = 4096;
+        const N: usize = 4096;
+        let f_master = 468.75_f32;
+        let f_slave = f_master * 2.6;
+        let master_dt = f_master / SR;
+        let slave_dt = f_slave / SR;
+        let voct = (f_slave / C0_FREQ).log2();
+
+        let sched = sync_schedule(master_dt, WARMUP + N);
+
+        let mut h = ModuleHarness::build_with_env::<Oscillator>(
+            params!["frequency" => voct],
+            env(SR),
+        );
+        h.disconnect_all_inputs();
+        h.disconnect_output("sine");
+        h.disconnect_output("triangle");
+        h.disconnect_output("square");
+
+        let mut blep = Vec::with_capacity(WARMUP + N);
+        for &s in &sched {
+            h.set_mono("sync", s);
+            h.tick();
+            blep.push(h.read_mono("sawtooth"));
+        }
+        let naive = naive_synced_saw(slave_dt, &sched);
+
+        let blep_hi = high_band(&blep[WARMUP..]);
+        let naive_hi = high_band(&naive[WARMUP..]);
+
+        assert!(
+            blep_hi * 1.4 < naive_hi,
+            "polyBLEP synced saw aliasing ({blep_hi:.4}) not >=1.4x below clean reset ({naive_hi:.4})"
+        );
     }
 }

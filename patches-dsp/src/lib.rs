@@ -36,7 +36,7 @@ pub mod ota_ladder;
 pub use ota_ladder::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles, PolyOtaLadderKernel};
 
 pub mod oscillator;
-pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep, sync_blep_residual};
+pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep};
 
 pub mod adsr;
 pub use adsr::{AdsrCore, AdsrShape, AdsrStage};
