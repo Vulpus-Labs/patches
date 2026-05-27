@@ -116,7 +116,10 @@ jobs:
             binary: patches-lsp
           - vscode-target: darwin-x64
             cargo-target: x86_64-apple-darwin
-            runner: macos-13
+            # macos-latest (arm64) cross-compiles the x86_64 target; the
+            # macos-13 Intel runner image is being retired and the job
+            # was hanging in queue with no runner (see rc.2 release).
+            runner: macos-latest
             binary: patches-lsp
           - vscode-target: win32-x64
             cargo-target: x86_64-pc-windows-msvc
