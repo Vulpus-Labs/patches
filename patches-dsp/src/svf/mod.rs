@@ -58,13 +58,15 @@ fn sanitize(v: f32) -> f32 {
 /// Clamp `f` so the Chamberlin SVF remains stable for damping `d`.
 ///
 /// The topology's characteristic polynomial is `λ² − (2−f²−fd)λ + (1−fd)`.
-/// Both roots stay inside the unit circle iff `f² + 2fd < 4`.  Solving for `f`
-/// gives `f < (−d + √(d² + 16)) / 2`.  We subtract a small margin (0.05) so
-/// the filter never operates right at the stability boundary, where transient
-/// gains are extreme enough to overflow `f32`.
+/// The Jury test puts both roots inside the unit circle iff `f² + 2fd < 4`
+/// (together with `fd < 2`, which the bound below satisfies automatically).
+/// Solving the boundary `f² + 2fd = 4` for `f` gives `f < −d + √(d² + 4)`.
+/// We subtract a small margin (0.05) so the filter never operates right at
+/// the stability boundary, where transient gains are extreme enough to
+/// overflow `f32`.
 #[inline]
 pub fn stability_clamp(f: f32, d: f32) -> f32 {
-    let f_max = 0.5 * (-d + (d * d + 16.0).sqrt()) - 0.05;
+    let f_max = (-d + (d * d + 4.0).sqrt()) - 0.05;
     f.min(f_max)
 }
 
