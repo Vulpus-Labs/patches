@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::HalfbandFir;
 
 /// Default peak window length in oversampled samples.
@@ -15,19 +13,28 @@ pub const DEFAULT_PEAK_WINDOW_LEN: usize = HalfbandFir::GROUP_DELAY_OVERSAMPLED 
 /// for large lookahead windows (hundreds to thousands of samples) without the
 /// per-sample scan cost of a naïve approach.
 ///
+/// The deque is a **fixed array ring**, not a `VecDeque`: front/back are plain
+/// index arithmetic, so the hot `push` is branch-light with no `Option`/deref/
+/// capacity bookkeeping on the audio path. The deque can never hold more than
+/// `buf.len()` indices (one per live slot), so the ring is sized to match and
+/// never overflows.
+///
 /// # Allocation
 ///
-/// All memory — both the ring buffer and the deque — is pre-allocated in
-/// [`PeakWindow::new`]. Neither [`push`](PeakWindow::push) nor
+/// All memory — both the value ring buffer and the deque ring — is pre-allocated
+/// in [`PeakWindow::new`]. Neither [`push`](PeakWindow::push) nor
 /// [`set_window`](PeakWindow::set_window) allocates on the audio thread.
-/// The deque holds at most `window` indices at any time, which is ≤ the
-/// pre-allocated capacity.
 pub struct PeakWindow {
-    buf:    Box<[f32]>,       // ring buffer of absolute values
-    mask:   usize,            // buf.len() - 1 (power-of-two bitmask)
-    write:  usize,            // index of most-recently written sample
-    deque:  VecDeque<usize>,  // indices into buf; front = oldest max, values decrease back→front
-    window: usize,            // active window length (≤ buf.len())
+    buf:    Box<[f32]>,    // ring buffer of absolute values
+    mask:   usize,         // buf.len() - 1 (power-of-two bitmask)
+    write:  usize,         // index of most-recently written sample
+    // Monotonic deque of indices into `buf`, oldest-max at the front. Backed by
+    // a power-of-two ring sized to `buf.len()`; values decrease front→back.
+    dq:      Box<[usize]>,
+    dq_mask: usize,        // dq.len() - 1
+    dq_head: usize,        // ring index of the front (oldest) deque entry
+    dq_len:  usize,        // live deque length
+    window:  usize,        // active window length (≤ buf.len())
 }
 
 impl PeakWindow {
@@ -43,16 +50,23 @@ impl PeakWindow {
         assert!(min_len > 0, "PeakWindow requires at least 1 slot");
         let size = min_len.next_power_of_two();
         Self {
-            buf:    vec![0.0_f32; size].into_boxed_slice(),
-            mask:   size - 1,
-            write:  0,
-            // Pre-allocate the deque for the worst case: every slot in the ring
-            // buffer is in the deque (a monotonically increasing sequence).
-            // As long as we never exceed `window` elements — which is ≤ size —
-            // push_back never triggers reallocation.
-            deque:  VecDeque::with_capacity(size),
-            window: size,
+            buf:     vec![0.0_f32; size].into_boxed_slice(),
+            mask:    size - 1,
+            write:   0,
+            // One deque slot per ring slot: the deque holds at most `window`
+            // (≤ size) indices, so this ring never wraps onto a live entry.
+            dq:      vec![0_usize; size].into_boxed_slice(),
+            dq_mask: size - 1,
+            dq_head: 0,
+            dq_len:  0,
+            window:  size,
         }
+    }
+
+    /// Index of the back (newest) deque entry. Caller must ensure `dq_len > 0`.
+    #[inline]
+    fn dq_back(&self) -> usize {
+        self.dq[(self.dq_head + self.dq_len - 1) & self.dq_mask]
     }
 
     /// Change the active window length without allocating.
@@ -78,36 +92,44 @@ impl PeakWindow {
         // After advancing write, the oldest valid slot is write - (window-1),
         // so the slot at write - window is stale.
         let evict = self.write.wrapping_sub(self.window) & self.mask;
-        if self.deque.front() == Some(&evict) {
-            self.deque.pop_front();
+        if self.dq_len > 0 && self.dq[self.dq_head] == evict {
+            self.dq_head = (self.dq_head + 1) & self.dq_mask;
+            self.dq_len -= 1;
         }
 
         // Maintain the monotone-decreasing invariant: any back entries that are
         // ≤ the new value can never be the maximum while the new entry is alive.
-        while self.deque.back().is_some_and(|&j| self.buf[j] <= val) {
-            self.deque.pop_back();
+        while self.dq_len > 0 && self.buf[self.dq_back()] <= val {
+            self.dq_len -= 1;
         }
-        self.deque.push_back(self.write);
+        self.dq[(self.dq_head + self.dq_len) & self.dq_mask] = self.write;
+        self.dq_len += 1;
     }
 
     /// Maximum absolute value over the current window. O(1).
     #[inline]
     pub fn peak(&self) -> f32 {
-        self.deque.front().map_or(0.0, |&i| self.buf[i])
+        if self.dq_len == 0 {
+            0.0
+        } else {
+            self.buf[self.dq[self.dq_head]]
+        }
     }
 
     /// Rebuild the deque from scratch after a window-size change.
-    /// O(window) but allocation-free (uses pre-allocated deque capacity).
+    /// O(window) but allocation-free (reuses the pre-allocated deque ring).
     fn rebuild_deque(&mut self) {
-        self.deque.clear();
+        self.dq_head = 0;
+        self.dq_len = 0;
         // Iterate from oldest to newest within the current window.
         for age in (0..self.window).rev() {
             let idx = self.write.wrapping_sub(age) & self.mask;
             let val = self.buf[idx];
-            while self.deque.back().is_some_and(|&j| self.buf[j] <= val) {
-                self.deque.pop_back();
+            while self.dq_len > 0 && self.buf[self.dq_back()] <= val {
+                self.dq_len -= 1;
             }
-            self.deque.push_back(idx);
+            self.dq[(self.dq_head + self.dq_len) & self.dq_mask] = idx;
+            self.dq_len += 1;
         }
     }
 }
