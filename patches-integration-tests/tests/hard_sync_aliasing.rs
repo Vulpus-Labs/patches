@@ -52,7 +52,7 @@ const F_MASTER: f32 = 468.75;
 /// pointing at a loss of sub-sample accuracy on the typed path.
 ///
 /// Re-tuned in ticket 0956: fixing the mono `Oscillator` post-reset duplicate
-/// + 2-point polyBLEP widened the non-integer margins (was ~1.6×) but
+/// and adding 2-point polyBLEP widened the non-integer margins (was ~1.6×) but
 /// tightened the degenerate 2:1 case (was ~1.3×). Both chains share the fix,
 /// so the comparison still isolates frac-rounding loss.
 const ALIAS_MARGIN: f64 = 1.08;
