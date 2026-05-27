@@ -1941,6 +1941,117 @@
       }
     },
     {
+      "name": "HyperSaw",
+      "template": {
+        "name": "HyperSaw",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "voct",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "fm",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "spread_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "density_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "mix_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "frequency",
+            "kind": {
+              "Float": {
+                "min": -4.0,
+                "max": 12.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "fm_type",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "logarithmic"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "spread",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.3
+              }
+            }
+          },
+          {
+            "name": "density",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0
+              }
+            }
+          },
+          {
+            "name": "mix",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.7
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "Lfo",
       "template": {
         "name": "Lfo",
@@ -4114,6 +4225,117 @@
             "kind": {
               "Bool": {
                 "default": false
+              }
+            }
+          }
+        ],
+        "structural_params": [],
+        "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "PolyHyperSaw",
+      "template": {
+        "name": "PolyHyperSaw",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "voct",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "fm",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "spread_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "density_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "mix_cv",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "frequency",
+            "kind": {
+              "Float": {
+                "min": -4.0,
+                "max": 12.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "fm_type",
+            "kind": {
+              "Enum": {
+                "variants": [
+                  "linear",
+                  "logarithmic"
+                ],
+                "default": "linear"
+              }
+            }
+          },
+          {
+            "name": "spread",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.3
+              }
+            }
+          },
+          {
+            "name": "density",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 1.0
+              }
+            }
+          },
+          {
+            "name": "mix",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.7
               }
             }
           }
