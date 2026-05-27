@@ -1,7 +1,7 @@
 ---
 id: E154
 title: DSL grammar tidy
-status: open
+status: closed
 created: 2026-05-20
 ---
 

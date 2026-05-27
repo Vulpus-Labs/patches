@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-328d5810.js";
+            window.path_to_searchindex_js = "searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-f5b402d7.js"></script>
+        <script src="toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -552,39 +552,155 @@ match the <code>channels</code> list on the <code>PatternPlayer</code> that read
 <li>All channels in a pattern must have the <strong>same number of steps</strong>.</li>
 <li>Steps are separated by whitespace.</li>
 </ul>
-<h3 id="step-notation"><a class="header" href="#step-notation">Step notation</a></h3>
-<p>Each step produces up to four signals: <code>cv1</code>, <code>cv2</code>, <code>trigger</code>, and <code>gate</code>.</p>
+<h3 id="step-events"><a class="header" href="#step-events">Step events</a></h3>
+<p>The step grammar is a unified taxonomy of cell shapes (ADR 0077). Each
+cell of a channel row parses into one shape; the row-build pass walks
+each channel left-to-right tracking <code>(slide_open, roll_active)</code> channel
+state and emits a resolved effect per cell. The pattern player
+dispatches on the resolved effect.</p>
+<h4 id="cell-taxonomy"><a class="header" href="#cell-taxonomy">Cell taxonomy</a></h4>
+<p>A cell produces up to four signals: <code>cv1</code>, <code>cv2</code>, <code>trigger</code>, <code>gate</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Syntax</th><th>cv1</th><th>cv2</th><th>trigger</th><th>gate</th><th>Description</th></tr>
+<tr><th>Cell</th><th>Trigger?</th><th>Lead-in effect on this tick</th><th>Outgoing slide / roll state</th></tr>
 </thead>
 <tbody>
-<tr><td><code>C4</code>, <code>A#3</code></td><td>V/oct</td><td>—</td><td>yes</td><td>yes</td><td>Note (pitch to cv1)</td></tr>
-<tr><td><code>x</code></td><td>—</td><td>—</td><td>yes</td><td>yes</td><td>Trigger hit</td></tr>
-<tr><td><code>x:0.8</code></td><td>—</td><td>0.8</td><td>yes</td><td>yes</td><td>Trigger with cv2 (velocity)</td></tr>
-<tr><td><code>0.5</code></td><td>0.5</td><td>—</td><td>yes</td><td>yes</td><td>Float value to cv1</td></tr>
-<tr><td><code>0.5:0.3</code></td><td>0.5</td><td>0.3</td><td>yes</td><td>yes</td><td>Float cv1 and cv2</td></tr>
-<tr><td><code>.</code></td><td>—</td><td>—</td><td>no</td><td>no</td><td>Rest</td></tr>
-<tr><td><code>~</code></td><td>—</td><td>—</td><td>no</td><td>yes</td><td>Tie (sustain gate, no retrigger)</td></tr>
+<tr><td><code>value</code></td><td>yes</td><td>snap cv1 (and cv2) at start</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>value:cv2</code></td><td>yes</td><td>snap cv1 + cv2 at start</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>value*N</code></td><td>yes</td><td>snap cv1; fires N sub-triggers</td><td>opens a roll</td></tr>
+<tr><td><code>value&gt;value</code></td><td>yes</td><td>snap cv1 at start</td><td>one-tick slide that lands at end value</td></tr>
+<tr><td><code>value&gt;</code></td><td>yes</td><td>snap cv1 at start</td><td>opens a multi-tick slide</td></tr>
+<tr><td><code>/value</code></td><td>no</td><td>snap cv1 at the tick boundary</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>&gt;_</code></td><td>no</td><td>continues / opens a slide</td><td>extends or opens slide flow</td></tr>
+<tr><td><code>&gt;value</code></td><td>no</td><td>ramps to value within the tick</td><td>closes the slide inside this tick</td></tr>
+<tr><td><code>_</code></td><td>no</td><td>depends on the channel’s state</td><td>absorbed by roll / slide, else sustains</td></tr>
+<tr><td><code>.</code></td><td>no</td><td>rest — gate drops</td><td>resets channel state</td></tr>
 </tbody>
 </table>
 </div>
-<p>Values support the same unit suffixes as module parameters: <code>440Hz</code>,
-<code>2.5kHz</code>, <code>-6dB</code>, and note names are all valid.</p>
-<h3 id="slides"><a class="header" href="#slides">Slides</a></h3>
-<p>A slide interpolates cv1 (and optionally cv2) linearly over the tick
-duration:</p>
-<pre><code class="language-patches">note: C4&gt;E4  .  G4:0.5&gt;0.8  .
+<p><code>value</code> is any of: note name (<code>C4</code>, <code>A#3</code>), float (<code>0.5</code>), int (<code>2</code>),
+unit literal (<code>440Hz</code>, <code>-6dB</code>). The optional <code>:cv2</code> tail attaches to
+<code>value</code>, <code>value&gt;</code>, <code>/value</code>, and <code>&gt;value</code> (cv2 endpoints on close
+cells ramp through the slide). Cv2 on <code>value&gt;value</code> sugar is
+<code>A:0.5&gt;B:0.8</code>.</p>
+<h4 id="unified-close-rule"><a class="header" href="#unified-close-rule">Unified close rule</a></h4>
+<p>A slide opened by <code>value&gt;</code> or <code>&gt;_</code> closes when the row-build pass
+encounters a non-<code>_</code>, non-<code>&gt;_</code>, non-<code>value&gt;</code> cell:</p>
+<ul>
+<li><code>value</code> close — slide lands at <code>value</code> at the tick boundary entering
+the cell; cell then fires a fresh trigger on its own tick.</li>
+<li><code>/value</code> close — slide lands at <code>value</code> at the tick boundary; cell
+holds without retrigger.</li>
+<li><code>&gt;value</code> close — slide ramps to <code>value</code> <em>inside</em> this tick (no
+trigger); the close-tick is itself a slide-flow tick.</li>
+</ul>
+<p>The lead-in shape (flat hold vs ramp) is determined by prior cells,
+not by anything on the close cell. Bare <code>value</code> is therefore always
+locally readable as a fresh trigger.</p>
+<h4 id="continuation-absorption"><a class="header" href="#continuation-absorption">Continuation absorption</a></h4>
+<p>A <code>_</code> cell takes its meaning from whichever modifier was last open on
+the channel:</p>
+<ul>
+<li>After a non-roll, non-slide anchor: sustain (gate held, cv unchanged).</li>
+<li>After a <code>value*N</code> anchor: absorbed into the roll’s spread schedule
+(the N sub-triggers spread across the anchor tick + the absorbed-tie
+run). Span <code>S = 1 + consecutive_underscores</code>; sub-triggers fall at
+<code>k * S / N</code> of the span for <code>k = 0..N-1</code>; gate articulates at ~80%
+of each interval. Swing within the span is respected per-tick.</li>
+<li>After a <code>value&gt;</code> or <code>&gt;_</code>: absorbed into the slide’s ramp.</li>
+</ul>
+<p><code>&gt;_</code> is the explicit-flow form for slides that start on a non-value
+cell (“hold this note for a bit, then start ramping”).</p>
+<h4 id="worked-example-timelines"><a class="header" href="#worked-example-timelines">Worked-example timelines</a></h4>
+<p>Each five-tick figure below shows trigger placement (<code>!</code>), gate
+articulation (<code>-</code> = high, <code>.</code> = low), and cv shape across ticks.</p>
+<pre><code class="language-text">Pattern:  E4 . . . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- .  .  .  .
+cv1:      E4 E4 E4 E4 E4   (held after gate drops; analog convention)
+
+Pattern:  E4 /G4 . . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  .  .  .   (only the E4 fires)
+Gate:     --- -- .  .  .
+cv1:      E4  G4 G4 G4 G4  (snap at the 1→2 boundary)
+
+Pattern:  E4 _ /G4 . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- .  .
+cv1:      E4 E4 G4 G4 G4  (snap at the 2→3 boundary)
+
+Pattern:  E4&gt; _ G4 . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  !  .  .   (fresh G4 trigger at start of tick 3)
+Gate:     --- -- -- .  .
+cv1:      E4→ →G4 G4 G4 G4 (ramp through ticks 1+2; lands at boundary)
+
+Pattern:  E4 _ &gt;_ /G4 .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- -- .
+cv1:      E4 E4 E4→ G4 G4   (slide opens at tick 3 via &gt;_; closes at
+                              tick-3→tick-4 boundary)
+
+Pattern:  E4&gt; _ &gt;G4 . .
+Tick:     1   2  3   4  5
+Trigger:  !   .  .   .  .
+Gate:     --- -- --- .  .
+cv1:      E4→ →  →G4 G4 G4  (continuous ramp across ticks 1-3; lands
+                              at end of tick 3)
+
+Pattern:  x*3 _ . . .
+Tick:     1   2 3 4 5
+Trigger:  !!!!! . . . .     (3 sub-triggers spread across ticks 1+2,
+                              `*0/3`, `*2/3`, `*4/3` of T each)
+Gate:     -..-..-.. . . .   (~80% duty per sub-interval)
+cv1:      anchor cv1 held across the span
 </code></pre>
-<p>The <code>&gt;</code> separates start and end values. The gate stays high through the
-slide. Slides work with notes, floats, and cv1:cv2 pairs.</p>
-<h3 id="repeats"><a class="header" href="#repeats">Repeats</a></h3>
-<p>A repeat subdivides a single tick into multiple sub-triggers:</p>
-<pre><code class="language-patches">hit: x*3  .  x*2  .
+<p>The <code>value&gt;value</code> sugar is the common one-tick case: it packs an
+open-and-close into a single cell. It is exactly equivalent in effect
+to <code>value&gt; /value</code> <em>except</em> that the unsugared form takes two ticks
+(slide tick 1, hold tick 2). Use the sugar when the timing fits.</p>
+<h4 id="row-continuation-across-"><a class="header" href="#row-continuation-across-">Row-continuation across <code>|</code></a></h4>
+<p>Channel state and slide / roll spans flow through the <code>|</code>
+row-continuation marker — the parser merges continuations into one
+logical row before the row-build pass, so a span can cross the join:</p>
+<pre><code class="language-patches">hit: x*3
+   | _ _
+vox: A3&gt;
+   | _ /B3
 </code></pre>
-<p><code>x*3</code> fires three evenly-spaced triggers within the tick, each with an ~80%
-duty cycle gate.</p>
+<h4 id="migration-from-"><a class="header" href="#migration-from-">Migration from <code>~</code></a></h4>
+<p>The <code>~</code> tie token was retired in favour of <code>_</code> (ADR 0077). Old
+patches using <code>~</code> in step rows do not parse; mechanically replace
+<code>~</code> → <code>_</code> inside pattern bodies. The cable-endpoint forms (<code>~tap(…)</code>,
+<code>~host_control</code>) are unaffected.</p>
+<h4 id="slide-macro-retired"><a class="header" href="#slide-macro-retired"><code>slide(…)</code> macro retired</a></h4>
+<p>The <code>slide(n, A, B)</code> macro generator was removed in ticket 0948.
+Authors write slides inline using the cell shapes above. Mechanical
+equivalences:</p>
+<ul>
+<li><code>slide(1, A, B)</code> → <code>A&gt;B</code></li>
+<li><code>slide(2, A, B)</code> → <code>A&gt; &gt;B</code></li>
+<li><code>slide(n, A, B)</code> (n ≥ 3) → <code>A&gt;</code> + (n−2)×<code>&gt;_</code> + <code>&gt;B</code></li>
+</ul>
+<h4 id="known-limitations"><a class="header" href="#known-limitations">Known limitations</a></h4>
+<ul>
+<li><strong>Row-end truncation</strong>: a slide or roll never extends past the end
+of a channel row. <code>x*5 _ _</code> at the end of a 3-step row still fires
+5 sub-triggers across those 3 ticks. A <code>value&gt;</code> with no close cell
+in the row is degraded to a no-op (close target = open value); the
+row-build pass emits a diagnostic.</li>
+<li><strong>Cross-loop / cross-bank</strong>: spans don’t wrap past a pattern loop
+or bank boundary; trailing sub-events are dropped rather than
+wrapping.</li>
+<li><strong>Mid-span live edit</strong>: if a <code>_</code> cell is edited to a non-tie
+mid-roll or mid-slide, the new content takes over on its own tick
+rise and the prior span is replaced (no overrun).</li>
+</ul>
 <h2 id="songs"><a class="header" href="#songs">Songs</a></h2>
 <p>A song block defines a playback order built from named <code>section</code> blocks and
 <code>play</code> statements.</p>

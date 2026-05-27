@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-328d5810.js";
+            window.path_to_searchindex_js = "../searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f5b402d7.js"></script>
+        <script src="../toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -245,6 +245,75 @@ envelope.</p>
 </table>
 </div>
 <hr>
+<h2 id="env--multi-stage-breakpoint-envelope-with-key-follow"><a class="header" href="#env--multi-stage-breakpoint-envelope-with-key-follow"><code>Env</code> — Multi-stage breakpoint envelope with key-follow</a></h2>
+<p>Where <code>Adsr</code> has a fixed attack/decay/sustain/release shape, <code>Env</code> runs
+an arbitrary number of <code>(time, level, curve)</code> stages with a designated
+sustain stage — enough to express D50-style contours ADSR cannot (attack
+spike → dip → secondary swell → sustain). The stage count is the
+module’s <em>channels</em> axis: <code>Env(5)</code> is a five-stage envelope. One module
+is one envelope (mono); use multiple instances for multiple envelopes.</p>
+<p>Stages <code>0..sustain_stage</code> form the pre-sustain contour; the envelope
+holds at <code>level[sustain_stage]</code> while the gate is high, then runs the
+remaining stages <code>sustain_stage+1..N</code> as the release tail on gate-off.
+Designate a final stage with <code>level = 0</code> for a release to silence. A
+re-trigger restarts from the current level (no click), and a gate-off
+during the pre-sustain contour jumps straight into the release tail.</p>
+<p><strong>Key-follow</strong> shortens stage times with pitch, as real resonators decay
+faster up the keyboard: <code>time_scale = 2^(-keyfollow * (voct - ref_key))</code>,
+so <code>keyfollow = 1.0</code> halves all stage times one octave above <code>ref_key</code>.
+It is applied per tick, so a bending <code>voct</code> re-scales the contour live.</p>
+<p><strong>Velocity</strong> scales stage <em>levels</em>: the effective <code>velocity</code> (1.0 if the
+input is unconnected) is mapped to a level multiplier
+<code>1 - vel_depth * (1 - velocity)</code> and latched at the trigger, so an
+in-flight envelope keeps a stable scaling.</p>
+<p>Route <code>out</code> to an oscillator <code>voct</code> / <code>phase_mod</code> or a filter cutoff for
+the D50 attack pitch-blip or filter sweep — that’s a patch idiom, not a
+port.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>trigger</td><td>One-sample pulse starts the envelope</td></tr>
+<tr><td><code>gate</code></td><td>mono</td><td>Held high to sustain; release to run the release tail</td></tr>
+<tr><td><code>voct</code></td><td>mono</td><td>1V/oct pitch driving key-follow time-scaling (0 if unconnected)</td></tr>
+<tr><td><code>velocity</code></td><td>mono</td><td>Velocity in [0, 1] scaling stage levels (1.0 if unconnected)</td></tr>
+<tr><td><code>vca_in</code></td><td>mono</td><td>Optional audio/CV input multiplied by the envelope</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>Envelope level in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out</code></td><td>mono</td><td><code>vca_in * out</code> — pre-multiplied</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>time[i]</code></td><td>float</td><td>0.0 – 10.0</td><td><code>0.1</code></td><td>Stage i duration in seconds (i in 0..N−1, N = stage count)</td></tr>
+<tr><td><code>level[i]</code></td><td>float</td><td>0.0 – 1.0</td><td><code>1.0</code></td><td>Stage i target level</td></tr>
+<tr><td><code>curve[i]</code></td><td>enum</td><td>linear, exponential</td><td><code>linear</code></td><td>Stage i segment shape</td></tr>
+<tr><td><code>sustain_stage</code></td><td>int (structural)</td><td>0 – 7</td><td><code>0</code></td><td>Index of the held stage; later stages are the release tail</td></tr>
+<tr><td><code>keyfollow</code></td><td>float</td><td>0.0 – 1.0</td><td><code>0.0</code></td><td>Pitch time-scaling depth (1.0 halves times one octave up)</td></tr>
+<tr><td><code>ref_key</code></td><td>float</td><td>-5.0 – 5.0</td><td><code>0.0</code></td><td>Reference pitch (V/oct) at which <code>time_scale = 1</code></td></tr>
+<tr><td><code>vel_depth</code></td><td>float</td><td>0.0 – 1.0</td><td><code>0.0</code></td><td>How much velocity attenuates stage levels</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
 <h2 id="polyadsr--per-voice-dadsr"><a class="header" href="#polyadsr--per-voice-dadsr"><code>PolyAdsr</code> — Per-voice DADSR</a></h2>
 <p>Same envelope shape as <code>Adsr</code> (delay/attack/decay/sustain/release/shape)
 but each voice has independent state, driven by per-voice
@@ -276,6 +345,48 @@ but each voice has independent state, driven by per-voice
 </div>
 <p><strong>Parameters</strong> — same names and ranges as <code>Adsr</code>. Parameters apply
 identically to all voices.</p>
+<hr>
+<h2 id="polyenv--per-voice-multi-stage-envelope"><a class="header" href="#polyenv--per-voice-multi-stage-envelope"><code>PolyEnv</code> — Per-voice multi-stage envelope</a></h2>
+<p>The 16-voice form of <code>Env</code>: same multi-stage contour, key-follow, and
+velocity scaling, but each voice holds independent state driven by
+per-voice <code>trigger</code> / <code>gate</code> / <code>voct</code> / <code>velocity</code> poly cables. All
+voices share one stage configuration. The stage count is the channels
+axis (<code>PolyEnv(5)</code> = five stages); <code>sustain_stage</code> and the release-tail
+semantics are identical to <code>Env</code>.</p>
+<p>Key-follow and velocity are computed per voice:
+<code>time_scale = 2^(-keyfollow * (voct[v] - ref_key))</code> and the level
+multiplier <code>1 - vel_depth * (1 - velocity[v])</code>, latched at each voice’s
+trigger. Unconnected <code>voct</code> reads as 0 and unconnected <code>velocity</code> as 1.0.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>poly_trigger</td><td>Per-voice rising edge starts the envelope</td></tr>
+<tr><td><code>gate</code></td><td>poly</td><td>Per-voice gate; release to run the release tail</td></tr>
+<tr><td><code>voct</code></td><td>poly</td><td>Per-voice 1V/oct pitch driving key-follow</td></tr>
+<tr><td><code>velocity</code></td><td>poly</td><td>Per-voice velocity in [0, 1] scaling stage levels</td></tr>
+<tr><td><code>vca_in</code></td><td>poly</td><td>Optional per-voice audio/CV multiplied by the envelope</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>poly</td><td>Per-voice envelope level in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out</code></td><td>poly</td><td><code>vca_in * out</code> per voice</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong> — same names, ranges, and defaults as <code>Env</code>
+(<code>time[i]</code>, <code>level[i]</code>, <code>curve[i]</code>, <code>sustain_stage</code>, <code>keyfollow</code>,
+<code>ref_key</code>, <code>vel_depth</code>). Parameters apply identically to all voices.</p>
 
                     </main>
 

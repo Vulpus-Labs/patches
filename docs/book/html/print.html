@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-328d5810.js";
+            window.path_to_searchindex_js = "searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-f5b402d7.js"></script>
+        <script src="toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -179,9 +179,16 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>Patches is a modular audio instrument with a text-based patch language. You describe a graph of modules — oscillators, filters, envelopes, sequencers, effects — and how they connect; the engine runs the graph in real time. Editing the patch file and saving swaps in the new graph without interrupting audio or resetting module state, so the language doubles as a REPL for the development cycle.</p>
+<p>Patches is a modular audio instrument with a text-based patch language. You describe a graph of modules — oscillators, filters, envelopes, sequencers, effects — and how they connect; the engine runs the graph in real time. Save the file and Patches swaps in the new graph without interrupting audio or resetting module state, so editing the patch is itself the development cycle.</p>
 <h2 id="why-patches"><a class="header" href="#why-patches">Why Patches?</a></h2>
-<p>Other software modular systems aim to provide a skeuomorphic UI representation of a Eurorack-style physical modular setup. Patches skips the UI layer entirely, focusing instead on providing a convenient, powerful, machine-readable and human/LLM-writeable DSL for defining modular patches, and a fast, efficient, real-time-stable synthesis engine for running them. The DSL is supported by a full LSP implementation, giving the user hinting, autocomplete and navigation support.</p>
+<p>Most software modular systems present a graphical reproduction of a Eurorack-style hardware modular setup. You drag patch cables between ports, turn knobs, move sliders. This is satisfying and creatively rewarding, but it isn’t the only way to work.</p>
+<p>Patches sets the visual interface aside and concentrates on two things: a clear language for describing patches, and a fast, real-time-stable engine for running them. The language is supported by a full Language Server Protocol implementation, so any compatible editor can offer autocomplete, inline hints, and navigation between definitions.</p>
+<p>Working in text makes some abstractions natural that would be awkward in a visual environment. Three examples:</p>
+<ul>
+<li>Per-cable scaling, offset and clipping. Signals can be amplified, offset, or mapped into and bounded within a constant range with an annotation on the cable connection.</li>
+<li>Templates. Define a sub-patch once with parameters, then instantiate it multiple times with different values.</li>
+<li>Multi-channel modules. A mixing desk or multi-tap delay can be declared with whatever number of channels you need, each with its own parameters, inputs, and outputs.</li>
+</ul>
 <h2 id="three-ways-to-run-a-patch"><a class="header" href="#three-ways-to-run-a-patch">Three ways to run a patch</a></h2>
 <p>Patches has no single intended workflow. The same <code>.patches</code> file works in any of these contexts:</p>
 <p><strong>As a CLAP plugin in a DAW.</strong> Load the <code>Patches</code> plugin in REAPER, Bitwig, or any CLAP host. Point it at a patch file, drive it from MIDI tracks, automate its parameters, save with the project. Use this when you want a custom synth voice inside a larger production.</p>
@@ -1969,39 +1976,155 @@ match the <code>channels</code> list on the <code>PatternPlayer</code> that read
 <li>All channels in a pattern must have the <strong>same number of steps</strong>.</li>
 <li>Steps are separated by whitespace.</li>
 </ul>
-<h3 id="step-notation"><a class="header" href="#step-notation">Step notation</a></h3>
-<p>Each step produces up to four signals: <code>cv1</code>, <code>cv2</code>, <code>trigger</code>, and <code>gate</code>.</p>
+<h3 id="step-events"><a class="header" href="#step-events">Step events</a></h3>
+<p>The step grammar is a unified taxonomy of cell shapes (ADR 0077). Each
+cell of a channel row parses into one shape; the row-build pass walks
+each channel left-to-right tracking <code>(slide_open, roll_active)</code> channel
+state and emits a resolved effect per cell. The pattern player
+dispatches on the resolved effect.</p>
+<h4 id="cell-taxonomy"><a class="header" href="#cell-taxonomy">Cell taxonomy</a></h4>
+<p>A cell produces up to four signals: <code>cv1</code>, <code>cv2</code>, <code>trigger</code>, <code>gate</code>.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Syntax</th><th>cv1</th><th>cv2</th><th>trigger</th><th>gate</th><th>Description</th></tr>
+<tr><th>Cell</th><th>Trigger?</th><th>Lead-in effect on this tick</th><th>Outgoing slide / roll state</th></tr>
 </thead>
 <tbody>
-<tr><td><code>C4</code>, <code>A#3</code></td><td>V/oct</td><td>—</td><td>yes</td><td>yes</td><td>Note (pitch to cv1)</td></tr>
-<tr><td><code>x</code></td><td>—</td><td>—</td><td>yes</td><td>yes</td><td>Trigger hit</td></tr>
-<tr><td><code>x:0.8</code></td><td>—</td><td>0.8</td><td>yes</td><td>yes</td><td>Trigger with cv2 (velocity)</td></tr>
-<tr><td><code>0.5</code></td><td>0.5</td><td>—</td><td>yes</td><td>yes</td><td>Float value to cv1</td></tr>
-<tr><td><code>0.5:0.3</code></td><td>0.5</td><td>0.3</td><td>yes</td><td>yes</td><td>Float cv1 and cv2</td></tr>
-<tr><td><code>.</code></td><td>—</td><td>—</td><td>no</td><td>no</td><td>Rest</td></tr>
-<tr><td><code>~</code></td><td>—</td><td>—</td><td>no</td><td>yes</td><td>Tie (sustain gate, no retrigger)</td></tr>
+<tr><td><code>value</code></td><td>yes</td><td>snap cv1 (and cv2) at start</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>value:cv2</code></td><td>yes</td><td>snap cv1 + cv2 at start</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>value*N</code></td><td>yes</td><td>snap cv1; fires N sub-triggers</td><td>opens a roll</td></tr>
+<tr><td><code>value&gt;value</code></td><td>yes</td><td>snap cv1 at start</td><td>one-tick slide that lands at end value</td></tr>
+<tr><td><code>value&gt;</code></td><td>yes</td><td>snap cv1 at start</td><td>opens a multi-tick slide</td></tr>
+<tr><td><code>/value</code></td><td>no</td><td>snap cv1 at the tick boundary</td><td>closes any open slide at the boundary</td></tr>
+<tr><td><code>&gt;_</code></td><td>no</td><td>continues / opens a slide</td><td>extends or opens slide flow</td></tr>
+<tr><td><code>&gt;value</code></td><td>no</td><td>ramps to value within the tick</td><td>closes the slide inside this tick</td></tr>
+<tr><td><code>_</code></td><td>no</td><td>depends on the channel’s state</td><td>absorbed by roll / slide, else sustains</td></tr>
+<tr><td><code>.</code></td><td>no</td><td>rest — gate drops</td><td>resets channel state</td></tr>
 </tbody>
 </table>
 </div>
-<p>Values support the same unit suffixes as module parameters: <code>440Hz</code>,
-<code>2.5kHz</code>, <code>-6dB</code>, and note names are all valid.</p>
-<h3 id="slides"><a class="header" href="#slides">Slides</a></h3>
-<p>A slide interpolates cv1 (and optionally cv2) linearly over the tick
-duration:</p>
-<pre><code class="language-patches">note: C4&gt;E4  .  G4:0.5&gt;0.8  .
+<p><code>value</code> is any of: note name (<code>C4</code>, <code>A#3</code>), float (<code>0.5</code>), int (<code>2</code>),
+unit literal (<code>440Hz</code>, <code>-6dB</code>). The optional <code>:cv2</code> tail attaches to
+<code>value</code>, <code>value&gt;</code>, <code>/value</code>, and <code>&gt;value</code> (cv2 endpoints on close
+cells ramp through the slide). Cv2 on <code>value&gt;value</code> sugar is
+<code>A:0.5&gt;B:0.8</code>.</p>
+<h4 id="unified-close-rule"><a class="header" href="#unified-close-rule">Unified close rule</a></h4>
+<p>A slide opened by <code>value&gt;</code> or <code>&gt;_</code> closes when the row-build pass
+encounters a non-<code>_</code>, non-<code>&gt;_</code>, non-<code>value&gt;</code> cell:</p>
+<ul>
+<li><code>value</code> close — slide lands at <code>value</code> at the tick boundary entering
+the cell; cell then fires a fresh trigger on its own tick.</li>
+<li><code>/value</code> close — slide lands at <code>value</code> at the tick boundary; cell
+holds without retrigger.</li>
+<li><code>&gt;value</code> close — slide ramps to <code>value</code> <em>inside</em> this tick (no
+trigger); the close-tick is itself a slide-flow tick.</li>
+</ul>
+<p>The lead-in shape (flat hold vs ramp) is determined by prior cells,
+not by anything on the close cell. Bare <code>value</code> is therefore always
+locally readable as a fresh trigger.</p>
+<h4 id="continuation-absorption"><a class="header" href="#continuation-absorption">Continuation absorption</a></h4>
+<p>A <code>_</code> cell takes its meaning from whichever modifier was last open on
+the channel:</p>
+<ul>
+<li>After a non-roll, non-slide anchor: sustain (gate held, cv unchanged).</li>
+<li>After a <code>value*N</code> anchor: absorbed into the roll’s spread schedule
+(the N sub-triggers spread across the anchor tick + the absorbed-tie
+run). Span <code>S = 1 + consecutive_underscores</code>; sub-triggers fall at
+<code>k * S / N</code> of the span for <code>k = 0..N-1</code>; gate articulates at ~80%
+of each interval. Swing within the span is respected per-tick.</li>
+<li>After a <code>value&gt;</code> or <code>&gt;_</code>: absorbed into the slide’s ramp.</li>
+</ul>
+<p><code>&gt;_</code> is the explicit-flow form for slides that start on a non-value
+cell (“hold this note for a bit, then start ramping”).</p>
+<h4 id="worked-example-timelines"><a class="header" href="#worked-example-timelines">Worked-example timelines</a></h4>
+<p>Each five-tick figure below shows trigger placement (<code>!</code>), gate
+articulation (<code>-</code> = high, <code>.</code> = low), and cv shape across ticks.</p>
+<pre><code class="language-text">Pattern:  E4 . . . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- .  .  .  .
+cv1:      E4 E4 E4 E4 E4   (held after gate drops; analog convention)
+
+Pattern:  E4 /G4 . . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  .  .  .   (only the E4 fires)
+Gate:     --- -- .  .  .
+cv1:      E4  G4 G4 G4 G4  (snap at the 1→2 boundary)
+
+Pattern:  E4 _ /G4 . .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- .  .
+cv1:      E4 E4 G4 G4 G4  (snap at the 2→3 boundary)
+
+Pattern:  E4&gt; _ G4 . .
+Tick:     1   2  3  4  5
+Trigger:  !   .  !  .  .   (fresh G4 trigger at start of tick 3)
+Gate:     --- -- -- .  .
+cv1:      E4→ →G4 G4 G4 G4 (ramp through ticks 1+2; lands at boundary)
+
+Pattern:  E4 _ &gt;_ /G4 .
+Tick:     1  2  3  4  5
+Trigger:  !  .  .  .  .
+Gate:     -- -- -- -- .
+cv1:      E4 E4 E4→ G4 G4   (slide opens at tick 3 via &gt;_; closes at
+                              tick-3→tick-4 boundary)
+
+Pattern:  E4&gt; _ &gt;G4 . .
+Tick:     1   2  3   4  5
+Trigger:  !   .  .   .  .
+Gate:     --- -- --- .  .
+cv1:      E4→ →  →G4 G4 G4  (continuous ramp across ticks 1-3; lands
+                              at end of tick 3)
+
+Pattern:  x*3 _ . . .
+Tick:     1   2 3 4 5
+Trigger:  !!!!! . . . .     (3 sub-triggers spread across ticks 1+2,
+                              `*0/3`, `*2/3`, `*4/3` of T each)
+Gate:     -..-..-.. . . .   (~80% duty per sub-interval)
+cv1:      anchor cv1 held across the span
 </code></pre>
-<p>The <code>&gt;</code> separates start and end values. The gate stays high through the
-slide. Slides work with notes, floats, and cv1:cv2 pairs.</p>
-<h3 id="repeats"><a class="header" href="#repeats">Repeats</a></h3>
-<p>A repeat subdivides a single tick into multiple sub-triggers:</p>
-<pre><code class="language-patches">hit: x*3  .  x*2  .
+<p>The <code>value&gt;value</code> sugar is the common one-tick case: it packs an
+open-and-close into a single cell. It is exactly equivalent in effect
+to <code>value&gt; /value</code> <em>except</em> that the unsugared form takes two ticks
+(slide tick 1, hold tick 2). Use the sugar when the timing fits.</p>
+<h4 id="row-continuation-across-"><a class="header" href="#row-continuation-across-">Row-continuation across <code>|</code></a></h4>
+<p>Channel state and slide / roll spans flow through the <code>|</code>
+row-continuation marker — the parser merges continuations into one
+logical row before the row-build pass, so a span can cross the join:</p>
+<pre><code class="language-patches">hit: x*3
+   | _ _
+vox: A3&gt;
+   | _ /B3
 </code></pre>
-<p><code>x*3</code> fires three evenly-spaced triggers within the tick, each with an ~80%
-duty cycle gate.</p>
+<h4 id="migration-from-"><a class="header" href="#migration-from-">Migration from <code>~</code></a></h4>
+<p>The <code>~</code> tie token was retired in favour of <code>_</code> (ADR 0077). Old
+patches using <code>~</code> in step rows do not parse; mechanically replace
+<code>~</code> → <code>_</code> inside pattern bodies. The cable-endpoint forms (<code>~tap(…)</code>,
+<code>~host_control</code>) are unaffected.</p>
+<h4 id="slide-macro-retired"><a class="header" href="#slide-macro-retired"><code>slide(…)</code> macro retired</a></h4>
+<p>The <code>slide(n, A, B)</code> macro generator was removed in ticket 0948.
+Authors write slides inline using the cell shapes above. Mechanical
+equivalences:</p>
+<ul>
+<li><code>slide(1, A, B)</code> → <code>A&gt;B</code></li>
+<li><code>slide(2, A, B)</code> → <code>A&gt; &gt;B</code></li>
+<li><code>slide(n, A, B)</code> (n ≥ 3) → <code>A&gt;</code> + (n−2)×<code>&gt;_</code> + <code>&gt;B</code></li>
+</ul>
+<h4 id="known-limitations"><a class="header" href="#known-limitations">Known limitations</a></h4>
+<ul>
+<li><strong>Row-end truncation</strong>: a slide or roll never extends past the end
+of a channel row. <code>x*5 _ _</code> at the end of a 3-step row still fires
+5 sub-triggers across those 3 ticks. A <code>value&gt;</code> with no close cell
+in the row is degraded to a no-op (close target = open value); the
+row-build pass emits a diagnostic.</li>
+<li><strong>Cross-loop / cross-bank</strong>: spans don’t wrap past a pattern loop
+or bank boundary; trailing sub-events are dropped rather than
+wrapping.</li>
+<li><strong>Mid-span live edit</strong>: if a <code>_</code> cell is edited to a non-tie
+mid-roll or mid-slide, the new content takes over on its own tick
+rise and the prior span is replaced (no overrun).</li>
+</ul>
 <h2 id="songs"><a class="header" href="#songs">Songs</a></h2>
 <p>A song block defines a playback order built from named <code>section</code> blocks and
 <code>play</code> statements.</p>
@@ -2685,8 +2808,8 @@ exposed through:</p>
 <li>The VS Code extension command <strong>Show Patch Graph</strong>.</li>
 <li>The LSP <code>patches/renderSvg</code> custom request, for any LSP client.</li>
 <li>The <code>patches_svg</code> library crate, for programmatic use.</li>
-<li>The <code>patches-svg-cli</code> workspace crate, which produces a <code>patches-svg</code>
-binary (<code>publish = false</code>, build with <code>cargo build -p patches-svg-cli</code>).</li>
+<li>The <code>patches-svg</code> binary, shipped by the <code>patches-svg</code> workspace crate
+(<code>publish = false</code>, build with <code>cargo build -p patches-svg --bin patches-svg</code>).</li>
 </ul>
 <h2 id="from-vs-code"><a class="header" href="#from-vs-code">From VS Code</a></h2>
 <p>Install the <a href="#installing-the-vs-code-extension">VS Code extension</a>. Open a <code>.patches</code>
@@ -2804,7 +2927,10 @@ use the diagram as a sanity check after structural changes.</p>
 <tr><td><a href="#midi-input-1">MIDI</a></td><td><code>MidiToCv</code>, <code>PolyMidiToCv</code>, <code>MidiCC</code>, <code>MidiArp</code>, <code>MidiDelay</code>, <code>MidiSplit</code>, <code>MidiTranspose</code>, <code>MidiDrumset</code></td><td>MIDI input and processing</td></tr>
 <tr><td><a href="#delays--reverb">Delays &amp; reverb</a></td><td><code>Delay</code>, <code>StereoDelay</code>, <code>FdnReverb</code>, <code>ConvReverb</code>, <code>StereoConvReverb</code></td><td>Delay and reverb</td></tr>
 <tr><td><a href="#dynamics">Dynamics</a></td><td><code>Limiter</code>, <code>StereoLimiter</code>, <code>Bitcrusher</code>, <code>Drive</code>, <code>TransientShaper</code>, <code>RingMod</code>, <code>PitchShift</code></td><td>Dynamics and nonlinear effects</td></tr>
+<tr><td><a href="#detectors">Detectors</a></td><td><code>AudioToTrigger</code>, <code>PolyAudioToTrigger</code>, <code>AudioToGate</code>, <code>PolyAudioToGate</code></td><td>Audio → sub-sample triggers / gates</td></tr>
+<tr><td><a href="#stereo-utilities">Stereo utilities</a></td><td><code>Pan</code>, <code>Balance</code>, <code>StereoWidth</code>, <code>MidSide</code>, <code>MonoBass</code></td><td>Stereo image control</td></tr>
 <tr><td><a href="#utilities">Utilities</a></td><td><code>Glide</code>, <code>Tuner</code>, <code>PolyTuner</code>, <code>Quant</code>, <code>PolyQuant</code>, <code>Sah</code>, <code>PolySah</code>, <code>MonoToPoly</code>, <code>PolyToMono</code></td><td>Conversion, smoothing, quantisation</td></tr>
+<tr><td><a href="#primitives">Primitives</a></td><td><code>DcBlocker</code>, <code>Comb</code></td><td>Small reusable DSP building blocks</td></tr>
 <tr><td><a href="#audio-output">Output</a></td><td><code>AudioOut</code>, <code>AudioIn</code>, <code>HostTransport</code></td><td>Audio I/O and host transport</td></tr>
 </tbody>
 </table>
@@ -2903,6 +3029,116 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><td><code>triangle</code></td><td>Per-voice triangle (poly)</td></tr>
 <tr><td><code>sawtooth</code></td><td>Per-voice sawtooth, PolyBLEP anti-aliased (poly)</td></tr>
 <tr><td><code>square</code></td><td>Per-voice square, PolyBLEP anti-aliased (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="supersaw--hypersaw-and-polyhypersaw"><a class="header" href="#supersaw--hypersaw-and-polyhypersaw">Supersaw — <code>HyperSaw</code> and <code>PolyHyperSaw</code></a></h2>
+<p>A <em>supersaw</em> (JP-8000 style) is a stack of detuned sawtooth copies summed to
+one voice. <code>HyperSaw</code>/<code>PolyHyperSaw</code> use <strong>9 copies</strong> — one centre saw plus four
+pairs of side saws, detuned symmetrically below and above the centre pitch. The
+copies run at slightly different frequencies, so they slowly drift in and out of
+phase with one another; that continuous beating is the wide, animated character
+you cannot get from a single saw or a static wavetable.</p>
+<p>Three controls shape the ensemble:</p>
+<ul>
+<li><strong><code>spread</code></strong> — the detune width. <code>0</code> collapses every copy onto the centre
+pitch (a plain unison saw, no beating); <code>1</code> pushes the outermost pair to
+±50 cents. The pairs are spaced nonlinearly (inner pairs detuned much less
+than the outer ones).</li>
+<li><strong><code>density</code></strong> — how many of the four side pairs are active, faded in
+inner→outer. The fade is loudness-normalised, so turning density up thickens
+the sound without a level jump.</li>
+<li><strong><code>mix</code></strong> — the centre↔side balance. <code>0</code> is the clean centre saw alone; <code>1</code> is
+the full stack with the centre and sides together. The summed output is
+normalised to stay within <code>[-1, 1]</code>.</li>
+</ul>
+<p><strong>FM here is vibrato, not timbre.</strong> Unlike <code>Osc</code>/<code>PolyOsc</code>, which recompute pitch
+every sample, the supersaw recomputes all 144 increments (9 copies × 16 voices)
+only at the control-rate interval — recomputing them per sample is not
+affordable. Pitch and FM are therefore sampled at control rate: <code>fm</code> is a
+vibrato input, and there is <strong>no hard-sync and no phase modulation</strong> (syncing
+would re-align the copies and kill the beating that is the whole point). See
+<strong>ADR 0078</strong> for the design and the fixed-point, autovectorised kernel behind it.</p>
+<p>The copies’ start phases are randomised once at construction, so there is no
+thin attack and no comb-filtered coincident-wrap aliasing.</p>
+<p>A worked patch using <code>PolyHyperSaw</code> into a filter and amp lives in
+<a href="https://github.com/Vulpus-Labs/patches/blob/main/examples/synths/hypersaw_lead.patches"><code>examples/synths/hypersaw_lead.patches</code></a>.</p>
+<h3 id="hypersaw--mono-supersaw"><a class="header" href="#hypersaw--mono-supersaw"><code>HyperSaw</code> — Mono supersaw</a></h3>
+<p>A single detuned-saw ensemble. Runs the 16-voice kernel and reads one voice;
+mono is not the performance case.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>frequency</code></td><td>float (v/oct)</td><td><code>0.0</code></td><td>Base pitch as V/oct above C0 (0.0 = C0 ≈ 16.35 Hz)</td></tr>
+<tr><td><code>fm_type</code></td><td>string</td><td><code>linear</code></td><td>FM response: <code>linear</code> or <code>logarithmic</code></td></tr>
+<tr><td><code>spread</code></td><td>float</td><td><code>0.3</code></td><td>Detune width (0 = unison, 1 = ±50 cents at the outer pair)</td></tr>
+<tr><td><code>density</code></td><td>float</td><td><code>1.0</code></td><td>Active side pairs, faded in inner→outer (×4 pairs)</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td><code>0.7</code></td><td>Centre↔side balance (0 = clean centre saw, 1 = full stack)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>V/oct pitch offset (added to <code>frequency</code> at runtime)</td></tr>
+<tr><td><code>fm</code></td><td>Frequency modulation (control-rate vibrato)</td></tr>
+<tr><td><code>spread_cv</code></td><td>Adds to <code>spread</code></td></tr>
+<tr><td><code>density_cv</code></td><td>Adds to <code>density</code></td></tr>
+<tr><td><code>mix_cv</code></td><td>Adds to <code>mix</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Summed detuned-saw ensemble (PolyBLEP anti-aliased)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h3 id="polyhypersaw--polyphonic-supersaw"><a class="header" href="#polyhypersaw--polyphonic-supersaw"><code>PolyHyperSaw</code> — Polyphonic supersaw</a></h3>
+<p>The 16-voice counterpart: one detuned ensemble per voice, driven by per-voice
+<code>voct</code>/<code>fm</code>. <code>spread</code>/<code>density</code>/<code>mix</code> CV are <strong>mono (shared across voices)</strong> so
+the detune ratios are computed once per control interval and reused for every
+voice; per-voice spread is deferred.</p>
+<p><strong>Parameters</strong></p>
+<p>Same as <code>HyperSaw</code> (<code>frequency</code>, <code>fm_type</code>, <code>spread</code>, <code>density</code>, <code>mix</code>).</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>Per-voice V/oct pitch offset (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM input (poly; control-rate vibrato)</td></tr>
+<tr><td><code>spread_cv</code></td><td>Adds to <code>spread</code>, shared across voices (mono)</td></tr>
+<tr><td><code>density_cv</code></td><td>Adds to <code>density</code>, shared across voices (mono)</td></tr>
+<tr><td><code>mix_cv</code></td><td>Adds to <code>mix</code>, shared across voices (mono)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice detuned-saw ensemble, PolyBLEP anti-aliased (poly)</td></tr>
 </tbody>
 </table>
 </div>
@@ -3021,6 +3257,75 @@ envelope.</p>
 </table>
 </div>
 <hr>
+<h2 id="env--multi-stage-breakpoint-envelope-with-key-follow"><a class="header" href="#env--multi-stage-breakpoint-envelope-with-key-follow"><code>Env</code> — Multi-stage breakpoint envelope with key-follow</a></h2>
+<p>Where <code>Adsr</code> has a fixed attack/decay/sustain/release shape, <code>Env</code> runs
+an arbitrary number of <code>(time, level, curve)</code> stages with a designated
+sustain stage — enough to express D50-style contours ADSR cannot (attack
+spike → dip → secondary swell → sustain). The stage count is the
+module’s <em>channels</em> axis: <code>Env(5)</code> is a five-stage envelope. One module
+is one envelope (mono); use multiple instances for multiple envelopes.</p>
+<p>Stages <code>0..sustain_stage</code> form the pre-sustain contour; the envelope
+holds at <code>level[sustain_stage]</code> while the gate is high, then runs the
+remaining stages <code>sustain_stage+1..N</code> as the release tail on gate-off.
+Designate a final stage with <code>level = 0</code> for a release to silence. A
+re-trigger restarts from the current level (no click), and a gate-off
+during the pre-sustain contour jumps straight into the release tail.</p>
+<p><strong>Key-follow</strong> shortens stage times with pitch, as real resonators decay
+faster up the keyboard: <code>time_scale = 2^(-keyfollow * (voct - ref_key))</code>,
+so <code>keyfollow = 1.0</code> halves all stage times one octave above <code>ref_key</code>.
+It is applied per tick, so a bending <code>voct</code> re-scales the contour live.</p>
+<p><strong>Velocity</strong> scales stage <em>levels</em>: the effective <code>velocity</code> (1.0 if the
+input is unconnected) is mapped to a level multiplier
+<code>1 - vel_depth * (1 - velocity)</code> and latched at the trigger, so an
+in-flight envelope keeps a stable scaling.</p>
+<p>Route <code>out</code> to an oscillator <code>voct</code> / <code>phase_mod</code> or a filter cutoff for
+the D50 attack pitch-blip or filter sweep — that’s a patch idiom, not a
+port.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>trigger</td><td>One-sample pulse starts the envelope</td></tr>
+<tr><td><code>gate</code></td><td>mono</td><td>Held high to sustain; release to run the release tail</td></tr>
+<tr><td><code>voct</code></td><td>mono</td><td>1V/oct pitch driving key-follow time-scaling (0 if unconnected)</td></tr>
+<tr><td><code>velocity</code></td><td>mono</td><td>Velocity in [0, 1] scaling stage levels (1.0 if unconnected)</td></tr>
+<tr><td><code>vca_in</code></td><td>mono</td><td>Optional audio/CV input multiplied by the envelope</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>Envelope level in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out</code></td><td>mono</td><td><code>vca_in * out</code> — pre-multiplied</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Range</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>time[i]</code></td><td>float</td><td>0.0 – 10.0</td><td><code>0.1</code></td><td>Stage i duration in seconds (i in 0..N−1, N = stage count)</td></tr>
+<tr><td><code>level[i]</code></td><td>float</td><td>0.0 – 1.0</td><td><code>1.0</code></td><td>Stage i target level</td></tr>
+<tr><td><code>curve[i]</code></td><td>enum</td><td>linear, exponential</td><td><code>linear</code></td><td>Stage i segment shape</td></tr>
+<tr><td><code>sustain_stage</code></td><td>int (structural)</td><td>0 – 7</td><td><code>0</code></td><td>Index of the held stage; later stages are the release tail</td></tr>
+<tr><td><code>keyfollow</code></td><td>float</td><td>0.0 – 1.0</td><td><code>0.0</code></td><td>Pitch time-scaling depth (1.0 halves times one octave up)</td></tr>
+<tr><td><code>ref_key</code></td><td>float</td><td>-5.0 – 5.0</td><td><code>0.0</code></td><td>Reference pitch (V/oct) at which <code>time_scale = 1</code></td></tr>
+<tr><td><code>vel_depth</code></td><td>float</td><td>0.0 – 1.0</td><td><code>0.0</code></td><td>How much velocity attenuates stage levels</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
 <h2 id="polyadsr--per-voice-dadsr"><a class="header" href="#polyadsr--per-voice-dadsr"><code>PolyAdsr</code> — Per-voice DADSR</a></h2>
 <p>Same envelope shape as <code>Adsr</code> (delay/attack/decay/sustain/release/shape)
 but each voice has independent state, driven by per-voice
@@ -3052,6 +3357,48 @@ but each voice has independent state, driven by per-voice
 </div>
 <p><strong>Parameters</strong> — same names and ranges as <code>Adsr</code>. Parameters apply
 identically to all voices.</p>
+<hr>
+<h2 id="polyenv--per-voice-multi-stage-envelope"><a class="header" href="#polyenv--per-voice-multi-stage-envelope"><code>PolyEnv</code> — Per-voice multi-stage envelope</a></h2>
+<p>The 16-voice form of <code>Env</code>: same multi-stage contour, key-follow, and
+velocity scaling, but each voice holds independent state driven by
+per-voice <code>trigger</code> / <code>gate</code> / <code>voct</code> / <code>velocity</code> poly cables. All
+voices share one stage configuration. The stage count is the channels
+axis (<code>PolyEnv(5)</code> = five stages); <code>sustain_stage</code> and the release-tail
+semantics are identical to <code>Env</code>.</p>
+<p>Key-follow and velocity are computed per voice:
+<code>time_scale = 2^(-keyfollow * (voct[v] - ref_key))</code> and the level
+multiplier <code>1 - vel_depth * (1 - velocity[v])</code>, latched at each voice’s
+trigger. Unconnected <code>voct</code> reads as 0 and unconnected <code>velocity</code> as 1.0.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>trigger</code></td><td>poly_trigger</td><td>Per-voice rising edge starts the envelope</td></tr>
+<tr><td><code>gate</code></td><td>poly</td><td>Per-voice gate; release to run the release tail</td></tr>
+<tr><td><code>voct</code></td><td>poly</td><td>Per-voice 1V/oct pitch driving key-follow</td></tr>
+<tr><td><code>velocity</code></td><td>poly</td><td>Per-voice velocity in [0, 1] scaling stage levels</td></tr>
+<tr><td><code>vca_in</code></td><td>poly</td><td>Optional per-voice audio/CV multiplied by the envelope</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>poly</td><td>Per-voice envelope level in [0.0, 1.0]</td></tr>
+<tr><td><code>vca_out</code></td><td>poly</td><td><code>vca_in * out</code> per voice</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Parameters</strong> — same names, ranges, and defaults as <code>Env</code>
+(<code>time[i]</code>, <code>level[i]</code>, <code>curve[i]</code>, <code>sustain_stage</code>, <code>keyfollow</code>,
+<code>ref_key</code>, <code>vel_depth</code>). Parameters apply identically to all voices.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="filters"><a class="header" href="#filters">Filters</a></h1>
 <blockquote>
@@ -4021,15 +4368,50 @@ aliases to match the pattern’s channel names:</p>
 <p>For note channels, <code>cv1</code> carries the V/oct pitch (same convention as <code>Osc</code>)
 and <code>trigger</code>/<code>gate</code> signal note-on events. For drum/trigger
 channels, <code>trigger</code> fires on each hit and <code>cv2</code> carries the velocity value.</p>
-<h3 id="slides-and-repeats"><a class="header" href="#slides-and-repeats">Slides and repeats</a></h3>
-<p>The PatternPlayer supports two per-step modifiers from the pattern syntax:</p>
+<h3 id="step-events-adr-0077-unified-grammar"><a class="header" href="#step-events-adr-0077-unified-grammar">Step events (ADR 0077 unified grammar)</a></h3>
+<p>The PatternPlayer consumes the row-build pass’s resolved <code>StepEffect</code>
+per cell — a single typed dispatch covering rests, triggered notes,
+rolls, slides, step-cv changes, and continuation cells. See the
+<a href="#step-events">DSL reference — Step events</a> for the
+full cell taxonomy, close rule, and worked-example timelines. The
+player-side behaviour is:</p>
 <ul>
-<li><strong>Slides</strong> (<code>C4&gt;E4</code>): interpolates <code>cv1</code> (and optionally <code>cv2</code>) linearly
-over the tick duration. The gate stays high through the slide.</li>
-<li><strong>Repeats</strong> (<code>x*3</code>): subdivides the tick into N equal sub-triggers, each
-with an ~80% duty cycle gate so downstream envelopes get clear
-attack transients.</li>
+<li><strong>Triggered cell</strong> (<code>value</code>, <code>value*N</code>, <code>value:cv2</code>, <code>value&gt;value</code>,
+<code>value&gt;</code>): snap cv1/cv2 at the start of the tick and fire <code>trigger</code>.
+<code>*N</code> opens a roll; <code>value&gt;value</code> opens-and-closes a one-tick slide;
+<code>value&gt;</code> opens a multi-tick slide whose close target is resolved
+when the close cell arrives.</li>
+<li><strong>Step-cv</strong> (<code>/value</code>): snap cv1 (and <code>:cv2</code> if present) at the tick
+boundary; no trigger. Gate stays high.</li>
+<li><strong>Slide flow</strong> (<code>&gt;_</code>, <code>_</code> absorbed by a slide): no trigger; cv ramps
+per the slide’s per-channel schedule. Gate stays high.</li>
+<li><strong>Slide close-in-tick</strong> (<code>&gt;value</code>): cv1 (and <code>:cv2</code> if present) ramp
+to the close value across this tick; no trigger.</li>
+<li><strong>Tie sustain</strong> (<code>_</code> with no open modifier): gate stays high; cv
+held.</li>
+<li><strong>Tie-spread roll</strong> (<code>_</code> absorbed by a <code>*N</code> anchor): the N
+sub-triggers spread evenly across the anchor tick plus the absorbed
+run. Per-tick sub-event placement respects swung tick durations —
+each sub-event’s sample offset is computed against the <em>current</em>
+tick’s duration, not the anchor’s, so swing within a span sits
+precisely on the swung beats.</li>
+<li><strong>Rest</strong> (<code>.</code>): gate drops; channel state resets (any open slide is
+closed at its current cv).</li>
 </ul>
+<pre><code class="language-patches"># tie-spread roll across two ticks then a fresh hit
+hit: x*3 _ x .
+
+# slide opens at tick 1, ramps through ticks 1+2, lands on G4 at the
+# boundary, holds tick 3
+note: E4&gt; _ /G4
+
+# slide opens, ramps continuously across three ticks, finishes inside
+# tick 3
+note: E4&gt; _ &gt;G4
+
+# step cv without retrigger
+note: E4 /G4 _
+</code></pre>
 <hr>
 <h2 id="wiring-examples"><a class="header" href="#wiring-examples">Wiring examples</a></h2>
 <h3 id="drum-machine"><a class="header" href="#drum-machine">Drum machine</a></h3>
@@ -4848,6 +5230,176 @@ value (50 ms), so changing <code>attack_ms</code> at runtime never allocates.</l
 <h2 id="stereolimiter--stereo-lookahead-limiter"><a class="header" href="#stereolimiter--stereo-lookahead-limiter"><code>StereoLimiter</code> — Stereo lookahead limiter</a></h2>
 <p>Stereo variant of <code>Limiter</code> with linked gain reduction across channels.
 See <code>patches-modules/src/stereo_limiter.rs</code> for the current parameter set.</p>
+<hr>
+<h2 id="compressor--feed-forward-compressor"><a class="header" href="#compressor--feed-forward-compressor"><code>Compressor</code> — Feed-forward compressor</a></h2>
+<p>Feed-forward compressor with soft knee, peak / RMS detection, and a
+sidechain input. When <code>sidechain</code> is unconnected the detector self-keys
+from <code>in</code> (the standard hardware default — see ADR 0076).</p>
+<p>The static gain curve is C¹-continuous across the knee region: at the
+boundaries <code>threshold ± knee_width/2</code> both value and slope match the
+linear / no-reduction branches, so the knee introduces no kink. A high
+<code>ratio</code> value asymptotically approaches a limiter shape; no special
+casing of <code>ratio = ∞</code> is required.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-12</code></td><td>Knee centre (−60..0 dB).</td></tr>
+<tr><td><code>ratio</code></td><td>float</td><td><code>4</code></td><td>Above-knee slope (1..100). High values approach a limiter.</td></tr>
+<tr><td><code>knee_width</code></td><td>float (dB)</td><td><code>6</code></td><td>Soft-knee width; <code>0</code> = hard knee (0..24 dB).</td></tr>
+<tr><td><code>attack</code></td><td>float (ms)</td><td><code>10</code></td><td>Detector attack (0.1..1000 ms).</td></tr>
+<tr><td><code>release</code></td><td>float (ms)</td><td><code>100</code></td><td>Detector release (1..5000 ms).</td></tr>
+<tr><td><code>makeup</code></td><td>float (dB)</td><td><code>0</code></td><td>Output gain trim (−24..24 dB).</td></tr>
+<tr><td><code>detect</code></td><td>enum</td><td><code>peak</code></td><td><code>peak</code> (envelope on absolute value) or <code>rms</code> (envelope on squared).</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td><code>1</code></td><td>Dry/wet blend (0..1). <code>0</code> returns dry.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>External detector key. Self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Compressed audio</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="stereocompressor--true-stereo-feed-forward-compressor"><a class="header" href="#stereocompressor--true-stereo-feed-forward-compressor"><code>StereoCompressor</code> — True-stereo feed-forward compressor</a></h2>
+<p>Stereo variant of <code>Compressor</code> with linked detection: a single magnitude
+derived from both channels drives one detector, and one gain reduction
+value is applied identically to L and R. This preserves the stereo image
+under asymmetric transients (a per-channel detector would shift the
+image on panned hits).</p>
+<p>Detector magnitude:</p>
+<ul>
+<li><strong>Peak:</strong> <code>max(|L|, |R|)</code></li>
+<li><strong>RMS:</strong>  <code>sqrt((L² + R²) / 2)</code></li>
+</ul>
+<p>Parameters are identical to <code>Compressor</code>. The <code>sidechain</code> port is
+stereo; a mono source patched in is broadcast to both channels per
+ADR 0059.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>stereo</td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>stereo</td><td>External detector key; self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>stereo</td><td>Compressed stereo</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="gate--threshold-gate-with-hysteresis"><a class="header" href="#gate--threshold-gate-with-hysteresis"><code>Gate</code> — Threshold gate with hysteresis</a></h2>
+<p>Threshold gate with hysteresis, attack / hold / release ballistics, and a
+sidechain input. The detector self-keys from <code>in</code> when <code>sidechain</code> is
+unconnected (ADR 0076). Gating is binary in intent — there is no <code>mix</code>
+parameter; a patch author wanting ducking-with-blend uses <code>Compressor</code>
+with high ratio and <code>mix &lt; 1</code>.</p>
+<p>The gate opens when the rectified detector key crosses <code>threshold</code> (the
+fire condition is <code>armed &amp;&amp; |x| &gt; threshold</code> — the threshold itself, not
+<code>threshold - hysteresis</code>). Hysteresis controls <em>eligibility</em>: after a
+fire the state machine disarms and only re-arms once the signal has
+dropped below <code>threshold - hysteresis</code>. Once open the gate cannot close
+for at least <code>hold</code> ms; after that it closes when the signal drops below
+<code>threshold - hysteresis</code>. Attack and release set the ramp times of the
+open/closed envelope.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-40</code></td><td>Open threshold (−80..0 dB).</td></tr>
+<tr><td><code>hysteresis</code></td><td>float (dB)</td><td><code>3</code></td><td>Re-arm band below threshold (0..24 dB).</td></tr>
+<tr><td><code>attack</code></td><td>float (ms)</td><td><code>1</code></td><td>Open-ramp time (0.01..1000 ms).</td></tr>
+<tr><td><code>hold</code></td><td>float (ms)</td><td><code>10</code></td><td>Minimum open time after a trigger (0..5000 ms).</td></tr>
+<tr><td><code>release</code></td><td>float (ms)</td><td><code>100</code></td><td>Close-ramp time (1..5000 ms).</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>External detector key. Self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Gated audio</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="stereogate--true-stereo-threshold-gate"><a class="header" href="#stereogate--true-stereo-threshold-gate"><code>StereoGate</code> — True-stereo threshold gate</a></h2>
+<p>Stereo variant of <code>Gate</code> with linked detection: one detector is fed by
+<code>max(|L|, |R|)</code> and one gate state drives both channels. This preserves
+the stereo image — per-channel detection would cause audible image shift
+on asymmetric transients.</p>
+<p>Parameters are identical to <code>Gate</code>. The <code>sidechain</code> port is stereo; a
+mono source patched in is broadcast to both channels per ADR 0059.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>stereo</td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>stereo</td><td>External detector key; self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>stereo</td><td>Gated stereo</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="bitcrusher--bit-depth-and-sample-rate-reduction"><a class="header" href="#bitcrusher--bit-depth-and-sample-rate-reduction"><code>Bitcrusher</code> — Bit-depth and sample-rate reduction</a></h2>
 <p>Quantises samples to a configurable bit depth and decimates the sample
 rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
@@ -4856,6 +5408,406 @@ rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
 <h2 id="transientshaper--attacksustain-emphasis"><a class="header" href="#transientshaper--attacksustain-emphasis"><code>TransientShaper</code> — Attack/sustain emphasis</a></h2>
 <p>Envelope-follower-based transient emphasis and suppression. See
 <code>patches-modules/src/transient_shaper.rs</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="detectors"><a class="header" href="#detectors">Detectors</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/detectors/</code> define the canonical port names,
+parameter ranges, and behaviour. This page is kept in sync with those
+comments.</p>
+</blockquote>
+<p>The detector family converts an audio signal into control events or
+sustained gates by threshold-crossing the <strong>instantaneous signed sample
+value</strong> — not envelope, magnitude, or onset. Two sub-families share a
+threshold + hysteresis state machine but differ in what they emit:</p>
+<ul>
+<li><strong>Trigger family</strong> (<code>AudioToTrigger</code>, <code>PolyAudioToTrigger</code>) emits
+<a href="../../adr/0047-sub-sample-trigger-cables.html">ADR 0047</a> sub-sample
+sync events on a <code>Trigger</code> cable. Intended for clock recovery from
+oscillator-rate audio, sub-octave division (a divider chain fed by an
+<code>AudioToTrigger</code> cascade), and driving hard-sync ports from an
+arbitrary audio source.</li>
+<li><strong>Gate family</strong> (<code>AudioToGate</code>, <code>PolyAudioToGate</code>) emits sample-
+accurate sustained gates (<code>0.0</code> / <code>1.0</code>) on a normal mono / poly
+cable. Intended for sustained-state derivation from a signed-sample
+stream — the schmitt-trigger pattern.</li>
+</ul>
+<p>Onset / transient detection (envelope follower → threshold) is a
+different problem and not provided here.</p>
+<h2 id="audiototrigger--mono-threshold-crossing-detector"><a class="header" href="#audiototrigger--mono-threshold-crossing-detector"><code>AudioToTrigger</code> — Mono threshold-crossing detector</a></h2>
+<p>Fires a sub-sample sync event when the input crosses <code>threshold</code> in the
+chosen direction. The event fraction is the linear-interpolated
+zero-crossing position inside the current sample interval:
+<code>frac = (threshold - prev) / (curr - prev)</code>, encoded on the output
+<code>Trigger</code> cable per ADR 0047.</p>
+<p>Hysteresis is a two-state machine. After a rising fire the detector
+disarms; it only re-arms once the signal drops below
+<code>threshold - hysteresis</code>. <strong>Hysteresis controls eligibility, not event
+location</strong> — the fire point is <code>threshold</code>, never
+<code>threshold - hysteresis</code>. The falling direction is symmetric.</p>
+<p>Bidirectional detection tracks the rising and falling arm states
+independently.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-12</code></td><td>Fire threshold (-60..0 dB)</td></tr>
+<tr><td><code>hysteresis</code></td><td>float (dB)</td><td><code>3</code></td><td>Re-arm band around threshold (0..24 dB)</td></tr>
+<tr><td><code>direction</code></td><td>enum</td><td><code>rising</code></td><td>Edge polarity: <code>rising</code> / <code>falling</code> / <code>both</code></td></tr>
+<tr><td><code>cooldown</code></td><td>float (ms)</td><td><code>0</code></td><td>Debounce after fire (0..1000 ms)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>mono</td><td>Audio source</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>trigger</td><td>Sub-sample sync event in <code>(0, 1]</code> on fire, <code>0.0</code> otherwise</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="polyaudiototrigger--per-voice-threshold-crossing-detector"><a class="header" href="#polyaudiototrigger--per-voice-threshold-crossing-detector"><code>PolyAudioToTrigger</code> — Per-voice threshold-crossing detector</a></h2>
+<p>Polyphonic variant. One independent <code>EdgeDetector</code> runs per voice
+channel, so per-voice transitions fire on the corresponding lane of the
+output <code>PolyTrigger</code> cable. Parameters apply identically across voices.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>poly</td><td>Per-voice audio source</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>poly trigger</td><td>Per-voice sub-sample sync event (independent lanes)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Parameters identical to <code>AudioToTrigger</code>.</p>
+<h2 id="audiotogate--mono-schmitt-trigger-gate"><a class="header" href="#audiotogate--mono-schmitt-trigger-gate"><code>AudioToGate</code> — Mono Schmitt-trigger gate</a></h2>
+<p>Holds a sustained gate high while <code>signal &gt; threshold</code>; closes the gate
+when <code>signal &lt; threshold - hysteresis</code>. Values inside the schmitt band
+hold the previous state. Sample-accurate per
+<a href="../../adr/0030-trigger-and-gate-input-types.html">ADR 0030</a> — no
+sub-sample reporting.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-12</code></td><td>Open threshold (-60..0 dB)</td></tr>
+<tr><td><code>hysteresis</code></td><td>float (dB)</td><td><code>3</code></td><td>Close band below threshold (0..24 dB)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>mono</td><td>Audio source</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>Gate (<code>0.0</code> closed, <code>1.0</code> open)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="polyaudiotogate--per-voice-schmitt-trigger-gate"><a class="header" href="#polyaudiotogate--per-voice-schmitt-trigger-gate"><code>PolyAudioToGate</code> — Per-voice Schmitt-trigger gate</a></h2>
+<p>Polyphonic variant. One independent <code>GateSchmitt</code> runs per voice
+channel, so per-voice gate states are emitted on the lanes of the output
+poly cable. Parameters apply identically across voices.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>poly</td><td>Per-voice audio source</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>poly</td><td>Per-voice gate (<code>0.0</code> / <code>1.0</code>, independent lanes)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Parameters identical to <code>AudioToGate</code>.</p>
+<h2 id="no-stereo-variants"><a class="header" href="#no-stereo-variants">No stereo variants</a></h2>
+<p>Neither family has a stereo variant. Both threshold-cross the signed
+sample value, and there is no consistent collapse of two signed streams
+into one: <code>(L + R) / 2</code> cancels antiphase content; <code>max(|L|, |R|)</code> is
+rectified magnitude (contradicting the mono variants’ signed semantics —
+a <code>max(|L|, |R|)</code> gate would behave as an envelope-above-threshold
+detector, a different operation from the mono <code>AudioToGate</code>); and
+per-channel detection contradicts a single output. A patch needing a
+stereo-bus gate or trigger derives it from per-channel <code>AudioToTrigger</code>
+/ <code>AudioToGate</code> instances fed by <code>StereoSplitter</code>, or from a dedicated
+stereo magnitude-summariser (peak / RMS) whose mono output keys an
+<code>AudioToGate</code> when envelope semantics are wanted. See
+<a href="../../adr/0076-native-dynamics-and-stereo-utility-modules.html">ADR 0076</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="stereo-utilities"><a class="header" href="#stereo-utilities">Stereo utilities</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/stereo/</code> define the canonical port names,
+parameter ranges, and behaviour. This page is kept in sync with those
+comments.</p>
+</blockquote>
+<p>The stereo utility group covers image control — pan, balance, width,
+mid-side encode/decode, and a sum-mono-bass crossover. <code>StereoSplitter</code>,
+<code>StereoJoiner</code>, and <code>StereoSum</code> complement these but live elsewhere
+today; they will migrate into this group under the source-tree
+reorganisation tickets.</p>
+<h2 id="pan--equal-power-mono-pan"><a class="header" href="#pan--equal-power-mono-pan"><code>Pan</code> — Equal-power mono pan</a></h2>
+<p>Places a mono signal in the stereo field using the equal-power law
+<code>(L, R) = in · (cos θ, sin θ)</code> with <code>θ = (pan + 1) · π/4</code>. The total
+power <code>L² + R²</code> is preserved across the sweep; at the centre each
+channel receives <code>in / √2</code> (−3 dB). The CV input is added to the
+parameter and clamped to <code>[-1, 1]</code> before the angle is computed.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>pan</code></td><td>float</td><td><code>0.0</code></td><td>Base position; -1 = L, +1 = R (-1–1)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Mono source</td></tr>
+<tr><td><code>pan</code></td><td>Additive CV (offsets <code>pan</code> param)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Equal-power stereo L/R</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="balance--linear-stereo-balance"><a class="header" href="#balance--linear-stereo-balance"><code>Balance</code> — Linear stereo balance</a></h2>
+<p>Attenuates one side of a stereo signal while the other passes unchanged.
+With <code>balance ∈ [-1, 1]</code>, <code>gain_L = clamp(1 − balance, 0, 1)</code> and
+<code>gain_R = clamp(1 + balance, 0, 1)</code>. At the centre the signal passes
+through unchanged; at the extremes the opposite side is silenced. The
+linear ramp per side matches the mixer’s pan-law ramp shape. The CV
+input is added to the parameter before clamping.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>balance</code></td><td>float</td><td><code>0.0</code></td><td>Base balance; -1 = L, +1 = R (-1–1)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Stereo source</td></tr>
+<tr><td><code>balance</code></td><td>Additive CV (offsets <code>balance</code> param)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Balanced stereo</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="stereowidth--width-control-via-internal-m-s"><a class="header" href="#stereowidth--width-control-via-internal-m-s"><code>StereoWidth</code> — Width control via internal M-S</a></h2>
+<p>Encodes the input to mid (<code>M = (L+R)/2</code>) and side (<code>S = (L-R)/2</code>),
+scales <code>S</code> by <code>width</code>, leaves <code>M</code> unchanged, and decodes back:
+<code>L_out = M + width·S</code>, <code>R_out = M − width·S</code>. At <code>width = 0</code> both
+outputs collapse to the mono sum; at <code>width = 1</code> the implementation
+short-circuits so the M-S round-trip is bit-exact; at <code>width = 2</code>
+antiphase content is doubled. The CV input is added to the parameter
+and clamped to <code>[0, 2]</code> before scaling.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>width</code></td><td>float</td><td><code>1.0</code></td><td>0 = mono sum, 1 = unchanged, 2 = double-wide (0–2)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Stereo source</td></tr>
+<tr><td><code>width</code></td><td>Additive CV (offsets <code>width</code> param)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Width-scaled stereo</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="midside--bidirectional-encodedecode"><a class="header" href="#midside--bidirectional-encodedecode"><code>MidSide</code> — Bidirectional encode/decode</a></h2>
+<p>Two independent arithmetic paths in one module: the encode side reads
+<code>stereo_in</code> (L/R) and writes <code>(M, S) = ((L+R)/2, (L-R)/2)</code> to <code>ms_out</code>;
+the decode side reads <code>ms_in</code> (M/S) and writes <code>(M+S, M−S)</code> to
+<code>stereo_out</code>. Either side can be used in isolation by leaving the other
+side’s ports unconnected.</p>
+<p>All four ports are stereo cables. The mid-side form is just a stereo
+cable carrying <code>(M, S)</code> rather than <code>(L, R)</code> — nothing in the
+descriptor distinguishes the two, the same constraint that already
+applies to any mid/side workflow in a DAW.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>stereo_in</code></td><td>L/R input to encode side</td></tr>
+<tr><td><code>ms_in</code></td><td>(M, S) input to decode side</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ms_out</code></td><td>(M, S) from encode side</td></tr>
+<tr><td><code>stereo_out</code></td><td>L/R from decode side</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="monobass--mono-summed-bass-via-lr4-crossover"><a class="header" href="#monobass--mono-summed-bass-via-lr4-crossover"><code>MonoBass</code> — Mono-summed bass via LR4 crossover</a></h2>
+<p>Splits the stereo input into a low band and a high band at <code>cutoff</code>
+using Linkwitz-Riley 4th-order filters (two cascaded Butterworth
+biquads each). The lows are summed to mono (<code>(L+R)/2</code> then LP-filtered)
+and sent identically to both output channels; the highs are HP-filtered
+per channel so the stereo image above the crossover is preserved. At
+the crossover frequency, the LP and HP magnitudes are each −6 dB; the
+sum-flat property means an L = R input is reconstructed at unity
+magnitude while differential content below the cutoff is summed away.</p>
+<p>Use for vinyl-safe masters, club-system protection, and any source
+whose low end you don’t trust to be summable.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>cutoff</code></td><td>float Hz</td><td><code>120.0</code></td><td>Crossover frequency (20–2000 Hz)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Stereo source</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>High-band stereo + low-band mono on both</td></tr>
+</tbody>
+</table>
+</div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="utilities"><a class="header" href="#utilities">Utilities</a></h1>
 <blockquote>
@@ -5133,6 +6085,93 @@ introduces harmonic colouring.</p>
 </thead>
 <tbody>
 <tr><td><code>out</code></td><td>Ring-modulated output</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="primitives"><a class="header" href="#primitives">Primitives</a></h1>
+<blockquote>
+<p><strong>Source of truth:</strong> the doc comments on each module struct in
+<code>patches-modules/src/</code> define the canonical port names, parameter
+ranges, and behaviour. This page is kept in sync with those comments.</p>
+</blockquote>
+<p>Small DSP building blocks that are useful on their own and as
+components inside larger patches. See <a href="../../adr/0076-native-dynamics-and-stereo-utility-modules.html">ADR
+0076</a>.</p>
+<h2 id="dcblocker--one-pole-dc-removal"><a class="header" href="#dcblocker--one-pole-dc-removal"><code>DcBlocker</code> — One-pole DC removal</a></h2>
+<p>Thin wrapper over the shared <code>patches_dsp::DcBlocker</code> kernel: a
+one-pole highpass at ~5 Hz. No parameters; the cutoff is fixed by the
+kernel. Useful after waveshapers, bias injection, or any process that
+may introduce a DC offset.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>mono</td><td>Audio input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>DC-blocked output</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="comb--universal-comb-ff--fb--both"><a class="header" href="#comb--universal-comb-ff--fb--both"><code>Comb</code> — Universal comb (FF / FB / both)</a></h2>
+<p>Single module covering feed-forward (FIR), feedback (IIR), and combined
+pole-zero comb topologies via a <code>mode</code> enum. The <code>feedback</code> parameter
+is the coefficient on the delayed tap; its meaning depends on <code>mode</code>:</p>
+<pre><code class="language-text">ff   : y[n] = mix · (x[n] + g · x[n−D])
+fb   : y[n] = mix · y'[n]              where y'[n] = x[n] + g · y'[n−D]
+both : y[n] = mix · y'[n]              where y'[n] = x[n] + g · x[n−D] + g · y'[n−D]
+</code></pre>
+<p><code>y'</code> is the pre-mix signal — feedback recursion uses the unmixed value
+so adjusting <code>mix</code> does not destabilise the loop.</p>
+<p>In modes that include <code>fb</code> the caller is responsible for keeping
+<code>feedback</code> strictly below <code>1.0</code>. The module does not clamp on the user’s
+behalf; <code>feedback ≥ 1</code> produces unbounded growth (the same convention
+as other recursive modules in the bundle).</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>mode</code></td><td><code>ff</code>/<code>fb</code>/<code>both</code></td><td><code>fb</code></td><td>Topology selection</td></tr>
+<tr><td><code>delay_ms</code></td><td>float (ms)</td><td><code>10.0</code></td><td>Delay-line length (0.1–500 ms)</td></tr>
+<tr><td><code>feedback</code></td><td>float</td><td><code>0.5</code></td><td>Delayed-tap coefficient (−0.99..0.99)</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td><code>1.0</code></td><td>Output scale applied after the comb topology</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>mono</td><td>Audio input</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>mono</td><td>Comb output</td></tr>
 </tbody>
 </table>
 </div>

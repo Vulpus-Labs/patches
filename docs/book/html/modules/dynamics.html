@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-328d5810.js";
+            window.path_to_searchindex_js = "../searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f5b402d7.js"></script>
+        <script src="../toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -256,6 +256,176 @@ value (50 ms), so changing <code>attack_ms</code> at runtime never allocates.</l
 <h2 id="stereolimiter--stereo-lookahead-limiter"><a class="header" href="#stereolimiter--stereo-lookahead-limiter"><code>StereoLimiter</code> — Stereo lookahead limiter</a></h2>
 <p>Stereo variant of <code>Limiter</code> with linked gain reduction across channels.
 See <code>patches-modules/src/stereo_limiter.rs</code> for the current parameter set.</p>
+<hr>
+<h2 id="compressor--feed-forward-compressor"><a class="header" href="#compressor--feed-forward-compressor"><code>Compressor</code> — Feed-forward compressor</a></h2>
+<p>Feed-forward compressor with soft knee, peak / RMS detection, and a
+sidechain input. When <code>sidechain</code> is unconnected the detector self-keys
+from <code>in</code> (the standard hardware default — see ADR 0076).</p>
+<p>The static gain curve is C¹-continuous across the knee region: at the
+boundaries <code>threshold ± knee_width/2</code> both value and slope match the
+linear / no-reduction branches, so the knee introduces no kink. A high
+<code>ratio</code> value asymptotically approaches a limiter shape; no special
+casing of <code>ratio = ∞</code> is required.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-12</code></td><td>Knee centre (−60..0 dB).</td></tr>
+<tr><td><code>ratio</code></td><td>float</td><td><code>4</code></td><td>Above-knee slope (1..100). High values approach a limiter.</td></tr>
+<tr><td><code>knee_width</code></td><td>float (dB)</td><td><code>6</code></td><td>Soft-knee width; <code>0</code> = hard knee (0..24 dB).</td></tr>
+<tr><td><code>attack</code></td><td>float (ms)</td><td><code>10</code></td><td>Detector attack (0.1..1000 ms).</td></tr>
+<tr><td><code>release</code></td><td>float (ms)</td><td><code>100</code></td><td>Detector release (1..5000 ms).</td></tr>
+<tr><td><code>makeup</code></td><td>float (dB)</td><td><code>0</code></td><td>Output gain trim (−24..24 dB).</td></tr>
+<tr><td><code>detect</code></td><td>enum</td><td><code>peak</code></td><td><code>peak</code> (envelope on absolute value) or <code>rms</code> (envelope on squared).</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td><code>1</code></td><td>Dry/wet blend (0..1). <code>0</code> returns dry.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>External detector key. Self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Compressed audio</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="stereocompressor--true-stereo-feed-forward-compressor"><a class="header" href="#stereocompressor--true-stereo-feed-forward-compressor"><code>StereoCompressor</code> — True-stereo feed-forward compressor</a></h2>
+<p>Stereo variant of <code>Compressor</code> with linked detection: a single magnitude
+derived from both channels drives one detector, and one gain reduction
+value is applied identically to L and R. This preserves the stereo image
+under asymmetric transients (a per-channel detector would shift the
+image on panned hits).</p>
+<p>Detector magnitude:</p>
+<ul>
+<li><strong>Peak:</strong> <code>max(|L|, |R|)</code></li>
+<li><strong>RMS:</strong>  <code>sqrt((L² + R²) / 2)</code></li>
+</ul>
+<p>Parameters are identical to <code>Compressor</code>. The <code>sidechain</code> port is
+stereo; a mono source patched in is broadcast to both channels per
+ADR 0059.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>stereo</td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>stereo</td><td>External detector key; self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>stereo</td><td>Compressed stereo</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="gate--threshold-gate-with-hysteresis"><a class="header" href="#gate--threshold-gate-with-hysteresis"><code>Gate</code> — Threshold gate with hysteresis</a></h2>
+<p>Threshold gate with hysteresis, attack / hold / release ballistics, and a
+sidechain input. The detector self-keys from <code>in</code> when <code>sidechain</code> is
+unconnected (ADR 0076). Gating is binary in intent — there is no <code>mix</code>
+parameter; a patch author wanting ducking-with-blend uses <code>Compressor</code>
+with high ratio and <code>mix &lt; 1</code>.</p>
+<p>The gate opens when the rectified detector key crosses <code>threshold</code> (the
+fire condition is <code>armed &amp;&amp; |x| &gt; threshold</code> — the threshold itself, not
+<code>threshold - hysteresis</code>). Hysteresis controls <em>eligibility</em>: after a
+fire the state machine disarms and only re-arms once the signal has
+dropped below <code>threshold - hysteresis</code>. Once open the gate cannot close
+for at least <code>hold</code> ms; after that it closes when the signal drops below
+<code>threshold - hysteresis</code>. Attack and release set the ramp times of the
+open/closed envelope.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>float (dB)</td><td><code>-40</code></td><td>Open threshold (−80..0 dB).</td></tr>
+<tr><td><code>hysteresis</code></td><td>float (dB)</td><td><code>3</code></td><td>Re-arm band below threshold (0..24 dB).</td></tr>
+<tr><td><code>attack</code></td><td>float (ms)</td><td><code>1</code></td><td>Open-ramp time (0.01..1000 ms).</td></tr>
+<tr><td><code>hold</code></td><td>float (ms)</td><td><code>10</code></td><td>Minimum open time after a trigger (0..5000 ms).</td></tr>
+<tr><td><code>release</code></td><td>float (ms)</td><td><code>100</code></td><td>Close-ramp time (1..5000 ms).</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>External detector key. Self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Gated audio</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="stereogate--true-stereo-threshold-gate"><a class="header" href="#stereogate--true-stereo-threshold-gate"><code>StereoGate</code> — True-stereo threshold gate</a></h2>
+<p>Stereo variant of <code>Gate</code> with linked detection: one detector is fed by
+<code>max(|L|, |R|)</code> and one gate state drives both channels. This preserves
+the stereo image — per-channel detection would cause audible image shift
+on asymmetric transients.</p>
+<p>Parameters are identical to <code>Gate</code>. The <code>sidechain</code> port is stereo; a
+mono source patched in is broadcast to both channels per ADR 0059.</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>in</code></td><td>stereo</td><td>Audio input</td></tr>
+<tr><td><code>sidechain</code></td><td>stereo</td><td>External detector key; self-keys from <code>in</code> when unconnected.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Kind</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>stereo</td><td>Gated stereo</td></tr>
+</tbody>
+</table>
+</div>
 <h2 id="bitcrusher--bit-depth-and-sample-rate-reduction"><a class="header" href="#bitcrusher--bit-depth-and-sample-rate-reduction"><code>Bitcrusher</code> — Bit-depth and sample-rate reduction</a></h2>
 <p>Quantises samples to a configurable bit depth and decimates the sample
 rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
@@ -273,7 +443,7 @@ rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../modules/utilities.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../modules/detectors.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -287,7 +457,7 @@ rate. See <code>patches-modules/src/bitcrusher.rs</code>.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../modules/utilities.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../modules/detectors.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

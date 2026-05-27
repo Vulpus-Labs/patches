@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-328d5810.js";
+            window.path_to_searchindex_js = "searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-f5b402d7.js"></script>
+        <script src="toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -181,9 +181,16 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>Patches is a modular audio instrument with a text-based patch language. You describe a graph of modules — oscillators, filters, envelopes, sequencers, effects — and how they connect; the engine runs the graph in real time. Editing the patch file and saving swaps in the new graph without interrupting audio or resetting module state, so the language doubles as a REPL for the development cycle.</p>
+<p>Patches is a modular audio instrument with a text-based patch language. You describe a graph of modules — oscillators, filters, envelopes, sequencers, effects — and how they connect; the engine runs the graph in real time. Save the file and Patches swaps in the new graph without interrupting audio or resetting module state, so editing the patch is itself the development cycle.</p>
 <h2 id="why-patches"><a class="header" href="#why-patches">Why Patches?</a></h2>
-<p>Other software modular systems aim to provide a skeuomorphic UI representation of a Eurorack-style physical modular setup. Patches skips the UI layer entirely, focusing instead on providing a convenient, powerful, machine-readable and human/LLM-writeable DSL for defining modular patches, and a fast, efficient, real-time-stable synthesis engine for running them. The DSL is supported by a full LSP implementation, giving the user hinting, autocomplete and navigation support.</p>
+<p>Most software modular systems present a graphical reproduction of a Eurorack-style hardware modular setup. You drag patch cables between ports, turn knobs, move sliders. This is satisfying and creatively rewarding, but it isn’t the only way to work.</p>
+<p>Patches sets the visual interface aside and concentrates on two things: a clear language for describing patches, and a fast, real-time-stable engine for running them. The language is supported by a full Language Server Protocol implementation, so any compatible editor can offer autocomplete, inline hints, and navigation between definitions.</p>
+<p>Working in text makes some abstractions natural that would be awkward in a visual environment. Three examples:</p>
+<ul>
+<li>Per-cable scaling, offset and clipping. Signals can be amplified, offset, or mapped into and bounded within a constant range with an annotation on the cable connection.</li>
+<li>Templates. Define a sub-patch once with parameters, then instantiate it multiple times with different values.</li>
+<li>Multi-channel modules. A mixing desk or multi-tap delay can be declared with whatever number of channels you need, each with its own parameters, inputs, and outputs.</li>
+</ul>
 <h2 id="three-ways-to-run-a-patch"><a class="header" href="#three-ways-to-run-a-patch">Three ways to run a patch</a></h2>
 <p>Patches has no single intended workflow. The same <code>.patches</code> file works in any of these contexts:</p>
 <p><strong>As a CLAP plugin in a DAW.</strong> Load the <code>Patches</code> plugin in REAPER, Bitwig, or any CLAP host. Point it at a patch file, drive it from MIDI tracks, automate its parameters, save with the project. Use this when you want a custom synth voice inside a larger production.</p>

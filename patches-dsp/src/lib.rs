@@ -38,6 +38,9 @@ pub use ota_ladder::{OtaLadderCoeffs, OtaLadderKernel, OtaPoles, PolyOtaLadderKe
 pub mod oscillator;
 pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep};
 
+pub mod hypersaw;
+pub use hypersaw::{HyperSawCore, N_COPIES, N_PAIRS, N_VOICES};
+
 pub mod adsr;
 pub use adsr::{AdsrCore, AdsrShape, AdsrStage};
 

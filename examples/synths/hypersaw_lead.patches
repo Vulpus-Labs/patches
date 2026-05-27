@@ -1,0 +1,37 @@
+# hypersaw_lead.patches — supersaw lead/pad
+#
+# A single PolyHyperSaw replaces the old three-oscillator + tuner unison rig
+# (cf. unison_saw.patches): one module is a 9-saw detuned ensemble per voice.
+# `spread` sets the detune width, `density` how many side pairs are active, and
+# `mix` the centre↔side balance. The slow inter-copy beating is the width — no
+# drift or external detuning needed. See ADR 0078.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module osc      : PolyHyperSaw { spread: 0.7, density: 1.0, mix: 0.8 }
+
+    module amp_env  : PolyAdsr   { attack: 0.01, decay: 0.25, sustain: 0.8, release: 0.3 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr   { attack: 0.02, decay: 0.6, sustain: 0.5, release: 0.4 }
+    module filt     : PolyLowpass { cutoff: 1.2kHz, resonance: 0.35, saturate: true }
+    module verb     : FdnReverb  { character: hall, size: 0.6, mix: 0.25 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt_env.out -[0.9]-> filt.voct
+
+    filt.out     -[0.08]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

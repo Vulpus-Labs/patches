@@ -78,6 +78,26 @@ fn flat_patch_round_trip() {
     assert_eq!(graph.edge_list().len(), 1);
 }
 
+/// The `PolyHyperSaw` example patches (ADR 0078 / E156) compile end to end:
+/// the supersaw instantiates with params and its poly `out`/`voct` (and shared
+/// mono CV) wire through the poly amp/filter chain into reverb and stereo out.
+#[test]
+fn hypersaw_examples_build() {
+    for name in ["hypersaw_lead.patches", "hypersaw_pad.patches"] {
+        let path = format!("{}/../examples/synths/{name}", env!("CARGO_MANIFEST_DIR"));
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let file = patches_dsl::parse(&src).unwrap_or_else(|e| panic!("{name} parse: {e:?}"));
+        let result = patches_dsl::expand(&file).unwrap_or_else(|e| panic!("{name} expand: {e:?}"));
+        let graph = patches_interpreter::build(&result.patch, &registry(), &env())
+            .unwrap_or_else(|e| panic!("{name} build: {e:?}"))
+            .graph;
+        assert!(
+            graph.get_node(&NodeId::from("osc".to_string())).is_some(),
+            "{name}: expected PolyHyperSaw node 'osc'"
+        );
+    }
+}
+
 /// Parse, expand, and build `voice_template.patches`; assert namespaced node IDs.
 #[test]
 fn template_expansion() {

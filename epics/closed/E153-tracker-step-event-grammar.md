@@ -1,7 +1,7 @@
 ---
 id: E153
 title: Tracker step event grammar (ADR 0077)
-status: in-progress
+status: closed
 created: 2026-05-20
 ---
 

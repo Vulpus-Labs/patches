@@ -1,0 +1,41 @@
+# hypersaw_pad.patches — wide supersaw pad
+#
+# A slow, lush pad from a single PolyHyperSaw: wide detune (spread 0.85), full
+# density, sides heavy in the mix. A slow LFO breathes the spread for a chorus-
+# like swell, the filter opens gently on each note, and a cathedral reverb sits
+# behind it. See ADR 0078.
+
+patch {
+    module kbd      : PolyMidiToCv
+    module breathe  : Lfo { rate: 0.12 }
+
+    module osc      : PolyHyperSaw { spread: 0.05, density: 1.0, mix: 0.9 }
+
+    module amp_env  : PolyAdsr   { attack: 0.02, decay: 1.2, sustain: 0.85, release: 1.6 }
+    module vca      : PolyVca
+    module filt_env : PolyAdsr   { attack: 1.0, decay: 1.5, sustain: 0.6, release: 1.4 }
+    module filt     : PolyLowpass { cutoff: 900Hz, resonance: 0.2 }
+    module verb     : FdnReverb  { character: cathedral, size: 0.9, mix: 0.55, pre_delay: 0.08 }
+    module lim      : StereoLimiter { threshold: -3db }
+    module out      : AudioOut
+
+    kbd.voct        -> osc.voct
+
+    # Slow swell of the detune width — shared across all voices.
+    breathe.sine -[0.15]-> osc.spread_cv
+
+    kbd.trigger     -> amp_env.trigger
+    kbd.gate        -> amp_env.gate
+    kbd.trigger     -> filt_env.trigger
+    kbd.gate        -> filt_env.gate
+
+    osc.out         -> vca.in
+    amp_env.out     -> vca.cv
+
+    vca.out         -> filt.in
+    filt_env.out -[0.7]-> filt.voct
+
+    filt.out     -[0.1]-> verb.in
+    verb.out        -> lim.in
+    lim.out         -> out.in
+}

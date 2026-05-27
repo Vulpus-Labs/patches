@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-328d5810.js";
+            window.path_to_searchindex_js = "../searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f5b402d7.js"></script>
+        <script src="../toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -273,6 +273,116 @@ ranges, and behaviour. This page is kept in sync with those comments.</p>
 <tr><td><code>triangle</code></td><td>Per-voice triangle (poly)</td></tr>
 <tr><td><code>sawtooth</code></td><td>Per-voice sawtooth, PolyBLEP anti-aliased (poly)</td></tr>
 <tr><td><code>square</code></td><td>Per-voice square, PolyBLEP anti-aliased (poly)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="supersaw--hypersaw-and-polyhypersaw"><a class="header" href="#supersaw--hypersaw-and-polyhypersaw">Supersaw — <code>HyperSaw</code> and <code>PolyHyperSaw</code></a></h2>
+<p>A <em>supersaw</em> (JP-8000 style) is a stack of detuned sawtooth copies summed to
+one voice. <code>HyperSaw</code>/<code>PolyHyperSaw</code> use <strong>9 copies</strong> — one centre saw plus four
+pairs of side saws, detuned symmetrically below and above the centre pitch. The
+copies run at slightly different frequencies, so they slowly drift in and out of
+phase with one another; that continuous beating is the wide, animated character
+you cannot get from a single saw or a static wavetable.</p>
+<p>Three controls shape the ensemble:</p>
+<ul>
+<li><strong><code>spread</code></strong> — the detune width. <code>0</code> collapses every copy onto the centre
+pitch (a plain unison saw, no beating); <code>1</code> pushes the outermost pair to
+±50 cents. The pairs are spaced nonlinearly (inner pairs detuned much less
+than the outer ones).</li>
+<li><strong><code>density</code></strong> — how many of the four side pairs are active, faded in
+inner→outer. The fade is loudness-normalised, so turning density up thickens
+the sound without a level jump.</li>
+<li><strong><code>mix</code></strong> — the centre↔side balance. <code>0</code> is the clean centre saw alone; <code>1</code> is
+the full stack with the centre and sides together. The summed output is
+normalised to stay within <code>[-1, 1]</code>.</li>
+</ul>
+<p><strong>FM here is vibrato, not timbre.</strong> Unlike <code>Osc</code>/<code>PolyOsc</code>, which recompute pitch
+every sample, the supersaw recomputes all 144 increments (9 copies × 16 voices)
+only at the control-rate interval — recomputing them per sample is not
+affordable. Pitch and FM are therefore sampled at control rate: <code>fm</code> is a
+vibrato input, and there is <strong>no hard-sync and no phase modulation</strong> (syncing
+would re-align the copies and kill the beating that is the whole point). See
+<strong>ADR 0078</strong> for the design and the fixed-point, autovectorised kernel behind it.</p>
+<p>The copies’ start phases are randomised once at construction, so there is no
+thin attack and no comb-filtered coincident-wrap aliasing.</p>
+<p>A worked patch using <code>PolyHyperSaw</code> into a filter and amp lives in
+<a href="https://github.com/Vulpus-Labs/patches/blob/main/examples/synths/hypersaw_lead.patches"><code>examples/synths/hypersaw_lead.patches</code></a>.</p>
+<h3 id="hypersaw--mono-supersaw"><a class="header" href="#hypersaw--mono-supersaw"><code>HyperSaw</code> — Mono supersaw</a></h3>
+<p>A single detuned-saw ensemble. Runs the 16-voice kernel and reads one voice;
+mono is not the performance case.</p>
+<p><strong>Parameters</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>frequency</code></td><td>float (v/oct)</td><td><code>0.0</code></td><td>Base pitch as V/oct above C0 (0.0 = C0 ≈ 16.35 Hz)</td></tr>
+<tr><td><code>fm_type</code></td><td>string</td><td><code>linear</code></td><td>FM response: <code>linear</code> or <code>logarithmic</code></td></tr>
+<tr><td><code>spread</code></td><td>float</td><td><code>0.3</code></td><td>Detune width (0 = unison, 1 = ±50 cents at the outer pair)</td></tr>
+<tr><td><code>density</code></td><td>float</td><td><code>1.0</code></td><td>Active side pairs, faded in inner→outer (×4 pairs)</td></tr>
+<tr><td><code>mix</code></td><td>float</td><td><code>0.7</code></td><td>Centre↔side balance (0 = clean centre saw, 1 = full stack)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>V/oct pitch offset (added to <code>frequency</code> at runtime)</td></tr>
+<tr><td><code>fm</code></td><td>Frequency modulation (control-rate vibrato)</td></tr>
+<tr><td><code>spread_cv</code></td><td>Adds to <code>spread</code></td></tr>
+<tr><td><code>density_cv</code></td><td>Adds to <code>density</code></td></tr>
+<tr><td><code>mix_cv</code></td><td>Adds to <code>mix</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Summed detuned-saw ensemble (PolyBLEP anti-aliased)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h3 id="polyhypersaw--polyphonic-supersaw"><a class="header" href="#polyhypersaw--polyphonic-supersaw"><code>PolyHyperSaw</code> — Polyphonic supersaw</a></h3>
+<p>The 16-voice counterpart: one detuned ensemble per voice, driven by per-voice
+<code>voct</code>/<code>fm</code>. <code>spread</code>/<code>density</code>/<code>mix</code> CV are <strong>mono (shared across voices)</strong> so
+the detune ratios are computed once per control interval and reused for every
+voice; per-voice spread is deferred.</p>
+<p><strong>Parameters</strong></p>
+<p>Same as <code>HyperSaw</code> (<code>frequency</code>, <code>fm_type</code>, <code>spread</code>, <code>density</code>, <code>mix</code>).</p>
+<p><strong>Inputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>voct</code></td><td>Per-voice V/oct pitch offset (poly)</td></tr>
+<tr><td><code>fm</code></td><td>Per-voice FM input (poly; control-rate vibrato)</td></tr>
+<tr><td><code>spread_cv</code></td><td>Adds to <code>spread</code>, shared across voices (mono)</td></tr>
+<tr><td><code>density_cv</code></td><td>Adds to <code>density</code>, shared across voices (mono)</td></tr>
+<tr><td><code>mix_cv</code></td><td>Adds to <code>mix</code>, shared across voices (mono)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Outputs</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Port</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>out</code></td><td>Per-voice detuned-saw ensemble, PolyBLEP anti-aliased (poly)</td></tr>
 </tbody>
 </table>
 </div>

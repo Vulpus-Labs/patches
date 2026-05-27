@@ -1,0 +1,51 @@
+# Syntax corpus — HyperSaw / PolyHyperSaw supersaw oscillators (ADR 0078, E156).
+#
+# These modules add no new grammar; the entries exist per the syntax-corpus
+# policy (any module the DSL can name should appear), exercising their params
+# and CV wiring so pest and tree-sitter agree they parse and the snippets
+# expand cleanly.
+
+=== ok HyperSaw bare
+module osc : HyperSaw
+
+=== ok PolyHyperSaw bare
+module osc : PolyHyperSaw
+
+=== ok HyperSaw with full param block
+module osc : HyperSaw {
+    frequency: 440Hz,
+    fm_type: logarithmic,
+    spread: 0.7,
+    density: 1.0,
+    mix: 0.8
+}
+
+=== ok PolyHyperSaw with param block
+module osc : PolyHyperSaw { spread: 0.5, density: 0.75, mix: 0.7 }
+
+=== ok HyperSaw CV wiring (mono spread/density/mix + voct/fm)
+module pitch : Osc
+module sweep : Lfo
+module osc : HyperSaw { spread: 0.3 }
+module amp : AudioOut
+pitch.sine -> osc.voct
+sweep.sine -> osc.spread_cv
+sweep.triangle -> osc.density_cv
+sweep.sawtooth -> osc.mix_cv
+sweep.square -> osc.fm
+osc.out -> amp.in
+
+=== ok PolyHyperSaw poly voct/fm with mono shared CV
+module kbd : PolyMidiToCv
+module mod : Lfo
+module osc : PolyHyperSaw { spread: 0.6 }
+module vca : PolyVca
+kbd.voct -> osc.voct
+kbd.voct -> osc.fm
+mod.sine -> osc.spread_cv
+mod.triangle -> osc.mix_cv
+osc.out -> vca.in
+
+=== ok PolyHyperSaw out feeds a tap probe
+module osc : PolyHyperSaw
+osc.out -> ~scope(supersaw)

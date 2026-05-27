@@ -35,7 +35,7 @@ pub use modulators::{
     Adsr, Env, Glide, Lfo, Op, PolyAdsr, PolyEnv, PolyLfo, PolyOp, PolyQuant, PolySah, PolyTuner,
     Quant, RingMod, Sah, Tuner,
 };
-pub use osc::{Noise, Oscillator, PolyNoise, PolyOsc};
+pub use osc::{HyperSaw, Noise, Oscillator, PolyHyperSaw, PolyNoise, PolyOsc};
 pub use stereo::{
     Balance, MidSide, MonoBass, Pan, StereoJoiner, StereoSplitter, StereoSum, StereoWidth,
 };
@@ -88,6 +88,8 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<Op>();
     r.register::<PolyOp>();
     r.register::<PolyOsc>();
+    r.register::<HyperSaw>();
+    r.register::<PolyHyperSaw>();
     r.register::<PolyAdsr>();
     r.register::<PolyEnv>();
     r.register::<PolyVca>();

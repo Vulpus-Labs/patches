@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-328d5810.js";
+            window.path_to_searchindex_js = "../searchindex-5c4606f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-f5b402d7.js"></script>
+        <script src="../toc-66b9837c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -310,15 +310,50 @@ aliases to match the pattern’s channel names:</p>
 <p>For note channels, <code>cv1</code> carries the V/oct pitch (same convention as <code>Osc</code>)
 and <code>trigger</code>/<code>gate</code> signal note-on events. For drum/trigger
 channels, <code>trigger</code> fires on each hit and <code>cv2</code> carries the velocity value.</p>
-<h3 id="slides-and-repeats"><a class="header" href="#slides-and-repeats">Slides and repeats</a></h3>
-<p>The PatternPlayer supports two per-step modifiers from the pattern syntax:</p>
+<h3 id="step-events-adr-0077-unified-grammar"><a class="header" href="#step-events-adr-0077-unified-grammar">Step events (ADR 0077 unified grammar)</a></h3>
+<p>The PatternPlayer consumes the row-build pass’s resolved <code>StepEffect</code>
+per cell — a single typed dispatch covering rests, triggered notes,
+rolls, slides, step-cv changes, and continuation cells. See the
+<a href="../dsl-reference.html#step-events">DSL reference — Step events</a> for the
+full cell taxonomy, close rule, and worked-example timelines. The
+player-side behaviour is:</p>
 <ul>
-<li><strong>Slides</strong> (<code>C4&gt;E4</code>): interpolates <code>cv1</code> (and optionally <code>cv2</code>) linearly
-over the tick duration. The gate stays high through the slide.</li>
-<li><strong>Repeats</strong> (<code>x*3</code>): subdivides the tick into N equal sub-triggers, each
-with an ~80% duty cycle gate so downstream envelopes get clear
-attack transients.</li>
+<li><strong>Triggered cell</strong> (<code>value</code>, <code>value*N</code>, <code>value:cv2</code>, <code>value&gt;value</code>,
+<code>value&gt;</code>): snap cv1/cv2 at the start of the tick and fire <code>trigger</code>.
+<code>*N</code> opens a roll; <code>value&gt;value</code> opens-and-closes a one-tick slide;
+<code>value&gt;</code> opens a multi-tick slide whose close target is resolved
+when the close cell arrives.</li>
+<li><strong>Step-cv</strong> (<code>/value</code>): snap cv1 (and <code>:cv2</code> if present) at the tick
+boundary; no trigger. Gate stays high.</li>
+<li><strong>Slide flow</strong> (<code>&gt;_</code>, <code>_</code> absorbed by a slide): no trigger; cv ramps
+per the slide’s per-channel schedule. Gate stays high.</li>
+<li><strong>Slide close-in-tick</strong> (<code>&gt;value</code>): cv1 (and <code>:cv2</code> if present) ramp
+to the close value across this tick; no trigger.</li>
+<li><strong>Tie sustain</strong> (<code>_</code> with no open modifier): gate stays high; cv
+held.</li>
+<li><strong>Tie-spread roll</strong> (<code>_</code> absorbed by a <code>*N</code> anchor): the N
+sub-triggers spread evenly across the anchor tick plus the absorbed
+run. Per-tick sub-event placement respects swung tick durations —
+each sub-event’s sample offset is computed against the <em>current</em>
+tick’s duration, not the anchor’s, so swing within a span sits
+precisely on the swung beats.</li>
+<li><strong>Rest</strong> (<code>.</code>): gate drops; channel state resets (any open slide is
+closed at its current cv).</li>
 </ul>
+<pre><code class="language-patches"># tie-spread roll across two ticks then a fresh hit
+hit: x*3 _ x .
+
+# slide opens at tick 1, ramps through ticks 1+2, lands on G4 at the
+# boundary, holds tick 3
+note: E4&gt; _ /G4
+
+# slide opens, ramps continuously across three ticks, finishes inside
+# tick 3
+note: E4&gt; _ &gt;G4
+
+# step cv without retrigger
+note: E4 /G4 _
+</code></pre>
 <hr>
 <h2 id="wiring-examples"><a class="header" href="#wiring-examples">Wiring examples</a></h2>
 <h3 id="drum-machine"><a class="header" href="#drum-machine">Drum machine</a></h3>
