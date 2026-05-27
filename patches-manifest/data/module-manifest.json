@@ -1307,6 +1307,154 @@
       }
     },
     {
+      "name": "Env",
+      "template": {
+        "name": "Env",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "trigger",
+            "kind": "Mono",
+            "mono_layout": "Trigger",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "gate",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "voct",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "velocity",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "vca_in",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "vca_out",
+            "kind": "Mono",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "keyfollow",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "ref_key",
+            "kind": {
+              "Float": {
+                "min": -5.0,
+                "max": 5.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "vel_depth",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [
+          {
+            "name": "sustain_stage",
+            "kind": {
+              "Int": {
+                "min": 0,
+                "max": 7,
+                "default": 0
+              }
+            }
+          }
+        ],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "time",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 10.0,
+                  "default": 0.1
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "level",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 1.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "curve",
+              "kind": {
+                "Enum": {
+                  "variants": [
+                    "linear",
+                    "exponential"
+                  ],
+                  "default": "linear"
+                }
+              }
+            }
+          ]
+        ],
+        "per_axis_structural_params": []
+      }
+    },
+    {
       "name": "FdnReverb",
       "template": {
         "name": "FdnReverb",
@@ -3743,6 +3891,154 @@
         ],
         "structural_params": [],
         "per_axis_realtime_params": [],
+        "per_axis_structural_params": []
+      }
+    },
+    {
+      "name": "PolyEnv",
+      "template": {
+        "name": "PolyEnv",
+        "axes": [
+          {
+            "id": "channels",
+            "name": "channels"
+          }
+        ],
+        "global_inputs": [
+          {
+            "name": "trigger",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Trigger"
+          },
+          {
+            "name": "gate",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "voct",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "velocity",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "vca_in",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_inputs": [],
+        "global_outputs": [
+          {
+            "name": "out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          },
+          {
+            "name": "vca_out",
+            "kind": "Poly",
+            "mono_layout": "Audio",
+            "poly_layout": "Audio"
+          }
+        ],
+        "per_axis_outputs": [],
+        "realtime_params": [
+          {
+            "name": "keyfollow",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "ref_key",
+            "kind": {
+              "Float": {
+                "min": -5.0,
+                "max": 5.0,
+                "default": 0.0
+              }
+            }
+          },
+          {
+            "name": "vel_depth",
+            "kind": {
+              "Float": {
+                "min": 0.0,
+                "max": 1.0,
+                "default": 0.0
+              }
+            }
+          }
+        ],
+        "structural_params": [
+          {
+            "name": "sustain_stage",
+            "kind": {
+              "Int": {
+                "min": 0,
+                "max": 7,
+                "default": 0
+              }
+            }
+          }
+        ],
+        "per_axis_realtime_params": [
+          [
+            "channels",
+            {
+              "name": "time",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 10.0,
+                  "default": 0.1
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "level",
+              "kind": {
+                "Float": {
+                  "min": 0.0,
+                  "max": 1.0,
+                  "default": 1.0
+                }
+              }
+            }
+          ],
+          [
+            "channels",
+            {
+              "name": "curve",
+              "kind": {
+                "Enum": {
+                  "variants": [
+                    "linear",
+                    "exponential"
+                  ],
+                  "default": "linear"
+                }
+              }
+            }
+          ]
+        ],
         "per_axis_structural_params": []
       }
     },

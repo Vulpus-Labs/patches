@@ -32,8 +32,8 @@ pub use midi::{
     PolyMidiToCv,
 };
 pub use modulators::{
-    Adsr, Glide, Lfo, Op, PolyAdsr, PolyLfo, PolyOp, PolyQuant, PolySah, PolyTuner, Quant, RingMod,
-    Sah, Tuner,
+    Adsr, Env, Glide, Lfo, Op, PolyAdsr, PolyEnv, PolyLfo, PolyOp, PolyQuant, PolySah, PolyTuner,
+    Quant, RingMod, Sah, Tuner,
 };
 pub use osc::{Noise, Oscillator, PolyNoise, PolyOsc};
 pub use stereo::{
@@ -64,6 +64,7 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<AudioIn>();
     r.register::<AudioOut>();
     r.register::<Adsr>();
+    r.register::<Env>();
     r.register::<Clock>();
     r.register::<Glide>();
     r.register::<Lfo>();
@@ -88,6 +89,7 @@ pub fn default_registry() -> patches_core::registry::Registry {
     r.register::<PolyOp>();
     r.register::<PolyOsc>();
     r.register::<PolyAdsr>();
+    r.register::<PolyEnv>();
     r.register::<PolyVca>();
     r.register::<PolySum>();
     r.register::<StereoSum>();
@@ -166,6 +168,7 @@ mod tests {
             "AudioIn",
             "AudioOut",
             "Adsr",
+            "Env",
             "Clock",
             "Glide",
             "Lfo",
@@ -181,6 +184,7 @@ mod tests {
             "PolyOp",
             "PolyOsc",
             "PolyAdsr",
+            "PolyEnv",
             "PolyVca",
             "PolySum",
             "StereoSum",

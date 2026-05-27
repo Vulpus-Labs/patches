@@ -6,10 +6,12 @@
 //! out of scope.
 
 pub mod adsr;
+pub mod env;
 pub mod glide;
 pub mod lfo;
 pub mod op;
 pub mod poly_adsr;
+pub mod poly_env;
 pub mod poly_lfo;
 pub mod poly_op;
 pub mod poly_quant;
@@ -21,10 +23,12 @@ pub mod sah;
 pub mod tuner;
 
 pub use adsr::Adsr;
+pub use env::Env;
 pub use glide::Glide;
 pub use lfo::Lfo;
 pub use op::Op;
 pub use poly_adsr::PolyAdsr;
+pub use poly_env::PolyEnv;
 pub use poly_lfo::PolyLfo;
 pub use poly_op::PolyOp;
 pub use poly_quant::PolyQuant;

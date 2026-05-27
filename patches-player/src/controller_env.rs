@@ -335,10 +335,16 @@ pub(crate) fn xdg_fallback_for(sidecar_path: &Path) -> PathBuf {
 }
 
 fn scan_into_registry(paths: &[PathBuf], registry: &mut Registry) -> ScanDetails {
-    let (summary, details) = if paths.is_empty() {
+    // Resolve all four ADR 0075 tiers on every (re)scan, not just at startup.
+    // `with_global_dirs` folds in `PATCHES_PLUGIN_PATH` (tier 1) and the
+    // OS-default bundle dir (tier 4) on top of `paths` (the controller's
+    // module_paths, carrying the settings.toml bundle_dirs). Tier 3 is passed
+    // empty so a hot-reload re-scan doesn't re-persist env/default entries back
+    // into module_paths (which is saved as bundle_dirs).
+    let scanner = patches_ffi::PluginScanner::with_global_dirs(paths.to_vec(), &[]);
+    let (summary, details) = if scanner.paths.is_empty() {
         (String::new(), Vec::new())
     } else {
-        let scanner = patches_ffi::PluginScanner::new(paths.to_vec());
         let report = scanner.scan(registry);
         (report.summary(), scan_detail_lines(&report))
     };

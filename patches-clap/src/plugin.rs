@@ -1106,10 +1106,17 @@ fn scan_into_registry(
     registry: &mut Registry,
     empty_summary: &str,
 ) -> ScanDetails {
-    let (summary, details) = if paths.is_empty() {
+    // Resolve all four ADR 0075 tiers, not just the caller-supplied paths:
+    // `with_global_dirs` folds in `PATCHES_PLUGIN_PATH` (tier 1) and the
+    // OS-default bundle dir (tier 4) on top of `paths` (which already carries
+    // the settings.toml bundle_dirs merged at plugin_init). Tier 3 is passed
+    // empty here so we don't re-persist env/default entries back into the
+    // controller's module_paths. Mirrors the player's startup scan so a CLAP
+    // host picks up user-installed .pxm bundles in the default location.
+    let scanner = patches_ffi::PluginScanner::with_global_dirs(paths.to_vec(), &[]);
+    let (summary, details) = if scanner.paths.is_empty() {
         (empty_summary.to_string(), Vec::new())
     } else {
-        let scanner = patches_ffi::PluginScanner::new(paths.to_vec());
         let report = scanner.scan(registry);
         (report.summary(), scan_detail_lines(&report))
     };

@@ -41,6 +41,9 @@ pub use oscillator::{MonoPhaseAccumulator, PolyPhaseAccumulator, polyblep};
 pub mod adsr;
 pub use adsr::{AdsrCore, AdsrShape, AdsrStage};
 
+pub mod multistage_env;
+pub use multistage_env::{EnvCore, EnvPhase, Stage, MAX_STAGES};
+
 pub mod noise;
 pub use noise::{xorshift64, PinkFilter, BrownFilter};
 
