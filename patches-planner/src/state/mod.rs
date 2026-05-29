@@ -19,12 +19,27 @@ pub use graph_index::{GraphIndex, ResolvedGraph};
 // ── PlanError ─────────────────────────────────────────────────────────────────
 
 /// Errors that can occur during the decision phase of plan building.
+///
+/// These are **internal-invariant** failures (a planner bug), not user-input
+/// validation — the latter lives upstream in `patches-interpreter`. The
+/// invariant variants ([`FusedOrderViolation`](PlanError::FusedOrderViolation),
+/// [`ScratchFusedConflict`](PlanError::ScratchFusedConflict)) carry the
+/// offending nodes/slot so a test can assert the *specific* deviant condition
+/// (ADR 0081 / E160).
 #[derive(Debug)]
 pub enum PlanError {
     /// The number of output ports would exceed the buffer pool capacity.
     BufferPoolExhausted,
     /// The number of modules would exceed the module pool capacity.
     ModulePoolExhausted,
+    /// A fused cable's producer does not precede its consumer in execution
+    /// order — or an endpoint is missing from the order (ADR 0072). Phase 2
+    /// would read stale data; indicates a planner bug.
+    FusedOrderViolation { from: NodeId, to: NodeId },
+    /// A producer port allocated a single-buffered scratch slot has a delayed
+    /// (non-fused) consumer (ticket 0974). Scratch carries no last-tick value,
+    /// so the consumer would read same-tick data instead of the 1-sample delay.
+    ScratchFusedConflict { producer: NodeId, slot: usize, consumer: NodeId },
     /// An internal consistency invariant was violated (indicates a bug in the builder).
     Internal(String),
 }
@@ -38,6 +53,18 @@ impl fmt::Display for PlanError {
             PlanError::ModulePoolExhausted => {
                 write!(f, "module pool exhausted: too many modules")
             }
+            PlanError::FusedOrderViolation { from, to } => write!(
+                f,
+                "ADR 0072 invariant violated: fused cable {from} -> {to} \
+                 has its producer at or after its consumer in execution order \
+                 (or an endpoint is missing); producer must precede consumer",
+            ),
+            PlanError::ScratchFusedConflict { producer, slot, consumer } => write!(
+                f,
+                "ADR 0072 phase-5 invariant violated: producer {producer} occupies \
+                 scratch slot {slot} but consumer {consumer} reads it with fused=false; \
+                 scratch implies all consumers fused (ticket 0974)",
+            ),
             PlanError::Internal(msg) => write!(f, "internal error: {msg}"),
         }
     }
@@ -158,23 +185,62 @@ pub enum NodeDecision<'a> {
     },
 }
 
-// ── PlanDecisions ─────────────────────────────────────────────────────────────
+// ── Topology (analysis IR) ────────────────────────────────────────────────────
 
-/// Everything produced by [`make_decisions`] and consumed by the action phase
-/// of the builder in `patches-engine`.
-pub struct PlanDecisions<'a> {
-    pub index: GraphIndex<'a>,
+/// Execution order and per-cable fusion classification derived from the SCC
+/// condensation of the graph (ADR 0072).
+///
+/// Finalised once by [`Topology::build`] and passed forward **frozen**: later
+/// stages read `order` / `cable_fused` from here and never recompute the SCC
+/// analysis (ADR 0081 no-churn rule). The raw `SccPartition` is intentionally
+/// discarded after this stage — nothing downstream reads it once `order` and
+/// `cable_fused` are derived.
+pub struct Topology {
+    /// Nodes in condensation topological order; alphabetical within an SCC.
     pub order: Vec<NodeId>,
-    pub buf_alloc: BufferAllocation,
-    pub decisions: Vec<(NodeId, NodeDecision<'a>)>,
     /// Per-edge fused/cyclic classification, parallel to `index.edges`
     /// (ADR 0072 phase 1). `true` means the cable spans a forward
-    /// (inter-SCC) edge in the condensation: in phase 2 the engine
-    /// reads it from the producer's same-tick write slot. `false`
-    /// means the cable lies inside a non-trivial SCC and must retain
-    /// the 1-sample feedback delay. Phase 1 emits this metadata; the
-    /// engine continues to apply the delay to every cable.
+    /// (inter-SCC) edge in the condensation: the engine reads it from the
+    /// producer's same-tick write slot (phase 2). `false` means the cable
+    /// lies inside a non-trivial SCC and must retain the 1-sample feedback
+    /// delay.
     pub cable_fused: Vec<bool>,
+    /// Size of the feedback arc set: number of cables internal to a
+    /// non-trivial SCC. Reported on plan build to validate the assumption
+    /// that typical patches have very few cyclic cables.
+    pub fas_size: usize,
+}
+
+impl Topology {
+    /// Analysis stage: condense the graph into SCCs, emit execution order,
+    /// and classify every cable as fused (inter-SCC) or cyclic.
+    pub fn build(index: &GraphIndex<'_>, node_ids: &[NodeId]) -> Self {
+        let (order, cable_fused, fas_size) = compute_order_with_fusion(node_ids, &index.edges);
+        Self { order, cable_fused, fas_size }
+    }
+}
+
+// ── PortClassification (analysis IR) ──────────────────────────────────────────
+
+/// The **single owner** of the producer-port slice-position facts (ADR 0081):
+/// each edge's producer-port slice position and each producer port's
+/// cycle/scratch classification.
+///
+/// Built once by [`PortClassification::build`] from [`Topology::cable_fused`]
+/// and read frozen by [`allocate_buffers`] (via `producer_port_cycle`) and the
+/// scratch/fused validation (via `out_port_pos`). The action phase resolves the
+/// same slice-position fact through this bundle's `out_port_pos` when wiring
+/// input buffers, so there is exactly one derivation site —
+/// [`ModuleDescriptor::output_position`] — and the three call sites that
+/// ticket 0974 saw diverge can no longer drift apart.
+///
+/// [`ModuleDescriptor::output_position`]: patches_core::modules::ModuleDescriptor::output_position
+pub struct PortClassification {
+    /// Per-edge producer-port slice position, parallel to `index.edges`.
+    /// `out_port_pos[i]` is edge `i`'s producer-port position in the
+    /// producer's `desc.outputs` (distinct from the edge's user-visible
+    /// `out_idx`; see [`resolve_output_port_positions`]).
+    pub out_port_pos: Vec<usize>,
     /// Per-producer-port cycle/scratch classification (ADR 0072 phase 3,
     /// ticket 0850). Keyed by `(NodeId, output-port slice position)` — the
     /// position in the producer's `desc.outputs`, matching the keys used by
@@ -184,13 +250,38 @@ pub struct PlanDecisions<'a> {
     /// slot. `false` means every consumer is fused and the port may occupy
     /// a single-slot scratch entry.
     ///
-    /// Producer ports with no consumers default to `false` (scratch),
-    /// since there is no read path that needs the delay.
+    /// Producer ports with no consumers are absent; callers treat an absent
+    /// key as `false` (scratch), since no read path needs the delay.
     pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
-    /// Size of the feedback arc set: number of cables internal to a
-    /// non-trivial SCC. Reported on plan build to validate the
-    /// assumption that typical patches have very few cyclic cables.
-    pub fas_size: usize,
+}
+
+impl PortClassification {
+    /// Analysis stage: resolve each edge's producer port to its slice
+    /// position, then classify each producer port cycle/scratch from the
+    /// per-edge fused flags in [`Topology`].
+    pub fn build(index: &GraphIndex<'_>, cable_fused: &[bool]) -> Self {
+        let out_port_pos = resolve_output_port_positions(index);
+        let producer_port_cycle =
+            classify_producer_ports(&index.edges, &out_port_pos, cable_fused);
+        Self { out_port_pos, producer_port_cycle }
+    }
+}
+
+// ── PlanDecisions ─────────────────────────────────────────────────────────────
+
+/// Everything produced by [`make_decisions`] and consumed by the action phase
+/// of the builder. A thin composition of the frozen decision-phase IRs
+/// ([`Topology`], [`PortClassification`]) plus the buffer allocation and the
+/// per-node install/update decisions (ADR 0081). No field re-maps another
+/// bundle's data; the action phase reads each fact from its owning bundle.
+pub struct PlanDecisions<'a> {
+    pub index: GraphIndex<'a>,
+    /// Frozen SCC-derived order + fusion classification.
+    pub topology: Topology,
+    /// Frozen producer-port slice-position facts (single owner).
+    pub ports: PortClassification,
+    pub buf_alloc: BufferAllocation,
+    pub decisions: Vec<(NodeId, NodeDecision<'a>)>,
 }
 
 // ── classify_nodes ────────────────────────────────────────────────────────────
@@ -292,33 +383,27 @@ pub fn make_decisions<'a>(
 ) -> Result<PlanDecisions<'a>, PlanError> {
     let index = GraphIndex::build(graph);
     let node_ids = graph.node_ids();
-    let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
-    validate_fused_invariant(&order, &index.edges, &cable_fused);
-    let out_port_pos = resolve_output_port_positions(&index);
-    let producer_port_cycle = classify_producer_ports(&index.edges, &out_port_pos, &cable_fused);
+
+    // Analysis → validation → analysis → transformation → validation → analysis,
+    // each reading the prior frozen bundle (ADR 0081).
+    let topology = Topology::build(&index, &node_ids);
+    validate_fused_invariant(&topology.order, &index.edges, &topology.cable_fused)?;
+    let ports = PortClassification::build(&index, &topology.cable_fused);
     let buf_alloc = allocate_buffers(
         &index,
-        &order,
+        &topology.order,
         &prev_state.buffer_alloc,
-        &producer_port_cycle,
+        &ports.producer_port_cycle,
         pool_capacity,
     )?;
     validate_scratch_fused_consistency(
         &index.edges,
-        &out_port_pos,
-        &cable_fused,
+        &ports.out_port_pos,
+        &topology.cable_fused,
         &buf_alloc.output_buf,
-    );
-    let decisions = classify_nodes(&index, &order, prev_state)?;
-    Ok(PlanDecisions {
-        index,
-        order,
-        buf_alloc,
-        decisions,
-        cable_fused,
-        producer_port_cycle,
-        fas_size,
-    })
+    )?;
+    let decisions = classify_nodes(&index, &topology.order, prev_state)?;
+    Ok(PlanDecisions { index, topology, ports, buf_alloc, decisions })
 }
 
 /// Resolve each edge's producer output port to its *slice position* in
@@ -432,13 +517,17 @@ pub(crate) fn compute_order_with_fusion(
     (order, cable_fused, fas_size)
 }
 
-/// Assert that every fused cable points forward in `order`. A
-/// violation is a planner bug — phase 2 would read stale data.
+/// Validation stage: every fused cable must point forward in `order`. Returns
+/// [`PlanError::FusedOrderViolation`] for the offending cable if a fused
+/// producer is at or after its consumer (or an endpoint is missing). A
+/// violation is a planner bug — phase 2 would read stale data — but it is a
+/// returned error, not a panic, so it is a first-class testable outcome on the
+/// control thread (ADR 0081).
 fn validate_fused_invariant(
     order: &[NodeId],
     edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
     cable_fused: &[bool],
-) {
+) -> Result<(), PlanError> {
     debug_assert_eq!(edges.len(), cable_fused.len());
     let pos: HashMap<&NodeId, usize> = order.iter().enumerate().map(|(i, n)| (n, i)).collect();
     for (i, edge) in edges.iter().enumerate() {
@@ -446,60 +535,48 @@ fn validate_fused_invariant(
             continue;
         }
         let (from, _, _, to, _, _, _) = edge;
-        let pi = pos.get(from);
-        let pj = pos.get(to);
-        match (pi, pj) {
-            (Some(&p), Some(&c)) => {
-                assert!(
-                    p < c,
-                    "ADR 0072 invariant violated: fused cable {from} -> {to} \
-                     has producer at active_indices[{p}] and consumer at active_indices[{c}]; \
-                     producer must precede consumer in topo order",
-                );
-            }
-            _ => panic!(
-                "ADR 0072 invariant violated: fused cable {from} -> {to} references \
-                 a node missing from active_indices",
-            ),
+        let forward = matches!((pos.get(from), pos.get(to)), (Some(&p), Some(&c)) if p < c);
+        if !forward {
+            return Err(PlanError::FusedOrderViolation { from: from.clone(), to: to.clone() });
         }
     }
+    Ok(())
 }
 
-/// Assert the ADR 0072 phase-5 scratch invariant at plan-build time: a
-/// producer port allocated a scratch slot (`cable_idx < SCRATCH_CAPACITY`)
-/// must have only fused consumers, since scratch slots are single-buffered
-/// and carry no last-tick value.
+/// Validation stage for the ADR 0072 phase-5 scratch invariant: a producer
+/// port allocated a scratch slot (`cable_idx < SCRATCH_CAPACITY`) must have only
+/// fused consumers, since scratch slots are single-buffered and carry no
+/// last-tick value. Returns [`PlanError::ScratchFusedConflict`] for the
+/// offending producer/consumer pair on violation.
 ///
 /// This is the build-time counterpart to the `CablePool::read_raw` debug
-/// assert. The runtime guard is the last line of defence, but it fires
-/// inside `tick()`, where the per-tick `catch_unwind` (ADR 0051) converts
-/// the panic into a silent engine halt — so tests that merely tick the
-/// engine pass unless they also inspect `halt_info()`. This check runs
+/// assert. The runtime guard fires inside `tick()`, where the per-tick
+/// `catch_unwind` (ADR 0051) converts a panic into a silent engine halt — so a
+/// ticking test passes unless it also inspects `halt_info()`. This check runs
 /// once per plan build on the control thread, off the audio hot path and
 /// outside any `catch_unwind`, so any divergence between the producer-port
-/// scratch/cycle classification and the per-edge `fused` flag fails the
-/// build directly (ticket 0974).
+/// scratch/cycle classification and the per-edge `fused` flag fails the build
+/// directly with a structured error (ticket 0974 / E160).
 fn validate_scratch_fused_consistency(
     edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
     out_port_pos: &[usize],
     cable_fused: &[bool],
     output_buf: &HashMap<(NodeId, usize), usize>,
-) {
+) -> Result<(), PlanError> {
     debug_assert_eq!(edges.len(), cable_fused.len());
     debug_assert_eq!(edges.len(), out_port_pos.len());
     for (i, (from, _, _, to, _, _, _)) in edges.iter().enumerate() {
         let key = (from.clone(), out_port_pos[i]);
         let Some(&slot) = output_buf.get(&key) else { continue };
-        if slot < patches_core::cables::SCRATCH_CAPACITY {
-            assert!(
-                cable_fused[i],
-                "ADR 0072 phase-5 invariant violated: producer port {from}[slice {}] \
-                 occupies scratch slot {slot} but consumer {to} reads it with fused=false; \
-                 scratch implies all consumers fused (ticket 0974)",
-                out_port_pos[i],
-            );
+        if slot < patches_core::cables::SCRATCH_CAPACITY && !cable_fused[i] {
+            return Err(PlanError::ScratchFusedConflict {
+                producer: from.clone(),
+                slot,
+                consumer: to.clone(),
+            });
         }
     }
+    Ok(())
 }
 
 // ── classify_nodes tests (T-0099) ────────────────────────────────────────────

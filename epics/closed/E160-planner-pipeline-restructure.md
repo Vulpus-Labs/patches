@@ -1,7 +1,7 @@
 ---
 id: E160
 title: Planner pipeline restructure — typed analysis/validation/transformation stages
-status: open
+status: closed
 created: 2026-05-29
 ---
 
@@ -57,12 +57,12 @@ and testability change, not a behaviour change.
 
 ## Tickets
 
-- [ ] [0975 — Lock-in unit tests for `allocate_buffers` cable-buffer logic](../../tickets/open/0975-allocate-buffers-cable-tests.md)
-- [ ] [0976 — Lock-in tests: action-phase ExecutionPlan output + `make_decisions` orchestration](../../tickets/open/0976-action-phase-make-decisions-tests.md)
-- [ ] [0977 — Typed IR bundles; rewire `make_decisions` to thread them (no logic change)](../../tickets/open/0977-typed-ir-bundles.md)
-- [ ] [0978 — Split action phase: pure transforms + thin impure shell; inject InstanceId](../../tickets/open/0978-action-phase-pure-split.md)
-- [ ] [0979 — Panic → Result internal-invariant validation stages](../../tickets/open/0979-result-based-validation.md)
-- [ ] [0980 — Coverage fill: Planner replan/state threading, tracker indices, resolve variants](../../tickets/open/0980-planner-coverage-fill.md)
+- [x] [0975 — Lock-in unit tests for `allocate_buffers` cable-buffer logic](../../tickets/closed/0975-allocate-buffers-cable-tests.md)
+- [x] [0976 — Lock-in tests: action-phase ExecutionPlan output + `make_decisions` orchestration](../../tickets/closed/0976-action-phase-make-decisions-tests.md)
+- [x] [0977 — Typed IR bundles; rewire `make_decisions` to thread them (no logic change)](../../tickets/closed/0977-typed-ir-bundles.md)
+- [x] [0978 — Split action phase: pure transforms + thin impure shell; inject InstanceId](../../tickets/closed/0978-action-phase-pure-split.md)
+- [ ] [0979 — Panic → Result internal-invariant validation stages](../../tickets/in-progress/0979-result-based-validation.md)
+- [x] [0980 — Coverage fill: Planner replan/state threading, tracker indices, resolve variants](../../tickets/closed/0980-planner-coverage-fill.md)
 
 ## Dependency order
 

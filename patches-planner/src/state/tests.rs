@@ -696,7 +696,7 @@ fn classify_producer_ports_later_output_slot_in_feedback_loop_is_cycle() {
 
     let send_key = (NodeId::from("con"), 1);
     assert_eq!(
-        decisions.producer_port_cycle.get(&send_key),
+        decisions.ports.producer_port_cycle.get(&send_key),
         Some(&true),
         "send port (slice position 1) feeds a non-fused consumer and must be classified cycle"
     );
@@ -713,14 +713,13 @@ fn classify_producer_ports_later_output_slot_in_feedback_loop_is_cycle() {
     );
 }
 
-/// The plan-build scratch invariant fires when a producer port sits in a
-/// scratch slot but one of its consuming edges is non-fused — the exact
-/// inconsistency ticket 0974 produced. This shape cannot arise from a
-/// correct `classify_producer_ports` + `allocate_buffers` pairing; the
-/// assert is a backstop for future planner bugs.
+/// The plan-build scratch invariant returns a structured error when a producer
+/// port sits in a scratch slot but one of its consuming edges is non-fused —
+/// the exact inconsistency ticket 0974 produced. This shape cannot arise from a
+/// correct `classify_producer_ports` + `allocate_buffers` pairing; the check is
+/// a backstop for future planner bugs (now a `Result`, not a panic).
 #[test]
-#[should_panic(expected = "ADR 0072 phase-5 invariant violated")]
-fn validate_scratch_fused_consistency_panics_on_scratch_with_unfused_consumer() {
+fn validate_scratch_fused_consistency_errors_on_scratch_with_unfused_consumer() {
     let edges = vec![edge("a", "b")];
     let out_port_pos = vec![0];
     // Edge is non-fused (consumer wants last-tick value)...
@@ -728,11 +727,20 @@ fn validate_scratch_fused_consistency_panics_on_scratch_with_unfused_consumer() 
     // ...but the producer port was allocated a scratch slot.
     let mut output_buf = std::collections::HashMap::new();
     output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
-    super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
+    let result =
+        super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
+    match result {
+        Err(PlanError::ScratchFusedConflict { producer, slot, consumer }) => {
+            assert_eq!(producer, NodeId::from("a"));
+            assert_eq!(slot, patches_core::cables::RESERVED_SLOTS);
+            assert_eq!(consumer, NodeId::from("b"));
+        }
+        other => panic!("expected ScratchFusedConflict, got {other:?}"),
+    }
 }
 
 /// A scratch slot with an all-fused consumer, and a cycle slot with a
-/// non-fused consumer, are both consistent — no panic.
+/// non-fused consumer, are both consistent — returns `Ok`.
 #[test]
 fn validate_scratch_fused_consistency_accepts_consistent_allocation() {
     let edges = vec![edge("a", "b"), edge("c", "d")];
@@ -743,18 +751,105 @@ fn validate_scratch_fused_consistency_accepts_consistent_allocation() {
     output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
     // Non-fused consumer → cycle slot: OK.
     output_buf.insert((NodeId::from("c"), 0), patches_core::cables::SCRATCH_CAPACITY);
-    super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
+    assert!(
+        super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf)
+            .is_ok()
+    );
 }
 
+/// A backward fused cable returns [`PlanError::FusedOrderViolation`] naming the
+/// offending cable. This shape cannot arise from `compute_order_with_fusion`;
+/// the check catches planner bugs that bypass it (now a `Result`, not a panic).
 #[test]
-#[should_panic(expected = "ADR 0072 invariant violated")]
-fn validate_fused_invariant_panics_on_backward_fused_cable() {
-    // Construct a deliberately-broken classification: edge a → b
-    // marked fused but the order places b before a. This shape
-    // cannot arise from `compute_order_with_fusion`; the assertion
-    // exists to catch planner bugs that bypass it.
+fn validate_fused_invariant_errors_on_backward_fused_cable() {
     let order = vec![NodeId::from("b"), NodeId::from("a")];
     let edges = vec![edge("a", "b")];
     let fused = vec![true];
-    super::validate_fused_invariant(&order, &edges, &fused);
+    match super::validate_fused_invariant(&order, &edges, &fused) {
+        Err(PlanError::FusedOrderViolation { from, to }) => {
+            assert_eq!(from, NodeId::from("a"));
+            assert_eq!(to, NodeId::from("b"));
+        }
+        other => panic!("expected FusedOrderViolation, got {other:?}"),
+    }
+}
+
+/// A forward fused cable in topo order validates `Ok`.
+#[test]
+fn validate_fused_invariant_accepts_forward_fused_cable() {
+    let order = vec![NodeId::from("a"), NodeId::from("b")];
+    let edges = vec![edge("a", "b")];
+    let fused = vec![true];
+    assert!(super::validate_fused_invariant(&order, &edges, &fused).is_ok());
+}
+
+/// A fused cable whose endpoint is missing from the order is also a
+/// [`PlanError::FusedOrderViolation`].
+#[test]
+fn validate_fused_invariant_errors_on_missing_endpoint() {
+    let order = vec![NodeId::from("a")]; // b absent
+    let edges = vec![edge("a", "b")];
+    let fused = vec![true];
+    assert!(matches!(
+        super::validate_fused_invariant(&order, &edges, &fused),
+        Err(PlanError::FusedOrderViolation { .. })
+    ));
+}
+
+// ── Typed IR stage tests (E160 / ticket 0977) ────────────────────────────────
+
+/// `Topology::build` composes `compute_order_with_fusion` into the frozen
+/// analysis IR: condensation order, per-edge fused flags, feedback-arc size.
+#[test]
+fn topology_build_linear_chain() {
+    // c → b → a feeding console: build a real graph so the IR sees real edges.
+    let mut graph = ModuleGraph::new();
+    graph.add_module("osc", osc_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("sink", sink_desc(), &ParameterMap::new()).unwrap();
+    graph
+        .connect(&NodeId::from("osc"), p("sine"), &NodeId::from("sink"), PortRef { name: "left", index: 0 }, 1.0)
+        .unwrap();
+
+    let index = GraphIndex::build(&graph);
+    let topo = Topology::build(&index, &graph.node_ids());
+
+    assert_eq!(topo.order, vec![NodeId::from("osc"), NodeId::from("sink")]);
+    assert_eq!(topo.cable_fused, vec![true], "the single forward edge is fused");
+    assert_eq!(topo.fas_size, 0);
+}
+
+/// `PortClassification::build` is the single owner of `out_port_pos` and
+/// `producer_port_cycle`. For the 0974 console-feedback shape it keys the
+/// classification by slice position (send at slice 1), not the edge's
+/// user-visible `out_idx` (0).
+#[test]
+fn port_classification_build_keys_by_slice_position() {
+    let mut graph = ModuleGraph::new();
+    graph.add_module("con", console_like_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("del", delay_like_desc(), &ParameterMap::new()).unwrap();
+    // con.send (slice 1) → del.in ; del.out → con.ret  (feedback SCC)
+    graph
+        .connect(&NodeId::from("con"), PortRef { name: "send", index: 0 }, &NodeId::from("del"), p("in"), 1.0)
+        .unwrap();
+    graph
+        .connect(&NodeId::from("del"), p("out"), &NodeId::from("con"), PortRef { name: "ret", index: 0 }, 1.0)
+        .unwrap();
+
+    let index = GraphIndex::build(&graph);
+    let topo = Topology::build(&index, &graph.node_ids());
+    let ports = PortClassification::build(&index, &topo.cable_fused);
+
+    // out_port_pos resolves each edge's producer slice position. Edge order
+    // follows index.edges; assert via the map instead of positional indices.
+    assert_eq!(
+        ports.producer_port_cycle.get(&(NodeId::from("con"), 1)),
+        Some(&true),
+        "con.send is slice 1 and feeds a non-fused consumer → cycle"
+    );
+    assert_eq!(ports.producer_port_cycle.get(&(NodeId::from("del"), 0)), Some(&true));
+    // con.out (slice 0) is unconsumed → absent.
+    assert_eq!(ports.producer_port_cycle.get(&(NodeId::from("con"), 0)), None);
+
+    // out_port_pos contains slice position 1 for the con.send edge.
+    assert!(ports.out_port_pos.contains(&1), "send edge resolves to slice position 1");
 }

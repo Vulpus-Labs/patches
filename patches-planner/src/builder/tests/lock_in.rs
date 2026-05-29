@@ -1,0 +1,993 @@
+//! Behaviour lock-in tests for the decision phase (`make_decisions`) and the
+//! action phase (`PatchBuilder::build_patch_with_meta`), written before the
+//! E160 pipeline refactor (ADR 0081, ticket 0976). They assert the
+//! *observable* plan output — `order`, `cable_fused`, `producer_port_cycle`
+//! (keyed by slice position), buffer regions, `ExecutionPlan` port objects,
+//! tombstones, param frames — so they survive the typed-IR (0977) and
+//! action-phase-split (0978) restructure unchanged.
+//!
+//! The action-phase assertions need a registry; rather than the full
+//! `default_registry()` this uses a minimal two-module registry: `MonoPass`
+//! (one in, one out, one realtime param) and `MultiOut` (one in; outputs
+//! `out`/`send_a`/`send_b`, the Console-shaped multi-group layout from the
+//! 0974 regression).
+
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use patches_core::build_error::BuildError;
+use patches_core::cable_pool::CablePool;
+use patches_core::tracker::{PatternBank, ReceivesTrackerData, SongBank, TrackerData};
+use patches_core::cables::{CableKind, CableMap, MonoLayout, PolyLayout, SCRATCH_CAPACITY};
+use patches_core::modules::descriptor_template::{
+    ModuleDescriptorTemplate, ParameterTemplate, PortTemplate,
+};
+use patches_core::param_frame::ParamView;
+use patches_core::registry::Registry;
+use patches_core::{
+    AudioEnvironment, InputPort, InstanceId, Module, ModuleDescriptor, ModuleGraph, ModuleShape,
+    NodeId, OutputPort, ParameterKind, ParameterMap, ParameterValue, PortConnectivity,
+    PortDescriptor, PortRef, StructuralParams,
+};
+use patches_ffi_common::param_frame::ParamViewIndex;
+use patches_ffi_common::param_layout::compute_layout;
+
+use crate::builder::{
+    build_input_ports, build_output_ports, instantiate, BuildErrorKind, InstallMeta,
+    InstanceIdSource, PatchBuilder,
+};
+use crate::planner::Planner;
+use crate::state::{make_decisions, NodeDecision, PlannerState};
+
+// ── Minimal test modules ──────────────────────────────────────────────────────
+
+/// One mono input, one mono output, one realtime `gain` param.
+struct MonoPass {
+    id: InstanceId,
+    desc: ModuleDescriptor,
+}
+
+impl Module for MonoPass {
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MonoPass",
+            axes: &[],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[PortTemplate::mono("out")],
+            per_axis_outputs: &[],
+            realtime_params: &[ParameterTemplate {
+                name: "gain",
+                kind: ParameterKind::Float { min: 0.0, max: 1.0, default: 0.5 },
+            }],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
+    }
+
+    fn prepare(
+        _env: &AudioEnvironment,
+        descriptor: ModuleDescriptor,
+        instance_id: InstanceId,
+        _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> {
+        Ok(Self { id: instance_id, desc: descriptor })
+    }
+
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
+    fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
+    fn instance_id(&self) -> InstanceId { self.id }
+    fn process(&mut self, _pool: &mut CablePool<'_>) {}
+    fn as_any(&self) -> &dyn Any { self }
+}
+
+/// One mono input; three mono outputs in distinct port-name groups
+/// (`out`/`send_a`/`send_b`), all declaring `index == 0` but sitting at slice
+/// positions 0/1/2 — the Console shape behind ticket 0974.
+struct MultiOut {
+    id: InstanceId,
+    desc: ModuleDescriptor,
+}
+
+impl Module for MultiOut {
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "MultiOut",
+            axes: &[],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[
+                PortTemplate::mono("out"),
+                PortTemplate::mono("send_a"),
+                PortTemplate::mono("send_b"),
+            ],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
+    }
+
+    fn prepare(
+        _env: &AudioEnvironment,
+        descriptor: ModuleDescriptor,
+        instance_id: InstanceId,
+        _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> {
+        Ok(Self { id: instance_id, desc: descriptor })
+    }
+
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
+    fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
+    fn instance_id(&self) -> InstanceId { self.id }
+    fn process(&mut self, _pool: &mut CablePool<'_>) {}
+    fn as_any(&self) -> &dyn Any { self }
+}
+
+/// One mono input; implements [`ReceivesTrackerData`] so the planner lists it
+/// in `tracker_receiver_indices`.
+struct TrackerSink {
+    id: InstanceId,
+    desc: ModuleDescriptor,
+}
+
+impl Module for TrackerSink {
+    fn template() -> ModuleDescriptorTemplate {
+        const T: ModuleDescriptorTemplate = ModuleDescriptorTemplate {
+            name: "TrackerSink",
+            axes: &[],
+            global_inputs: &[PortTemplate::mono("in")],
+            per_axis_inputs: &[],
+            global_outputs: &[],
+            per_axis_outputs: &[],
+            realtime_params: &[],
+            structural_params: &[],
+            per_axis_realtime_params: &[],
+            per_axis_structural_params: &[],
+        };
+        T
+    }
+
+    fn prepare(
+        _env: &AudioEnvironment,
+        descriptor: ModuleDescriptor,
+        instance_id: InstanceId,
+        _structural: &StructuralParams,
+    ) -> Result<Self, BuildError> {
+        Ok(Self { id: instance_id, desc: descriptor })
+    }
+
+    fn update_validated_parameters(&mut self, _params: &ParamView<'_>) {}
+    fn descriptor(&self) -> &ModuleDescriptor { &self.desc }
+    fn instance_id(&self) -> InstanceId { self.id }
+    fn process(&mut self, _pool: &mut CablePool<'_>) {}
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_tracker_data_receiver(&mut self) -> Option<&mut dyn ReceivesTrackerData> {
+        Some(self)
+    }
+}
+
+impl ReceivesTrackerData for TrackerSink {
+    fn receive_tracker_data(&mut self, _data: Arc<TrackerData>) {}
+}
+
+// ── Harness helpers ───────────────────────────────────────────────────────────
+
+fn env() -> AudioEnvironment {
+    AudioEnvironment {
+        sample_rate: 44100.0,
+        poly_voices: 16,
+        periodic_update_interval: 32,
+        hosted: false,
+    }
+}
+
+fn registry() -> Registry {
+    let mut r = Registry::new();
+    r.register::<MonoPass>();
+    r.register::<MultiOut>();
+    r.register::<TrackerSink>();
+    r
+}
+
+fn tracker_sink(g: &mut ModuleGraph, name: &str) {
+    let desc = patches_core::describe_for::<TrackerSink>(&shape0());
+    g.add_module(name, desc, &ParameterMap::new()).unwrap();
+}
+
+fn empty_tracker_data() -> TrackerData {
+    TrackerData { patterns: PatternBank { patterns: vec![] }, songs: SongBank { songs: vec![] } }
+}
+
+fn shape0() -> ModuleShape {
+    ModuleShape { channels: 0 }
+}
+
+fn gain_params(v: f32) -> ParameterMap {
+    std::iter::once(("gain".to_string(), 0usize, ParameterValue::Float(v))).collect()
+}
+
+fn mono_pass(g: &mut ModuleGraph, name: &str, gain: f32) {
+    let desc = patches_core::describe_for::<MonoPass>(&shape0());
+    g.add_module(name, desc, &gain_params(gain)).unwrap();
+}
+
+fn multi_out(g: &mut ModuleGraph, name: &str) {
+    let desc = patches_core::describe_for::<MultiOut>(&shape0());
+    g.add_module(name, desc, &ParameterMap::new()).unwrap();
+}
+
+fn wire(g: &mut ModuleGraph, from: &str, out: &'static str, to: &str, inp: &'static str) {
+    g.connect(
+        &NodeId::from(from),
+        PortRef { name: out, index: 0 },
+        &NodeId::from(to),
+        PortRef { name: inp, index: 0 },
+        1.0,
+    )
+    .unwrap();
+}
+
+/// `a -> b -> c` linear chain of `MonoPass`, each with the given gain.
+fn chain_graph(gain: f32) -> ModuleGraph {
+    let mut g = ModuleGraph::new();
+    mono_pass(&mut g, "a", gain);
+    mono_pass(&mut g, "b", gain);
+    mono_pass(&mut g, "c", gain);
+    wire(&mut g, "a", "out", "b", "in");
+    wire(&mut g, "b", "out", "c", "in");
+    g
+}
+
+/// Feedback loop through a multi-output module: `m.send_b -> d.in` and
+/// `d.out -> m.in`, forming the SCC `{d, m}`.
+fn feedback_graph() -> ModuleGraph {
+    let mut g = ModuleGraph::new();
+    multi_out(&mut g, "m");
+    mono_pass(&mut g, "d", 0.5);
+    wire(&mut g, "m", "send_b", "d", "in");
+    wire(&mut g, "d", "out", "m", "in");
+    g
+}
+
+fn out_view(op: &OutputPort) -> (usize, bool) {
+    match op {
+        OutputPort::Mono(m) => (m.cable_idx, m.connected),
+        OutputPort::Poly(p) => (p.cable_idx, p.connected),
+        OutputPort::Stereo(s) => (s.cable_idx, s.connected),
+    }
+}
+
+fn in_view(ip: &InputPort) -> (usize, bool, bool) {
+    match ip {
+        InputPort::Mono(m) => (m.cable_idx, m.connected, m.fused),
+        InputPort::Poly(p) => (p.cable_idx, p.connected, p.fused),
+        InputPort::Stereo(s) => (s.cable_idx, s.connected, s.fused),
+    }
+}
+
+fn decision_for<'a, 'b>(
+    decisions: &'a [(NodeId, NodeDecision<'b>)],
+    id: &str,
+) -> &'a NodeDecision<'b> {
+    let want = NodeId::from(id);
+    &decisions.iter().find(|(n, _)| *n == want).expect("node in decisions").1
+}
+
+// ── make_decisions: linear chain ──────────────────────────────────────────────
+
+#[test]
+fn make_decisions_linear_chain() {
+    let graph = chain_graph(0.5);
+    let dec = make_decisions(&graph, &PlannerState::empty(), 2048).unwrap();
+
+    assert_eq!(dec.topology.order, vec![NodeId::from("a"), NodeId::from("b"), NodeId::from("c")]);
+    assert!(dec.topology.cable_fused.iter().all(|&f| f), "acyclic chain: every cable fused");
+    assert_eq!(dec.topology.fas_size, 0);
+
+    // Every consumer is fused → scratch (false). Unconsumed `c.out` is absent.
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("a"), 0)), Some(&false));
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("b"), 0)), Some(&false));
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("c"), 0)), None);
+
+    for &slot in dec.buf_alloc.output_buf.values() {
+        assert!(slot < SCRATCH_CAPACITY, "all chain producers land in scratch");
+    }
+
+    for id in ["a", "b", "c"] {
+        assert!(
+            matches!(decision_for(&dec.decisions, id), NodeDecision::Install { .. }),
+            "first build installs {id}"
+        );
+    }
+}
+
+// ── make_decisions: feedback through a multi-output module ─────────────────────
+
+#[test]
+fn make_decisions_feedback_through_multi_output() {
+    let graph = feedback_graph();
+    let dec = make_decisions(&graph, &PlannerState::empty(), 2048).unwrap();
+
+    // Single SCC {d, m}; within-SCC order is alphabetical.
+    assert_eq!(dec.topology.order, vec![NodeId::from("d"), NodeId::from("m")]);
+    assert!(dec.topology.cable_fused.iter().all(|&f| !f), "both edges are internal to the SCC");
+    assert_eq!(dec.topology.fas_size, 2);
+
+    // The 0974 lock-in: `send_b` is at slice position 2, and the cycle
+    // classification is keyed by slice position (not the edge's out_idx 0).
+    assert_eq!(
+        dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 2)),
+        Some(&true),
+        "send_b (slice 2) has a delayed consumer → cycle"
+    );
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("d"), 0)), Some(&true));
+    // m.out (slice 0) and m.send_a (slice 1) have no consumers → absent.
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 0)), None);
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 1)), None);
+
+    // Every output port is allocated a slot: cyclic ports land in the cycle
+    // region, the unconsumed ports stay in scratch.
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 2)] >= SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("d"), 0)] >= SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 0)] < SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 1)] < SCRATCH_CAPACITY);
+}
+
+// ── make_decisions: replan (surviving + new + removed) ────────────────────────
+
+#[test]
+fn make_decisions_replan_classifies_survivors_new_and_removed() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    // Seed a real prev_state from a first build of the chain a -> b -> c.
+    let g1 = chain_graph(0.5);
+    let (_plan, state1) = builder
+        .build_patch(&g1, &registry, &env, &PlannerState::empty())
+        .unwrap();
+
+    // Replan: keep a, b; drop c; add d fed by b.
+    let mut g2 = ModuleGraph::new();
+    mono_pass(&mut g2, "a", 0.5);
+    mono_pass(&mut g2, "b", 0.5);
+    mono_pass(&mut g2, "d", 0.5);
+    wire(&mut g2, "a", "out", "b", "in");
+    wire(&mut g2, "b", "out", "d", "in");
+
+    let dec = make_decisions(&g2, &state1, 2048).unwrap();
+
+    assert!(matches!(decision_for(&dec.decisions, "a"), NodeDecision::Update { .. }));
+    assert!(matches!(decision_for(&dec.decisions, "b"), NodeDecision::Update { .. }));
+    assert!(matches!(decision_for(&dec.decisions, "d"), NodeDecision::Install { .. }));
+    // The removed node never appears in the decision set.
+    assert!(
+        !dec.decisions.iter().any(|(n, _)| *n == NodeId::from("c")),
+        "removed node c is absent from decisions"
+    );
+}
+
+// ── build_patch: install shape ────────────────────────────────────────────────
+
+#[test]
+fn build_patch_install_shape() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+    let graph = chain_graph(0.5);
+
+    let (plan, state) = builder
+        .build_patch(&graph, &registry, &env, &PlannerState::empty())
+        .unwrap();
+
+    // Every node covered; active_indices mirrors slot pool indices.
+    assert_eq!(plan.slots.len(), 3);
+    assert_eq!(plan.active_indices.len(), 3);
+    let slot_indices: Vec<usize> = plan.slots.iter().map(|s| s.pool_index).collect();
+    assert_eq!(plan.active_indices, slot_indices);
+
+    // All three installed; no survivor diffs.
+    assert_eq!(plan.new_modules.len(), 3);
+    assert!(plan.parameter_updates.is_empty(), "installs emit no parameter_updates");
+    assert!(plan.param_frames.is_empty());
+    assert!(plan.tombstones.is_empty());
+    assert!(plan.port_updates.is_empty(), "installs set ports inline, not via port_updates");
+
+    // Port objects (read off NodeState, which mirrors what set_ports delivered).
+    let (_, a_out_conn) = out_view(&state.nodes[&NodeId::from("a")].output_ports[0]);
+    assert!(a_out_conn, "a.out feeds b");
+    let (_, c_out_conn) = out_view(&state.nodes[&NodeId::from("c")].output_ports[0]);
+    assert!(!c_out_conn, "c.out is unconsumed");
+
+    let (_, a_in_conn, _) = in_view(&state.nodes[&NodeId::from("a")].input_ports[0]);
+    assert!(!a_in_conn, "a.in is unconnected");
+    let (_, b_in_conn, b_in_fused) = in_view(&state.nodes[&NodeId::from("b")].input_ports[0]);
+    assert!(b_in_conn && b_in_fused, "b.in is a connected, fused (acyclic) input");
+
+    // to_zero contains exactly the freshly allocated output slots; nothing poly.
+    let alloc_slots: std::collections::HashSet<usize> =
+        plan.slots.iter().flat_map(|s| s.output_buffers.iter().copied()).collect();
+    let to_zero_set: std::collections::HashSet<usize> = plan.to_zero.iter().copied().collect();
+    assert_eq!(to_zero_set, alloc_slots, "to_zero == newly allocated output slots on install");
+    assert!(plan.to_zero_poly.is_empty(), "all-mono graph has no poly zeroing");
+}
+
+// ── build_patch: replan stability + tombstones ────────────────────────────────
+
+#[test]
+fn build_patch_replan_pool_stability_and_tombstones() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    let g1 = chain_graph(0.5);
+    let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
+    let pool_of = |s: &PlannerState, id: &str| {
+        let iid = s.nodes[&NodeId::from(id)].instance_id;
+        s.module_alloc.pool_map[&iid]
+    };
+    let a_slot = pool_of(&s1, "a");
+    let b_slot = pool_of(&s1, "b");
+    let c_slot = pool_of(&s1, "c");
+
+    // Identical replan: every node survives, pool slots stable, no installs.
+    let g2 = chain_graph(0.5);
+    let (p2, s2) = builder.build_patch(&g2, &registry, &env, &s1).unwrap();
+    assert!(p2.new_modules.is_empty(), "identical replan installs nothing");
+    assert!(p2.tombstones.is_empty());
+    assert_eq!(pool_of(&s2, "a"), a_slot);
+    assert_eq!(pool_of(&s2, "b"), b_slot);
+    assert_eq!(pool_of(&s2, "c"), c_slot);
+
+    // Drop c: its slot is tombstoned, survivors keep their slots.
+    let mut g3 = ModuleGraph::new();
+    mono_pass(&mut g3, "a", 0.5);
+    mono_pass(&mut g3, "b", 0.5);
+    wire(&mut g3, "a", "out", "b", "in");
+    let (p3, s3) = builder.build_patch(&g3, &registry, &env, &s2).unwrap();
+    assert_eq!(p3.tombstones, vec![c_slot], "removed node's pool slot is tombstoned");
+    assert!(p3.new_modules.is_empty());
+    assert_eq!(pool_of(&s3, "a"), a_slot);
+    assert_eq!(pool_of(&s3, "b"), b_slot);
+}
+
+// ── build_patch: parameter diffs ──────────────────────────────────────────────
+
+#[test]
+fn build_patch_parameter_updates_only_on_change() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    let mut g1 = ModuleGraph::new();
+    mono_pass(&mut g1, "p", 0.5);
+    let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
+
+    // Change gain → one parameter_update + one param_frame, no install.
+    let mut g2 = ModuleGraph::new();
+    mono_pass(&mut g2, "p", 0.8);
+    let (p2, s2) = builder.build_patch(&g2, &registry, &env, &s1).unwrap();
+    assert!(p2.new_modules.is_empty());
+    assert_eq!(p2.parameter_updates.len(), 1, "changed gain emits one update");
+    assert_eq!(p2.param_frames.len(), 1, "and one repacked frame");
+    assert_eq!(p2.parameter_updates[0].0, p2.param_frames[0].0, "same pool_index");
+
+    // Unchanged replan → no updates.
+    let mut g3 = ModuleGraph::new();
+    mono_pass(&mut g3, "p", 0.8);
+    let (p3, _s3) = builder.build_patch(&g3, &registry, &env, &s2).unwrap();
+    assert!(p3.parameter_updates.is_empty(), "no change → no parameter_updates");
+    assert!(p3.param_frames.is_empty());
+}
+
+// ── build_patch: feedback fused flags + cycle-region outputs (0974) ────────────
+
+#[test]
+fn build_patch_feedback_fused_flags_and_cycle_outputs() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+    let graph = feedback_graph();
+
+    let (_plan, state) = builder
+        .build_patch(&graph, &registry, &env, &PlannerState::empty())
+        .unwrap();
+
+    // Both cyclic input ports read with fused = false (retain 1-sample delay).
+    let (_, d_in_conn, d_in_fused) = in_view(&state.nodes[&NodeId::from("d")].input_ports[0]);
+    assert!(d_in_conn && !d_in_fused, "d.in is a cyclic (non-fused) input");
+    let (_, m_in_conn, m_in_fused) = in_view(&state.nodes[&NodeId::from("m")].input_ports[0]);
+    assert!(m_in_conn && !m_in_fused, "m.in is a cyclic (non-fused) input");
+
+    // send_b is slice position 2 and must occupy a cycle slot; the unconsumed
+    // out/send_a stay in scratch. This is the action-phase face of 0974.
+    let m_ports = &state.nodes[&NodeId::from("m")].output_ports;
+    let (m_out_idx, m_out_conn) = out_view(&m_ports[0]);
+    let (m_senda_idx, m_senda_conn) = out_view(&m_ports[1]);
+    let (m_sendb_idx, m_sendb_conn) = out_view(&m_ports[2]);
+    assert!(!m_out_conn && m_out_idx < SCRATCH_CAPACITY, "m.out: unconsumed scratch");
+    assert!(!m_senda_conn && m_senda_idx < SCRATCH_CAPACITY, "m.send_a: unconsumed scratch");
+    assert!(m_sendb_conn && m_sendb_idx >= SCRATCH_CAPACITY, "m.send_b: cyclic → cycle region");
+
+    let (d_out_idx, d_out_conn) = out_view(&state.nodes[&NodeId::from("d")].output_ports[0]);
+    assert!(d_out_conn && d_out_idx >= SCRATCH_CAPACITY, "d.out: cyclic → cycle region");
+}
+
+// ── Pure-transform unit tests (E160 / ticket 0978) ───────────────────────────
+
+/// Deterministic [`InstanceIdSource`] for tests: mints sequential ids from a
+/// seed, so installs get predictable ids without the global counter.
+struct SeqInstanceIds(u64);
+
+impl InstanceIdSource for SeqInstanceIds {
+    fn next_id(&mut self) -> InstanceId {
+        let id = InstanceId::from_raw(self.0);
+        self.0 += 1;
+        id
+    }
+}
+
+/// `build_input_ports` is pure: it maps connectivity + resolved buffers + the
+/// per-input fused map into positional `InputPort` objects, with no registry or
+/// module access.
+#[test]
+fn build_input_ports_pure() {
+    let desc = patches_core::describe_for::<MonoPass>(&shape0());
+    let id = NodeId::from("n");
+
+    // Connected input, no fused entry → defaults to fused.
+    let mut conn = PortConnectivity::new(1, 1);
+    conn.inputs[0] = true;
+    let resolved = vec![(7usize, CableMap::scalar(0.5), false)];
+    let fused = HashMap::new();
+    let ports = build_input_ports(&desc, &conn, &resolved, &fused, &id);
+    assert_eq!(in_view(&ports[0]), (7, true, true), "connected, default fused");
+
+    // Same port flagged non-fused.
+    let mut fused = HashMap::new();
+    fused.insert((id.clone(), "in", 0usize), false);
+    let ports = build_input_ports(&desc, &conn, &resolved, &fused, &id);
+    assert_eq!(in_view(&ports[0]), (7, true, false), "explicit non-fused honoured");
+
+    // Disconnected input is fused by definition regardless of the map.
+    let conn = PortConnectivity::new(1, 1);
+    let ports = build_input_ports(&desc, &conn, &resolved, &fused, &id);
+    assert_eq!(in_view(&ports[0]), (7, false, true), "disconnected ⇒ fused");
+}
+
+/// `build_output_ports` is pure and routes poly/stereo slots that appear in
+/// `to_zero_set` into `to_zero_poly` (so the audio thread zeroes them as the
+/// right cable variant).
+#[test]
+fn build_output_ports_pure_poly_to_zero() {
+    // Hand-built descriptor: one mono out, one poly out.
+    let desc = ModuleDescriptor {
+        module_name: "MixedOut",
+        shape: shape0(),
+        inputs: vec![],
+        outputs: vec![
+            PortDescriptor { name: "m", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "p", index: 0, kind: CableKind::Poly, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+        ],
+        realtime_params: vec![],
+        structural_params: vec![],
+    };
+    let mut conn = PortConnectivity::new(0, 2);
+    conn.outputs[0] = true;
+    conn.outputs[1] = true;
+    let output_buffers = vec![40usize, 41usize];
+    let to_zero_set: HashSet<usize> = [40, 41].into_iter().collect();
+    let mut to_zero_poly = Vec::new();
+
+    let ports = build_output_ports(&desc, &conn, &output_buffers, &to_zero_set, &mut to_zero_poly);
+    assert_eq!(out_view(&ports[0]), (40, true));
+    assert_eq!(out_view(&ports[1]), (41, true));
+    assert_eq!(to_zero_poly, vec![41], "only the poly slot is queued for poly zeroing");
+}
+
+/// `instantiate` is the impure shell: with an injected deterministic id source
+/// it mints sequential ids in decision order and captures per-install metadata.
+#[test]
+fn instantiate_uses_injected_id_source() {
+    let registry = registry();
+    let env = env();
+    let graph = chain_graph(0.5);
+    let dec = make_decisions(&graph, &PlannerState::empty(), 2048).unwrap();
+
+    let mut ids = SeqInstanceIds(100);
+    let inst = instantiate(&dec.decisions, &registry, &env, &mut ids).unwrap();
+
+    // decisions are in topo order [a, b, c] → ids 100, 101, 102.
+    assert_eq!(inst.instance_ids[&NodeId::from("a")], InstanceId::from_raw(100));
+    assert_eq!(inst.instance_ids[&NodeId::from("b")], InstanceId::from_raw(101));
+    assert_eq!(inst.instance_ids[&NodeId::from("c")], InstanceId::from_raw(102));
+    assert_eq!(inst.install_meta.len(), 3, "all three are installs");
+    assert_eq!(inst.modules.len(), 3);
+}
+
+/// The pure `build_draft` transform builds a complete plan draft from the
+/// decision IR + hand-built install metadata — no registry, no module instances.
+#[test]
+fn build_draft_pure_no_registry() {
+    let graph = chain_graph(0.5);
+    let dec = make_decisions(&graph, &PlannerState::empty(), 2048).unwrap();
+
+    // Hand-build instance ids + install metadata from descriptors only.
+    let mut instance_ids = HashMap::new();
+    let mut install_meta = HashMap::new();
+    for (i, name) in ["a", "b", "c"].iter().enumerate() {
+        instance_ids.insert(NodeId::from(*name), InstanceId::from_raw(i as u64));
+        let pdesc = patches_core::describe_for::<MonoPass>(&shape0());
+        let layout = compute_layout(&pdesc);
+        let view_index = ParamViewIndex::from_layout(&layout);
+        install_meta.insert(
+            NodeId::from(*name),
+            InstallMeta { layout, view_index, wants_periodic: false, scratch_base_offset: 0 },
+        );
+    }
+
+    let builder = PatchBuilder::new(2048, 64);
+    let draft = builder
+        .build_draft(
+            dec.decisions,
+            &dec.index,
+            &dec.topology,
+            &dec.ports,
+            dec.buf_alloc,
+            &instance_ids,
+            &install_meta,
+            &PlannerState::empty(),
+        )
+        .unwrap();
+
+    assert_eq!(draft.installs.len(), 3, "all three nodes are installs");
+    assert_eq!(draft.slots.len(), 3);
+    assert_eq!(draft.node_states.len(), 3);
+    assert!(draft.tombstones.is_empty());
+    // installs are recorded in execution order a, b, c.
+    let install_ids: Vec<&str> = draft.installs.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(install_ids, vec!["a", "b", "c"]);
+    // b.in is connected + fused (acyclic chain).
+    let (_, b_conn, b_fused) = in_view(&draft.node_states[&NodeId::from("b")].input_ports[0]);
+    assert!(b_conn && b_fused);
+}
+
+/// Param-frame packing via [`ParamState::new_for_descriptor`] is pure: it packs
+/// a frame for a descriptor + params with no registry.
+#[test]
+fn param_frame_packing_pure() {
+    let desc = patches_core::describe_for::<MonoPass>(&shape0());
+    let params = gain_params(0.7);
+    let state = crate::builder::ParamState::new_for_descriptor(&desc, &params)
+        .expect("packing a valid gain param must succeed");
+    assert_eq!(state.layout, compute_layout(&desc), "layout matches the descriptor");
+}
+
+// ── Planner shell coverage (E160 / ticket 0980) ──────────────────────────────
+
+/// `Planner` threads state across replans: survivors keep their `InstanceId`,
+/// removed nodes are tombstoned, new nodes are installed.
+#[test]
+fn planner_threads_state_across_replans() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+
+    let g1 = chain_graph(0.5);
+    let p1 = planner.build(&g1, &registry, &env).unwrap();
+    assert_eq!(p1.new_modules.len(), 3, "first build installs all");
+    let a_id = planner.instance_id(&NodeId::from("a")).unwrap();
+    let c_id = planner.instance_id(&NodeId::from("c")).unwrap();
+
+    // Identical replan: survivors keep ids, nothing installed/tombstoned.
+    let g2 = chain_graph(0.5);
+    let p2 = planner.build(&g2, &registry, &env).unwrap();
+    assert!(p2.new_modules.is_empty() && p2.tombstones.is_empty());
+    assert_eq!(planner.instance_id(&NodeId::from("a")), Some(a_id));
+
+    // Drop c: it is tombstoned and forgotten; a, b survive.
+    let mut g3 = ModuleGraph::new();
+    mono_pass(&mut g3, "a", 0.5);
+    mono_pass(&mut g3, "b", 0.5);
+    wire(&mut g3, "a", "out", "b", "in");
+    let p3 = planner.build(&g3, &registry, &env).unwrap();
+    assert_eq!(p3.tombstones.len(), 1, "removed node tombstoned");
+    assert!(p3.new_modules.is_empty());
+    assert_eq!(planner.instance_id(&NodeId::from("a")), Some(a_id));
+    assert!(planner.instance_id(&NodeId::from("c")).is_none(), "c forgotten");
+
+    // Re-add c: fresh install, new id distinct from the old one.
+    let g4 = chain_graph(0.5);
+    let p4 = planner.build(&g4, &registry, &env).unwrap();
+    assert_eq!(p4.new_modules.len(), 1, "re-adding c installs one module");
+    assert_ne!(planner.instance_id(&NodeId::from("c")), Some(c_id), "c gets a fresh id");
+}
+
+/// The tracker-receiver index list is built from freshly installed and
+/// surviving `ReceivesTrackerData` modules, sorted, and lands on real pool
+/// slots (a subset of `active_indices`).
+#[test]
+fn planner_builds_tracker_receiver_indices() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+
+    let mut g = ModuleGraph::new();
+    mono_pass(&mut g, "src", 0.5);
+    tracker_sink(&mut g, "t1");
+    tracker_sink(&mut g, "t2");
+    wire(&mut g, "src", "out", "t1", "in");
+    wire(&mut g, "src", "out", "t2", "in");
+
+    let p = planner.build(&g, &registry, &env).unwrap();
+    assert_eq!(p.tracker_receiver_indices.len(), 2, "both sinks are receivers");
+    let mut sorted = p.tracker_receiver_indices.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, p.tracker_receiver_indices, "indices are sorted");
+    let active: HashSet<usize> = p.active_indices.iter().copied().collect();
+    for idx in &p.tracker_receiver_indices {
+        assert!(active.contains(idx), "receiver slot {idx} must be a live pool slot");
+    }
+
+    // Identical replan: the surviving receivers are still listed.
+    let p2 = planner.build(&g, &registry, &env).unwrap();
+    assert_eq!(p2.tracker_receiver_indices.len(), 2, "survivors stay receivers");
+}
+
+/// Tracker data is attached when provided and absent otherwise.
+#[test]
+fn planner_attaches_tracker_data_when_provided() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+    let mut g = ModuleGraph::new();
+    tracker_sink(&mut g, "t");
+
+    let (with, _) = planner
+        .build_with_tracker_data_and_meta(&g, &registry, &env, Some(empty_tracker_data()))
+        .unwrap();
+    assert!(with.tracker_data.is_some(), "provided data is attached");
+
+    let (without, _) = planner
+        .build_with_tracker_data_and_meta(&g, &registry, &env, None)
+        .unwrap();
+    assert!(without.tracker_data.is_none(), "no data → none attached");
+}
+
+/// A builder error (buffer pool exhausted) surfaces from the `Planner` as a
+/// `BuildError`, not a panic.
+#[test]
+fn planner_propagates_build_error() {
+    let registry = registry();
+    let env = env();
+    // Buffer pool sized to the reserved range only — no room for any dynamic
+    // scratch output, so the chain's first producer port exhausts it.
+    let mut planner = Planner::with_capacity(patches_core::cables::RESERVED_SLOTS);
+    let g = chain_graph(0.5);
+    match planner.build(&g, &registry, &env) {
+        Err(e) => assert!(
+            matches!(e.kind, BuildErrorKind::PoolExhausted),
+            "buffer exhaustion must propagate as BuildError::PoolExhausted, got {:?}",
+            e.kind
+        ),
+        Ok(_) => panic!("expected a BuildError, not a plan"),
+    }
+}
+
+// ── Adversarial probes (should-pass-might-not) ───────────────────────────────
+
+/// A producer wired to its own input forms a single-node SCC. The edge is
+/// intra-SCC (`cable_fused = false`), so the producer port must occupy the
+/// cycle region and the consumer side must read with `fused = false`.
+#[test]
+fn self_loop_producer_uses_cycle_region() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+    let mut g = ModuleGraph::new();
+    mono_pass(&mut g, "x", 0.5);
+    wire(&mut g, "x", "out", "x", "in");
+    let (_p, state) = PatchBuilder::new(2048, 64)
+        .build_patch(&g, &registry, &env, &PlannerState::empty())
+        .unwrap();
+
+    let x = NodeId::from("x");
+    let (out_idx, _) = out_view(&state.nodes[&x].output_ports[0]);
+    let (in_idx, in_conn, in_fused) = in_view(&state.nodes[&x].input_ports[0]);
+    assert!(
+        out_idx >= patches_core::cables::SCRATCH_CAPACITY,
+        "self-loop producer must occupy the cycle region (slot {out_idx})"
+    );
+    assert!(in_conn, "x.in is connected to x.out");
+    assert!(!in_fused, "self-loop cable is intra-SCC ⇒ fused=false");
+    assert_eq!(out_idx, in_idx, "the same cable slot serves both ends of the self-loop");
+
+    // Also drive through Planner to confirm the full shell handles it.
+    let _ = planner.build(&g, &registry, &env).unwrap();
+}
+
+/// `Planner::build` on an empty graph returns a well-formed empty plan.
+#[test]
+fn planner_handles_empty_graph() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+    let g = ModuleGraph::new();
+    let p = planner.build(&g, &registry, &env).unwrap();
+    assert!(p.slots.is_empty());
+    assert!(p.new_modules.is_empty());
+    assert!(p.tombstones.is_empty());
+    assert!(p.tracker_receiver_indices.is_empty());
+    assert!(p.active_indices.is_empty());
+    // Replan: still empty, still Ok.
+    let p2 = planner.build(&g, &registry, &env).unwrap();
+    assert!(p2.slots.is_empty());
+}
+
+/// A surviving consumer whose previously-disconnected input becomes connected
+/// on the next plan must emit a `port_updates` entry (cable_idx + connected
+/// flag both change), and the surviving producer whose output is now consumed
+/// must too.
+#[test]
+fn late_connection_emits_port_updates_for_both_endpoints() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    // Plan 1: a and b both present, no edge.
+    let mut g1 = ModuleGraph::new();
+    mono_pass(&mut g1, "a", 0.5);
+    mono_pass(&mut g1, "b", 0.5);
+    let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
+
+    // Plan 2: same nodes, now wire a → b.
+    let mut g2 = ModuleGraph::new();
+    mono_pass(&mut g2, "a", 0.5);
+    mono_pass(&mut g2, "b", 0.5);
+    wire(&mut g2, "a", "out", "b", "in");
+    let (p2, _s2) = builder.build_patch(&g2, &registry, &env, &s1).unwrap();
+
+    assert!(p2.new_modules.is_empty(), "both nodes survive");
+    let touched: HashSet<usize> = p2.port_updates.iter().map(|(slot, _, _)| *slot).collect();
+    assert_eq!(
+        touched.len(),
+        2,
+        "both endpoints of the newly-added edge must emit a port_updates entry, got {:?}",
+        p2.port_updates.iter().map(|(s, _, _)| *s).collect::<Vec<_>>()
+    );
+}
+
+/// Changing only an edge's cable scale (a→b CableMap) emits a `port_updates`
+/// entry for the **consumer** (scale lives on the input port) and **nothing**
+/// for the producer (its output port carries no scale).
+#[test]
+fn cable_scale_change_emits_port_update_only_on_consumer() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    let mut g1 = ModuleGraph::new();
+    mono_pass(&mut g1, "a", 0.5);
+    mono_pass(&mut g1, "b", 0.5);
+    wire(&mut g1, "a", "out", "b", "in");
+    let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
+
+    // Plan 2: same topology, edge re-scaled.
+    let mut g2 = ModuleGraph::new();
+    mono_pass(&mut g2, "a", 0.5);
+    mono_pass(&mut g2, "b", 0.5);
+    g2.connect(
+        &NodeId::from("a"), PortRef { name: "out", index: 0 },
+        &NodeId::from("b"), PortRef { name: "in", index: 0 },
+        0.25,
+    ).unwrap();
+    let (p2, _s2) = builder.build_patch(&g2, &registry, &env, &s1).unwrap();
+
+    assert!(p2.new_modules.is_empty(), "both nodes survive");
+    let touched: Vec<usize> = p2.port_updates.iter().map(|(s, _, _)| *s).collect();
+    assert_eq!(
+        p2.port_updates.len(),
+        1,
+        "exactly one port_updates entry (the consumer), got {touched:?}"
+    );
+}
+
+/// Dropping a `ReceivesTrackerData` node clears it from the next plan's
+/// `tracker_receiver_indices`, and a subsequent re-add lists the *new*
+/// InstanceId / pool slot — the dropped id must not stick around.
+#[test]
+fn tracker_sink_drop_then_re_add_uses_fresh_id() {
+    let registry = registry();
+    let env = env();
+    let mut planner = Planner::new();
+
+    let mut g1 = ModuleGraph::new();
+    tracker_sink(&mut g1, "t");
+    let p1 = planner.build(&g1, &registry, &env).unwrap();
+    assert_eq!(p1.tracker_receiver_indices.len(), 1);
+    let id1 = planner.instance_id(&NodeId::from("t")).unwrap();
+
+    // Drop t.
+    let g_empty = ModuleGraph::new();
+    let p2 = planner.build(&g_empty, &registry, &env).unwrap();
+    assert!(p2.tracker_receiver_indices.is_empty(), "dropped receiver cleared");
+    assert!(planner.instance_id(&NodeId::from("t")).is_none());
+
+    // Re-add t: fresh install, fresh id, listed again.
+    let mut g3 = ModuleGraph::new();
+    tracker_sink(&mut g3, "t");
+    let p3 = planner.build(&g3, &registry, &env).unwrap();
+    assert_eq!(p3.new_modules.len(), 1, "re-added receiver freshly installed");
+    assert_eq!(p3.tracker_receiver_indices.len(), 1, "re-added receiver listed");
+    let id3 = planner.instance_id(&NodeId::from("t")).unwrap();
+    assert_ne!(id1, id3, "re-added node gets a fresh InstanceId");
+}
+
+/// Multi-replan stress: a churn of adds/removes/param/topology changes keeps
+/// allocation consistent — no two live modules (or producer ports) share a
+/// slot, and freelisted slots are never simultaneously live.
+#[test]
+fn multi_replan_stress_keeps_allocation_consistent() {
+    let registry = registry();
+    let env = env();
+    let builder = PatchBuilder::new(2048, 64);
+
+    // A churny sequence: grow, change topology, shrink, param-change, regrow.
+    let graphs: Vec<ModuleGraph> = vec![
+        chain_graph(0.5),
+        {
+            let mut g = ModuleGraph::new();
+            mono_pass(&mut g, "a", 0.5);
+            mono_pass(&mut g, "b", 0.5);
+            mono_pass(&mut g, "c", 0.5);
+            mono_pass(&mut g, "d", 0.5);
+            wire(&mut g, "a", "out", "b", "in");
+            wire(&mut g, "b", "out", "c", "in");
+            wire(&mut g, "c", "out", "d", "in");
+            g
+        },
+        {
+            let mut g = ModuleGraph::new();
+            mono_pass(&mut g, "a", 0.5);
+            mono_pass(&mut g, "b", 0.5);
+            wire(&mut g, "a", "out", "b", "in");
+            g
+        },
+        {
+            let mut g = ModuleGraph::new();
+            mono_pass(&mut g, "a", 0.9);
+            mono_pass(&mut g, "b", 0.1);
+            wire(&mut g, "a", "out", "b", "in");
+            g
+        },
+        chain_graph(0.5),
+    ];
+
+    let mut state = PlannerState::empty();
+    for (i, g) in graphs.iter().enumerate() {
+        let (_plan, new_state) = builder.build_patch(g, &registry, &env, &state).unwrap();
+
+        // Live module slots are all distinct.
+        let live: Vec<usize> = new_state.module_alloc.pool_map.values().copied().collect();
+        let live_set: HashSet<usize> = live.iter().copied().collect();
+        assert_eq!(live.len(), live_set.len(), "step {i}: two live modules share a pool slot");
+
+        // Freelisted slots are not simultaneously live.
+        for f in &new_state.module_alloc.freelist {
+            assert!(!live_set.contains(f), "step {i}: freelisted slot {f} is also live");
+        }
+
+        // Producer-port buffer slots are all distinct.
+        let bufs: Vec<usize> = new_state.buffer_alloc.output_buf.values().copied().collect();
+        let buf_set: HashSet<usize> = bufs.iter().copied().collect();
+        assert_eq!(bufs.len(), buf_set.len(), "step {i}: two ports share a buffer slot");
+
+        state = new_state;
+    }
+}

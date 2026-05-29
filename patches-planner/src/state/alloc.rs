@@ -334,11 +334,14 @@ pub fn allocate_buffers(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use super::*;
     use super::super::PlanError;
-    use patches_core::modules::InstanceId;
+    use patches_core::cables::{CableKind, MonoLayout, PolyLayout};
+    use patches_core::graphs::graph::{ModuleGraph, NodeId};
+    use patches_core::modules::{InstanceId, ModuleDescriptor, ModuleShape, PortDescriptor};
+    use patches_core::parameter_map::ParameterMap;
 
     fn fresh_ids(n: usize) -> Vec<InstanceId> {
         (0..n).map(|_| InstanceId::next()).collect()
@@ -544,5 +547,328 @@ mod tests {
         for &t in &diff1.tombstoned {
             assert!(!active_slots.contains(&t), "tombstoned slot {t} must not appear in slot_map");
         }
+    }
+
+    // ── allocate_buffers helpers ──────────────────────────────────────────────
+
+    fn mono_out(name: &'static str, index: usize) -> PortDescriptor {
+        PortDescriptor {
+            name,
+            index,
+            kind: CableKind::Mono,
+            mono_layout: MonoLayout::Audio,
+            poly_layout: PolyLayout::Audio,
+        }
+    }
+
+    fn node_desc(outputs: Vec<PortDescriptor>) -> ModuleDescriptor {
+        ModuleDescriptor {
+            module_name: "Test",
+            shape: ModuleShape { channels: 0 },
+            inputs: vec![],
+            outputs,
+            realtime_params: vec![],
+            structural_params: vec![],
+        }
+    }
+
+    /// Build a graph where each `(name, n_outputs)` becomes a node with `n`
+    /// single mono output ports (`"out"`/index `0..n`).
+    fn graph_with(specs: &[(&'static str, usize)]) -> ModuleGraph {
+        let mut g = ModuleGraph::new();
+        for (name, n) in specs {
+            let outs = (0..*n).map(|i| mono_out("out", i)).collect();
+            g.add_module(*name, node_desc(outs), &ParameterMap::new()).unwrap();
+        }
+        g
+    }
+
+    fn order_of(names: &[&str]) -> Vec<NodeId> {
+        names.iter().map(|n| NodeId::from(*n)).collect()
+    }
+
+    /// Cycle classification keyed by `(node, slice-position)`.
+    fn cycle_map(entries: &[((&str, usize), bool)]) -> HashMap<(NodeId, usize), bool> {
+        entries
+            .iter()
+            .map(|((n, p), c)| ((NodeId::from(*n), *p), *c))
+            .collect()
+    }
+
+    /// Fold an allocation result into the next plan's carried state.
+    fn as_prev(a: &BufferAllocation) -> BufferAllocState {
+        BufferAllocState {
+            output_buf: a.output_buf.clone(),
+            cycle_freelist: a.cycle_freelist.clone(),
+            cycle_hwm: a.cycle_hwm,
+            scratch_hwm: a.scratch_hwm,
+        }
+    }
+
+    fn key(name: &str, pos: usize) -> (NodeId, usize) {
+        (NodeId::from(name), pos)
+    }
+
+    // ── scratch assignment ────────────────────────────────────────────────────
+
+    /// Every-consumer-fused ports pack densely into the scratch region in
+    /// forward-sweep order, starting at `RESERVED_SLOTS`.
+    #[test]
+    fn scratch_ports_pack_densely_from_reserved_slots() {
+        let graph = graph_with(&[("a", 1), ("b", 1), ("c", 1)]);
+        let index = GraphIndex::build(&graph);
+        let order = order_of(&["a", "b", "c"]);
+        // No cycle entries — every port defaults to scratch.
+        let alloc =
+            allocate_buffers(&index, &order, &BufferAllocState::default(), &HashMap::new(), 2048)
+                .unwrap();
+
+        assert_eq!(alloc.output_buf[&key("a", 0)], RESERVED_SLOTS);
+        assert_eq!(alloc.output_buf[&key("b", 0)], RESERVED_SLOTS + 1);
+        assert_eq!(alloc.output_buf[&key("c", 0)], RESERVED_SLOTS + 2);
+        assert_eq!(alloc.scratch_hwm, RESERVED_SLOTS + 3);
+        for v in alloc.output_buf.values() {
+            assert!(
+                (RESERVED_SLOTS..SCRATCH_CAPACITY).contains(v),
+                "scratch slot {v} must lie in [RESERVED_SLOTS, SCRATCH_CAPACITY)"
+            );
+        }
+    }
+
+    // ── cycle assignment ──────────────────────────────────────────────────────
+
+    /// A port with a non-fused consumer is placed in the cycle region
+    /// (`cable_idx >= SCRATCH_CAPACITY`), at logical 0 on the first plan.
+    #[test]
+    fn cycle_port_uses_cycle_region() {
+        let graph = graph_with(&[("a", 1)]);
+        let index = GraphIndex::build(&graph);
+        let order = order_of(&["a"]);
+        let cycle = cycle_map(&[(("a", 0), true)]);
+        let alloc =
+            allocate_buffers(&index, &order, &BufferAllocState::default(), &cycle, 2048).unwrap();
+
+        assert_eq!(alloc.output_buf[&key("a", 0)], SCRATCH_CAPACITY);
+        assert_eq!(alloc.cycle_hwm, 1);
+    }
+
+    // ── cycle stability across replans ────────────────────────────────────────
+
+    /// A surviving cycle producer keeps the same cycle slot across a replan,
+    /// preserving in-flight feedback state.
+    #[test]
+    fn cycle_slot_stable_across_replan() {
+        let graph = graph_with(&[("a", 1), ("b", 1)]);
+        let index = GraphIndex::build(&graph);
+        let order = order_of(&["a", "b"]);
+        let cycle = cycle_map(&[(("a", 0), true), (("b", 0), true)]);
+
+        let p1 =
+            allocate_buffers(&index, &order, &BufferAllocState::default(), &cycle, 2048).unwrap();
+        let a_slot = p1.output_buf[&key("a", 0)];
+        let b_slot = p1.output_buf[&key("b", 0)];
+        assert!(a_slot >= SCRATCH_CAPACITY && b_slot >= SCRATCH_CAPACITY);
+        assert_ne!(a_slot, b_slot);
+
+        let p2 = allocate_buffers(&index, &order, &as_prev(&p1), &cycle, 2048).unwrap();
+        assert_eq!(p2.output_buf[&key("a", 0)], a_slot, "survivor keeps its cycle slot");
+        assert_eq!(p2.output_buf[&key("b", 0)], b_slot, "survivor keeps its cycle slot");
+    }
+
+    /// A vacated cycle slot returns to the freelist and is recycled LIFO by
+    /// the next new cycle producer.
+    #[test]
+    fn vacated_cycle_slot_freelisted_and_recycled_lifo() {
+        let graph = graph_with(&[("a", 1), ("b", 1)]);
+        let index = GraphIndex::build(&graph);
+        let cycle_ab = cycle_map(&[(("a", 0), true), (("b", 0), true)]);
+        let p1 = allocate_buffers(
+            &index,
+            &order_of(&["a", "b"]),
+            &BufferAllocState::default(),
+            &cycle_ab,
+            2048,
+        )
+        .unwrap();
+        let b_slot = p1.output_buf[&key("b", 0)];
+        let b_logical = b_slot - SCRATCH_CAPACITY;
+
+        // Replan with only `a`: `b`'s cycle slot is vacated.
+        let cycle_a = cycle_map(&[(("a", 0), true)]);
+        let p2 =
+            allocate_buffers(&index, &order_of(&["a"]), &as_prev(&p1), &cycle_a, 2048).unwrap();
+        assert_eq!(
+            p2.cycle_freelist.iter().filter(|&&l| l == b_logical).count(),
+            1,
+            "vacated logical freelisted exactly once (no double-free)"
+        );
+        assert!(p2.to_zero.contains(&b_slot), "vacated slot must be zeroed");
+
+        // A fresh cycle producer recycles the freed slot (LIFO).
+        let graph2 = graph_with(&[("a", 1), ("c", 1)]);
+        let index2 = GraphIndex::build(&graph2);
+        let cycle_ac = cycle_map(&[(("a", 0), true), (("c", 0), true)]);
+        let p3 =
+            allocate_buffers(&index2, &order_of(&["a", "c"]), &as_prev(&p2), &cycle_ac, 2048)
+                .unwrap();
+        assert_eq!(
+            p3.output_buf[&key("c", 0)],
+            b_slot,
+            "new cycle producer recycles the last freed cycle slot"
+        );
+    }
+
+    // ── region flips ──────────────────────────────────────────────────────────
+
+    /// scratch → cycle: the old scratch index is abandoned, the new cycle
+    /// slot is zeroed, and the abandoned scratch slot is reconciled to_zero.
+    #[test]
+    fn flip_scratch_to_cycle() {
+        let graph = graph_with(&[("a", 1)]);
+        let index = GraphIndex::build(&graph);
+
+        let p1 = allocate_buffers(
+            &index,
+            &order_of(&["a"]),
+            &BufferAllocState::default(),
+            &HashMap::new(),
+            2048,
+        )
+        .unwrap();
+        let scratch_slot = p1.output_buf[&key("a", 0)];
+        assert!(scratch_slot < SCRATCH_CAPACITY);
+
+        let cycle = cycle_map(&[(("a", 0), true)]);
+        let p2 = allocate_buffers(&index, &order_of(&["a"]), &as_prev(&p1), &cycle, 2048).unwrap();
+        let new_slot = p2.output_buf[&key("a", 0)];
+        assert!(new_slot >= SCRATCH_CAPACITY, "must flip into the cycle region");
+        assert!(p2.to_zero.contains(&new_slot), "new cycle slot must be zeroed");
+        assert!(p2.to_zero.contains(&scratch_slot), "abandoned scratch slot must be zeroed");
+    }
+
+    /// cycle → scratch: the old cycle slot is freelisted (exactly once) and
+    /// zeroed; the port takes a fresh scratch index.
+    #[test]
+    fn flip_cycle_to_scratch() {
+        let graph = graph_with(&[("a", 1)]);
+        let index = GraphIndex::build(&graph);
+
+        let cycle = cycle_map(&[(("a", 0), true)]);
+        let p1 = allocate_buffers(
+            &index,
+            &order_of(&["a"]),
+            &BufferAllocState::default(),
+            &cycle,
+            2048,
+        )
+        .unwrap();
+        let cycle_slot = p1.output_buf[&key("a", 0)];
+        let logical = cycle_slot - SCRATCH_CAPACITY;
+
+        let p2 = allocate_buffers(
+            &index,
+            &order_of(&["a"]),
+            &as_prev(&p1),
+            &HashMap::new(),
+            2048,
+        )
+        .unwrap();
+        let new_slot = p2.output_buf[&key("a", 0)];
+        assert!(new_slot < SCRATCH_CAPACITY, "must flip into the scratch region");
+        assert_eq!(
+            p2.cycle_freelist.iter().filter(|&&l| l == logical).count(),
+            1,
+            "old cycle logical freelisted exactly once (no double-free)"
+        );
+        assert!(p2.to_zero.contains(&cycle_slot), "old cycle slot must be zeroed");
+    }
+
+    // ── capacity edges ────────────────────────────────────────────────────────
+
+    /// Scratch allocation succeeds up to `min(pool_capacity, SCRATCH_CAPACITY)`
+    /// and fails one past it.
+    #[test]
+    fn scratch_exhaustion_at_pool_capacity() {
+        // Room for exactly one dynamic scratch slot (index RESERVED_SLOTS).
+        let g_ok = graph_with(&[("a", 1)]);
+        let i_ok = GraphIndex::build(&g_ok);
+        assert!(allocate_buffers(
+            &i_ok,
+            &order_of(&["a"]),
+            &BufferAllocState::default(),
+            &HashMap::new(),
+            RESERVED_SLOTS + 1,
+        )
+        .is_ok());
+
+        // A second scratch port exceeds that capacity.
+        let g_err = graph_with(&[("a", 1), ("b", 1)]);
+        let i_err = GraphIndex::build(&g_err);
+        let r = allocate_buffers(
+            &i_err,
+            &order_of(&["a", "b"]),
+            &BufferAllocState::default(),
+            &HashMap::new(),
+            RESERVED_SLOTS + 1,
+        );
+        assert!(matches!(r, Err(PlanError::BufferPoolExhausted)));
+    }
+
+    /// Cycle allocation fails when the logical index would reach
+    /// `CYCLE_CAPACITY`.
+    #[test]
+    fn cycle_exhaustion_at_cycle_capacity() {
+        let graph = graph_with(&[("a", 1)]);
+        let index = GraphIndex::build(&graph);
+        let prev = BufferAllocState {
+            output_buf: HashMap::new(),
+            cycle_freelist: Vec::new(),
+            cycle_hwm: CYCLE_CAPACITY,
+            scratch_hwm: RESERVED_SLOTS,
+        };
+        let cycle = cycle_map(&[(("a", 0), true)]);
+        let r = allocate_buffers(&index, &order_of(&["a"]), &prev, &cycle, 2048);
+        assert!(matches!(r, Err(PlanError::BufferPoolExhausted)));
+    }
+
+    // ── multi-output group (0974 shape) ───────────────────────────────────────
+
+    /// A node whose output ports all declare `index == 0` but sit at distinct
+    /// slice positions (Console's `out`/`send_a`/`send_b`) gets a distinct slot
+    /// per slice position, in the correct region per the slice-position-keyed
+    /// cycle map. This is the 0974 regression lock-in.
+    #[test]
+    fn multi_output_group_distinct_slots_by_slice_position() {
+        let mut graph = ModuleGraph::new();
+        let outs = vec![mono_out("out", 0), mono_out("send_a", 0), mono_out("send_b", 0)];
+        graph.add_module("c", node_desc(outs), &ParameterMap::new()).unwrap();
+        let index = GraphIndex::build(&graph);
+
+        // Slice position 1 is cyclic; 0 and 2 are scratch.
+        let cycle = cycle_map(&[(("c", 0), false), (("c", 1), true), (("c", 2), false)]);
+        let alloc = allocate_buffers(
+            &index,
+            &order_of(&["c"]),
+            &BufferAllocState::default(),
+            &cycle,
+            2048,
+        )
+        .unwrap();
+
+        let s0 = alloc.output_buf[&key("c", 0)];
+        let s1 = alloc.output_buf[&key("c", 1)];
+        let s2 = alloc.output_buf[&key("c", 2)];
+
+        assert!(s0 < SCRATCH_CAPACITY, "slice 0 is scratch");
+        assert!(s1 >= SCRATCH_CAPACITY, "slice 1 is cycle");
+        assert!(s2 < SCRATCH_CAPACITY, "slice 2 is scratch");
+
+        let distinct: HashSet<usize> = [s0, s1, s2].into_iter().collect();
+        assert_eq!(distinct.len(), 3, "each slice position gets its own slot");
+
+        // Scratch ports packed densely in slice order; cycle at logical 0.
+        assert_eq!(s0, RESERVED_SLOTS);
+        assert_eq!(s2, RESERVED_SLOTS + 1);
+        assert_eq!(s1, SCRATCH_CAPACITY);
     }
 }
