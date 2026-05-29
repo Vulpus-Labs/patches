@@ -50,9 +50,9 @@ use patches_core::cables::PolyTriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
 
-use crate::common::approximate::lookup_sine;
+use crate::common::approximate::lookup_sine_q32;
 use super::lfo::LfoMode;
-use patches_dsp::xorshift64;
+use patches_dsp::{xorshift64, PolyPhaseAccumulatorQ32};
 
 module_params! {
     PolyLfo {
@@ -79,7 +79,7 @@ pub struct PolyLfo {
     phase_offset: f32,
     mode: LfoMode,
     spread: f32,
-    phases: [f32; 16],
+    phase_acc: PolyPhaseAccumulatorQ32,
     prng_states: [u64; 16],
     random_values: [f32; 16],
     // Inputs
@@ -160,7 +160,7 @@ impl Module for PolyLfo {
             phase_offset: 0.0,
             mode: LfoMode::Bipolar,
             spread: 0.0,
-            phases: [0.0; 16],
+            phase_acc: PolyPhaseAccumulatorQ32::new(),
             prng_states,
             random_values: [0.0; 16],
             in_sync: PolyTriggerInput::default(),
@@ -220,7 +220,7 @@ impl Module for PolyLfo {
         let do_reset = self.out_reset.is_connected();
 
         let mode = self.mode;
-        let phase_offset = self.phase_offset;
+        let offset_u = (self.phase_offset.fract() * 4_294_967_296.0) as u32;
 
         let mut sine_out = [0.0f32; 16];
         let mut tri_out  = [0.0f32; 16];
@@ -246,33 +246,38 @@ impl Module for PolyLfo {
             let hz = (base_hz * mult).clamp(0.001, 40.0);
             let increment = hz / self.sample_rate;
 
+            // Q32 per-voice phase (ADR 0080): uniform 32-bit resolution, so the
+            // slow-rate increment is never absorbed near the top of the cycle.
+            self.phase_acc.set_increment(i, increment);
+            let inc_u = self.phase_acc.increments[i];
+
             if let Some(frac) = sync[i] {
-                let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
-                self.phases[i] = (1.0 - frac) * increment;
+                self.phase_acc.sync_reset(i, frac);
             } else {
-                let next = self.phases[i] + increment;
-                if next >= 1.0 {
-                    self.phases[i] = next - 1.0;
+                let before = self.phase_acc.phases[i];
+                let after = before.wrapping_add(inc_u);
+                self.phase_acc.phases[i] = after;
+                // inc < one cycle, so `after < before` only on a free wrap.
+                if after < before {
                     self.random_values[i] = xorshift64(&mut self.prng_states[i]);
                     if do_reset {
-                        reset_out[i] = if increment > 0.0 {
-                            (1.0 - self.phases[i] / increment).clamp(f32::MIN_POSITIVE, 1.0)
+                        reset_out[i] = if inc_u > 0 {
+                            (1.0 - after as f32 / inc_u as f32).clamp(f32::MIN_POSITIVE, 1.0)
                         } else {
                             1.0
                         };
                     }
-                } else {
-                    self.phases[i] = next;
                 }
             }
 
-            let read_phase = (self.phases[i] + phase_offset).fract();
-            if do_sine { sine_out[i] = apply_mode(lookup_sine(read_phase), mode); }
+            let read_phase_u = self.phase_acc.phases[i].wrapping_add(offset_u);
+            let read_phase = read_phase_u as f32 / 4_294_967_296.0;
+            if do_sine { sine_out[i] = apply_mode(lookup_sine_q32(read_phase_u), mode); }
             if do_tri  { tri_out[i]  = apply_mode(1.0 - 4.0 * (read_phase - 0.5).abs(), mode); }
             if do_sup  { sup_out[i]  = apply_mode(2.0 * read_phase - 1.0, mode); }
             if do_sdn  { sdn_out[i]  = apply_mode(1.0 - 2.0 * read_phase, mode); }
             if do_sq   {
-                let v = if read_phase < 0.5 { 1.0 } else { -1.0 };
+                let v = if read_phase_u < 0x8000_0000 { 1.0 } else { -1.0 };
                 sq_out[i] = apply_mode(v, mode);
             }
             if do_rand { rand_out[i] = apply_mode(self.random_values[i], mode); }

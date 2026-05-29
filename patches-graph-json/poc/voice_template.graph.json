@@ -1,0 +1,1209 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "seq",
+      "qname": {
+        "path": [],
+        "name": "seq"
+      },
+      "type_name": "MidiToCv",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "midi",
+            "index": 0,
+            "kind": "poly",
+            "mono_layout": "audio",
+            "poly_layout": "midi"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "voct",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "trigger",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "gate",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "mod",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "pitch",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "velocity",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "slur",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 833,
+          "end": 849
+        },
+        "expansion": []
+      }
+    },
+    {
+      "id": "v1/osc",
+      "qname": {
+        "path": [
+          "v1"
+        ],
+        "name": "osc"
+      },
+      "type_name": "Osc",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "voct",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "fm",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "pulse_width_cv",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "phase_mod",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sync",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "sine",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "triangle",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sawtooth",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "square",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "reset_out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 417,
+          "end": 426
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      }
+    },
+    {
+      "id": "v1/env",
+      "qname": {
+        "path": [
+          "v1"
+        ],
+        "name": "env"
+      },
+      "type_name": "Adsr",
+      "shape": [],
+      "params": [
+        {
+          "name": "attack",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.005
+            }
+          }
+        },
+        {
+          "name": "decay",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.1
+            }
+          }
+        },
+        {
+          "name": "sustain",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.6
+            }
+          }
+        },
+        {
+          "name": "release",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.3
+            }
+          }
+        }
+      ],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "trigger",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "gate",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "vca_in",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "vca_out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 438,
+          "end": 448
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      }
+    },
+    {
+      "id": "v1/vca",
+      "qname": {
+        "path": [
+          "v1"
+        ],
+        "name": "vca"
+      },
+      "type_name": "Vca",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "cv",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 531,
+          "end": 540
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      }
+    },
+    {
+      "id": "v2/osc",
+      "qname": {
+        "path": [
+          "v2"
+        ],
+        "name": "osc"
+      },
+      "type_name": "Osc",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "voct",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "fm",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "pulse_width_cv",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "phase_mod",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sync",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "sine",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "triangle",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sawtooth",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "square",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "reset_out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 417,
+          "end": 426
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      }
+    },
+    {
+      "id": "v2/env",
+      "qname": {
+        "path": [
+          "v2"
+        ],
+        "name": "env"
+      },
+      "type_name": "Adsr",
+      "shape": [],
+      "params": [
+        {
+          "name": "attack",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.01
+            }
+          }
+        },
+        {
+          "name": "decay",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.1
+            }
+          }
+        },
+        {
+          "name": "sustain",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.7
+            }
+          }
+        },
+        {
+          "name": "release",
+          "value": {
+            "kind": "scalar",
+            "scalar": {
+              "type": "float",
+              "value": 0.3
+            }
+          }
+        }
+      ],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "trigger",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "gate",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "vca_in",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "vca_out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 438,
+          "end": 448
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      }
+    },
+    {
+      "id": "v2/vca",
+      "qname": {
+        "path": [
+          "v2"
+        ],
+        "name": "vca"
+      },
+      "type_name": "Vca",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "cv",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 531,
+          "end": 540
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      }
+    },
+    {
+      "id": "join",
+      "qname": {
+        "path": [],
+        "name": "join"
+      },
+      "type_name": "StereoJoiner",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in_left",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "in_right",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "stereo",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1011,
+          "end": 1031
+        },
+        "expansion": []
+      }
+    },
+    {
+      "id": "out",
+      "qname": {
+        "path": [],
+        "name": "out"
+      },
+      "type_name": "AudioOut",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "stereo",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": []
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1043,
+          "end": 1059
+        },
+        "expansion": []
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": {
+        "module": "v1/osc",
+        "port": "sine",
+        "index": 0
+      },
+      "to": {
+        "module": "v1/vca",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 718,
+          "end": 736
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 718,
+          "end": 726
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 730,
+          "end": 736
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      }
+    },
+    {
+      "from": {
+        "module": "v1/env",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "v1/vca",
+        "port": "cv",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 792,
+          "end": 810
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 792,
+          "end": 799
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 804,
+          "end": 810
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 861,
+            "end": 874
+          }
+        ]
+      }
+    },
+    {
+      "from": {
+        "module": "v2/osc",
+        "port": "sine",
+        "index": 0
+      },
+      "to": {
+        "module": "v2/vca",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 718,
+          "end": 736
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 718,
+          "end": 726
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 730,
+          "end": 736
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      }
+    },
+    {
+      "from": {
+        "module": "v2/env",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "v2/vca",
+        "port": "cv",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 792,
+          "end": 810
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 792,
+          "end": 799
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 804,
+          "end": 810
+        },
+        "expansion": [
+          {
+            "source": 1,
+            "start": 938,
+            "end": 951
+          }
+        ]
+      }
+    },
+    {
+      "from": {
+        "module": "seq",
+        "port": "pitch",
+        "index": 0
+      },
+      "to": {
+        "module": "v1/osc",
+        "port": "voct",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1065,
+          "end": 1098
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1065,
+          "end": 1074
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1091,
+          "end": 1098
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "seq",
+        "port": "gate",
+        "index": 0
+      },
+      "to": {
+        "module": "v1/env",
+        "port": "gate",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1103,
+          "end": 1136
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1103,
+          "end": 1111
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1129,
+          "end": 1136
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "seq",
+        "port": "pitch",
+        "index": 0
+      },
+      "to": {
+        "module": "v2/osc",
+        "port": "voct",
+        "index": 0
+      },
+      "map": {
+        "scale": 0.5,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1141,
+          "end": 1174
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1141,
+          "end": 1150
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1167,
+          "end": 1174
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "seq",
+        "port": "gate",
+        "index": 0
+      },
+      "to": {
+        "module": "v2/env",
+        "port": "gate",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1217,
+          "end": 1250
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1217,
+          "end": 1225
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1243,
+          "end": 1250
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "v1/vca",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "join",
+        "port": "in_left",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1255,
+          "end": 1287
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1279,
+          "end": 1287
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1255,
+          "end": 1267
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "v2/vca",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "join",
+        "port": "in_right",
+        "index": 0
+      },
+      "map": {
+        "scale": 0.8,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1292,
+          "end": 1323
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1315,
+          "end": 1323
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1292,
+          "end": 1305
+        },
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "join",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "out",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": {
+          "source": 1,
+          "start": 1365,
+          "end": 1383
+        },
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1365,
+          "end": 1373
+        },
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": {
+          "source": 1,
+          "start": 1377,
+          "end": 1383
+        },
+        "expansion": []
+      }
+    }
+  ]
+}

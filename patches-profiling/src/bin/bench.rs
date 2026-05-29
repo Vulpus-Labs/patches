@@ -193,6 +193,10 @@ fn bench_patch(path: &str) {
 }
 
 fn main() {
+    // Measure under the same denormal-flush mode the real-time block handlers
+    // run under (FtzGuard, ticket 0954); otherwise this bench reintroduces the
+    // subnormal CPU cliff it exists to catch.
+    let _ftz = patches_engine::FtzGuard::enable();
     let args: Vec<String> = env::args().skip(1).collect();
     let paths: Vec<String> = if args.is_empty() {
         vec!["examples/poly_synth_layered.patches".to_owned()]

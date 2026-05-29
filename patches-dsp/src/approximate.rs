@@ -71,6 +71,20 @@ pub fn lookup_sine(phase: f32) -> f32 {
     a + (b - a) * index_frac
 }
 
+/// Wavetable lookup for sine from a Q32 phase, where the full `u32` range maps
+/// to one cycle. The top 10 bits select the 1024-entry table index; the low 22
+/// bits are the interpolation fraction. Unlike [`lookup_sine`], the index path
+/// is a shift + mask (no float multiply, no float→int floor).
+#[inline(always)]
+pub fn lookup_sine_q32(phase: u32) -> f32 {
+    let index_whole = (phase >> 22) as usize; // top 10 bits → 0..=1023
+    // Low 22 bits as a fraction in [0, 1): divide by 2^22.
+    let index_frac = (phase & 0x003F_FFFF) as f32 * (1.0 / 4_194_304.0);
+    let a = SINE_TABLE[index_whole]; // already < 1024
+    let b = SINE_TABLE[(index_whole + 1) & 1023];
+    a + (b - a) * index_frac
+}
+
 /// Polynomial approximation of sine. `phase` must be in [0, 1).
 ///
 /// Uses the Bhaskara I formula with Moser correction.
@@ -503,5 +517,35 @@ mod tests {
         println!("lookup_sine RMS error: {rms:.2e}");
         // Documented tolerance: RMS < 1e-4 over full period.
         assert!(rms < 1e-4, "lookup_sine RMS error {rms:.2e} exceeds 1e-4");
+    }
+
+    // ── lookup_sine_q32 parity ──────────────────────────────────────────────────
+
+    #[test]
+    fn lookup_sine_q32_matches_f32_lookup() {
+        // The Q32 reader maps the full u32 range to one cycle and selects the
+        // table via shift+mask; the f32 reader multiplies a normalised phase.
+        // They share the 1024-entry table, so they must agree to within the
+        // representation gap (22-bit Q32 frac vs f32 frac).
+        let steps = 100_000u32;
+        let mut max_err = 0.0f32;
+        for i in 0..steps {
+            let phase_norm = i as f32 / steps as f32;
+            let phase_u32 = (phase_norm as f64 * 4_294_967_296.0) as u32;
+            let q = lookup_sine_q32(phase_u32);
+            let f = lookup_sine(phase_norm);
+            max_err = max_err.max((q - f).abs());
+        }
+        println!("lookup_sine_q32 vs lookup_sine max abs error: {max_err:.2e}");
+        assert!(max_err < 1e-3, "q32 vs f32 lookup diverged: {max_err:.2e}");
+    }
+
+    #[test]
+    fn lookup_sine_q32_quarter_phase_landmarks() {
+        // Q32 landmarks: 0 → 0, ¼ → +1, ½ → 0, ¾ → −1.
+        assert!(lookup_sine_q32(0).abs() < 1e-3);
+        assert!((lookup_sine_q32(0x4000_0000) - 1.0).abs() < 1e-3);
+        assert!(lookup_sine_q32(0x8000_0000).abs() < 1e-3);
+        assert!((lookup_sine_q32(0xC000_0000) + 1.0).abs() < 1e-3);
     }
 }

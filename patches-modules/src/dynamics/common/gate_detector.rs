@@ -16,7 +16,7 @@
 //! 5. Asymmetric one-pole ramp (attack on rising, release on falling) between
 //!    the binary open target and the smoothed envelope.
 
-use patches_dsp::{compute_time_coeff, flush_denormal, ms_to_samples};
+use patches_dsp::{compute_time_coeff, ms_to_samples};
 
 /// Pure DSP kernel: detector input sample → linear output gain.
 #[derive(Clone, Debug)]
@@ -120,7 +120,7 @@ impl GateDetector {
 
         let target = if self.open { 1.0 } else { 0.0 };
         let coeff = if target > self.envelope { self.attack_coeff } else { self.release_coeff };
-        self.envelope = flush_denormal(self.envelope + coeff * (target - self.envelope));
+        self.envelope += coeff * (target - self.envelope);
         self.envelope
     }
 

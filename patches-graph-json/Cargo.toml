@@ -1,0 +1,24 @@
+[package]
+name = "patches-graph-json"
+version = "0.1.0"
+edition = "2021"
+description = "JSON serializer for the expanded, port-kind-resolved Patches DSL graph (ADR 0079)"
+publish = false
+
+[lib]
+name = "patches_graph_json"
+path = "src/lib.rs"
+
+[[bin]]
+name = "patches-graph-json"
+path = "src/bin/patches-graph-json.rs"
+
+[dependencies]
+patches-core = { path = "../patches-core" }
+patches-dsl = { path = "../patches-dsl" }
+patches-manifest = { path = "../patches-manifest" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+insta = { version = "1", features = ["json", "redactions"] }

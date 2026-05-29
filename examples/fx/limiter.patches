@@ -1,0 +1,27 @@
+patch {
+    module in : AudioIn
+    stereo module highpass : Svf {
+        cutoff: 40hz
+    }
+    stereo module sat : Drive {
+        drive: 1.5
+        tone: 0.9
+    }
+    stereo module trans : TransientShaper {
+        attack: 1.0
+        sustain: 0.0
+        speed: 1.0
+    }
+    module limit : StereoLimiter { 
+        threshold: 0.8
+    }
+    module out: AudioOut
+
+    in.out -> highpass.in
+    highpass.highpass -> trans.in
+    highpass.highpass[l] -> ~osc(unshaped)
+    trans.out -> sat.in
+    trans.out[l] -> ~osc(shaped)
+    sat.out -> limit.in
+    limit.out -> out.in
+}

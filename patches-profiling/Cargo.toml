@@ -28,6 +28,10 @@ path = "src/bin/fdn_reverb_bench.rs"
 name = "fdn_kernel_bench"
 path = "src/bin/fdn_kernel_bench.rs"
 
+[[bin]]
+name = "osc_fixedpoint_bench"
+path = "src/bin/osc_fixedpoint_bench.rs"
+
 [dependencies]
 patches-core        = { path = "../patches-core", features = ["test-support"] }
 patches-dsl         = { path = "../patches-dsl" }

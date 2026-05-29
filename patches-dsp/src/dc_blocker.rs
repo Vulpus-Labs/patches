@@ -32,7 +32,7 @@ impl DcBlocker {
     /// Process one sample, returning the DC-blocked output.
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
-        let y = crate::flush_denormal(x - self.x_prev + self.r * self.y_prev);
+        let y = x - self.x_prev + self.r * self.y_prev;
         self.x_prev = x;
         self.y_prev = y;
         y
@@ -77,8 +77,15 @@ mod tests {
         assert!(out.abs() > 0.1, "DC blocker should pass AC, got {out}");
     }
 
+    // Denormal flushing is owned by `FtzGuard` at the block boundary (E134,
+    // tickets 0954/0962), not by per-site scrubbing in the kernel. This test
+    // pins that the guarded scope keeps every output non-subnormal across a
+    // long decay; without the guard the feedback state would settle into
+    // subnormal range. FTZ-capable arches only (the guard is a no-op elsewhere).
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
-    fn prolonged_silence_does_not_produce_denormals() {
+    fn prolonged_silence_does_not_produce_denormals_under_ftz() {
+        let _ftz = crate::FtzGuard::enable();
         let mut dc = DcBlocker::new(SR);
         // Kick with a DC pulse, then run silence for 30 seconds
         for _ in 0..100 {

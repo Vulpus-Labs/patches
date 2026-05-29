@@ -21,6 +21,7 @@ members = [
     "patches-plugin-common",
     "patches-lsp",
     "patches-svg",
+    "patches-graph-json",
     "patches-observation",
     "patches-io-ring",
     "patches-ffi",

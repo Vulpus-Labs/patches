@@ -50,7 +50,7 @@ impl EnvelopeFollower {
         } else {
             self.release_coeff
         };
-        self.envelope = crate::flush_denormal(self.envelope + coeff * (abs_input - self.envelope));
+        self.envelope += coeff * (abs_input - self.envelope);
         self.envelope
     }
 
@@ -153,8 +153,15 @@ mod tests {
         assert_within!(0.7, ef.current(), 0.05);
     }
 
+    // Denormal flushing is owned by `FtzGuard` at the block boundary (E134,
+    // tickets 0954/0962), not by per-site scrubbing in the kernel. This test
+    // pins that the guarded scope keeps every output non-subnormal across a
+    // long release; without the guard the envelope would settle into subnormal
+    // range. FTZ-capable arches only (the guard is a no-op elsewhere).
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
-    fn prolonged_silence_does_not_produce_denormals() {
+    fn prolonged_silence_does_not_produce_denormals_under_ftz() {
+        let _ftz = crate::FtzGuard::enable();
         let mut ef = EnvelopeFollower::new();
         ef.set_attack_ms(1.0, SR);
         ef.set_release_ms(200.0, SR);

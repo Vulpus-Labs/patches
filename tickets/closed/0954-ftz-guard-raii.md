@@ -68,19 +68,20 @@ flipped mode on that path. The guard fixes this as a side effect of correct RAII
 
 ## Acceptance criteria
 
-- [ ] `FtzGuard` in `patches-dsp` with `enable()` + `Drop` restore on x86_64
+- [x] `FtzGuard` in `patches-dsp` with `enable()` + `Drop` restore on x86_64
       and aarch64; no-op (still constructs/drops cleanly) on other arches.
-- [ ] CPAL block handler (`patches-cpal/src/callback.rs::fill_buffer`) holds an
+- [x] CPAL block handler (`patches-cpal/src/callback.rs::fill_buffer`) holds an
       `FtzGuard` for the block instead of calling `enable_flush_to_zero()`.
-- [ ] CLAP block handler (`patches-clap/src/plugin.rs::plugin_process`) likewise.
-- [ ] Guard is bound to a named local (not `_`), so it is not dropped early.
-- [ ] Drop restores the exact saved MXCSR/FPCR value (unit test: read mode,
-      construct guard, assert FTZ set, drop, assert mode equals saved).
-- [ ] Test that restore happens on panic unwind (construct guard in a closure,
-      `catch_unwind` a panic, assert mode restored after).
-- [ ] `enable_flush_to_zero()` either removed (no remaining callers) or kept
-      with a doc note that `FtzGuard` is preferred for scoped use.
-- [ ] `just commit` green; determinism tests audited per 0803 still pass.
+- [x] CLAP block handler (`patches-clap/src/plugin.rs::plugin_process`) likewise.
+- [x] Guard is bound to a named local (`_ftz_guard`, not `_`), so it is not
+      dropped early.
+- [x] Drop restores the exact saved MXCSR/FPCR value (unit test
+      `enable_sets_ftz_and_drop_restores`).
+- [x] Test that restore happens on panic unwind
+      (`drop_restores_on_panic_unwind`, via `catch_unwind`).
+- [x] `enable_flush_to_zero()` removed (no remaining callers); the
+      `patches-engine` re-export now points at `FtzGuard`.
+- [x] `just commit` green; determinism tests audited per 0803 still pass.
 
 ## Notes
 

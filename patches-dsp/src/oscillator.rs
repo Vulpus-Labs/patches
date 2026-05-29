@@ -151,6 +151,131 @@ impl Default for PolyPhaseAccumulator {
     }
 }
 
+/// Q32 → cycles scale: `2^32`. A full `u32` range is one cycle.
+const Q32_SCALE: f32 = 4_294_967_296.0;
+
+/// A single-channel (mono) **Q32 fixed-point** phase accumulator (ADR 0080).
+///
+/// The full `u32` range maps to one cycle, so the wrap at `2^32` is free
+/// (`wrapping_add`, no conditional). Unlike [`MonoPhaseAccumulator`], phase
+/// resolution is uniform across the cycle — there is no f32 ulp growth near
+/// `phase = 1.0`, which is the defect this type exists to fix for very slow
+/// (sub-`0.1` Hz) modulation. Tuning is unchanged: the increment is still
+/// derived from an f32 `frequency/sample_rate`; only *accumulation* is exact.
+///
+/// Phase is read as `u32` so consumers can `wrapping_add` a modulation offset
+/// before lookup (e.g. phase-mod / FM); [`lookup_sine_q32`] is the table reader.
+///
+/// [`lookup_sine_q32`]: crate::lookup_sine_q32
+pub struct MonoPhaseAccumulatorQ32 {
+    pub phase: u32,
+    pub increment: u32,
+}
+
+impl MonoPhaseAccumulatorQ32 {
+    pub fn new() -> Self {
+        Self { phase: 0, increment: 0 }
+    }
+
+    pub fn reset(&mut self) {
+        self.phase = 0;
+    }
+
+    /// Set the per-sample increment from cycles/sample (the same
+    /// `frequency/sample_rate` value the f32 accumulator takes). Clamped to
+    /// `[0.0, 0.999_999]` before scaling by `2^32`; the clamp matches the f32
+    /// path's sub-Nyquist guarantee and keeps the float→u32 cast in range.
+    pub fn set_increment(&mut self, increment: f32) {
+        let frac = increment.clamp(0.0, 0.999_999);
+        self.increment = (frac * Q32_SCALE) as u32;
+    }
+
+    /// Advance phase by `increment`; wraps free at `2^32`.
+    pub fn advance(&mut self) {
+        self.phase = self.phase.wrapping_add(self.increment);
+    }
+
+    /// Current phase as a normalised f32 in `[0, 1)` (introspection / analytic
+    /// shapes that still want a float).
+    pub fn phase_f32(&self) -> f32 {
+        self.phase as f32 / Q32_SCALE
+    }
+
+    /// Reset the phase for a sub-sample sync event at fractional position
+    /// `frac ∈ (0, 1]`, accounting for the remainder of the current sample.
+    /// Mirrors [`MonoPhaseAccumulator::sync_reset`] in the Q32 domain.
+    pub fn sync_reset(&mut self, frac: f32) {
+        let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+        self.phase = ((1.0 - frac) * self.increment as f32) as u32;
+    }
+}
+
+impl Default for MonoPhaseAccumulatorQ32 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A 16-voice polyphonic **Q32 fixed-point** phase accumulator (ADR 0080).
+///
+/// The Q32 counterpart of [`PolyPhaseAccumulator`]: `u32` phase and increment
+/// per voice, free wrap at `2^32`. The fixed voice count of 16 lets the
+/// compiler auto-vectorise [`advance_all`](Self::advance_all) (plain `u32`
+/// adds, which vectorise cleanly).
+pub struct PolyPhaseAccumulatorQ32 {
+    pub phases: [u32; 16],
+    pub increments: [u32; 16],
+}
+
+impl PolyPhaseAccumulatorQ32 {
+    pub fn new() -> Self {
+        Self { phases: [0; 16], increments: [0; 16] }
+    }
+
+    pub fn reset(&mut self, voice: usize) {
+        self.phases[voice] = 0;
+    }
+
+    pub fn reset_all(&mut self) {
+        self.phases = [0; 16];
+    }
+
+    pub fn set_increment(&mut self, voice: usize, increment: f32) {
+        let frac = increment.clamp(0.0, 0.999_999);
+        self.increments[voice] = (frac * Q32_SCALE) as u32;
+    }
+
+    /// Set the same increment for all 16 voices.
+    pub fn set_all_increments(&mut self, increment: f32) {
+        let frac = increment.clamp(0.0, 0.999_999);
+        self.increments = [(frac * Q32_SCALE) as u32; 16];
+    }
+
+    /// Advance all 16 voices; each wraps free at `2^32`.
+    pub fn advance_all(&mut self) {
+        for i in 0..16 {
+            self.phases[i] = self.phases[i].wrapping_add(self.increments[i]);
+        }
+    }
+
+    /// Voice `voice`'s phase as a normalised f32 in `[0, 1)`.
+    pub fn phase_f32(&self, voice: usize) -> f32 {
+        self.phases[voice] as f32 / Q32_SCALE
+    }
+
+    /// Reset a single voice's phase for a sub-sample sync event.
+    pub fn sync_reset(&mut self, voice: usize, frac: f32) {
+        let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
+        self.phases[voice] = ((1.0 - frac) * self.increments[voice] as f32) as u32;
+    }
+}
+
+impl Default for PolyPhaseAccumulatorQ32 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// PolyBLEP correction for a normalised phase `t ∈ [0, 1)` and phase increment `dt`.
 ///
 /// Returns a correction value that smooths the discontinuity near `t = 0` (rising)
@@ -348,5 +473,164 @@ mod tests {
             wrap_count, 1,
             "expected exactly 1 phase wrap in {n_samples} samples at 440 Hz / 44100 Hz; got {wrap_count}"
         );
+    }
+
+    // ── Q32 accumulator tests (ADR 0080) ─────────────────────────────────────
+
+    /// Determinism: two Q32 accumulators with the same increment produce a
+    /// bit-identical phase sequence.
+    #[test]
+    fn q32_mono_determinism() {
+        let mut a = MonoPhaseAccumulatorQ32::new();
+        let mut b = MonoPhaseAccumulatorQ32::new();
+        a.set_increment(440.0 / 44100.0);
+        b.set_increment(440.0 / 44100.0);
+        for step in 0..1000 {
+            a.advance();
+            b.advance();
+            assert_eq!(a.phase, b.phase, "diverged at step {step}");
+        }
+    }
+
+    /// Free wrap: phase wraps at 2^32 with no conditional. A quarter-cycle
+    /// increment returns to 0 after exactly 4 advances.
+    #[test]
+    fn q32_mono_free_wrap_at_2_pow_32() {
+        let mut acc = MonoPhaseAccumulatorQ32::new();
+        acc.increment = 0x4000_0000; // exactly a quarter cycle
+        acc.advance();
+        assert_eq!(acc.phase, 0x4000_0000);
+        acc.advance();
+        assert_eq!(acc.phase, 0x8000_0000);
+        acc.advance();
+        assert_eq!(acc.phase, 0xC000_0000);
+        acc.advance(); // wraps back to 0 with no branch
+        assert_eq!(acc.phase, 0);
+    }
+
+    /// Low-rate no-absorption — the f32 defect this type exists to fix. At
+    /// 0.001 Hz and 0.01 Hz / 48 kHz the increment is non-zero and the phase
+    /// advances by exactly that increment every sample (no stall near the top
+    /// of the cycle, where f32 absorbs the increment into its ulp).
+    #[test]
+    fn q32_mono_no_low_rate_absorption() {
+        for rate_hz in [0.001_f32, 0.01] {
+            let mut acc = MonoPhaseAccumulatorQ32::new();
+            acc.set_increment(rate_hz / 48_000.0);
+            assert!(acc.increment > 0, "{rate_hz} Hz increment was absorbed to 0");
+
+            let inc = acc.increment;
+            let mut prev = acc.phase;
+            for sample in 0..20_000 {
+                acc.advance();
+                assert_eq!(
+                    acc.phase,
+                    prev.wrapping_add(inc),
+                    "{rate_hz} Hz stalled at sample {sample}"
+                );
+                assert!(acc.phase > prev, "{rate_hz} Hz not strictly increasing");
+                prev = acc.phase;
+            }
+        }
+    }
+
+    /// `set_increment` parity: the Q32 increment is the f32 increment scaled by
+    /// 2^32 (within the truncation of the cast).
+    #[test]
+    fn q32_set_increment_scales_to_2_pow_32() {
+        let mut acc = MonoPhaseAccumulatorQ32::new();
+        acc.set_increment(0.25);
+        assert_eq!(acc.increment, 0x4000_0000);
+        acc.set_increment(0.5);
+        assert_eq!(acc.increment, 0x8000_0000);
+    }
+
+    /// `sync_reset` lands the sub-sample phase `(1 - frac) * increment`.
+    #[test]
+    fn q32_mono_sync_reset_sub_sample() {
+        let mut acc = MonoPhaseAccumulatorQ32::new();
+        acc.increment = 4000;
+        acc.phase = 12345; // dirty
+        acc.sync_reset(0.25);
+        assert_eq!(acc.phase, ((1.0 - 0.25) * 4000.0) as u32); // 3000
+        acc.sync_reset(1.0);
+        assert_eq!(acc.phase, 0); // whole sample boundary
+    }
+
+    /// `reset` zeroes the phase.
+    #[test]
+    fn q32_mono_reset() {
+        let mut acc = MonoPhaseAccumulatorQ32::new();
+        acc.set_increment(0.1);
+        for _ in 0..5 {
+            acc.advance();
+        }
+        assert_ne!(acc.phase, 0);
+        acc.reset();
+        assert_eq!(acc.phase, 0);
+    }
+
+    /// Poly Q32 matches 16 mono Q32 accumulators (bit-identical per voice).
+    #[test]
+    fn q32_poly_matches_mono() {
+        let increments: [f32; 16] =
+            std::array::from_fn(|i| (i as f32 + 1.0) * 440.0 / 44100.0);
+
+        let mut monos: Vec<MonoPhaseAccumulatorQ32> = (0..16)
+            .map(|i| {
+                let mut m = MonoPhaseAccumulatorQ32::new();
+                m.set_increment(increments[i]);
+                m
+            })
+            .collect();
+
+        let mut poly = PolyPhaseAccumulatorQ32::new();
+        for (i, &inc) in increments.iter().enumerate() {
+            poly.set_increment(i, inc);
+        }
+
+        for step in 0..500 {
+            for m in monos.iter_mut() {
+                m.advance();
+            }
+            poly.advance_all();
+            for (v, (pp, mm)) in poly.phases.iter().zip(monos.iter()).enumerate() {
+                assert_eq!(*pp, mm.phase, "voice {v} step {step}");
+            }
+        }
+    }
+
+    /// Resetting one poly voice leaves the others untouched.
+    #[test]
+    fn q32_poly_reset_voice_isolation() {
+        let mut poly = PolyPhaseAccumulatorQ32::new();
+        for i in 0..16 {
+            poly.set_increment(i, 0.05 * (i as f32 + 1.0));
+        }
+        for _ in 0..20 {
+            poly.advance_all();
+        }
+        let before = poly.phases;
+        poly.reset(3);
+        assert_eq!(poly.phases[3], 0);
+        for (v, (&pp, &pb)) in poly.phases.iter().zip(before.iter()).enumerate() {
+            if v != 3 {
+                assert_eq!(pp, pb, "voice {v} disturbed by resetting voice 3");
+            }
+        }
+    }
+
+    /// `set_all_increments` followed by `advance_all` keeps every voice in
+    /// lockstep.
+    #[test]
+    fn q32_poly_set_all_increments() {
+        let mut poly = PolyPhaseAccumulatorQ32::new();
+        poly.set_all_increments(0.01);
+        for _ in 0..50 {
+            poly.advance_all();
+        }
+        let first = poly.phases[0];
+        assert!(poly.phases.iter().all(|&p| p == first));
+        assert!(first > 0);
     }
 }

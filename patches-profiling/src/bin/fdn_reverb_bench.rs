@@ -62,6 +62,10 @@ fn bench(n: usize, warmup: usize) -> (Vec<u64>, std::time::Duration) {
 }
 
 fn main() {
+    // Measure under the same denormal-flush mode the real-time block handlers
+    // run under (FtzGuard, ticket 0954); otherwise this bench reintroduces the
+    // subnormal CPU cliff it exists to catch.
+    let _ftz = patches_engine::FtzGuard::enable();
     let mut args = env::args().skip(1);
     let n: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(2_000_000);
     let warmup: usize = (SR as usize) / 2;

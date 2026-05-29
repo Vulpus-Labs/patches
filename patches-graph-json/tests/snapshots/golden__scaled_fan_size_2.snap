@@ -1,0 +1,267 @@
+---
+source: patches-graph-json/tests/golden.rs
+expression: "& doc"
+---
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "fan/m",
+      "qname": {
+        "path": [
+          "fan"
+        ],
+        "name": "m"
+      },
+      "type_name": "Sum",
+      "shape": [
+        {
+          "name": "channels",
+          "value": {
+            "type": "int",
+            "value": 2
+          }
+        }
+      ],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "in",
+            "index": 1,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": [
+          "[span]"
+        ]
+      }
+    },
+    {
+      "id": "osc",
+      "qname": {
+        "path": [],
+        "name": "osc"
+      },
+      "type_name": "Osc",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "voct",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "fm",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "pulse_width_cv",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "phase_mod",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sync",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "sine",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "triangle",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "sawtooth",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "square",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          },
+          {
+            "name": "reset_out",
+            "index": 0,
+            "kind": "mono",
+            "mono_layout": "trigger",
+            "poly_layout": "audio"
+          }
+        ]
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    },
+    {
+      "id": "out",
+      "qname": {
+        "path": [],
+        "name": "out"
+      },
+      "type_name": "AudioOut",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "stereo",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": []
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": {
+        "module": "fan/m",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "out",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "osc",
+        "port": "sine",
+        "index": 0
+      },
+      "to": {
+        "module": "fan/m",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 0.5,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    },
+    {
+      "from": {
+        "module": "osc",
+        "port": "sine",
+        "index": 0
+      },
+      "to": {
+        "module": "fan/m",
+        "port": "in",
+        "index": 1
+      },
+      "map": {
+        "scale": 0.5,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    }
+  ]
+}

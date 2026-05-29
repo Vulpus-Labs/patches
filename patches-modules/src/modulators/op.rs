@@ -8,11 +8,10 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::cables::TriggerInput;
 use patches_core::module_params;
 use patches_core::param_frame::ParamView;
-use patches_dsp::{AdsrCore, lookup_sine};
+use patches_dsp::{AdsrCore, lookup_sine_q32, MonoPhaseAccumulatorQ32};
 
 use super::adsr::AdsrShapeParam;
 use crate::common::frequency::{C0_FREQ, FMMode, MonoFrequencyConverter, MonoFrequencyChangeTracker};
-use crate::common::phase_accumulator::MonoPhaseAccumulator;
 use crate::osc::OscFmType;
 
 params_enum! {
@@ -51,25 +50,32 @@ module_params! {
     }
 }
 
-/// Evaluate the selected analytic waveform at `phase` ∈ [0, 1).
+/// Evaluate the selected analytic waveform at a **Q32** `phase` (full `u32`
+/// range = one cycle; ADR 0080).
 ///
-/// Sine uses the shared linear-interpolated lookup table; the other shapes are
-/// the OPL3-family analytic waveforms (matching the operator-waveform set the
-/// Yamaha V50 and its YM2414/OPZ siblings exposed beyond the original DX7 sine).
-pub fn op_waveform(w: OpWaveform, phase: f32) -> f32 {
+/// Sine reads the Q32 lookup table directly (shift+mask index, no float
+/// multiply); the analytic shapes use `u32` threshold compares (½ cycle =
+/// `0x8000_0000`, ¼ = `0x4000_0000`). These are the OPL3-family analytic
+/// waveforms (matching the operator-waveform set the Yamaha V50 and its
+/// YM2414/OPZ siblings exposed beyond the original DX7 sine).
+pub fn op_waveform_q32(w: OpWaveform, phase: u32) -> f32 {
+    const HALF: u32 = 0x8000_0000;
+    const QUARTER: u32 = 0x4000_0000;
     match w {
-        OpWaveform::Sine        => lookup_sine(phase),
-        OpWaveform::HalfSine    => if phase < 0.5 { lookup_sine(phase) } else { 0.0 },
-        OpWaveform::AbsSine     => lookup_sine(phase).abs(),
+        OpWaveform::Sine        => lookup_sine_q32(phase),
+        OpWaveform::HalfSine    => if phase < HALF { lookup_sine_q32(phase) } else { 0.0 },
+        OpWaveform::AbsSine     => lookup_sine_q32(phase).abs(),
         OpWaveform::QuarterSine => {
             // Pulse sine: keep the first quarter of each half-cycle, zero the rest.
-            let p = if phase >= 0.5 { phase - 0.5 } else { phase };
-            if p < 0.25 { lookup_sine(phase) } else { 0.0 }
+            let p = if phase >= HALF { phase - HALF } else { phase };
+            if p < QUARTER { lookup_sine_q32(phase) } else { 0.0 }
         }
-        OpWaveform::AltSine     => if phase < 0.5 { lookup_sine(2.0 * phase) } else { 0.0 },
-        OpWaveform::AltAbsSine  => if phase < 0.5 { lookup_sine(2.0 * phase).abs() } else { 0.0 },
-        OpWaveform::Square      => if phase < 0.5 { 1.0 } else { -1.0 },
-        OpWaveform::Saw         => 1.0 - 2.0 * phase,
+        // `phase << 1` doubles the angle; safe (no overflow) because the high
+        // bit is clear whenever `phase < HALF`.
+        OpWaveform::AltSine     => if phase < HALF { lookup_sine_q32(phase << 1) } else { 0.0 },
+        OpWaveform::AltAbsSine  => if phase < HALF { lookup_sine_q32(phase << 1).abs() } else { 0.0 },
+        OpWaveform::Square      => if phase < HALF { 1.0 } else { -1.0 },
+        OpWaveform::Saw         => 1.0 - 2.0 * (phase as f32 / 4_294_967_296.0),
     }
 }
 
@@ -121,7 +127,7 @@ pub fn op_waveform(w: OpWaveform, phase: f32) -> f32 {
 pub struct Op {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    phase_acc: MonoPhaseAccumulator,
+    phase_acc: MonoPhaseAccumulatorQ32,
     freq_converter: MonoFrequencyConverter,
     freq_tracker: MonoFrequencyChangeTracker,
     adsr: AdsrCore,
@@ -196,7 +202,7 @@ impl Module for Op {
         Ok(Self {
             instance_id,
             descriptor,
-            phase_acc: MonoPhaseAccumulator::new(),
+            phase_acc: MonoPhaseAccumulatorQ32::new(),
             freq_converter: MonoFrequencyConverter::new(audio_environment.sample_rate),
             freq_tracker: MonoFrequencyChangeTracker::new(C0_FREQ),
             adsr: AdsrCore::new(audio_environment.sample_rate),
@@ -260,7 +266,7 @@ impl Module for Op {
         let gate_high = self.in_gate.tick(pool).is_high;
 
         if triggered && self.phase_reset {
-            self.phase_acc.phase = self.start_phase;
+            self.phase_acc.phase = (self.start_phase * 4_294_967_296.0) as u32;
         }
 
         if self.freq_tracker.is_modulating() {
@@ -275,8 +281,13 @@ impl Module for Op {
         let fb_avg = (fb_in + self.fb_z1) * 0.5;
         self.fb_z1 = fb_in;
 
-        let read_phase = (self.phase_acc.phase + pm + fb_avg).rem_euclid(1.0);
-        let raw = op_waveform(self.waveform, read_phase);
+        // PM and feedback are phase offsets in cycles; map to Q32 and wrapping_add
+        // (free wrap, no `rem_euclid`). The i64 step handles negative offsets via
+        // two's complement.
+        let pm_u = (pm * 4_294_967_296.0) as i64 as u32;
+        let fb_u = (fb_avg * 4_294_967_296.0) as i64 as u32;
+        let read_phase = self.phase_acc.phase.wrapping_add(pm_u).wrapping_add(fb_u);
+        let raw = op_waveform_q32(self.waveform, read_phase);
         let env = self.adsr.tick(triggered, gate_high);
 
         if self.out_signal.is_connected() {
@@ -295,6 +306,7 @@ impl Module for Op {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use patches_dsp::lookup_sine;
     use patches_core::AudioEnvironment;
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 

@@ -64,8 +64,8 @@ params_enum! {
         UnipolarNegative => "unipolar_negative",
     }
 }
-use crate::common::approximate::lookup_sine;
-use patches_dsp::xorshift64;
+use crate::common::approximate::lookup_sine_q32;
+use patches_dsp::{xorshift64, MonoPhaseAccumulatorQ32};
 
 module_params! {
     Lfo {
@@ -79,7 +79,7 @@ pub struct Lfo {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
     sample_rate: f32,
-    phase: f32,
+    phase_acc: MonoPhaseAccumulatorQ32,
     phase_increment: f32,
     phase_offset: f32,
     mode: LfoMode,
@@ -159,7 +159,7 @@ impl Module for Lfo {
             instance_id,
             descriptor,
             sample_rate: audio_environment.sample_rate,
-            phase: 0.0,
+            phase_acc: MonoPhaseAccumulatorQ32::new(),
             phase_increment: 1.0 / audio_environment.sample_rate,
             phase_offset: 0.0,
             mode: LfoMode::Bipolar,
@@ -220,33 +220,40 @@ impl Module for Lfo {
             self.phase_increment
         };
 
+        // Q32 accumulator (ADR 0080): uniform 32-bit resolution, so the slow-LFO
+        // increment is never absorbed near the top of the cycle the way an f32
+        // phase absorbs it into its ulp.
+        self.phase_acc.set_increment(increment);
+        let inc_u = self.phase_acc.increment;
+
         // Sub-sample sync: reset phase to (1 - frac) * dt, no BLEP. Pre-empts
         // the natural advance for this sample.
         let sync = if self.in_sync.is_connected() { self.in_sync.tick(pool) } else { None };
         let mut wrap_frac = 0.0_f32;
         if let Some(frac) = sync {
-            let frac = frac.clamp(f32::MIN_POSITIVE, 1.0);
-            self.phase = (1.0 - frac) * increment;
+            self.phase_acc.sync_reset(frac);
         } else {
-            let next = self.phase + increment;
-            if next >= 1.0 {
-                self.phase = next - 1.0;
+            let before = self.phase_acc.phase;
+            self.phase_acc.advance();
+            let after = self.phase_acc.phase;
+            // inc < one cycle, so a free wrap is the only way `after < before`.
+            if after < before {
                 self.random_value = xorshift64(&mut self.prng_state);
-                wrap_frac = if increment > 0.0 {
-                    (1.0 - self.phase / increment).clamp(f32::MIN_POSITIVE, 1.0)
+                wrap_frac = if inc_u > 0 {
+                    (1.0 - after as f32 / inc_u as f32).clamp(f32::MIN_POSITIVE, 1.0)
                 } else {
                     1.0
                 };
-            } else {
-                self.phase = next;
             }
         }
 
-        let read_phase = (self.phase + self.phase_offset).fract();
+        let offset_u = (self.phase_offset.fract() * 4_294_967_296.0) as u32;
+        let read_phase_u = self.phase_acc.phase.wrapping_add(offset_u);
+        let read_phase = read_phase_u as f32 / 4_294_967_296.0;
         let mode = self.mode;
 
         if self.out_sine.is_connected() {
-            pool.write_mono(&self.out_sine, apply_mode(lookup_sine(read_phase), mode));
+            pool.write_mono(&self.out_sine, apply_mode(lookup_sine_q32(read_phase_u), mode));
         }
         if self.out_triangle.is_connected() {
             pool.write_mono(&self.out_triangle, apply_mode(1.0 - 4.0 * (read_phase - 0.5).abs(), mode));
@@ -258,7 +265,7 @@ impl Module for Lfo {
             pool.write_mono(&self.out_saw_down, apply_mode(1.0 - 2.0 * read_phase, mode));
         }
         if self.out_square.is_connected() {
-            let v = if read_phase < 0.5 { 1.0 } else { -1.0 };
+            let v = if read_phase_u < 0x8000_0000 { 1.0 } else { -1.0 };
             pool.write_mono(&self.out_square, apply_mode(v, mode));
         }
         if self.out_random.is_connected() {
@@ -277,6 +284,7 @@ impl Module for Lfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::approximate::lookup_sine;
     use patches_core::{AudioEnvironment, CableValue};
     use patches_core::test_support::{assert_within, ModuleHarness, params};
 
@@ -532,5 +540,48 @@ mod tests {
             }
         }
         assert!(wraps >= 2);
+    }
+
+    /// Low-rate no-absorption (ADR 0080 / E159): at 0.001 Hz and 0.01 Hz the
+    /// LFO must keep advancing uniformly. With the old f32 phase the per-sample
+    /// increment (~2e-8 at 0.001 Hz / 48 kHz) falls below the f32 ulp near the
+    /// top of the cycle and is absorbed, stalling the LFO; Q32 holds uniform
+    /// resolution. `saw_up = 2·phase − 1`, so a non-stalled phase yields a
+    /// strictly increasing, evenly-sloped ramp.
+    #[test]
+    fn slow_lfo_advances_uniformly_without_stall() {
+        let sample_rate = 48_000.0_f32;
+        // 0.001 Hz is below the `rate` param floor (0.01) but inside the LFO's
+        // internal [0.001, 40] clamp, so drive it via `sync_ms` (period in ms).
+        for rate in [0.001_f32, 0.01] {
+            let mut h = ModuleHarness::build_with_env::<Lfo>(
+                params!["rate" => 1.0_f32],
+                env(sample_rate),
+            );
+            h.set_mono("sync", 0.0);
+            h.set_mono("rate_cv", 0.0);
+            h.set_mono("sync_ms", 1000.0 / rate); // ms period → `rate` Hz
+            let n = 2_000_000_usize;
+            let saw = h.run_mono(n, "saw_up");
+
+            let stride = 100_000_usize;
+            let inc = rate / sample_rate; // cycles/sample
+            let expected_step = 2.0 * stride as f32 * inc; // Δsaw over one stride
+
+            let mut prev = saw[0];
+            for k in (stride..n).step_by(stride) {
+                let cur = saw[k];
+                assert!(
+                    cur > prev,
+                    "rate {rate} Hz stalled at sample {k}: saw {cur} <= prev {prev}"
+                );
+                let step = cur - prev;
+                assert!(
+                    (step - expected_step).abs() < expected_step * 0.05,
+                    "rate {rate} Hz uneven advance at {k}: step {step}, expected {expected_step}"
+                );
+                prev = cur;
+            }
+        }
     }
 }

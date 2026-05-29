@@ -11,8 +11,8 @@ use patches_dsp::{AdsrCore, AdsrShape};
 
 use super::adsr::AdsrShapeParam;
 use crate::common::frequency::{C0_FREQ, FMMode, PolyFrequencyConverter, PolyFrequencyChangeTracker};
-use crate::common::phase_accumulator::PolyPhaseAccumulator;
-use super::op::{op_waveform, OpPhaseReset, OpWaveform};
+use patches_dsp::PolyPhaseAccumulatorQ32;
+use super::op::{op_waveform_q32, OpPhaseReset, OpWaveform};
 use crate::osc::OscFmType;
 
 module_params! {
@@ -74,7 +74,7 @@ module_params! {
 pub struct PolyOp {
     instance_id: InstanceId,
     descriptor: ModuleDescriptor,
-    phase_acc: PolyPhaseAccumulator,
+    phase_acc: PolyPhaseAccumulatorQ32,
     freq_converter: PolyFrequencyConverter,
     freq_tracker: PolyFrequencyChangeTracker,
     adsrs: [AdsrCore; 16],
@@ -147,7 +147,7 @@ impl Module for PolyOp {
         Ok(Self {
             instance_id,
             descriptor,
-            phase_acc: PolyPhaseAccumulator::new(),
+            phase_acc: PolyPhaseAccumulatorQ32::new(),
             freq_converter: PolyFrequencyConverter::new(sr),
             freq_tracker: PolyFrequencyChangeTracker::new(C0_FREQ),
             adsrs: std::array::from_fn(|_| AdsrCore::new(sr)),
@@ -230,12 +230,16 @@ impl Module for PolyOp {
         for i in 0..16 {
             let triggered = triggers[i].is_some();
             if triggered && self.phase_reset {
-                self.phase_acc.phases[i] = self.start_phase;
+                self.phase_acc.phases[i] = (self.start_phase * 4_294_967_296.0) as u32;
             }
             let fb_avg = (fb[i] + self.fb_z1[i]) * 0.5;
             self.fb_z1[i] = fb[i];
-            let read_phase = (self.phase_acc.phases[i] + pm[i] + fb_avg).rem_euclid(1.0);
-            let raw = op_waveform(self.waveform, read_phase);
+            // PM + feedback as Q32 phase offsets, wrapping_add (free wrap); i64
+            // step carries negative offsets via two's complement.
+            let pm_u = (pm[i] * 4_294_967_296.0) as i64 as u32;
+            let fb_u = (fb_avg * 4_294_967_296.0) as i64 as u32;
+            let read_phase = self.phase_acc.phases[i].wrapping_add(pm_u).wrapping_add(fb_u);
+            let raw = op_waveform_q32(self.waveform, read_phase);
             let env = self.adsrs[i].tick(triggered, gates[i].is_high);
             env_out[i] = env;
             signal_out[i] = raw * env;

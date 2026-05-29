@@ -1,0 +1,88 @@
+---
+source: patches-graph-json/tests/golden.rs
+expression: "& doc"
+---
+{
+  "version": 1,
+  "modules": [
+    {
+      "id": "o/i/gain",
+      "qname": {
+        "path": [
+          "o",
+          "i"
+        ],
+        "name": "gain"
+      },
+      "type_name": "Gain",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": null,
+      "provenance": {
+        "site": "[span]",
+        "expansion": [
+          "[span]",
+          "[span]"
+        ]
+      }
+    },
+    {
+      "id": "out",
+      "qname": {
+        "path": [],
+        "name": "out"
+      },
+      "type_name": "AudioOut",
+      "shape": [],
+      "params": [],
+      "port_aliases": [],
+      "ports": {
+        "inputs": [
+          {
+            "name": "in",
+            "index": 0,
+            "kind": "stereo",
+            "mono_layout": "audio",
+            "poly_layout": "audio"
+          }
+        ],
+        "outputs": []
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": {
+        "module": "o/i/gain",
+        "port": "out",
+        "index": 0
+      },
+      "to": {
+        "module": "out",
+        "port": "in",
+        "index": 0
+      },
+      "map": {
+        "scale": 1.0,
+        "offset": 0.0
+      },
+      "provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "from_provenance": {
+        "site": "[span]",
+        "expansion": []
+      },
+      "to_provenance": {
+        "site": "[span]",
+        "expansion": []
+      }
+    }
+  ]
+}

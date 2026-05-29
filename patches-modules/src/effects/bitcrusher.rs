@@ -23,7 +23,7 @@
 /// | Name      | Type  | Range      | Default | Description                          |
 /// |-----------|-------|------------|---------|--------------------------------------|
 /// | `rate`    | float | 0.0--1.0   | `1.0`   | Rate reduction (1.0 = full rate)     |
-/// | `depth`   | float | 1.0--32.0  | `32.0`  | Bit depth (continuous)               |
+/// | `depth`   | float | 1.0--16.0  | `16.0`  | Bit depth (continuous)               |
 /// | `dry_wet` | float | 0.0--1.0   | `1.0`   | Dry/wet mix                          |
 use patches_core::{
     AudioEnvironment, CablePool, InputPort, InstanceId, Module, ModuleDescriptor,
@@ -77,7 +77,7 @@ impl Module for Bitcrusher {
                 },
                 ParameterTemplate {
                     name: params::depth.as_str(),
-                    kind: ParameterKind::Float { min: 1.0, max: 32.0, default: 32.0 },
+                    kind: ParameterKind::Float { min: 1.0, max: 16.0, default: 16.0 },
                 },
                 ParameterTemplate {
                     name: params::dry_wet.as_str(),
@@ -94,14 +94,14 @@ impl Module for Bitcrusher {
     fn prepare(env: &AudioEnvironment, descriptor: ModuleDescriptor, instance_id: InstanceId, _structural: &StructuralParams) -> Result<Self, BuildError> { Ok({
         let mut kernel = BitcrusherKernel::new();
         kernel.set_rate(1.0, env.sample_rate);
-        kernel.set_depth(32.0);
+        kernel.set_depth(16.0);
         Self {
             instance_id,
             descriptor,
             sample_rate: env.sample_rate,
             kernel,
             rate: 1.0,
-            depth: 32.0,
+            depth: 16.0,
             dry_wet: 1.0,
             in_audio: MonoInput::default(),
             in_rate_cv: MonoInput::default(),
@@ -155,7 +155,7 @@ impl Module for Bitcrusher {
 
         let effective_rate = (self.rate + rate_cv).clamp(0.0, 1.0);
         self.kernel.set_rate(effective_rate, self.sample_rate);
-        let effective_depth = (self.depth + depth_cv * 31.0).clamp(1.0, 32.0);
+        let effective_depth = (self.depth + depth_cv * 15.0).clamp(1.0, 16.0);
         self.kernel.set_depth(effective_depth);
     }
 }
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn full_rate_full_depth_passes_through() {
         let mut h = ModuleHarness::build::<Bitcrusher>(
-            params!["rate" => 1.0_f32, "depth" => 32.0_f32, "dry_wet" => 1.0_f32],
+            params!["rate" => 1.0_f32, "depth" => 16.0_f32, "dry_wet" => 1.0_f32],
         );
         h.set_mono("in", 0.5);
         h.tick();
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn cv_reverts_to_base_on_zero() {
         let mut h = ModuleHarness::build::<Bitcrusher>(
-            params!["rate" => 1.0_f32, "depth" => 32.0_f32, "dry_wet" => 1.0_f32],
+            params!["rate" => 1.0_f32, "depth" => 16.0_f32, "dry_wet" => 1.0_f32],
         );
         // Apply rate CV to reduce rate significantly
         for _ in 0..32 {

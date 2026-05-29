@@ -432,9 +432,10 @@ unsafe extern "C" fn plugin_process(
     // Tag the host's audio thread on first entry (ADR 0045 spike 4).
     // Idempotent; no-op when the allocator-trap feature is off.
     patches_alloc_trap::mark_audio_thread();
-    // Flush denormals on the hardware. Per-callback because some hosts
-    // reset MXCSR between calls. See E134.
-    patches_engine::enable_flush_to_zero();
+    // Flush denormals on the hardware for the duration of this block,
+    // restoring the host thread's prior mode on drop (incl. panic unwind).
+    // Per-callback because some hosts reset MXCSR between calls. See E134.
+    let _ftz_guard = patches_engine::FtzGuard::enable();
 
     if process.is_null() {
         dlog!("process: null process ptr");

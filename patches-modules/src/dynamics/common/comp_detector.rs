@@ -19,7 +19,7 @@
 //! adjacent below-knee / above-knee regions, so the knee introduces no
 //! kink.
 
-use patches_dsp::{compute_time_coeff, flush_denormal};
+use patches_dsp::compute_time_coeff;
 
 /// Detection mode for [`CompDetector`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +108,7 @@ impl CompDetector {
             DetectMode::Rms => abs_key * abs_key,
         };
         let coeff = if target > self.envelope { self.attack_coeff } else { self.release_coeff };
-        self.envelope = flush_denormal(self.envelope + coeff * (target - self.envelope));
+        self.envelope += coeff * (target - self.envelope);
         let level = match self.mode {
             DetectMode::Peak => self.envelope,
             DetectMode::Rms => self.envelope.max(0.0).sqrt(),

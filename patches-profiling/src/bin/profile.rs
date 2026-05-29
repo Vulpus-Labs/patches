@@ -37,6 +37,10 @@ const PROFILE_ITERS: u64 = 200_000;
 const WARMUP_TICKS: u64 = 44_100;
 
 fn main() {
+    // Measure under the same denormal-flush mode the real-time block handlers
+    // run under (FtzGuard, ticket 0954); otherwise this profile reintroduces the
+    // subnormal CPU cliff it exists to catch.
+    let _ftz = patches_engine::FtzGuard::enable();
     let mut args = env::args().skip(1);
     let mut path: Option<String> = None;
     let mut dylibs: Vec<String> = Vec::new();

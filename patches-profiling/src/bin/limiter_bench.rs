@@ -95,6 +95,10 @@ fn bench_mono(n: usize, warmup: usize) -> (Vec<u64>, std::time::Duration) {
 }
 
 fn main() {
+    // Measure under the same denormal-flush mode the real-time block handlers
+    // run under (FtzGuard, ticket 0954); otherwise this bench reintroduces the
+    // subnormal CPU cliff it exists to catch.
+    let _ftz = patches_engine::FtzGuard::enable();
     let mut args = env::args().skip(1);
     let first = args.next();
     let mode = first.as_deref().unwrap_or("stereo");
