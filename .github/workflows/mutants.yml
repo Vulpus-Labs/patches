@@ -1,0 +1,55 @@
+name: Mutation testing (advisory)
+
+# Advisory mutation pass on patches-planner. **Non-blocking** — a
+# regression in mutation coverage is a triage signal, not a merge gate.
+# See MUTANTS.md.
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  mutants:
+    name: cargo mutants -p patches-planner
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: extractions/setup-just@v2
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --version '^27' --locked
+
+      # --keep-output preserves mutants.out/ past the wrapper's trap so
+      # the artefact upload below has something to work with.
+      - name: Run mutation pass
+        run: just mutants --keep-output
+        continue-on-error: true
+
+      - name: Summarise
+        if: always()
+        run: |
+          if [ ! -f mutants.out/outcomes.json ]; then
+            echo 'no outcomes.json — pass did not complete'
+            exit 0
+          fi
+          echo '## Mutation pass summary'
+          jq -r '
+            .outcomes | group_by(.summary) |
+            map({summary: .[0].summary, count: length}) |
+            (["summary","count"] | (., map(length*"-"))),
+            (.[] | [.summary, .count] | @tsv)
+          ' mutants.out/outcomes.json || cat mutants.out/outcomes.json | head -40
+
+      - name: Upload mutants.out
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out
+          path: mutants.out/
+          if-no-files-found: warn
+          retention-days: 14

@@ -14,7 +14,7 @@ pub use alloc::{
     MONO_READ_SINK, MONO_WRITE_SINK, POLY_READ_SINK, POLY_WRITE_SINK, RESERVED_SLOTS,
     AUDIO_OUT_L, AUDIO_OUT_R, AUDIO_IN_L, AUDIO_IN_R, GLOBAL_TRANSPORT, GLOBAL_DRIFT, GLOBAL_MIDI,
 };
-pub use graph_index::{GraphIndex, ResolvedGraph};
+pub use graph_index::{Edge, GraphIndex, PortKey, ProducerPortKey, ResolvedGraph};
 
 // ── PlanError ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,9 @@ pub enum PlanError {
 }
 
 impl fmt::Display for PlanError {
+    // MUTANTS: text is for human diagnostics only; programmatic callers
+    // match on the enum variant. No test asserts the exact rendered string.
+    #[cfg_attr(test, mutants::skip)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PlanError::BufferPoolExhausted => {
@@ -104,6 +107,16 @@ pub struct NodeState {
     /// Cached at build time from `Module::wants_periodic()` so that `periodic_indices`
     /// can be populated by the builder without access to the live module pool.
     pub is_periodic: bool,
+    /// Whether the module at this node implements [`ReceivesTrackerData`].
+    ///
+    /// Cached at install time from
+    /// [`Module::as_tracker_data_receiver`] so that the builder can populate
+    /// `tracker_receiver_indices` from `prev_state` directly — no post-build
+    /// mutation, no module-instance access in the Update branch (ticket 0990).
+    ///
+    /// [`Module::as_tracker_data_receiver`]: patches_core::modules::Module::as_tracker_data_receiver
+    /// [`ReceivesTrackerData`]: patches_core::tracker::ReceivesTrackerData
+    pub is_tracker_receiver: bool,
     /// Scratch-region cable-index offset for this module (ticket 0870).
     ///
     /// `0` for built-ins. FFI plugins return `BACKPLANE_SIZE`: the planner
@@ -205,6 +218,12 @@ pub struct Topology {
     /// lies inside a non-trivial SCC and must retain the 1-sample feedback
     /// delay.
     pub cable_fused: Vec<bool>,
+    /// Per-consumer-input fused flag, keyed by [`PortKey`]. Derived view
+    /// over `cable_fused` indexed by *consumer input port* rather than
+    /// edge index — every input port has at most one incoming edge
+    /// (ADR 0071 rejected). Built in [`Topology::build`] so the action
+    /// phase does not reconstruct it inline (ticket 0991 / ADR 0081).
+    pub fused_by_input: HashMap<PortKey, bool>,
     /// Size of the feedback arc set: number of cables internal to a
     /// non-trivial SCC. Reported on plan build to validate the assumption
     /// that typical patches have very few cyclic cables.
@@ -215,8 +234,74 @@ impl Topology {
     /// Analysis stage: condense the graph into SCCs, emit execution order,
     /// and classify every cable as fused (inter-SCC) or cyclic.
     pub fn build(index: &GraphIndex<'_>, node_ids: &[NodeId]) -> Self {
-        let (order, cable_fused, fas_size) = compute_order_with_fusion(node_ids, &index.edges);
-        Self { order, cable_fused, fas_size }
+        let (order, cable_fused, fas_size) =
+            Self::compute_order_with_fusion(node_ids, &index.edges);
+        let fused_by_input = Self::compute_fused_by_input(&index.edges, &cable_fused);
+        Self { order, cable_fused, fused_by_input, fas_size }
+    }
+
+    /// Build the per-consumer-input fused-flag view from the edge list and
+    /// the parallel per-edge fused flag. Every input port has at most one
+    /// incoming edge (ADR 0071 rejected), so the resulting map is
+    /// well-defined.
+    fn compute_fused_by_input(edges: &[Edge], cable_fused: &[bool]) -> HashMap<PortKey, bool> {
+        debug_assert_eq!(edges.len(), cable_fused.len());
+        let mut map = HashMap::with_capacity(edges.len());
+        for (i, e) in edges.iter().enumerate() {
+            map.insert(PortKey::new(e.to.clone(), e.in_name, e.in_idx), cable_fused[i]);
+        }
+        map
+    }
+
+    /// Compute execution order over the SCC condensation and classify
+    /// every cable as fused (inter-SCC, forward) or cyclic (internal to
+    /// a non-trivial SCC). Returns:
+    ///
+    /// - `order`: nodes in condensation topo order; within each SCC,
+    ///   alphabetical for determinism.
+    /// - `cable_fused`: parallel to `edges`. `true` iff the cable's
+    ///   producer and consumer live in different SCCs.
+    /// - `fas_size`: count of cyclic cables.
+    ///
+    /// For an empty edge set this returns alphabetical node order, the
+    /// same ordering the planner used before ADR 0072.
+    pub(crate) fn compute_order_with_fusion(
+        node_ids: &[NodeId],
+        edges: &[Edge],
+    ) -> (Vec<NodeId>, Vec<bool>, usize) {
+        let mut adj: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(node_ids.len());
+        for id in node_ids {
+            adj.insert(id.clone(), Vec::new());
+        }
+        for e in edges {
+            if let Some(succs) = adj.get_mut(&e.from) {
+                succs.push(e.to.clone());
+            }
+        }
+
+        let part = scc::tarjan_scc(node_ids, &adj);
+
+        let mut order: Vec<NodeId> = Vec::with_capacity(node_ids.len());
+        for &scc_idx in &part.topo_scc {
+            let mut members = part.members[scc_idx].clone();
+            members.sort();
+            order.extend(members);
+        }
+
+        let mut cable_fused: Vec<bool> = Vec::with_capacity(edges.len());
+        let mut fas_size: usize = 0;
+        for e in edges {
+            let fused = match (part.scc_of.get(&e.from), part.scc_of.get(&e.to)) {
+                (Some(a), Some(b)) => a != b,
+                _ => false,
+            };
+            if !fused {
+                fas_size += 1;
+            }
+            cable_fused.push(fused);
+        }
+
+        (order, cable_fused, fas_size)
     }
 }
 
@@ -239,7 +324,7 @@ pub struct PortClassification {
     /// Per-edge producer-port slice position, parallel to `index.edges`.
     /// `out_port_pos[i]` is edge `i`'s producer-port position in the
     /// producer's `desc.outputs` (distinct from the edge's user-visible
-    /// `out_idx`; see [`resolve_output_port_positions`]).
+    /// `out_idx`).
     pub out_port_pos: Vec<usize>,
     /// Per-producer-port cycle/scratch classification (ADR 0072 phase 3,
     /// ticket 0850). Keyed by `(NodeId, output-port slice position)` — the
@@ -252,7 +337,7 @@ pub struct PortClassification {
     ///
     /// Producer ports with no consumers are absent; callers treat an absent
     /// key as `false` (scratch), since no read path needs the delay.
-    pub producer_port_cycle: HashMap<(NodeId, usize), bool>,
+    pub producer_port_cycle: HashMap<ProducerPortKey, bool>,
 }
 
 impl PortClassification {
@@ -260,10 +345,68 @@ impl PortClassification {
     /// position, then classify each producer port cycle/scratch from the
     /// per-edge fused flags in [`Topology`].
     pub fn build(index: &GraphIndex<'_>, cable_fused: &[bool]) -> Self {
-        let out_port_pos = resolve_output_port_positions(index);
+        let out_port_pos = Self::resolve_output_port_positions(index);
         let producer_port_cycle =
-            classify_producer_ports(&index.edges, &out_port_pos, cable_fused);
+            Self::classify_producer_ports(&index.edges, &out_port_pos, cable_fused);
         Self { out_port_pos, producer_port_cycle }
+    }
+
+    /// Resolve each edge's producer output port to its *slice position* in
+    /// the producer's `desc.outputs` — the index that [`allocate_buffers`]
+    /// and `build_input_buffer_map` key by. This is distinct from the edge's
+    /// `out_idx`, which carries `PortDescriptor::index`: that field is scoped
+    /// per port-name group, so `out`/`send_a`/`send_b` all report `index == 0`
+    /// on a 1-channel `Console` even though they sit at slice positions
+    /// 0/1/2. Returns a vector parallel to `index.edges`.
+    ///
+    /// Falls back to the edge's `out_idx` only if the node or port is missing
+    /// — an internal inconsistency the later `build_input_buffer_map` pass
+    /// surfaces as a `PlanError`.
+    fn resolve_output_port_positions(index: &GraphIndex<'_>) -> Vec<usize> {
+        index
+            .edges
+            .iter()
+            .map(|e| {
+                index
+                    .get_node(&e.from)
+                    .and_then(|node| node.module_descriptor.output_position(e.out_name, e.out_idx))
+                    .unwrap_or(e.out_idx)
+            })
+            .collect()
+    }
+
+    /// Build per-producer-port cycle/scratch classification from the
+    /// per-edge fused flag. A producer port is `cycle` iff at least one of
+    /// its consuming edges is non-fused (the consumer needs last-tick's
+    /// value via the ping-pong pair). Otherwise it is `scratch`.
+    ///
+    /// The map is keyed by [`ProducerPortKey`] (slice position) — not the
+    /// edge's user-visible `out_idx` — so the classification aligns with
+    /// [`allocate_buffers`] and `build_input_buffer_map`. Before ticket
+    /// 0974 this keyed by `out_idx`, so a later-positioned port (e.g.
+    /// `Console`'s `send_b`) with a non-fused consumer was allocated a
+    /// scratch slot the consumer then read with `fused = false`.
+    ///
+    /// Producer ports with zero consumers do not appear in the map; callers
+    /// should treat absent keys as `scratch` (no read path requires the
+    /// delay).
+    pub(crate) fn classify_producer_ports(
+        edges: &[Edge],
+        out_port_pos: &[usize],
+        cable_fused: &[bool],
+    ) -> HashMap<ProducerPortKey, bool> {
+        debug_assert_eq!(edges.len(), cable_fused.len());
+        debug_assert_eq!(edges.len(), out_port_pos.len());
+        let mut by_port: HashMap<ProducerPortKey, bool> = HashMap::new();
+        for (i, e) in edges.iter().enumerate() {
+            let key = ProducerPortKey::new(e.from.clone(), out_port_pos[i]);
+            let needs_cycle = !cable_fused[i];
+            by_port
+                .entry(key)
+                .and_modify(|v| *v = *v || needs_cycle)
+                .or_insert(needs_cycle);
+        }
+        by_port
     }
 }
 
@@ -400,121 +543,10 @@ pub fn make_decisions<'a>(
         &index.edges,
         &ports.out_port_pos,
         &topology.cable_fused,
-        &buf_alloc.output_buf,
+        &buf_alloc.state.output_buf,
     )?;
     let decisions = classify_nodes(&index, &topology.order, prev_state)?;
     Ok(PlanDecisions { index, topology, ports, buf_alloc, decisions })
-}
-
-/// Resolve each edge's producer output port to its *slice position* in
-/// the producer's `desc.outputs` — the index that [`allocate_buffers`]
-/// and `build_input_buffer_map` key by. This is distinct from the edge's
-/// `out_idx`, which carries `PortDescriptor::index`: that field is scoped
-/// per port-name group, so `out`/`send_a`/`send_b` all report `index == 0`
-/// on a 1-channel `Console` even though they sit at slice positions
-/// 0/1/2. Returns a vector parallel to `index.edges`.
-///
-/// Falls back to the edge's `out_idx` only if the node or port is missing
-/// — an internal inconsistency the later `build_input_buffer_map` pass
-/// surfaces as a `PlanError`.
-fn resolve_output_port_positions(index: &GraphIndex<'_>) -> Vec<usize> {
-    index
-        .edges
-        .iter()
-        .map(|(from, out_name, out_idx, _, _, _, _)| {
-            index
-                .get_node(from)
-                .and_then(|node| node.module_descriptor.output_position(out_name, *out_idx))
-                .unwrap_or(*out_idx)
-        })
-        .collect()
-}
-
-/// Build per-producer-port cycle/scratch classification from the
-/// per-edge fused flag. A producer port is `cycle` iff at least one of
-/// its consuming edges is non-fused (the consumer needs last-tick's
-/// value via the ping-pong pair). Otherwise it is `scratch`.
-///
-/// The map is keyed by `(NodeId, output-port slice position)`, with
-/// `out_port_pos[i]` giving edge `i`'s producer-port slice position (see
-/// [`resolve_output_port_positions`]). Keying by slice position — rather
-/// than the edge's `out_idx` — keeps this classification aligned with
-/// [`allocate_buffers`] and `build_input_buffer_map`. Before ticket 0974
-/// this keyed by `out_idx`, so a later-positioned port (e.g. `Console`'s
-/// `send_b`) with a non-fused consumer was allocated a scratch slot the
-/// consumer then read with `fused = false`.
-///
-/// Producer ports with zero consumers do not appear in the map; callers
-/// should treat absent keys as `scratch` (no read path requires the
-/// delay).
-fn classify_producer_ports(
-    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
-    out_port_pos: &[usize],
-    cable_fused: &[bool],
-) -> HashMap<(NodeId, usize), bool> {
-    debug_assert_eq!(edges.len(), cable_fused.len());
-    debug_assert_eq!(edges.len(), out_port_pos.len());
-    let mut by_port: HashMap<(NodeId, usize), bool> = HashMap::new();
-    for (i, (from, _, _, _, _, _, _)) in edges.iter().enumerate() {
-        let key = (from.clone(), out_port_pos[i]);
-        let needs_cycle = !cable_fused[i];
-        by_port
-            .entry(key)
-            .and_modify(|v| *v = *v || needs_cycle)
-            .or_insert(needs_cycle);
-    }
-    by_port
-}
-
-/// Compute execution order over the SCC condensation and classify
-/// every cable as fused (inter-SCC, forward) or cyclic (internal to
-/// a non-trivial SCC). Returns:
-///
-/// - `order`: nodes in condensation topo order; within each SCC,
-///   alphabetical for determinism.
-/// - `cable_fused`: parallel to `edges`. `true` iff the cable's
-///   producer and consumer live in different SCCs.
-/// - `fas_size`: count of cyclic cables.
-///
-/// For an empty edge set this returns alphabetical node order, the
-/// same ordering the planner used before ADR 0072.
-pub(crate) fn compute_order_with_fusion(
-    node_ids: &[NodeId],
-    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
-) -> (Vec<NodeId>, Vec<bool>, usize) {
-    let mut adj: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(node_ids.len());
-    for id in node_ids {
-        adj.insert(id.clone(), Vec::new());
-    }
-    for (from, _, _, to, _, _, _) in edges {
-        if let Some(succs) = adj.get_mut(from) {
-            succs.push(to.clone());
-        }
-    }
-
-    let part = scc::tarjan_scc(node_ids, &adj);
-
-    let mut order: Vec<NodeId> = Vec::with_capacity(node_ids.len());
-    for &scc_idx in &part.topo_scc {
-        let mut members = part.members[scc_idx].clone();
-        members.sort();
-        order.extend(members);
-    }
-
-    let mut cable_fused: Vec<bool> = Vec::with_capacity(edges.len());
-    let mut fas_size: usize = 0;
-    for (from, _, _, to, _, _, _) in edges {
-        let fused = match (part.scc_of.get(from), part.scc_of.get(to)) {
-            (Some(a), Some(b)) => a != b,
-            _ => false,
-        };
-        if !fused {
-            fas_size += 1;
-        }
-        cable_fused.push(fused);
-    }
-
-    (order, cable_fused, fas_size)
 }
 
 /// Validation stage: every fused cable must point forward in `order`. Returns
@@ -525,19 +557,18 @@ pub(crate) fn compute_order_with_fusion(
 /// control thread (ADR 0081).
 fn validate_fused_invariant(
     order: &[NodeId],
-    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    edges: &[Edge],
     cable_fused: &[bool],
 ) -> Result<(), PlanError> {
     debug_assert_eq!(edges.len(), cable_fused.len());
     let pos: HashMap<&NodeId, usize> = order.iter().enumerate().map(|(i, n)| (n, i)).collect();
-    for (i, edge) in edges.iter().enumerate() {
+    for (i, e) in edges.iter().enumerate() {
         if !cable_fused[i] {
             continue;
         }
-        let (from, _, _, to, _, _, _) = edge;
-        let forward = matches!((pos.get(from), pos.get(to)), (Some(&p), Some(&c)) if p < c);
+        let forward = matches!((pos.get(&e.from), pos.get(&e.to)), (Some(&p), Some(&c)) if p < c);
         if !forward {
-            return Err(PlanError::FusedOrderViolation { from: from.clone(), to: to.clone() });
+            return Err(PlanError::FusedOrderViolation { from: e.from.clone(), to: e.to.clone() });
         }
     }
     Ok(())
@@ -558,21 +589,21 @@ fn validate_fused_invariant(
 /// scratch/cycle classification and the per-edge `fused` flag fails the build
 /// directly with a structured error (ticket 0974 / E160).
 fn validate_scratch_fused_consistency(
-    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    edges: &[Edge],
     out_port_pos: &[usize],
     cable_fused: &[bool],
-    output_buf: &HashMap<(NodeId, usize), usize>,
+    output_buf: &HashMap<ProducerPortKey, usize>,
 ) -> Result<(), PlanError> {
     debug_assert_eq!(edges.len(), cable_fused.len());
     debug_assert_eq!(edges.len(), out_port_pos.len());
-    for (i, (from, _, _, to, _, _, _)) in edges.iter().enumerate() {
-        let key = (from.clone(), out_port_pos[i]);
+    for (i, e) in edges.iter().enumerate() {
+        let key = ProducerPortKey::new(e.from.clone(), out_port_pos[i]);
         let Some(&slot) = output_buf.get(&key) else { continue };
         if slot < patches_core::cables::SCRATCH_CAPACITY && !cable_fused[i] {
             return Err(PlanError::ScratchFusedConflict {
-                producer: from.clone(),
+                producer: e.from.clone(),
                 slot,
-                consumer: to.clone(),
+                consumer: e.to.clone(),
             });
         }
     }

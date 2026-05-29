@@ -28,7 +28,7 @@ fn meta_is_none_when_monitor_disabled() {
     let builder = PatchBuilder::new(POOL_CAP, MODULE_CAP);
 
     let (_plan, meta, _state) = builder
-        .build_patch_with_meta(&graph, &registry, &env(), &PlannerState::empty())
+        .build_patch_with_meta(&graph, &registry, &env(), &PlannerState::empty(), None)
         .unwrap();
     assert!(meta.is_none(), "meta must be None when monitor disabled");
 }
@@ -40,7 +40,7 @@ fn meta_records_name_and_type_per_slot() {
     let builder = PatchBuilder::new(POOL_CAP, MODULE_CAP).with_monitor(true);
 
     let (_plan, meta, state) = builder
-        .build_patch_with_meta(&graph, &registry, &env(), &PlannerState::empty())
+        .build_patch_with_meta(&graph, &registry, &env(), &PlannerState::empty(), None)
         .unwrap();
     let meta = meta.expect("meta produced when monitor enabled");
 
@@ -61,7 +61,7 @@ fn meta_tracks_renames_removals_and_additions_across_reloads() {
     // Build A: osc_a + out.
     let graph_a = osc_out_graph("osc_a", 1.0);
     let (_plan_a, meta_a, state_a) = builder
-        .build_patch_with_meta(&graph_a, &registry, &env(), &PlannerState::empty())
+        .build_patch_with_meta(&graph_a, &registry, &env(), &PlannerState::empty(), None)
         .unwrap();
     let meta_a = meta_a.unwrap();
     let osc_a_slot = pool_index_of(&state_a, "osc_a");
@@ -71,7 +71,7 @@ fn meta_tracks_renames_removals_and_additions_across_reloads() {
     // freelisted slot may be recycled). Out survives.
     let graph_b = osc_out_graph("osc_b", 2.0);
     let (_plan_b, meta_b, state_b) = builder
-        .build_patch_with_meta(&graph_b, &registry, &env(), &state_a)
+        .build_patch_with_meta(&graph_b, &registry, &env(), &state_a, None)
         .unwrap();
     let meta_b = meta_b.unwrap();
     let osc_b_slot = pool_index_of(&state_b, "osc_b");
@@ -98,7 +98,7 @@ fn meta_tracks_renames_removals_and_additions_across_reloads() {
         .unwrap_err(); // input already connected; ignore — only need the node added
 
     let (_plan_c, meta_c, state_c) = builder
-        .build_patch_with_meta(&graph_c, &registry, &env(), &state_b)
+        .build_patch_with_meta(&graph_c, &registry, &env(), &state_b, None)
         .unwrap();
     let meta_c = meta_c.unwrap();
     let osc_c_slot = pool_index_of(&state_c, "osc_c");

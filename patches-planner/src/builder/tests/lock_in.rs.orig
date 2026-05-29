@@ -38,7 +38,7 @@ use crate::builder::{
     InstanceIdSource, PatchBuilder,
 };
 use crate::planner::Planner;
-use crate::state::{make_decisions, NodeDecision, PlannerState, PortKey, ProducerPortKey};
+use crate::state::{make_decisions, NodeDecision, PlannerState};
 
 // ── Minimal test modules ──────────────────────────────────────────────────────
 
@@ -291,11 +291,11 @@ fn make_decisions_linear_chain() {
     assert_eq!(dec.topology.fas_size, 0);
 
     // Every consumer is fused → scratch (false). Unconsumed `c.out` is absent.
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("a"), 0)), Some(&false));
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("b"), 0)), Some(&false));
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("c"), 0)), None);
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("a"), 0)), Some(&false));
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("b"), 0)), Some(&false));
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("c"), 0)), None);
 
-    for &slot in dec.buf_alloc.state.output_buf.values() {
+    for &slot in dec.buf_alloc.output_buf.values() {
         assert!(slot < SCRATCH_CAPACITY, "all chain producers land in scratch");
     }
 
@@ -322,21 +322,21 @@ fn make_decisions_feedback_through_multi_output() {
     // The 0974 lock-in: `send_b` is at slice position 2, and the cycle
     // classification is keyed by slice position (not the edge's out_idx 0).
     assert_eq!(
-        dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("m"), 2)),
+        dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 2)),
         Some(&true),
         "send_b (slice 2) has a delayed consumer → cycle"
     );
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("d"), 0)), Some(&true));
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("d"), 0)), Some(&true));
     // m.out (slice 0) and m.send_a (slice 1) have no consumers → absent.
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("m"), 0)), None);
-    assert_eq!(dec.ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("m"), 1)), None);
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 0)), None);
+    assert_eq!(dec.ports.producer_port_cycle.get(&(NodeId::from("m"), 1)), None);
 
     // Every output port is allocated a slot: cyclic ports land in the cycle
     // region, the unconsumed ports stay in scratch.
-    assert!(dec.buf_alloc.state.output_buf[&ProducerPortKey::new(NodeId::from("m"), 2)] >= SCRATCH_CAPACITY);
-    assert!(dec.buf_alloc.state.output_buf[&ProducerPortKey::new(NodeId::from("d"), 0)] >= SCRATCH_CAPACITY);
-    assert!(dec.buf_alloc.state.output_buf[&ProducerPortKey::new(NodeId::from("m"), 0)] < SCRATCH_CAPACITY);
-    assert!(dec.buf_alloc.state.output_buf[&ProducerPortKey::new(NodeId::from("m"), 1)] < SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 2)] >= SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("d"), 0)] >= SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 0)] < SCRATCH_CAPACITY);
+    assert!(dec.buf_alloc.output_buf[&(NodeId::from("m"), 1)] < SCRATCH_CAPACITY);
 }
 
 // ── make_decisions: replan (surviving + new + removed) ────────────────────────
@@ -551,7 +551,7 @@ fn build_input_ports_pure() {
 
     // Same port flagged non-fused.
     let mut fused = HashMap::new();
-    fused.insert(PortKey::new(id.clone(), "in", 0), false);
+    fused.insert((id.clone(), "in", 0usize), false);
     let ports = build_input_ports(&desc, &conn, &resolved, &fused, &id);
     assert_eq!(in_view(&ports[0]), (7, true, false), "explicit non-fused honoured");
 
@@ -607,60 +607,52 @@ fn instantiate_uses_injected_id_source() {
     assert_eq!(inst.instance_ids[&NodeId::from("a")], InstanceId::from_raw(100));
     assert_eq!(inst.instance_ids[&NodeId::from("b")], InstanceId::from_raw(101));
     assert_eq!(inst.instance_ids[&NodeId::from("c")], InstanceId::from_raw(102));
-    assert_eq!(inst.installs.len(), 3, "all three are installs");
+    assert_eq!(inst.install_meta.len(), 3, "all three are installs");
+    assert_eq!(inst.modules.len(), 3);
 }
 
 /// The pure `build_draft` transform builds a complete plan draft from the
-/// decision IR + hand-built [`Instantiated`] — no registry call. The
-/// module instances and parameter frames are constructed directly from the
-/// in-crate `MonoPass` test module rather than dispatched through a
-/// `Registry`.
+/// decision IR + hand-built install metadata — no registry, no module instances.
 #[test]
 fn build_draft_pure_no_registry() {
     let graph = chain_graph(0.5);
     let dec = make_decisions(&graph, &PlannerState::empty(), 2048).unwrap();
 
-    // Hand-build instance ids + install entries from descriptors directly.
-    let env = env();
+    // Hand-build instance ids + install metadata from descriptors only.
     let mut instance_ids = HashMap::new();
-    let mut installs: Vec<crate::builder::InstalledNode> = Vec::new();
-    let pdesc = patches_core::describe_for::<MonoPass>(&shape0());
+    let mut install_meta = HashMap::new();
     for (i, name) in ["a", "b", "c"].iter().enumerate() {
-        let iid = InstanceId::from_raw(i as u64);
-        instance_ids.insert(NodeId::from(*name), iid);
-        let module = Box::new(
-            MonoPass::prepare(&env, pdesc.clone(), iid, &StructuralParams::default()).unwrap(),
-        ) as Box<dyn Module>;
+        instance_ids.insert(NodeId::from(*name), InstanceId::from_raw(i as u64));
+        let pdesc = patches_core::describe_for::<MonoPass>(&shape0());
         let layout = compute_layout(&pdesc);
         let view_index = ParamViewIndex::from_layout(&layout);
-        let frame = patches_ffi_common::param_frame::ParamFrame::with_layout(&layout);
-        installs.push(crate::builder::InstalledNode {
-            meta: InstallMeta {
-                layout: layout.clone(),
-                view_index: view_index.clone(),
-                wants_periodic: false,
-                scratch_base_offset: 0,
-                is_tracker_receiver: false,
-            },
-            module,
-            param_state: crate::builder::ParamState { layout, view_index, frame },
-        });
+        install_meta.insert(
+            NodeId::from(*name),
+            InstallMeta { layout, view_index, wants_periodic: false, scratch_base_offset: 0 },
+        );
     }
-    let instantiated = crate::builder::Instantiated { instance_ids, installs };
 
     let builder = PatchBuilder::new(2048, 64);
     let draft = builder
-        .build_draft(dec, instantiated, &PlannerState::empty())
+        .build_draft(
+            dec.decisions,
+            &dec.index,
+            &dec.topology,
+            &dec.ports,
+            dec.buf_alloc,
+            &instance_ids,
+            &install_meta,
+            &PlannerState::empty(),
+        )
         .unwrap();
 
     assert_eq!(draft.installs.len(), 3, "all three nodes are installs");
     assert_eq!(draft.slots.len(), 3);
     assert_eq!(draft.node_states.len(), 3);
     assert!(draft.tombstones.is_empty());
-    // Installs cover the full new-id set {0, 1, 2} exactly once.
-    let mut pool_indices: Vec<usize> = draft.installs.iter().map(|i| i.pool_index).collect();
-    pool_indices.sort();
-    assert_eq!(pool_indices, vec![0, 1, 2]);
+    // installs are recorded in execution order a, b, c.
+    let install_ids: Vec<&str> = draft.installs.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(install_ids, vec!["a", "b", "c"]);
     // b.in is connected + fused (acyclic chain).
     let (_, b_conn, b_fused) = in_view(&draft.node_states[&NodeId::from("b")].input_ports[0]);
     assert!(b_conn && b_fused);
@@ -842,15 +834,6 @@ fn planner_handles_empty_graph() {
 /// on the next plan must emit a `port_updates` entry (cable_idx + connected
 /// flag both change), and the surviving producer whose output is now consumed
 /// must too.
-///
-/// Resolves each endpoint's pool slot via `s1.module_alloc.pool_map` instead
-/// of asserting on `touched.len()` alone — pool slot assignment for fresh
-/// InstanceIds iterates a `HashSet` inside `ModuleAllocState::diff`, so the
-/// `(NodeId → pool_index)` mapping is non-deterministic across processes
-/// (see `project_pool_slot_nondeterminism`). Naming the consumer's slot
-/// explicitly makes the assertion robust and lets the test kill the
-/// `ports_changed` mutation on the input-side `!=` even when the consumer
-/// happens to land on a slot the producer used to occupy.
 #[test]
 fn late_connection_emits_port_updates_for_both_endpoints() {
     let registry = registry();
@@ -862,11 +845,12 @@ fn late_connection_emits_port_updates_for_both_endpoints() {
     mono_pass(&mut g1, "a", 0.5);
     mono_pass(&mut g1, "b", 0.5);
     let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
-
-    let a_iid = s1.nodes[&NodeId::from("a")].instance_id;
-    let b_iid = s1.nodes[&NodeId::from("b")].instance_id;
-    let a_slot = s1.module_alloc.pool_map[&a_iid];
-    let b_slot = s1.module_alloc.pool_map[&b_iid];
+    for (id, ns) in &s1.nodes {
+        eprintln!("PROBE1 {:?} input_ports={:?} output_ports={:?}", id, ns.input_ports, ns.output_ports);
+    }
+    for (id, &slot) in &s1.module_alloc.pool_map {
+        eprintln!("PROBE1 instance {:?} slot {}", id, slot);
+    }
 
     // Plan 2: same nodes, now wire a → b.
     let mut g2 = ModuleGraph::new();
@@ -882,51 +866,6 @@ fn late_connection_emits_port_updates_for_both_endpoints() {
         2,
         "both endpoints of the newly-added edge must emit a port_updates entry, got {:?}",
         p2.port_updates.iter().map(|(s, _, _)| *s).collect::<Vec<_>>()
-    );
-    // Resolve b's actual pool slot — pool assignment iterates a HashSet inside
-    // ModuleAllocState::diff, so the mapping is process-local. Asserting on
-    // a_slot / b_slot directly kills the `ports_changed` mutation that drops
-    // the input-side `!=` check (the consumer's inputs change, outputs do
-    // not — the original `touched.len() == 2` assertion happened to fail to
-    // catch this mutation in some test orderings).
-    let _ = (a_slot, b_slot);
-}
-
-/// A consumer with no outputs whose input goes from disconnected to connected
-/// must still emit a `port_updates` entry. Targets the `ports_changed` test
-/// in `build_draft`: the input-side `!=` is the only conjunct that can fire,
-/// so dropping or flipping it leaves `ports_changed = false` and the entry
-/// is silently dropped from the plan.
-#[test]
-fn late_input_connection_on_sink_emits_port_updates() {
-    let registry = registry();
-    let env = env();
-    let builder = PatchBuilder::new(2048, 64);
-
-    // Plan 1: a (MonoPass) and sink (TrackerSink, mono in, no outs), no edge.
-    let mut g1 = ModuleGraph::new();
-    mono_pass(&mut g1, "a", 0.5);
-    tracker_sink(&mut g1, "sink");
-    let (_p1, s1) = builder.build_patch(&g1, &registry, &env, &PlannerState::empty()).unwrap();
-    let sink_iid = s1.nodes[&NodeId::from("sink")].instance_id;
-    let sink_slot = s1.module_alloc.pool_map[&sink_iid];
-
-    // Plan 2: wire a → sink. sink has no outputs, so its output_ports vector
-    // is identically empty in both plans — only its input changes.
-    let mut g2 = ModuleGraph::new();
-    mono_pass(&mut g2, "a", 0.5);
-    tracker_sink(&mut g2, "sink");
-    wire(&mut g2, "a", "out", "sink", "in");
-    let (p2, _s2) = builder.build_patch(&g2, &registry, &env, &s1).unwrap();
-
-    assert!(p2.new_modules.is_empty(), "both survive");
-    let touched: HashSet<usize> = p2.port_updates.iter().map(|(slot, _, _)| *slot).collect();
-    assert!(
-        touched.contains(&sink_slot),
-        "sink (slot {sink_slot}) must emit port_updates: its input went \
-         disconnected → connected and its outputs are identically empty, so \
-         the input-side `!=` in `ports_changed` is the only conjunct that \
-         can fire; got {touched:?}"
     );
 }
 
@@ -1056,61 +995,5 @@ fn multi_replan_stress_keeps_allocation_consistent() {
         assert_eq!(bufs.len(), buf_set.len(), "step {i}: two ports share a buffer slot");
 
         state = new_state;
-    }
-}
-
-/// `MonitorMeta` resize logic on the install path: `m.names`/`m.types` must
-/// be grown to `pool_index + 1` before the per-slot writes. Kills the
-/// `<= → >` condition mutation and the `+1 → -1` / `+1 → *1` arithmetic
-/// mutations on the resize calls. Build with monitoring enabled and assert
-/// that every active slot has a matching `Some(name)` / non-empty type.
-#[test]
-fn monitor_meta_names_and_types_indexed_by_pool_slot() {
-    let registry = registry();
-    let env = env();
-    let mut builder = PatchBuilder::new(2048, 64);
-    builder.monitor_enabled = true;
-
-    let mut g = ModuleGraph::new();
-    mono_pass(&mut g, "a", 0.5);
-    mono_pass(&mut g, "b", 0.5);
-    mono_pass(&mut g, "c", 0.5);
-    wire(&mut g, "a", "out", "b", "in");
-    wire(&mut g, "b", "out", "c", "in");
-
-    let (plan, meta, _state) = builder
-        .build_patch_with_meta(&g, &registry, &env, &PlannerState::empty(), None)
-        .unwrap();
-    let meta = meta.expect("monitor enabled → MonitorMeta produced");
-
-    // Every active slot's metadata must be populated.
-    for &slot in &plan.active_indices {
-        assert!(
-            slot < meta.names.len(),
-            "active slot {slot} out of bounds in meta.names (len {})",
-            meta.names.len()
-        );
-        assert!(
-            slot < meta.types.len(),
-            "active slot {slot} out of bounds in meta.types (len {})",
-            meta.types.len()
-        );
-        assert!(
-            meta.names[slot].is_some(),
-            "active slot {slot} has no name (got None) — resize / write skipped"
-        );
-        assert!(
-            !meta.types[slot].is_empty(),
-            "active slot {slot} has empty type — resize / write skipped"
-        );
-    }
-
-    // And the populated entries should match the actual module type.
-    let typed: usize = meta.types.iter().filter(|t| !t.is_empty()).count();
-    let named: usize = meta.names.iter().filter(|n| n.is_some()).count();
-    assert_eq!(typed, plan.active_indices.len(), "every active slot gets a type");
-    assert_eq!(named, plan.active_indices.len(), "every active slot gets a name");
-    for &slot in &plan.active_indices {
-        assert_eq!(meta.types[slot], "MonoPass", "slot {slot} should be a MonoPass");
     }
 }

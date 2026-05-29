@@ -42,8 +42,8 @@ fn scratch_region_compacts_and_zeroes_on_replan() {
     let (_plan_a, state_a) =
         builder.build_patch(&graph_a, &registry, &env, &PlannerState::empty()).unwrap();
 
-    let buf_a_old = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
-    let freed_buf = state_a.buffer_alloc.output_buf[&(NodeId::from("sine_b"), 0)];
+    let buf_a_old = state_a.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("sine_a"), 0)];
+    let freed_buf = state_a.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("sine_b"), 0)];
     assert!(
         buf_a_old < patches_core::cables::SCRATCH_CAPACITY,
         "sine_a output is fused, expected to live in the scratch region"
@@ -65,7 +65,7 @@ fn scratch_region_compacts_and_zeroes_on_replan() {
 
     let (plan_b, state_b) = builder.build_patch(&graph_b, &registry, &env, &state_a).unwrap();
 
-    let buf_a_new = state_b.buffer_alloc.output_buf[&(NodeId::from("sine_a"), 0)];
+    let buf_a_new = state_b.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("sine_a"), 0)];
     assert!(
         buf_a_new < patches_core::cables::SCRATCH_CAPACITY,
         "sine_a remains fused; new index must still live in the scratch region"

@@ -15,3 +15,9 @@ patches-ffi-common = { path = "../patches-ffi-common" }
 
 [dev-dependencies]
 patches-modules = { path = "../patches-modules" }
+proptest = "1"
+# Empty marker crate that lets `#[mutants::skip]` resolve under
+# `cargo test`. cargo-mutants 27 reads the attribute by path and skips
+# the function without needing real code from this crate; the crate
+# exists purely so rustc accepts the attribute. See MUTANTS.md.
+mutants = "0.0.3"

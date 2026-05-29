@@ -17,7 +17,7 @@ mod builder {
     use patches_modules::{AudioOut, Oscillator, Sum};
     use patches_planner::{
         BuildError, BuildErrorKind, ExecutionPlan, ModuleAllocState, PatchBuilder, PlanError,
-        PlannerState,
+        PlannerState, ProducerPortKey,
     };
     use patches_core::registry::Registry;
     use patches_engine::ModulePool;

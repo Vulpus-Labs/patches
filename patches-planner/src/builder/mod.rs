@@ -14,8 +14,8 @@ use patches_ffi_common::param_layout::{compute_layout, defaults_from_descriptor,
 
 use crate::state::{
     make_decisions, BufferAllocState, BufferAllocation, GraphIndex, ModuleAllocDiff,
-    ModuleAllocState, NodeDecision, NodeState, PlanDecisions, PlanError, PlannerState,
-    PortClassification, ResolvedGraph, Topology,
+    ModuleAllocState, NodeDecision, NodeState, PlanDecisions, PlanError, PlannerState, PortKey,
+    ProducerPortKey, ResolvedGraph,
 };
 use std::sync::Arc;
 
@@ -362,6 +362,14 @@ fn partition_inputs(resolved: Vec<(usize, CableMap, bool)>) -> PartitionedInputs
 /// below the module's `scratch_base_offset` (ticket 0870). `offset == 0`
 /// (built-ins) is the fast path: skip the scan entirely. Cycle indices
 /// (`>= SCRATCH_CAPACITY`) are always allowed and ignored.
+// MUTANTS: the first conjunct `idx < SCRATCH_CAPACITY` of each check is a
+// redundant guard against pointing this check at a cycle slot. `<` vs `<=`
+// only matters when `idx == SCRATCH_CAPACITY` (2048) AND
+// `idx < scratch_base_offset` also holds. `scratch_base_offset` is bounded
+// by `RESERVED_SLOTS` (32) — far less than 2048 — so the AND can never fire
+// at that boundary, and the boundary mutations on the first conjunct
+// (lines 380:16 and 395:16) are observably equivalent.
+#[cfg_attr(test, mutants::skip)]
 pub(crate) fn check_ffi_port_offsets(
     module_name: &'static str,
     scratch_base_offset: usize,
@@ -414,23 +422,23 @@ pub(crate) fn check_ffi_port_offsets(
 /// Composes the prior frozen bundles rather than re-flattening them — the
 /// action phase reads buffer slots from `alloc`, module pool slots from
 /// `modules`, and resolved inputs from `resolved`, each from its owning member.
-pub struct BufferLayout<'a> {
+pub struct BufferLayout {
     pub alloc: BufferAllocation,
     pub modules: ModuleAllocDiff,
-    pub resolved: ResolvedGraph<'a>,
+    pub resolved: ResolvedGraph,
 }
 
-impl<'a> BufferLayout<'a> {
+impl BufferLayout {
     /// Compose the action-phase layout. Resolves input buffers from the frozen
     /// `out_port_pos` (owned by `PortClassification`) so producer slice
     /// positions have a single derivation site (ticket 0974 / E160).
     fn build(
-        index: &'a GraphIndex<'a>,
+        index: &GraphIndex<'_>,
         alloc: BufferAllocation,
         modules: ModuleAllocDiff,
         out_port_pos: &[usize],
     ) -> Result<Self, PlanError> {
-        let resolved = ResolvedGraph::build(index, &alloc.output_buf, out_port_pos)?;
+        let resolved = ResolvedGraph::build(index, &alloc.state.output_buf, out_port_pos)?;
         Ok(Self { alloc, modules, resolved })
     }
 }
@@ -479,26 +487,29 @@ impl PatchBuilder {
         env: &AudioEnvironment,
         prev_state: &PlannerState,
     ) -> Result<(ExecutionPlan, PlannerState), BuildError> {
-        let (plan, _meta, state) = self.build_patch_with_meta(graph, registry, env, prev_state)?;
+        let (plan, _meta, state) =
+            self.build_patch_with_meta(graph, registry, env, prev_state, None)?;
         Ok((plan, state))
     }
 
     /// Like [`build_patch`](Self::build_patch) but additionally returns
-    /// [`MonitorMeta`] when [`monitor_enabled`](Self::monitor_enabled) is set.
-    /// When disabled, returns `None` for the meta (no allocation).
+    /// [`MonitorMeta`] when [`monitor_enabled`](Self::monitor_enabled) is set,
+    /// and accepts optional [`TrackerData`] to attach to the plan (ticket 0990).
+    /// When meta is disabled, returns `None` for the meta (no allocation).
     pub fn build_patch_with_meta(
         &self,
         graph: &ModuleGraph,
         registry: &Registry,
         env: &AudioEnvironment,
         prev_state: &PlannerState,
+        tracker_data: Option<patches_core::TrackerData>,
     ) -> Result<(ExecutionPlan, Option<MonitorMeta>, PlannerState), BuildError> {
         // ── Decision phase ───────────────────────────────────────────────────
         // Structural parameters are read directly from each `graph::Node`
         // (ADR 0060). The interpreter populates them via
         // `ModuleGraph::add_module_with_structural` before plan-build; the
         // planner threads them into `Module::prepare` on `Install`.
-        let PlanDecisions { index, topology, ports, buf_alloc, decisions } =
+        let plan_decisions =
             make_decisions(graph, prev_state, self.pool_capacity).map_err(BuildError::from)?;
 
         // ── Action phase ─────────────────────────────────────────────────────
@@ -507,45 +518,35 @@ impl PatchBuilder {
         // instances, or the id source. Production mints from the global
         // counter; tests inject a deterministic [`InstanceIdSource`].
         let mut id_source = GlobalInstanceIds;
-        let Instantiated { instance_ids, install_meta, modules } =
-            instantiate(&decisions, registry, env, &mut id_source)?;
+        let instantiated = instantiate(&plan_decisions.decisions, registry, env, &mut id_source)?;
 
         // Pure step: transform decisions + frozen IR + captured install
         // metadata into a `PlanDraft` (no registry, module, or counter).
-        let draft = self.build_draft(
-            decisions,
-            &index,
-            &topology,
-            &ports,
-            buf_alloc,
-            &instance_ids,
-            &install_meta,
-            prev_state,
-        )?;
+        let draft = self.build_draft(plan_decisions, instantiated, prev_state)?;
 
         // Impure step 2: set ports on the fresh modules and assemble the plan.
-        assemble(draft, modules)
+        assemble(draft, tracker_data)
     }
 
-    /// Pure action-phase transform (ADR 0081): turn the decisions and the
-    /// frozen decision-phase IR — plus the per-install module metadata captured
-    /// during instantiation — into a [`PlanDraft`], without touching the
+    /// Pure action-phase transform (ADR 0081): turn the frozen
+    /// [`PlanDecisions`] bundle and the per-install module metadata captured
+    /// during instantiation into a [`PlanDraft`], without touching the
     /// registry, the module instances, or the global id counter. The impure
     /// [`assemble`] shell turns the draft into the final plan + state.
-    #[allow(clippy::too_many_arguments)]
     fn build_draft(
         &self,
-        decisions: Vec<(NodeId, NodeDecision<'_>)>,
-        index: &GraphIndex<'_>,
-        topology: &Topology,
-        ports: &PortClassification,
-        buf_alloc: BufferAllocation,
-        instance_ids: &HashMap<NodeId, InstanceId>,
-        install_meta: &HashMap<NodeId, InstallMeta>,
+        plan_decisions: PlanDecisions<'_>,
+        instantiated: Instantiated,
         prev_state: &PlannerState,
     ) -> Result<PlanDraft, BuildError> {
-        let cycle_hwm = buf_alloc.cycle_hwm;
-        let scratch_hwm = buf_alloc.scratch_hwm;
+        let PlanDecisions { index, topology, ports, buf_alloc, decisions } = plan_decisions;
+        let Instantiated { instance_ids, installs: instantiated_installs } = instantiated;
+        // Walk `instantiated_installs` positionally alongside the install
+        // branch of `decisions` — both share execution order, so no NodeId
+        // lookup or missing-entry error path is needed (ticket 0989).
+        let mut install_iter = instantiated_installs.into_iter();
+        let cycle_hwm = buf_alloc.state.cycle_hwm;
+        let scratch_hwm = buf_alloc.state.scratch_hwm;
         let fas_size = topology.fas_size;
 
         // Stable module pool slots for this build.
@@ -557,28 +558,25 @@ impl PatchBuilder {
 
         // Compose the action-phase layout IR: the frozen buffer allocation,
         // this build's module diff, and the resolved input-buffer map.
-        let layout = BufferLayout::build(index, buf_alloc, module_diff, &ports.out_port_pos)?;
+        let layout = BufferLayout::build(&index, buf_alloc, module_diff, &ports.out_port_pos)?;
 
-        // Per-(consumer, input-port) fused flag (ADR 0072 phase 2). Each input
-        // port has at most one incoming edge (ADR 0071 was rejected), so this
-        // map is well-defined.
-        let mut fused_by_input: HashMap<(NodeId, &'static str, usize), bool> =
-            HashMap::with_capacity(index.edges.len());
-        for (i, (_, _, _, to, in_name, in_idx, _)) in index.edges.iter().enumerate() {
-            fused_by_input.insert((to.clone(), *in_name, *in_idx), topology.cable_fused[i]);
-        }
+        // Per-(consumer, input-port) fused flag (ADR 0072 phase 2) lives on
+        // `Topology` as `fused_by_input`; read it through that owner rather
+        // than reconstructing inline (ticket 0991 / ADR 0081).
+        let fused_by_input = &topology.fused_by_input;
 
         // Build a set of newly-allocated/recycled buffer slots for fast lookup.
         let to_zero_set: HashSet<usize> = layout.alloc.to_zero.iter().copied().collect();
 
         let mut slots: Vec<ModuleSlot> = Vec::with_capacity(decisions.len());
-        let mut installs: Vec<(NodeId, usize)> = Vec::new();
+        let mut installs: Vec<DraftInstall> = Vec::new();
         let mut parameter_updates: Vec<(usize, ParameterMap)> = Vec::new();
         let mut param_frames: Vec<(usize, ParamFrame)> = Vec::new();
         let mut port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)> = Vec::new();
         let mut node_states: HashMap<NodeId, NodeState> = HashMap::with_capacity(decisions.len());
         let mut to_zero_poly: Vec<usize> = Vec::new();
         let mut periodic_indices: Vec<usize> = Vec::new();
+        let mut tracker_receiver_indices: Vec<usize> = Vec::new();
         // Slot-indexed monitor metadata, only when enabled (ADR 0065).
         let mut meta: Option<MonitorMeta> = if self.monitor_enabled {
             Some(MonitorMeta::empty())
@@ -592,9 +590,9 @@ impl PatchBuilder {
             })?;
             let desc = &node.module_descriptor;
             let instance_id = instance_ids[&id];
-            let pool_index = *layout.modules.slot_map.get(&instance_id).ok_or_else(|| {
+            let pool_index = *layout.modules.state.pool_map.get(&instance_id).ok_or_else(|| {
                 BuildErrorKind::InternalError(format!(
-                    "instance {instance_id:?} missing from module_diff slot_map"
+                    "instance {instance_id:?} missing from module_diff pool_map"
                 ))
             })?;
 
@@ -616,8 +614,9 @@ impl PatchBuilder {
                 .map(|(port_idx, _)| {
                     layout
                         .alloc
+                        .state
                         .output_buf
-                        .get(&(id.clone(), port_idx))
+                        .get(&ProducerPortKey::new(id.clone(), port_idx))
                         .copied()
                         .ok_or_else(|| {
                             BuildErrorKind::InternalError(format!(
@@ -632,7 +631,7 @@ impl PatchBuilder {
 
             // Build InputPort / OutputPort objects (pure; see the helpers).
             let input_ports =
-                build_input_ports(desc, &connectivity, &resolved_inputs, &fused_by_input, &id);
+                build_input_ports(desc, &connectivity, &resolved_inputs, fused_by_input, &id);
             let output_ports = build_output_ports(
                 desc,
                 &connectivity,
@@ -645,28 +644,46 @@ impl PatchBuilder {
             // `Update` move directly into the corresponding diff collections
             // — matches the destructive-read convention used downstream by
             // `Module::update_validated_parameters(&mut ParameterMap)`.
-            let (is_periodic, scratch_base_offset, node_layout, node_view_index, node_structural) = match decision {
+            let (
+                is_periodic,
+                is_tracker_receiver,
+                scratch_base_offset,
+                node_layout,
+                node_view_index,
+                node_structural,
+            ) = match decision {
                 NodeDecision::Install { structural, .. } => {
-                    let meta_i = install_meta.get(&id).ok_or_else(|| {
-                        BuildError::new(BuildErrorKind::InternalError(format!(
-                            "install metadata for node {id:?} is missing"
-                        )))
-                    })?;
+                    let inst = install_iter.next().expect(
+                        "PlanDecisions install branch outruns Instantiated.installs — \
+                         planner invariant violated",
+                    );
+                    let InstalledNode { meta: meta_i, module, param_state } = inst;
                     let periodic = meta_i.wants_periodic;
                     if periodic { periodic_indices.push(pool_index); }
                     let offset = meta_i.scratch_base_offset;
+                    let is_receiver = meta_i.is_tracker_receiver;
+                    if is_receiver { tracker_receiver_indices.push(pool_index); }
                     check_ffi_port_offsets(desc.module_name, offset, &input_ports, &output_ports)
                         .map_err(BuildError::new)?;
-                    // The fresh module is `set_ports`-ed and moved into the plan
-                    // by `assemble`, in this (decision) order.
-                    installs.push((id.clone(), pool_index));
-                    (periodic, offset, meta_i.layout.clone(), meta_i.view_index.clone(), structural)
+                    // The fresh module + param state ride the draft installs in
+                    // (decision) order; `assemble` drains them positionally,
+                    // calling `set_ports` from the pre-built port vectors.
+                    installs.push(DraftInstall {
+                        pool_index,
+                        input_ports: input_ports.clone(),
+                        output_ports: output_ports.clone(),
+                        module,
+                        param_state,
+                    });
+                    (periodic, is_receiver, offset, meta_i.layout, meta_i.view_index, structural)
                 }
                 NodeDecision::Update { param_diff, .. } => {
                     let prev_ns = &prev_state.nodes[&id];
                     let ports_changed = prev_ns.input_ports != input_ports
                         || prev_ns.output_ports != output_ports;
                     let is_periodic = prev_ns.is_periodic;
+                    let is_receiver = prev_ns.is_tracker_receiver;
+                    if is_receiver { tracker_receiver_indices.push(pool_index); }
                     let scratch_base_offset = prev_ns.scratch_base_offset;
                     let layout = prev_ns.layout.clone();
                     let view_index = prev_ns.view_index.clone();
@@ -686,17 +703,11 @@ impl PatchBuilder {
                         // The audio thread swaps this frame into the module's
                         // pool-side `ParamState` during `adopt_plan` and
                         // builds a `ParamView` over it.
-                        let mut frame = ParamFrame::with_layout(&layout);
-                        let defaults = defaults_from_descriptor(desc);
-                        pack_into(
-                            &layout,
-                            &defaults,
-                            &node.parameter_map,
-                            &mut frame,
-                        )
-                        .map_err(|e| BuildError::new(BuildErrorKind::InternalError(
-                            format!("pack_into failed for update {id:?}: {e:?}"),
-                        )))?;
+                        let frame = pack_frame(desc, &layout, &node.parameter_map).map_err(|e| {
+                            BuildError::new(BuildErrorKind::InternalError(format!(
+                                "pack_into failed for update {id:?}: {e}"
+                            )))
+                        })?;
                         parameter_updates.push((pool_index, param_diff));
                         param_frames.push((pool_index, frame));
                     }
@@ -704,7 +715,7 @@ impl PatchBuilder {
                         port_updates.push((pool_index, input_ports.clone(), output_ports.clone()));
                     }
                     if is_periodic { periodic_indices.push(pool_index); }
-                    (is_periodic, scratch_base_offset, layout, view_index, prev_ns.structural.clone())
+                    (is_periodic, is_receiver, scratch_base_offset, layout, view_index, prev_ns.structural.clone())
                 }
             };
 
@@ -721,6 +732,7 @@ impl PatchBuilder {
                     input_ports,
                     output_ports,
                     is_periodic,
+                    is_tracker_receiver,
                     scratch_base_offset,
                     layout: node_layout,
                     view_index: node_view_index,
@@ -736,11 +748,13 @@ impl PatchBuilder {
             });
         }
 
-        // The action phase is done reading the layout; recover the owned
-        // buffer/module allocations for the carried state.
+        // The action phase is done reading the layout; the carried state
+        // moves out by member access on the composed
+        // [`BufferAllocation`] / [`ModuleAllocDiff`] shapes (ticket 0992).
         let BufferLayout { alloc: buf_alloc, modules: module_diff, resolved: _ } = layout;
         let tombstones = module_diff.tombstoned;
         let active_indices: Vec<usize> = slots.iter().map(|s| s.pool_index).collect();
+        tracker_receiver_indices.sort_unstable();
 
         Ok(PlanDraft {
             slots,
@@ -752,26 +766,35 @@ impl PatchBuilder {
             to_zero: buf_alloc.to_zero,
             to_zero_poly,
             periodic_indices,
+            tracker_receiver_indices,
             tombstones,
             active_indices,
             fas_size,
             cycle_hwm,
             scratch_hwm,
-            buffer_alloc: BufferAllocState {
-                output_buf: buf_alloc.output_buf,
-                cycle_freelist: buf_alloc.cycle_freelist,
-                cycle_hwm: buf_alloc.cycle_hwm,
-                scratch_hwm: buf_alloc.scratch_hwm,
-            },
-            module_alloc: ModuleAllocState {
-                pool_map: module_diff.slot_map,
-                freelist: module_diff.freelist,
-                next_hwm: module_diff.next_hwm,
-            },
+            buffer_alloc: buf_alloc.state,
+            module_alloc: module_diff.state,
             meta,
         })
     }
 
+}
+
+/// Pack the module's current parameters into a fresh [`ParamFrame`].
+///
+/// Build sites differ only in how they wrap a packing failure: install
+/// emits [`BuildErrorKind::ModuleCreationError`]; update emits
+/// [`BuildErrorKind::InternalError`]. The helper returns the raw error
+/// string so each caller picks the right variant (ticket 0993).
+fn pack_frame(
+    descriptor: &ModuleDescriptor,
+    layout: &ParamLayout,
+    params: &ParameterMap,
+) -> Result<ParamFrame, String> {
+    let mut frame = ParamFrame::with_layout(layout);
+    let defaults = defaults_from_descriptor(descriptor);
+    pack_into(layout, &defaults, params, &mut frame).map_err(|e| format!("{e:?}"))?;
+    Ok(frame)
 }
 
 // ── Action-phase split: id source, IR, impure shell (ADR 0081 / 0978) ──────────
@@ -794,38 +817,74 @@ impl InstanceIdSource for GlobalInstanceIds {
 
 /// Per-install metadata captured during instantiation so the pure transform
 /// never has to touch the module instance.
-struct InstallMeta {
-    layout: ParamLayout,
-    view_index: ParamViewIndex,
-    wants_periodic: bool,
-    scratch_base_offset: usize,
+pub(crate) struct InstallMeta {
+    pub layout: ParamLayout,
+    pub view_index: ParamViewIndex,
+    pub wants_periodic: bool,
+    pub scratch_base_offset: usize,
+    /// Whether the freshly-instantiated module implements
+    /// [`ReceivesTrackerData`](patches_core::tracker::ReceivesTrackerData).
+    /// Captured from the in-hand module so the pure transform can populate
+    /// `tracker_receiver_indices` without touching the instance (ticket 0990).
+    pub is_tracker_receiver: bool,
 }
 
-/// Output of the impure instantiation step: the minted ids, the per-install
-/// metadata the pure transform reads, and the module instances (+ their param
-/// state) the [`assemble`] shell moves into the plan.
-struct Instantiated {
-    instance_ids: HashMap<NodeId, InstanceId>,
-    install_meta: HashMap<NodeId, InstallMeta>,
-    modules: HashMap<NodeId, (Box<dyn Module>, ParamState)>,
+/// One install entry — captured metadata, fresh module instance, and its
+/// initial parameter state — in execution order.
+///
+/// Replaces the two NodeId-keyed side-tables (`install_meta`, `modules`)
+/// the action phase used to look up via `HashMap::get` /
+/// `HashMap::remove`, eliminating the "missing-entry → `InternalError`"
+/// paths (ticket 0989 / ADR 0081). The decision phase iterates
+/// installs in execution order; this collection rides that order directly.
+pub(crate) struct InstalledNode {
+    pub meta: InstallMeta,
+    pub module: Box<dyn Module>,
+    pub param_state: ParamState,
+}
+
+/// Output of the impure instantiation step: the minted ids (`instance_ids`,
+/// still keyed for Update-branch lookups during `build_draft`) and the
+/// install-order [`InstalledNode`] vec the pure transform walks alongside
+/// the install branch of `decisions`.
+pub(crate) struct Instantiated {
+    pub instance_ids: HashMap<NodeId, InstanceId>,
+    pub installs: Vec<InstalledNode>,
+}
+
+/// One install entry on the [`PlanDraft`]: the pool slot, the port objects
+/// already built by the pure transform, and the module + param state to be
+/// moved into the [`ExecutionPlan`] by [`assemble`].
+///
+/// Carries everything `assemble` needs to finish the install positionally —
+/// no NodeId-keyed lookups, no `set_ports`-time consultation of
+/// `node_states` (ticket 0989).
+struct DraftInstall {
+    pool_index: usize,
+    input_ports: Vec<InputPort>,
+    output_ports: Vec<OutputPort>,
+    module: Box<dyn Module>,
+    param_state: ParamState,
 }
 
 /// Pure description of a plan, produced by [`PatchBuilder::build_draft`] and
-/// consumed by the impure [`assemble`] shell (ADR 0081). Carries everything the
-/// plan + carried state need *except* the module instances, which `assemble`
-/// pulls from the instantiation output keyed by the `installs` list.
+/// consumed by the impure [`assemble`] shell (ADR 0081). Carries everything
+/// the plan + carried state need, including the install modules themselves
+/// (in [`installs`](Self::installs)) which `assemble` drains in order.
 struct PlanDraft {
     slots: Vec<ModuleSlot>,
     node_states: HashMap<NodeId, NodeState>,
-    /// Install nodes in execution order: `(node_id, pool_index)`. `assemble`
-    /// sets ports on each fresh module and moves it into the plan in this order.
-    installs: Vec<(NodeId, usize)>,
+    /// Install entries in execution order. `assemble` drains this vec into
+    /// `new_modules` / `new_module_param_state`, calling `set_ports` from
+    /// each entry's pre-built port vectors.
+    installs: Vec<DraftInstall>,
     parameter_updates: Vec<(usize, ParameterMap)>,
     param_frames: Vec<(usize, ParamFrame)>,
     port_updates: Vec<(usize, Vec<InputPort>, Vec<OutputPort>)>,
     to_zero: Vec<usize>,
     to_zero_poly: Vec<usize>,
     periodic_indices: Vec<usize>,
+    tracker_receiver_indices: Vec<usize>,
     tombstones: Vec<usize>,
     active_indices: Vec<usize>,
     fas_size: usize,
@@ -842,46 +901,45 @@ struct PlanDraft {
 /// its initial param frame, and captures the per-install metadata the pure
 /// transform needs. Iterates `decisions` in execution order so id minting is
 /// deterministic given a deterministic `id_source`.
-fn instantiate(
+pub(crate) fn instantiate(
     decisions: &[(NodeId, NodeDecision<'_>)],
     registry: &Registry,
     env: &AudioEnvironment,
     id_source: &mut dyn InstanceIdSource,
 ) -> Result<Instantiated, BuildError> {
     let mut instance_ids: HashMap<NodeId, InstanceId> = HashMap::with_capacity(decisions.len());
-    let mut install_meta: HashMap<NodeId, InstallMeta> = HashMap::new();
-    let mut modules: HashMap<NodeId, (Box<dyn Module>, ParamState)> = HashMap::new();
+    let mut installs: Vec<InstalledNode> = Vec::new();
 
     for (id, decision) in decisions {
         match decision {
             NodeDecision::Install { module_name, shape, params, structural } => {
                 let new_id = id_source.next_id();
-                let m = registry
+                let mut module = registry
                     .create(module_name, env, shape, params, structural, new_id)
                     .map_err(|e| BuildErrorKind::ModuleCreationError(e.to_string()))?;
-                // Layout + view index are prepare-time constants for the life of
-                // the instance (ADR 0045 §3 / ticket 0595); pack the initial
+                // Layout + view index are prepare-time constants for the life
+                // of the instance (ADR 0045 §3 / ticket 0595); pack the initial
                 // frame from the resolved parameters.
-                let descriptor = m.descriptor();
+                let descriptor = module.descriptor();
                 let layout = compute_layout(descriptor);
                 let view_index = ParamViewIndex::from_layout(&layout);
-                let mut frame = ParamFrame::with_layout(&layout);
-                let defaults = defaults_from_descriptor(descriptor);
-                pack_into(&layout, &defaults, params, &mut frame).map_err(|e| {
-                    BuildError::new(BuildErrorKind::InternalError(format!(
-                        "pack_into failed for install {id:?}: {e:?}"
+                let frame = pack_frame(descriptor, &layout, params).map_err(|e| {
+                    BuildError::new(BuildErrorKind::ModuleCreationError(format!(
+                        "pack_into failed for install {id:?}: {e}"
                     )))
                 })?;
-                install_meta.insert(
-                    id.clone(),
-                    InstallMeta {
-                        layout: layout.clone(),
-                        view_index: view_index.clone(),
-                        wants_periodic: m.wants_periodic(),
-                        scratch_base_offset: m.scratch_base_offset(),
-                    },
-                );
-                modules.insert(id.clone(), (m, ParamState { layout, view_index, frame }));
+                let meta = InstallMeta {
+                    layout: layout.clone(),
+                    view_index: view_index.clone(),
+                    wants_periodic: module.wants_periodic(),
+                    scratch_base_offset: module.scratch_base_offset(),
+                    is_tracker_receiver: module.as_tracker_data_receiver().is_some(),
+                };
+                installs.push(InstalledNode {
+                    meta,
+                    module,
+                    param_state: ParamState { layout, view_index, frame },
+                });
                 instance_ids.insert(id.clone(), new_id);
             }
             NodeDecision::Update { instance_id, .. } => {
@@ -890,15 +948,17 @@ fn instantiate(
         }
     }
 
-    Ok(Instantiated { instance_ids, install_meta, modules })
+    Ok(Instantiated { instance_ids, installs })
 }
 
 /// Impure assembly shell (ADR 0081): set ports on each fresh module (the only
 /// effect here) and turn the pure [`PlanDraft`] into the final
-/// [`ExecutionPlan`], [`MonitorMeta`], and [`PlannerState`].
+/// [`ExecutionPlan`], [`MonitorMeta`], and [`PlannerState`]. Drains
+/// `draft.installs` positionally — no `HashMap::remove` / `get` and no
+/// missing-entry error paths (ticket 0989).
 fn assemble(
     draft: PlanDraft,
-    mut modules: HashMap<NodeId, (Box<dyn Module>, ParamState)>,
+    tracker_data: Option<patches_core::TrackerData>,
 ) -> Result<(ExecutionPlan, Option<MonitorMeta>, PlannerState), BuildError> {
     let PlanDraft {
         slots,
@@ -910,6 +970,7 @@ fn assemble(
         to_zero,
         to_zero_poly,
         periodic_indices,
+        tracker_receiver_indices,
         tombstones,
         active_indices,
         fas_size,
@@ -922,19 +983,10 @@ fn assemble(
 
     let mut new_modules: Vec<(usize, Box<dyn Module>)> = Vec::with_capacity(installs.len());
     let mut new_module_param_state: Vec<ParamState> = Vec::with_capacity(installs.len());
-    for (id, pool_index) in &installs {
-        let (mut module, param_state) = modules.remove(id).ok_or_else(|| {
-            BuildError::new(BuildErrorKind::InternalError(format!(
-                "fresh module for install node {id:?} is missing"
-            )))
-        })?;
-        let ns = node_states.get(id).ok_or_else(|| {
-            BuildError::new(BuildErrorKind::InternalError(format!(
-                "node state for install node {id:?} is missing"
-            )))
-        })?;
-        module.set_ports(&ns.input_ports, &ns.output_ports);
-        new_modules.push((*pool_index, module));
+    for inst in installs {
+        let DraftInstall { pool_index, input_ports, output_ports, mut module, param_state } = inst;
+        module.set_ports(&input_ports, &output_ports);
+        new_modules.push((pool_index, module));
         new_module_param_state.push(param_state);
     }
 
@@ -954,8 +1006,8 @@ fn assemble(
             fas_size,
             cycle_hwm,
             scratch_hwm,
-            tracker_data: None,
-            tracker_receiver_indices: Vec::new(),
+            tracker_data: tracker_data.map(Arc::new),
+            tracker_receiver_indices,
             tap_manifest_generation: 0,
         },
         meta,
@@ -972,7 +1024,7 @@ fn build_input_ports(
     desc: &ModuleDescriptor,
     connectivity: &PortConnectivity,
     resolved_inputs: &[(usize, CableMap, bool)],
-    fused_by_input: &HashMap<(NodeId, &'static str, usize), bool>,
+    fused_by_input: &HashMap<PortKey, bool>,
     node_id: &NodeId,
 ) -> Vec<InputPort> {
     desc.inputs
@@ -986,7 +1038,7 @@ fn build_input_ports(
             let clip = map.clip;
             let fused = if connected {
                 *fused_by_input
-                    .get(&(node_id.clone(), port_desc.name, port_desc.index))
+                    .get(&PortKey::new(node_id.clone(), port_desc.name, port_desc.index))
                     .unwrap_or(&true)
             } else {
                 true

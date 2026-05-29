@@ -1,8 +1,9 @@
 ---
 id: E161
 title: Planner property-based + mutation testing
-status: open
+status: closed
 created: 2026-05-29
+closed: 2026-05-29
 ---
 
 ## Goal

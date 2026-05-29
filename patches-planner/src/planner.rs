@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use patches_core::{AudioEnvironment, InstanceId, ModuleGraph, NodeId};
 use patches_core::registry::Registry;
 
@@ -41,9 +38,6 @@ const DEFAULT_POOL_CAPACITY: usize = 4096;
 pub struct Planner {
     state: PlannerState,
     builder: PatchBuilder,
-    /// Instance IDs of modules that implement [`ReceivesTrackerData`] in the
-    /// most recently built plan.
-    tracker_receiver_instance_ids: HashSet<InstanceId>,
 }
 
 impl Default for Planner {
@@ -69,7 +63,6 @@ impl Planner {
         Self {
             state: PlannerState::empty(),
             builder: PatchBuilder::new(pool_capacity, DEFAULT_MODULE_POOL_CAPACITY),
-            tracker_receiver_instance_ids: HashSet::new(),
         }
     }
 
@@ -130,40 +123,17 @@ impl Planner {
         env: &AudioEnvironment,
         tracker_data: Option<patches_core::TrackerData>,
     ) -> Result<(ExecutionPlan, Option<MonitorMeta>), BuildError> {
-        let (mut plan, meta, new_state) = self.builder.build_patch_with_meta(
+        // The builder owns `tracker_receiver_indices` and `tracker_data`
+        // (ticket 0990); the surviving-receiver bookkeeping rides
+        // `PlannerState::nodes[id].is_tracker_receiver`, populated at install
+        // time from the in-hand module's capability flag.
+        let (plan, meta, new_state) = self.builder.build_patch_with_meta(
             graph,
             registry,
             env,
             &self.state,
+            tracker_data,
         )?;
-
-        // ── Populate tracker_receiver_indices ────────────────────────────────
-        let mut new_tracker_ids: HashSet<InstanceId> = self
-            .tracker_receiver_instance_ids
-            .iter()
-            .filter(|id| new_state.module_alloc.pool_map.contains_key(id))
-            .copied()
-            .collect();
-
-        // Freshly installed modules: check capabilities.
-        for (_, m) in plan.new_modules.iter_mut() {
-            if m.as_tracker_data_receiver().is_some() {
-                new_tracker_ids.insert(m.instance_id());
-            }
-        }
-
-        // Build the tracker receiver index list.
-        let mut tracker_receiver_indices: Vec<usize> = new_tracker_ids
-            .iter()
-            .filter_map(|id| new_state.module_alloc.pool_map.get(id).copied())
-            .collect();
-        tracker_receiver_indices.sort_unstable();
-        plan.tracker_receiver_indices = tracker_receiver_indices;
-
-        // Attach tracker data.
-        plan.tracker_data = tracker_data.map(Arc::new);
-
-        self.tracker_receiver_instance_ids = new_tracker_ids;
         self.state = new_state;
         Ok((plan, meta))
     }

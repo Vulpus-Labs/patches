@@ -3,7 +3,31 @@ id: "0982"
 title: Single-build planner invariants under proptest
 priority: medium
 created: 2026-05-29
+closed: 2026-05-29
 ---
+
+## Done
+
+All eight properties added to [patches-planner/tests/properties.rs](../../patches-planner/tests/properties.rs)
+under a dedicated `proptest!` block with `ProptestConfig { cases: 64, .. }`:
+
+- `buffer_slot_uniqueness` — `output_buf.values()` distinct.
+- `module_pool_slot_uniqueness` — `ExecutionPlan::slots[].pool_index` distinct.
+- `fused_implies_forward` — fused edges strictly forward in `topology.order`.
+- `scc_fusion_equivalence` — independent `tarjan_scc` run agrees with
+  `cable_fused` edge-by-edge.
+- `scratch_implies_all_consumers_fused` — every edge reading a slot in
+  `[RESERVED_SLOTS, SCRATCH_CAPACITY)` is itself fused (the 0974 invariant).
+- `slice_position_single_source` — `ports.out_port_pos[i]` equals
+  `descriptor.output_position(out_name, out_idx)`.
+- `producer_port_cycle_exhaustive` — `producer_port_cycle.keys()` set-equals
+  `{ (edge.from, out_port_pos[i]) | every edge i }`.
+- `region_containment` — every `output_buf` value in `[RESERVED_SLOTS,
+  SCRATCH_CAPACITY) ∪ [SCRATCH_CAPACITY, SCRATCH_CAPACITY + CYCLE_CAPACITY)`.
+
+Runtime: ~0.13 s for the full properties target (10 properties total
+including the two 0981 smoke properties). `just push` green (build 1.75s
+/ test 31.5s / clippy 7.75s).
 
 ## Summary
 

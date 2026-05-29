@@ -102,7 +102,7 @@ fn cycle_index_is_stable_across_replan_for_self_loop() {
     };
 
     let state_a = build(&PlannerState::empty());
-    let cycle_idx_a = state_a.buffer_alloc.output_buf[&(NodeId::from("sum"), 0)];
+    let cycle_idx_a = state_a.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("sum"), 0)];
     assert!(
         cycle_idx_a >= patches_core::cables::SCRATCH_CAPACITY,
         "sum.out must live in the cycle region (it has a back-edge consumer); got {cycle_idx_a}"
@@ -114,7 +114,7 @@ fn cycle_index_is_stable_across_replan_for_self_loop() {
     let mut current = state_a;
     for _ in 0..4 {
         current = build(&current);
-        let cycle_idx = current.buffer_alloc.output_buf[&(NodeId::from("sum"), 0)];
+        let cycle_idx = current.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("sum"), 0)];
         assert_eq!(
             cycle_idx_a, cycle_idx,
             "cycle slot for sum.out must be stable across replans"
@@ -147,8 +147,8 @@ fn scratch_indices_are_topo_ordered_and_dense() {
         .build_patch(&g, &registry, &env, &PlannerState::empty())
         .unwrap();
 
-    let a_out = state.buffer_alloc.output_buf[&(NodeId::from("a_osc"), 0)];
-    let b_out = state.buffer_alloc.output_buf[&(NodeId::from("b_sum"), 0)];
+    let a_out = state.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("a_osc"), 0)];
+    let b_out = state.buffer_alloc.output_buf[&ProducerPortKey::new(NodeId::from("b_sum"), 0)];
     let scratch_cap = patches_core::cables::SCRATCH_CAPACITY;
     let dyn_start = patches_core::cables::RESERVED_SLOTS;
     assert!(a_out >= dyn_start && a_out < scratch_cap, "a.out fused → scratch");
@@ -212,12 +212,12 @@ fn module_alloc_fresh_advances_hwm() {
     let new_ids = ids_set(&ids);
     let diff = state.diff(&new_ids, 64).expect("diff should succeed");
 
-    assert_eq!(diff.next_hwm, 3, "hwm should advance by number of new modules");
-    assert_eq!(diff.slot_map.len(), 3);
+    assert_eq!(diff.state.next_hwm, 3, "hwm should advance by number of new modules");
+    assert_eq!(diff.state.pool_map.len(), 3);
     assert!(diff.tombstoned.is_empty());
-    assert!(diff.freelist.is_empty());
+    assert!(diff.state.freelist.is_empty());
 
-    let mut slots: Vec<usize> = diff.slot_map.values().copied().collect();
+    let mut slots: Vec<usize> = diff.state.pool_map.values().copied().collect();
     slots.sort_unstable();
     assert_eq!(slots, vec![0, 1, 2]);
 }
@@ -230,22 +230,18 @@ fn module_alloc_stable_reuses_slots() {
     let state0 = ModuleAllocState::default();
     let diff0 = state0.diff(&new_ids, 64).unwrap();
 
-    let state1 = ModuleAllocState {
-        pool_map: diff0.slot_map.clone(),
-        freelist: diff0.freelist,
-        next_hwm: diff0.next_hwm,
-    };
+    let state1 = diff0.state;
 
     let diff1 = state1.diff(&new_ids, 64).unwrap();
 
     for id in &ids {
         assert_eq!(
-            diff0.slot_map[id], diff1.slot_map[id],
+            state1.pool_map[id], diff1.state.pool_map[id],
             "slot for {id:?} must be identical across re-plan"
         );
     }
 
-    assert_eq!(diff1.next_hwm, diff0.next_hwm, "hwm must not grow");
+    assert_eq!(diff1.state.next_hwm, state1.next_hwm, "hwm must not grow");
     assert!(diff1.tombstoned.is_empty());
 }
 
@@ -257,29 +253,21 @@ fn module_alloc_tombstone_then_recycle() {
 
     let state0 = ModuleAllocState::default();
     let diff0 = state0.diff(&ids_set(&ids), 64).unwrap();
-    let slot_b = diff0.slot_map[&id_b];
+    let slot_b = diff0.state.pool_map[&id_b];
 
-    let state1 = ModuleAllocState {
-        pool_map: diff0.slot_map,
-        freelist: diff0.freelist,
-        next_hwm: diff0.next_hwm,
-    };
+    let state1 = diff0.state;
     let diff1 = state1.diff(&ids_set(&[id_a]), 64).unwrap();
 
     assert!(diff1.tombstoned.contains(&slot_b));
-    assert!(diff1.freelist.contains(&slot_b));
-    let hwm_after_remove = diff1.next_hwm;
+    assert!(diff1.state.freelist.contains(&slot_b));
+    let hwm_after_remove = diff1.state.next_hwm;
 
     let id_c = make_ids(1)[0];
-    let state2 = ModuleAllocState {
-        pool_map: diff1.slot_map,
-        freelist: diff1.freelist,
-        next_hwm: diff1.next_hwm,
-    };
+    let state2 = diff1.state;
     let diff2 = state2.diff(&ids_set(&[id_a, id_c]), 64).unwrap();
 
-    assert_eq!(diff2.slot_map[&id_c], slot_b, "new module must reuse the recycled slot");
-    assert_eq!(diff2.next_hwm, hwm_after_remove, "hwm must not grow when recycling");
+    assert_eq!(diff2.state.pool_map[&id_c], slot_b, "new module must reuse the recycled slot");
+    assert_eq!(diff2.state.next_hwm, hwm_after_remove, "hwm must not grow when recycling");
 }
 
 #[test]

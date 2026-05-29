@@ -63,6 +63,7 @@ fn prev_with_node(
             input_ports: Vec::new(),
             output_ports: Vec::new(),
             is_periodic: false,
+            is_tracker_receiver: false,
             scratch_base_offset: 0,
             layout: patches_ffi_common::param_layout::ParamLayout {
                 scalar_size: 0,
@@ -365,18 +366,16 @@ fn classify_surviving_removed_param_produces_diff_with_default() {
 
 // ── compute_order_with_fusion + invariant tests (ADR 0072 phase 1) ───────────
 
-type Edge = (NodeId, &'static str, usize, NodeId, &'static str, usize, CableMap);
-
 fn edge(from: &str, to: &str) -> Edge {
-    (
-        NodeId::from(from),
-        "out",
-        0,
-        NodeId::from(to),
-        "in",
-        0,
-        CableMap::scalar(1.0),
-    )
+    Edge {
+        from: NodeId::from(from),
+        out_name: "out",
+        out_idx: 0,
+        to: NodeId::from(to),
+        in_name: "in",
+        in_idx: 0,
+        map: CableMap::scalar(1.0),
+    }
 }
 
 fn ids(strs: &[&str]) -> Vec<NodeId> {
@@ -387,7 +386,7 @@ fn ids(strs: &[&str]) -> Vec<NodeId> {
 /// single-output graphs the pure `classify_producer_ports` tests use
 /// (no real descriptors, so slice position == declared index == 0).
 fn out_idx_positions(edges: &[Edge]) -> Vec<usize> {
-    edges.iter().map(|(_, _, out_idx, _, _, _, _)| *out_idx).collect()
+    edges.iter().map(|e| e.out_idx).collect()
 }
 
 fn pos_of(order: &[NodeId], n: &str) -> usize {
@@ -399,7 +398,7 @@ fn compute_order_with_fusion_linear_chain_topo_not_alphabetical() {
     // c → b → a. Alphabetical would emit [a, b, c]; topo must emit [c, b, a].
     let nodes = ids(&["a", "b", "c"]);
     let edges = vec![edge("c", "b"), edge("b", "a")];
-    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    let (order, fused, fas_size) = Topology::compute_order_with_fusion(&nodes, &edges);
     assert!(pos_of(&order, "c") < pos_of(&order, "b"));
     assert!(pos_of(&order, "b") < pos_of(&order, "a"));
     assert_eq!(fused, vec![true, true], "all forward edges are fused");
@@ -411,7 +410,7 @@ fn compute_order_with_fusion_cycle_marks_cable_cyclic() {
     // a → b → a. Single SCC, both cables internal → fas_size = 2.
     let nodes = ids(&["a", "b"]);
     let edges = vec![edge("a", "b"), edge("b", "a")];
-    let (_order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    let (_order, fused, fas_size) = Topology::compute_order_with_fusion(&nodes, &edges);
     assert_eq!(fused, vec![false, false]);
     assert_eq!(fas_size, 2);
 }
@@ -419,7 +418,7 @@ fn compute_order_with_fusion_cycle_marks_cable_cyclic() {
 #[test]
 fn compute_order_with_fusion_isolated_node_passes_through() {
     let nodes = ids(&["a"]);
-    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &[]);
+    let (order, fused, fas_size) = Topology::compute_order_with_fusion(&nodes, &[]);
     assert_eq!(order, ids(&["a"]));
     assert!(fused.is_empty());
     assert_eq!(fas_size, 0);
@@ -436,7 +435,7 @@ fn compute_order_with_fusion_mixed_acyclic_and_cyclic() {
         edge("loopB", "loopA"),
         edge("loopB", "sink"),
     ];
-    let (order, fused, fas_size) = compute_order_with_fusion(&nodes, &edges);
+    let (order, fused, fas_size) = Topology::compute_order_with_fusion(&nodes, &edges);
     assert_eq!(fused, vec![true, false, false, true]);
     assert_eq!(fas_size, 2);
     // src precedes the loop, which precedes sink.
@@ -456,7 +455,7 @@ fn compute_order_with_fusion_empty_edges_alphabetical_within_scc() {
     // determinism we require the planner to always feed `node_ids` in
     // a deterministic order — this test pins that input.
     let nodes = ids(&["zeta", "alpha", "mu"]);
-    let (order, _fused, fas_size) = compute_order_with_fusion(&nodes, &[]);
+    let (order, _fused, fas_size) = Topology::compute_order_with_fusion(&nodes, &[]);
     assert_eq!(fas_size, 0);
     // Every input node must appear exactly once.
     let mut sorted = order.clone();
@@ -471,7 +470,7 @@ fn compute_order_with_fusion_disjoint_subgraphs_each_topo_sorted() {
     // unspecified but deterministic.
     let nodes = ids(&["a", "b", "x", "y"]);
     let edges = vec![edge("a", "b"), edge("x", "y")];
-    let (order, fused, _) = compute_order_with_fusion(&nodes, &edges);
+    let (order, fused, _) = Topology::compute_order_with_fusion(&nodes, &edges);
     assert_eq!(fused, vec![true, true]);
     assert!(pos_of(&order, "a") < pos_of(&order, "b"));
     assert!(pos_of(&order, "x") < pos_of(&order, "y"));
@@ -499,27 +498,27 @@ fn fused_cables_satisfy_topo_invariant_on_pseudo_random_dags() {
                 if rng.next_u32().is_multiple_of(4) {
                     let from = leak_str(&names[i]);
                     let to = leak_str(&names[j]);
-                    edges.push((
-                        NodeId::from(from),
-                        "out",
-                        0,
-                        NodeId::from(to),
-                        "in",
-                        0,
-                        CableMap::scalar(1.0),
-                    ));
+                    edges.push(Edge {
+                        from: NodeId::from(from),
+                        out_name: "out",
+                        out_idx: 0,
+                        to: NodeId::from(to),
+                        in_name: "in",
+                        in_idx: 0,
+                        map: CableMap::scalar(1.0),
+                    });
                 }
             }
         }
-        let (order, fused, fas_size) = compute_order_with_fusion(&permuted_nodes, &edges);
+        let (order, fused, fas_size) = Topology::compute_order_with_fusion(&permuted_nodes, &edges);
         assert_eq!(fas_size, 0, "DAG must have empty feedback arc set");
         assert!(fused.iter().all(|&b| b), "every cable in a DAG must be fused");
         let pos: std::collections::HashMap<&NodeId, usize> =
             order.iter().enumerate().map(|(i, n)| (n, i)).collect();
-        for (from, _, _, to, _, _, _) in &edges {
-            let p = pos[from];
-            let c = pos[to];
-            assert!(p < c, "{from} (pos {p}) must precede {to} (pos {c})");
+        for e in &edges {
+            let p = pos[&e.from];
+            let c = pos[&e.to];
+            assert!(p < c, "{} (pos {p}) must precede {} (pos {c})", e.from, e.to);
         }
     }
 }
@@ -565,9 +564,9 @@ fn leak_str(s: &str) -> &'static str {
 fn classify_producer_ports_all_fused_consumers_yields_scratch() {
     let nodes = ids(&["src", "dst"]);
     let edges = vec![edge("src", "dst")];
-    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
-    assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&false));
+    let (_order, fused, _fas) = Topology::compute_order_with_fusion(&nodes, &edges);
+    let by_port = PortClassification::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
+    assert_eq!(by_port.get(&ProducerPortKey::new(NodeId::from("src"), 0)), Some(&false));
 }
 
 /// A producer port whose any consumer is in a cycle (non-fused edge)
@@ -577,10 +576,10 @@ fn classify_producer_ports_any_cyclic_consumer_yields_cycle() {
     // Two-node SCC: both edges are non-fused.
     let nodes = ids(&["a", "b"]);
     let edges = vec![edge("a", "b"), edge("b", "a")];
-    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
-    assert_eq!(by_port.get(&(NodeId::from("a"), 0)), Some(&true));
-    assert_eq!(by_port.get(&(NodeId::from("b"), 0)), Some(&true));
+    let (_order, fused, _fas) = Topology::compute_order_with_fusion(&nodes, &edges);
+    let by_port = PortClassification::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
+    assert_eq!(by_port.get(&ProducerPortKey::new(NodeId::from("a"), 0)), Some(&true));
+    assert_eq!(by_port.get(&ProducerPortKey::new(NodeId::from("b"), 0)), Some(&true));
 }
 
 /// A producer port that fans out to one fused consumer and one cyclic
@@ -601,13 +600,13 @@ fn classify_producer_ports_mixed_fanout_yields_cycle() {
         edge("loopA", "src"),     // back edge → src now part of cycle
         edge("loopA", "loopB"),
     ];
-    let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
+    let (_order, fused, _fas) = Topology::compute_order_with_fusion(&nodes, &edges);
+    let by_port = PortClassification::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
     // src→loopA is internal to the SCC, so src's output is consumed by
     // a delayed reader.
-    assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&true));
+    assert_eq!(by_port.get(&ProducerPortKey::new(NodeId::from("src"), 0)), Some(&true));
     // loopA fans out to src (cyclic) and loopB (fused). Mixed → cycle.
-    assert_eq!(by_port.get(&(NodeId::from("loopA"), 0)), Some(&true));
+    assert_eq!(by_port.get(&ProducerPortKey::new(NodeId::from("loopA"), 0)), Some(&true));
 }
 
 /// A producer port with no consumers does not appear in the map (the
@@ -615,9 +614,9 @@ fn classify_producer_ports_mixed_fanout_yields_cycle() {
 #[test]
 fn classify_producer_ports_unconsumed_port_is_absent() {
     let nodes = ids(&["src"]);
-    let by_port = super::classify_producer_ports(&[], &[], &[]);
+    let by_port = PortClassification::classify_producer_ports(&[], &[], &[]);
     assert!(by_port.is_empty());
-    assert!(!by_port.contains_key(&(NodeId::from(nodes[0].as_str()), 0)));
+    assert!(!by_port.contains_key(&ProducerPortKey::new(NodeId::from(nodes[0].as_str()), 0)));
 }
 
 // ── ticket 0974: multi-output producer port in a feedback loop ───────────────
@@ -694,7 +693,7 @@ fn classify_producer_ports_later_output_slot_in_feedback_loop_is_cycle() {
 
     let decisions = super::make_decisions(&graph, &PlannerState::empty(), 4096).unwrap();
 
-    let send_key = (NodeId::from("con"), 1);
+    let send_key = ProducerPortKey::new(NodeId::from("con"), 1);
     assert_eq!(
         decisions.ports.producer_port_cycle.get(&send_key),
         Some(&true),
@@ -702,6 +701,7 @@ fn classify_producer_ports_later_output_slot_in_feedback_loop_is_cycle() {
     );
     let slot = decisions
         .buf_alloc
+        .state
         .output_buf
         .get(&send_key)
         .copied()
@@ -726,7 +726,7 @@ fn validate_scratch_fused_consistency_errors_on_scratch_with_unfused_consumer() 
     let cable_fused = vec![false];
     // ...but the producer port was allocated a scratch slot.
     let mut output_buf = std::collections::HashMap::new();
-    output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
+    output_buf.insert(ProducerPortKey::new(NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
     let result =
         super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
     match result {
@@ -748,9 +748,9 @@ fn validate_scratch_fused_consistency_accepts_consistent_allocation() {
     let cable_fused = vec![true, false];
     let mut output_buf = std::collections::HashMap::new();
     // Fused consumer → scratch slot: OK.
-    output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
+    output_buf.insert(ProducerPortKey::new(NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
     // Non-fused consumer → cycle slot: OK.
-    output_buf.insert((NodeId::from("c"), 0), patches_core::cables::SCRATCH_CAPACITY);
+    output_buf.insert(ProducerPortKey::new(NodeId::from("c"), 0), patches_core::cables::SCRATCH_CAPACITY);
     assert!(
         super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf)
             .is_ok()
@@ -842,14 +842,100 @@ fn port_classification_build_keys_by_slice_position() {
     // out_port_pos resolves each edge's producer slice position. Edge order
     // follows index.edges; assert via the map instead of positional indices.
     assert_eq!(
-        ports.producer_port_cycle.get(&(NodeId::from("con"), 1)),
+        ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("con"), 1)),
         Some(&true),
         "con.send is slice 1 and feeds a non-fused consumer → cycle"
     );
-    assert_eq!(ports.producer_port_cycle.get(&(NodeId::from("del"), 0)), Some(&true));
+    assert_eq!(ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("del"), 0)), Some(&true));
     // con.out (slice 0) is unconsumed → absent.
-    assert_eq!(ports.producer_port_cycle.get(&(NodeId::from("con"), 0)), None);
+    assert_eq!(ports.producer_port_cycle.get(&ProducerPortKey::new(NodeId::from("con"), 0)), None);
 
     // out_port_pos contains slice position 1 for the con.send edge.
     assert!(ports.out_port_pos.contains(&1), "send edge resolves to slice position 1");
+}
+
+// ── Topology::fused_by_input bundle (ticket 0991) ────────────────────────────
+
+/// `Topology::build` populates `fused_by_input` keyed by consumer
+/// [`PortKey`], with the same boolean as the parallel `cable_fused` entry.
+/// This is the structural guarantee that the action phase no longer
+/// reconstructs the map inline.
+#[test]
+fn topology_fused_by_input_keyed_by_consumer_port() {
+    // c → b → a chain: every cable is forward (fused).
+    let mut graph = ModuleGraph::new();
+    graph.add_module("osc1", osc_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("osc2", osc_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("sink", sink_desc(), &ParameterMap::new()).unwrap();
+    graph
+        .connect(&NodeId::from("osc1"), p("sine"), &NodeId::from("sink"), PortRef { name: "left", index: 0 }, 1.0)
+        .unwrap();
+    graph
+        .connect(&NodeId::from("osc2"), p("sine"), &NodeId::from("sink"), PortRef { name: "right", index: 0 }, 1.0)
+        .unwrap();
+
+    let index = GraphIndex::build(&graph);
+    let topo = Topology::build(&index, &graph.node_ids());
+
+    // One entry per edge, keyed by the *consumer* port.
+    assert_eq!(topo.fused_by_input.len(), 2);
+    let left = topo
+        .fused_by_input
+        .get(&PortKey::new(NodeId::from("sink"), "left", 0))
+        .copied();
+    let right = topo
+        .fused_by_input
+        .get(&PortKey::new(NodeId::from("sink"), "right", 0))
+        .copied();
+    assert_eq!(left, Some(true));
+    assert_eq!(right, Some(true));
+}
+
+/// Cycle edges land in `fused_by_input` as `false`.
+#[test]
+fn topology_fused_by_input_marks_cycle_edges_as_unfused() {
+    let mut graph = ModuleGraph::new();
+    graph.add_module("con", console_like_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("del", delay_like_desc(), &ParameterMap::new()).unwrap();
+    graph
+        .connect(&NodeId::from("con"), PortRef { name: "send", index: 0 }, &NodeId::from("del"), p("in"), 1.0)
+        .unwrap();
+    graph
+        .connect(&NodeId::from("del"), p("out"), &NodeId::from("con"), PortRef { name: "ret", index: 0 }, 1.0)
+        .unwrap();
+
+    let index = GraphIndex::build(&graph);
+    let topo = Topology::build(&index, &graph.node_ids());
+
+    let del_in = topo
+        .fused_by_input
+        .get(&PortKey::new(NodeId::from("del"), "in", 0))
+        .copied();
+    let con_ret = topo
+        .fused_by_input
+        .get(&PortKey::new(NodeId::from("con"), "ret", 0))
+        .copied();
+    assert_eq!(del_in, Some(false), "cycle edges read with fused=false");
+    assert_eq!(con_ret, Some(false));
+}
+
+// ── Producer-port key newtype (ticket 0991) ──────────────────────────────────
+
+/// `ProducerPortKey` and `PortKey` are distinct hashable types — keys built
+/// over the same `(node, idx)` pair compare equal as values but cannot be
+/// mistaken for each other at the type level. This is the structural
+/// guarantee that downstream stages cannot key by anything other than the
+/// slice position they own (the 0974 root cause generalised).
+#[test]
+fn producer_port_key_is_distinct_type_from_port_key() {
+    let node = NodeId::from("n");
+    let pk = ProducerPortKey::new(node.clone(), 1);
+    let pk2 = ProducerPortKey::new(node.clone(), 1);
+    let pk3 = ProducerPortKey::new(node.clone(), 2);
+    assert_eq!(pk, pk2);
+    assert_ne!(pk, pk3);
+
+    let port_key = PortKey::new(node.clone(), "out", 0);
+    let port_key2 = PortKey::new(node, "out", 0);
+    assert_eq!(port_key, port_key2);
 }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use patches_core::modules::InstanceId;
-use super::graph_index::GraphIndex;
+use super::graph_index::{GraphIndex, ProducerPortKey};
 use patches_core::graphs::graph::NodeId;
 use super::PlanError;
 
@@ -44,11 +44,12 @@ pub use patches_core::cables::{
 /// in `[0, CYCLE_CAPACITY)`; the absolute `cable_idx` emitted into
 /// `output_buf` is `SCRATCH_CAPACITY + logical`.
 pub struct BufferAllocState {
-    /// Maps `(NodeId, output_port_index)` to its current buffer pool
-    /// `cable_idx`. Cycle entries (`cable_idx >= SCRATCH_CAPACITY`)
-    /// persist across replans; scratch entries (`cable_idx <
-    /// SCRATCH_CAPACITY`) are recomputed each plan and may move freely.
-    pub output_buf: HashMap<(NodeId, usize), usize>,
+    /// Maps each producer port (slice-position keyed; see
+    /// [`ProducerPortKey`]) to its current buffer pool `cable_idx`. Cycle
+    /// entries (`cable_idx >= SCRATCH_CAPACITY`) persist across replans;
+    /// scratch entries (`cable_idx < SCRATCH_CAPACITY`) are recomputed each
+    /// plan and may move freely.
+    pub output_buf: HashMap<ProducerPortKey, usize>,
     /// Recycled cycle-region *logical* indices in `[0, CYCLE_CAPACITY)`,
     /// available for reuse (LIFO via [`Vec::pop`]). Populated when a
     /// cycle producer port disappears or flips to scratch; drained when
@@ -61,9 +62,13 @@ pub struct BufferAllocState {
     /// High-water mark for the scratch region in the *most recent* plan.
     /// Reset to [`RESERVED_SLOTS`] at the start of every allocation pass
     /// (skipping the backplane + sink range at the bottom of scratch)
-    /// and rises as the forward sweep emits scratch indices. Carried in
-    /// state only as the post-build snapshot (used by tests and
-    /// diagnostics); not consulted by the next allocation pass.
+    /// and rises as the forward sweep emits scratch indices.
+    ///
+    /// Carried as a post-build snapshot only; not consulted by the next
+    /// allocation pass. Readers: `patches-engine` builder integration tests
+    /// assert it is stable across replans with identical inputs, and
+    /// [`ExecutionPlan::scratch_hwm`](crate::ExecutionPlan) carries it
+    /// forward for `patches-profiling/bench.rs` to report bytes used.
     pub scratch_hwm: usize,
 }
 
@@ -88,7 +93,7 @@ impl Default for BufferAllocState {
 ///
 /// The `Default` implementation starts the high-water mark at `0` (no permanent-zero slot
 /// is needed for modules).
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ModuleAllocState {
     /// Maps [`InstanceId`] to the pool slot index currently holding that module.
     pub pool_map: HashMap<InstanceId, usize>,
@@ -99,17 +104,17 @@ pub struct ModuleAllocState {
     pub next_hwm: usize,
 }
 
-/// Result of [`ModuleAllocState::diff`]: the new pool map and freelist after applying
-/// the module set for the next graph.
+/// Result of [`ModuleAllocState::diff`]: the next plan's carried
+/// allocation state ([`state`](Self::state)) plus the per-build delta
+/// ([`tombstoned`](Self::tombstoned)). The carried state flows
+/// transformation → state by move; the delta is consumed at plan-build
+/// time and not threaded forward (ticket 0992 / ADR 0081).
 #[derive(Debug)]
 pub struct ModuleAllocDiff {
-    /// Slot index for each [`InstanceId`] in the new graph (surviving + newly allocated).
-    pub slot_map: HashMap<InstanceId, usize>,
-    /// Updated freelist (surviving freelisted indices + newly tombstoned slots).
-    pub freelist: Vec<usize>,
-    /// New high-water mark.
-    pub next_hwm: usize,
-    /// Slot indices that were tombstoned (freed) by this diff.
+    /// The next [`ModuleAllocState`]: pool map, freelist, high-water mark.
+    pub state: ModuleAllocState,
+    /// Slot indices that were tombstoned (freed) by this diff. Per-build
+    /// delta, not carried in [`state`](Self::state).
     pub tombstoned: Vec<usize>,
 }
 
@@ -125,7 +130,7 @@ impl ModuleAllocState {
         new_ids: &HashSet<InstanceId>,
         capacity: usize,
     ) -> Result<ModuleAllocDiff, PlanError> {
-        let mut slot_map: HashMap<InstanceId, usize> = HashMap::new();
+        let mut pool_map: HashMap<InstanceId, usize> = HashMap::new();
         let mut freelist: Vec<usize> = self.freelist.clone();
         let mut next_hwm: usize = self.next_hwm;
         let mut tombstoned: Vec<usize> = Vec::new();
@@ -141,7 +146,7 @@ impl ModuleAllocState {
         // Allocate: surviving entries reuse their slot; new entries get a fresh one.
         for &id in new_ids {
             if let Some(&existing) = self.pool_map.get(&id) {
-                slot_map.insert(id, existing);
+                pool_map.insert(id, existing);
             } else {
                 let idx = if let Some(recycled) = freelist.pop() {
                     recycled
@@ -153,11 +158,14 @@ impl ModuleAllocState {
                 if idx >= capacity {
                     return Err(PlanError::ModulePoolExhausted);
                 }
-                slot_map.insert(id, idx);
+                pool_map.insert(id, idx);
             }
         }
 
-        Ok(ModuleAllocDiff { slot_map, freelist, next_hwm, tombstoned })
+        Ok(ModuleAllocDiff {
+            state: ModuleAllocState { pool_map, freelist, next_hwm },
+            tombstoned,
+        })
     }
 }
 
@@ -167,11 +175,14 @@ impl ModuleAllocState {
 ///
 /// See [`BufferAllocState`] for the cycle/scratch region split.
 pub struct BufferAllocation {
-    pub output_buf: HashMap<(NodeId, usize), usize>,
+    /// The next [`BufferAllocState`]: output buffer map, cycle freelist,
+    /// region high-water marks. Flows transformation → state by move
+    /// (ticket 0992 / ADR 0081).
+    pub state: BufferAllocState,
+    /// Buffer pool indices that the audio thread must zero on plan adoption
+    /// (newly allocated + freed slots). Per-build delta, not carried in
+    /// [`state`](Self::state).
     pub to_zero: Vec<usize>,
-    pub cycle_freelist: Vec<usize>,
-    pub cycle_hwm: usize,
-    pub scratch_hwm: usize,
 }
 
 // ── allocate_buffers ──────────────────────────────────────────────────────────
@@ -224,7 +235,7 @@ pub fn allocate_buffers(
     index: &GraphIndex<'_>,
     order: &[NodeId],
     prev_alloc: &BufferAllocState,
-    producer_port_cycle: &HashMap<(NodeId, usize), bool>,
+    producer_port_cycle: &HashMap<ProducerPortKey, bool>,
     pool_capacity: usize,
 ) -> Result<BufferAllocation, PlanError> {
     let mut cycle_freelist = prev_alloc.cycle_freelist.clone();
@@ -234,9 +245,9 @@ pub fn allocate_buffers(
     let mut scratch_hwm: usize = RESERVED_SLOTS;
     let scratch_cap = pool_capacity.min(SCRATCH_CAPACITY);
     let mut to_zero = Vec::new();
-    let mut output_buf: HashMap<(NodeId, usize), usize> = HashMap::new();
+    let mut output_buf: HashMap<ProducerPortKey, usize> = HashMap::new();
 
-    let is_cycle = |key: &(NodeId, usize)| -> bool {
+    let is_cycle = |key: &ProducerPortKey| -> bool {
         producer_port_cycle.get(key).copied().unwrap_or(false)
     };
 
@@ -252,7 +263,7 @@ pub fn allocate_buffers(
             .module_descriptor;
 
         for (port_idx, _) in desc.outputs.iter().enumerate() {
-            let key = (id.clone(), port_idx);
+            let key = ProducerPortKey::new(id.clone(), port_idx);
             let want_cycle = is_cycle(&key);
             let prev = prev_alloc.output_buf.get(&key).copied();
 
@@ -324,11 +335,13 @@ pub fn allocate_buffers(
     }
 
     Ok(BufferAllocation {
-        output_buf,
+        state: BufferAllocState {
+            output_buf,
+            cycle_freelist,
+            cycle_hwm,
+            scratch_hwm,
+        },
         to_zero,
-        cycle_freelist,
-        cycle_hwm,
-        scratch_hwm,
     })
 }
 
@@ -353,9 +366,9 @@ mod tests {
 
     fn apply(diff: &ModuleAllocDiff) -> ModuleAllocState {
         ModuleAllocState {
-            pool_map: diff.slot_map.clone(),
-            freelist: diff.freelist.clone(),
-            next_hwm: diff.next_hwm,
+            pool_map: diff.state.pool_map.clone(),
+            freelist: diff.state.freelist.clone(),
+            next_hwm: diff.state.next_hwm,
         }
     }
 
@@ -368,9 +381,9 @@ mod tests {
         let ids = fresh_ids(4);
         let diff = state.diff(&id_set(&ids), 64).unwrap();
 
-        assert_eq!(diff.slot_map.len(), 4);
+        assert_eq!(diff.state.pool_map.len(), 4);
         for id in &ids {
-            assert!(diff.slot_map.contains_key(id), "id missing from slot_map");
+            assert!(diff.state.pool_map.contains_key(id), "id missing from pool_map");
         }
     }
 
@@ -381,7 +394,7 @@ mod tests {
         let ids = fresh_ids(5);
         let diff = state.diff(&id_set(&ids), 64).unwrap();
 
-        let mut slots: Vec<usize> = diff.slot_map.values().copied().collect();
+        let mut slots: Vec<usize> = diff.state.pool_map.values().copied().collect();
         slots.sort_unstable();
         slots.dedup();
         assert_eq!(slots.len(), 5, "all assigned slots must be distinct");
@@ -395,10 +408,10 @@ mod tests {
         let state = ModuleAllocState::default();
         let diff = state.diff(&HashSet::new(), 64).unwrap();
 
-        assert!(diff.slot_map.is_empty());
+        assert!(diff.state.pool_map.is_empty());
         assert!(diff.tombstoned.is_empty());
-        assert!(diff.freelist.is_empty());
-        assert_eq!(diff.next_hwm, 0);
+        assert!(diff.state.freelist.is_empty());
+        assert_eq!(diff.state.next_hwm, 0);
     }
 
     /// Diffing an empty set against a non-empty state tombstones everything.
@@ -407,15 +420,15 @@ mod tests {
         let state = ModuleAllocState::default();
         let ids = fresh_ids(3);
         let diff0 = state.diff(&id_set(&ids), 64).unwrap();
-        let hwm = diff0.next_hwm;
+        let hwm = diff0.state.next_hwm;
 
         let state1 = apply(&diff0);
         let diff1 = state1.diff(&HashSet::new(), 64).unwrap();
 
-        assert!(diff1.slot_map.is_empty());
+        assert!(diff1.state.pool_map.is_empty());
         assert_eq!(diff1.tombstoned.len(), 3, "all three slots must be tombstoned");
-        assert_eq!(diff1.freelist.len(), 3, "all three slots must be freelisted");
-        assert_eq!(diff1.next_hwm, hwm, "hwm must not change");
+        assert_eq!(diff1.state.freelist.len(), 3, "all three slots must be freelisted");
+        assert_eq!(diff1.state.next_hwm, hwm, "hwm must not change");
     }
 
     // ── capacity boundary ─────────────────────────────────────────────────────
@@ -427,7 +440,7 @@ mod tests {
         let ids = fresh_ids(3); // slots 0, 1, 2 — fits exactly in capacity 3
         let result = state.diff(&id_set(&ids), 3);
         assert!(result.is_ok(), "allocation filling capacity exactly must succeed");
-        assert_eq!(result.unwrap().next_hwm, 3);
+        assert_eq!(result.unwrap().state.next_hwm, 3);
     }
 
     /// Allocating one past capacity fails.
@@ -457,7 +470,7 @@ mod tests {
         let new_ids = fresh_ids(2);
         let state2 = apply(&diff1);
         let diff2 = state2.diff(&id_set(&new_ids), 2).unwrap();
-        assert_eq!(diff2.next_hwm, 2, "hwm must not grow when recycling");
+        assert_eq!(diff2.state.next_hwm, 2, "hwm must not grow when recycling");
     }
 
     // ── LIFO freelist ordering ────────────────────────────────────────────────
@@ -472,7 +485,7 @@ mod tests {
 
         let state1 = apply(&diff0);
         let diff1 = state1.diff(&HashSet::new(), 64).unwrap();
-        let last_on_freelist = *diff1.freelist.last().unwrap();
+        let last_on_freelist = *diff1.state.freelist.last().unwrap();
 
         // Introduce a single new id — must pop from the freelist (LIFO).
         let new_id = fresh_ids(1)[0];
@@ -480,10 +493,10 @@ mod tests {
         let diff2 = state2.diff(&id_set(&[new_id]), 64).unwrap();
 
         assert_eq!(
-            diff2.slot_map[&new_id], last_on_freelist,
+            diff2.state.pool_map[&new_id], last_on_freelist,
             "new module must reuse the last slot pushed onto the freelist (LIFO)"
         );
-        assert_eq!(diff2.freelist.len(), 2, "two slots remain on freelist after recycling one");
+        assert_eq!(diff2.state.freelist.len(), 2, "two slots remain on freelist after recycling one");
     }
 
     // ── freelist accounting ───────────────────────────────────────────────────
@@ -503,11 +516,11 @@ mod tests {
         let ids = fresh_ids(2);
         let diff = state.diff(&id_set(&ids), 64).unwrap();
 
-        assert!(diff.freelist.is_empty(), "freelist must be empty after recycling the one entry");
-        assert_eq!(diff.next_hwm, 7, "hwm advanced once for the non-recycled id");
+        assert!(diff.state.freelist.is_empty(), "freelist must be empty after recycling the one entry");
+        assert_eq!(diff.state.next_hwm, 7, "hwm advanced once for the non-recycled id");
         assert!(diff.tombstoned.is_empty());
 
-        let mut slots: Vec<usize> = diff.slot_map.values().copied().collect();
+        let mut slots: Vec<usize> = diff.state.pool_map.values().copied().collect();
         slots.sort_unstable();
         assert_eq!(slots, vec![5, 6], "must contain the recycled slot and the new hwm slot");
     }
@@ -526,10 +539,10 @@ mod tests {
         let diff1 = state1.diff(&id_set(&ids[..2]), 64).unwrap();
 
         assert_eq!(diff1.tombstoned.len(), 1, "only the removed id is tombstoned");
-        assert!(diff1.tombstoned.contains(&diff0.slot_map[&ids[2]]));
+        assert!(diff1.tombstoned.contains(&diff0.state.pool_map[&ids[2]]));
 
         for id in &ids[..2] {
-            assert_eq!(diff0.slot_map[id], diff1.slot_map[id], "surviving slot must be stable");
+            assert_eq!(diff0.state.pool_map[id], diff1.state.pool_map[id], "surviving slot must be stable");
         }
     }
 
@@ -543,9 +556,9 @@ mod tests {
         let state1 = apply(&diff0);
         let diff1 = state1.diff(&id_set(&ids[..2]), 64).unwrap();
 
-        let active_slots: HashSet<usize> = diff1.slot_map.values().copied().collect();
+        let active_slots: HashSet<usize> = diff1.state.pool_map.values().copied().collect();
         for &t in &diff1.tombstoned {
-            assert!(!active_slots.contains(&t), "tombstoned slot {t} must not appear in slot_map");
+            assert!(!active_slots.contains(&t), "tombstoned slot {t} must not appear in pool_map");
         }
     }
 
@@ -588,25 +601,25 @@ mod tests {
     }
 
     /// Cycle classification keyed by `(node, slice-position)`.
-    fn cycle_map(entries: &[((&str, usize), bool)]) -> HashMap<(NodeId, usize), bool> {
+    fn cycle_map(entries: &[((&str, usize), bool)]) -> HashMap<ProducerPortKey, bool> {
         entries
             .iter()
-            .map(|((n, p), c)| ((NodeId::from(*n), *p), *c))
+            .map(|((n, p), c)| (ProducerPortKey::new(NodeId::from(*n), *p), *c))
             .collect()
     }
 
     /// Fold an allocation result into the next plan's carried state.
     fn as_prev(a: &BufferAllocation) -> BufferAllocState {
         BufferAllocState {
-            output_buf: a.output_buf.clone(),
-            cycle_freelist: a.cycle_freelist.clone(),
-            cycle_hwm: a.cycle_hwm,
-            scratch_hwm: a.scratch_hwm,
+            output_buf: a.state.output_buf.clone(),
+            cycle_freelist: a.state.cycle_freelist.clone(),
+            cycle_hwm: a.state.cycle_hwm,
+            scratch_hwm: a.state.scratch_hwm,
         }
     }
 
-    fn key(name: &str, pos: usize) -> (NodeId, usize) {
-        (NodeId::from(name), pos)
+    fn key(name: &str, pos: usize) -> ProducerPortKey {
+        ProducerPortKey::new(NodeId::from(name), pos)
     }
 
     // ── scratch assignment ────────────────────────────────────────────────────
@@ -623,11 +636,11 @@ mod tests {
             allocate_buffers(&index, &order, &BufferAllocState::default(), &HashMap::new(), 2048)
                 .unwrap();
 
-        assert_eq!(alloc.output_buf[&key("a", 0)], RESERVED_SLOTS);
-        assert_eq!(alloc.output_buf[&key("b", 0)], RESERVED_SLOTS + 1);
-        assert_eq!(alloc.output_buf[&key("c", 0)], RESERVED_SLOTS + 2);
-        assert_eq!(alloc.scratch_hwm, RESERVED_SLOTS + 3);
-        for v in alloc.output_buf.values() {
+        assert_eq!(alloc.state.output_buf[&key("a", 0)], RESERVED_SLOTS);
+        assert_eq!(alloc.state.output_buf[&key("b", 0)], RESERVED_SLOTS + 1);
+        assert_eq!(alloc.state.output_buf[&key("c", 0)], RESERVED_SLOTS + 2);
+        assert_eq!(alloc.state.scratch_hwm, RESERVED_SLOTS + 3);
+        for v in alloc.state.output_buf.values() {
             assert!(
                 (RESERVED_SLOTS..SCRATCH_CAPACITY).contains(v),
                 "scratch slot {v} must lie in [RESERVED_SLOTS, SCRATCH_CAPACITY)"
@@ -648,8 +661,8 @@ mod tests {
         let alloc =
             allocate_buffers(&index, &order, &BufferAllocState::default(), &cycle, 2048).unwrap();
 
-        assert_eq!(alloc.output_buf[&key("a", 0)], SCRATCH_CAPACITY);
-        assert_eq!(alloc.cycle_hwm, 1);
+        assert_eq!(alloc.state.output_buf[&key("a", 0)], SCRATCH_CAPACITY);
+        assert_eq!(alloc.state.cycle_hwm, 1);
     }
 
     // ── cycle stability across replans ────────────────────────────────────────
@@ -665,14 +678,14 @@ mod tests {
 
         let p1 =
             allocate_buffers(&index, &order, &BufferAllocState::default(), &cycle, 2048).unwrap();
-        let a_slot = p1.output_buf[&key("a", 0)];
-        let b_slot = p1.output_buf[&key("b", 0)];
+        let a_slot = p1.state.output_buf[&key("a", 0)];
+        let b_slot = p1.state.output_buf[&key("b", 0)];
         assert!(a_slot >= SCRATCH_CAPACITY && b_slot >= SCRATCH_CAPACITY);
         assert_ne!(a_slot, b_slot);
 
         let p2 = allocate_buffers(&index, &order, &as_prev(&p1), &cycle, 2048).unwrap();
-        assert_eq!(p2.output_buf[&key("a", 0)], a_slot, "survivor keeps its cycle slot");
-        assert_eq!(p2.output_buf[&key("b", 0)], b_slot, "survivor keeps its cycle slot");
+        assert_eq!(p2.state.output_buf[&key("a", 0)], a_slot, "survivor keeps its cycle slot");
+        assert_eq!(p2.state.output_buf[&key("b", 0)], b_slot, "survivor keeps its cycle slot");
     }
 
     /// A vacated cycle slot returns to the freelist and is recycled LIFO by
@@ -690,7 +703,7 @@ mod tests {
             2048,
         )
         .unwrap();
-        let b_slot = p1.output_buf[&key("b", 0)];
+        let b_slot = p1.state.output_buf[&key("b", 0)];
         let b_logical = b_slot - SCRATCH_CAPACITY;
 
         // Replan with only `a`: `b`'s cycle slot is vacated.
@@ -698,7 +711,7 @@ mod tests {
         let p2 =
             allocate_buffers(&index, &order_of(&["a"]), &as_prev(&p1), &cycle_a, 2048).unwrap();
         assert_eq!(
-            p2.cycle_freelist.iter().filter(|&&l| l == b_logical).count(),
+            p2.state.cycle_freelist.iter().filter(|&&l| l == b_logical).count(),
             1,
             "vacated logical freelisted exactly once (no double-free)"
         );
@@ -712,7 +725,7 @@ mod tests {
             allocate_buffers(&index2, &order_of(&["a", "c"]), &as_prev(&p2), &cycle_ac, 2048)
                 .unwrap();
         assert_eq!(
-            p3.output_buf[&key("c", 0)],
+            p3.state.output_buf[&key("c", 0)],
             b_slot,
             "new cycle producer recycles the last freed cycle slot"
         );
@@ -735,12 +748,12 @@ mod tests {
             2048,
         )
         .unwrap();
-        let scratch_slot = p1.output_buf[&key("a", 0)];
+        let scratch_slot = p1.state.output_buf[&key("a", 0)];
         assert!(scratch_slot < SCRATCH_CAPACITY);
 
         let cycle = cycle_map(&[(("a", 0), true)]);
         let p2 = allocate_buffers(&index, &order_of(&["a"]), &as_prev(&p1), &cycle, 2048).unwrap();
-        let new_slot = p2.output_buf[&key("a", 0)];
+        let new_slot = p2.state.output_buf[&key("a", 0)];
         assert!(new_slot >= SCRATCH_CAPACITY, "must flip into the cycle region");
         assert!(p2.to_zero.contains(&new_slot), "new cycle slot must be zeroed");
         assert!(p2.to_zero.contains(&scratch_slot), "abandoned scratch slot must be zeroed");
@@ -762,7 +775,7 @@ mod tests {
             2048,
         )
         .unwrap();
-        let cycle_slot = p1.output_buf[&key("a", 0)];
+        let cycle_slot = p1.state.output_buf[&key("a", 0)];
         let logical = cycle_slot - SCRATCH_CAPACITY;
 
         let p2 = allocate_buffers(
@@ -773,12 +786,12 @@ mod tests {
             2048,
         )
         .unwrap();
-        let new_slot = p2.output_buf[&key("a", 0)];
+        let new_slot = p2.state.output_buf[&key("a", 0)];
         assert!(new_slot < SCRATCH_CAPACITY, "must flip into the scratch region");
         assert_eq!(
-            p2.cycle_freelist.iter().filter(|&&l| l == logical).count(),
-            1,
-            "old cycle logical freelisted exactly once (no double-free)"
+            p2.state.cycle_freelist,
+            vec![logical],
+            "old cycle logical freelisted exactly once, with the correct value (no double-free, no phantom entries)"
         );
         assert!(p2.to_zero.contains(&cycle_slot), "old cycle slot must be zeroed");
     }
@@ -855,9 +868,9 @@ mod tests {
         )
         .unwrap();
 
-        let s0 = alloc.output_buf[&key("c", 0)];
-        let s1 = alloc.output_buf[&key("c", 1)];
-        let s2 = alloc.output_buf[&key("c", 2)];
+        let s0 = alloc.state.output_buf[&key("c", 0)];
+        let s1 = alloc.state.output_buf[&key("c", 1)];
+        let s2 = alloc.state.output_buf[&key("c", 2)];
 
         assert!(s0 < SCRATCH_CAPACITY, "slice 0 is scratch");
         assert!(s1 >= SCRATCH_CAPACITY, "slice 1 is cycle");

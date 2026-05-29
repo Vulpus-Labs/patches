@@ -35,6 +35,13 @@ smoke: push
     cargo test --tests -p patches-lsp
     @just _sweep
 
+# Mutation testing on patches-planner (E161 / 0984). Wrapper traps
+# EXIT/INT/TERM and removes mutants.out/ on every exit path; pass
+# --keep-output to retain artefacts for triage.
+# Install: cargo install cargo-mutants. See MUTANTS.md.
+mutants *EXTRA:
+    ./tools/run-mutants.sh {{EXTRA}}
+
 # Manual sweep: drop target/ artefacts not touched in 7 days.
 # Keeps hot incremental cache; reclaims stale test-bin churn.
 sweep:

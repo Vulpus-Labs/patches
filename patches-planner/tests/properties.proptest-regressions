@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3e15c218a6e18df12903750c0e992c0383c2cae3ae8b1864febf61084c93ae7f # shrinks to plan = GraphPlan { nodes: [PolyIO, PolyIO], edges: [(0, 2, 0, 1), (1, 1, 1, 0)] }
+cc 34c44e403b0cce6b6e14add47a0a68993aa989b3a2d8ec775bd531b26571e2a5 # shrinks to seed = GraphPlan { nodes: [PolyIO, MultiOut], edges: [(0, 2, 0, 2), (0, 0, 1, 1)] }, node_pick = 8, new_kind = MultiOut

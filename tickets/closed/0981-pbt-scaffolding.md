@@ -3,7 +3,29 @@ id: "0981"
 title: proptest scaffolding for the planner — generators + harness
 priority: medium
 created: 2026-05-29
+closed: 2026-05-29
 ---
+
+## Done
+
+- `proptest = "1"` added to `patches-planner/Cargo.toml` `[dev-dependencies]`.
+- New integration target `patches-planner/tests/properties.rs`.
+- Five test modules (`MonoIO`, `MultiOut`, `PolyIO`, `StereoIO`, `MonoSink`)
+  covering the descriptor variants the ticket called out.
+- `arb_descriptor()` (spec-shaped, yields `ModuleDescriptor`) plus
+  `arb_kind()` (internal driver carrying port menus); `arb_plan()` /
+  `arb_graph()` (1–10 nodes, edges filtered to `connect()`-safe
+  proposals); `arb_edit()` / `arb_history()` (≤ 20 edits per history).
+- Minimal `registry()` covers all five descriptor variants.
+- Smoke properties: `graph_make_decisions_ok` and `history_build_patch_ok`.
+- `ChangeParam` / `ChangeStructural` are present as `Edit` variants but
+  apply as no-ops — `ModuleGraph` has no mutate-in-place API yet; 0982 /
+  0983 can upgrade once it lands. Shrinker behaviour is unaffected.
+- Inner-loop decision documented in the module doc: lives under `tests/`
+  so `just inner -p patches-planner` picks it up; the default
+  `inner_crates` set does not include `patches-planner`, so bare
+  `just inner` does not run it.
+- Runtime: ~0.13 s for both smoke properties on default case count.
 
 ## Summary
 

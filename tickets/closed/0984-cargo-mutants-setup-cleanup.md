@@ -3,7 +3,67 @@ id: "0984"
 title: cargo-mutants setup with strict cleanup discipline
 priority: medium
 created: 2026-05-29
+closed: 2026-05-29
 ---
+
+## Done
+
+- [tools/run-mutants.sh](../../tools/run-mutants.sh) — wrapper installing
+  `trap cleanup EXIT INT TERM` (separate handlers; the INT/TERM
+  handlers `trap - EXIT` before re-running cleanup to avoid double
+  cleanup, then exit 130 / 143). Removes `mutants.out/`,
+  `mutants.out.old/`, and best-effort sweeps stale
+  `$TMPDIR/cargo-mutants-*.tmp` worker dirs younger than 4 hours.
+  Avoids `exec cargo mutants` (would replace the shell and skip the trap).
+- `just mutants` — Justfile recipe forwarding extra args to the wrapper.
+- [.github/workflows/mutants.yml](../../.github/workflows/mutants.yml) —
+  advisory nightly job (07:00 UTC) + `workflow_dispatch`. Installs
+  `cargo-mutants ^27 --locked`, runs `just mutants --keep-output`,
+  uploads `mutants.out/` as a 14-day artefact, `continue-on-error: true`
+  so missed mutations never fail the workflow. Summary step prints a
+  per-outcome tally from `outcomes.json`.
+- [MUTANTS.md](../../MUTANTS.md) — install command, run examples,
+  wall-clock estimate, cleanup contract, worker-mode decision, triage
+  workflow.
+- `.gitignore` already covers `mutants.out/` (existing
+  `mutants.out/` / `mutants.out.old/` entries).
+
+## Worker-mode decision (E161 open question 1)
+
+Chose **default worker mode with `--jobs 4`** over `--in-place`.
+
+Measurement on this workspace (`--shard 0/30` → 7 mutations):
+
+| Mode               | wall-clock | disk footprint                       |
+| ------------------ | ---------- | ------------------------------------ |
+| `--in-place` j=1   | 10 s       | 216 KB (mutants.out only)            |
+| default workers j=2| 23 s       | 360 KB mutants.out; transient TMPDIR |
+
+Both modes left `target/` flat (10 GB baseline, unchanged after run).
+`--in-place` is faster for tiny shards (no worker tree copy) but
+modifies `patches-planner/src/` directly — a hard interrupt during
+mutation requires `git checkout` to recover. Worker mode writes to
+`$TMPDIR/cargo-mutants-*.tmp` per mutation, cleaned per-mutation by
+cargo-mutants; the working tree is never touched.
+
+Worker mode chosen for **safer interrupt semantics** and for the
+parallelism win on a full 181-mutation pass (`--jobs 4` amortises the
+worker-copy setup across all mutations).
+
+## End-to-end verification
+
+```sh
+$ just mutants --shard 0/30
+7 mutants tested in 24s: 1 missed, 2 caught, 4 unviable
+[run-mutants] removing mutants.out/ (exit 2)
+
+$ just mutants --shard 0/30 --keep-output
+7 mutants tested in 28s: 1 missed, 2 caught, 4 unviable
+[run-mutants] --keep-output: retaining mutants.out/ for triage (exit 2)
+```
+
+Cleanup fires on non-zero exit. `--keep-output` retains for triage.
+Exit code 2 (mutations missed) is forwarded.
 
 ## Summary
 

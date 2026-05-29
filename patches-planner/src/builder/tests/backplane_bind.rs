@@ -84,3 +84,16 @@ fn ffi_port_in_cycle_region_is_accepted() {
     let r = check_ffi_port_offsets("DylibX", BACKPLANE_SIZE, &inputs, &outputs);
     assert!(r.is_ok());
 }
+
+/// An FFI **output** port whose `cable_idx == BACKPLANE_SIZE` is the first
+/// legal scratch slot above the backplane and must be accepted. Kills the
+/// `idx < scratch_base_offset` → `idx <= scratch_base_offset` mutation on
+/// the output-side check (rejecting the boundary slot would deny FFI
+/// plugins from writing into the first free scratch position).
+#[test]
+fn ffi_output_at_backplane_boundary_is_accepted() {
+    let inputs: Vec<InputPort> = vec![];
+    let outputs = vec![mono_out(BACKPLANE_SIZE)];
+    let r = check_ffi_port_offsets("DylibX", BACKPLANE_SIZE, &inputs, &outputs);
+    assert!(r.is_ok(), "output at BACKPLANE_SIZE must be accepted, got {r:?}");
+}
