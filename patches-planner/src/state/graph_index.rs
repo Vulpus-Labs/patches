@@ -139,18 +139,15 @@ fn build_input_buffer_map(
         let from_node = graph
             .get_node(from)
             .ok_or_else(|| PlanError::Internal(format!("node {from:?} missing from graph")))?;
-        let out_port = from_node
+        let out_port_idx = from_node
             .module_descriptor
-            .outputs
-            .iter()
-            .enumerate()
-            .find(|(_, p)| p.name == *out_name && p.index == *out_idx)
+            .output_position(out_name, *out_idx)
             .ok_or_else(|| {
                 PlanError::Internal(format!(
                     "output port {out_name:?}/{out_idx} not found on node {from:?}"
                 ))
             })?;
-        let (out_port_idx, out_kind) = (out_port.0, out_port.1.kind.clone());
+        let out_kind = from_node.module_descriptor.outputs[out_port_idx].kind.clone();
         let buf = output_buf
             .get(&(from.clone(), out_port_idx))
             .copied()
@@ -165,17 +162,15 @@ fn build_input_buffer_map(
         let to_node = graph
             .get_node(to)
             .ok_or_else(|| PlanError::Internal(format!("node {to:?} missing from graph")))?;
-        let in_kind = to_node
+        let in_pos = to_node
             .module_descriptor
-            .inputs
-            .iter()
-            .find(|p| p.name == *in_name && p.index == *in_idx)
-            .map(|p| p.kind.clone())
+            .input_position(in_name, *in_idx)
             .ok_or_else(|| {
                 PlanError::Internal(format!(
                     "input port {in_name:?}/{in_idx} not found on node {to:?}"
                 ))
             })?;
+        let in_kind = to_node.module_descriptor.inputs[in_pos].kind.clone();
         let broadcast = matches!((&out_kind, &in_kind), (CableKind::Mono, CableKind::Stereo));
 
         map.insert((to.clone(), *in_name, *in_idx), (buf, *cable_map, broadcast));

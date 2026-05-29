@@ -262,6 +262,30 @@ impl ModuleDescriptor {
         }
     }
 
+    /// Slice position of the output port matching `(name, index)` within
+    /// [`outputs`](Self::outputs), or `None` if no such port exists.
+    ///
+    /// This is the canonical mapping from a *port reference* — a name plus
+    /// the user-visible [`PortDescriptor::index`], which is scoped per
+    /// port-name group (so `out`/`send_a`/`send_b` all carry `index == 0`)
+    /// — to the *slice position* that buffer allocation and cable wiring
+    /// key by. The two coincide only for single-group port layouts; keep
+    /// every consumer of "which output port" routed through this method so
+    /// they cannot drift apart (see ticket 0974, where one call site keyed
+    /// by the raw index instead and mis-allocated a feedback cable).
+    pub fn output_position(&self, name: &str, index: usize) -> Option<usize> {
+        self.outputs.iter().position(|p| p.name == name && p.index == index)
+    }
+
+    /// Slice position of the input port matching `(name, index)` within
+    /// [`inputs`](Self::inputs), or `None`. See [`output_position`] for why
+    /// slice position is distinct from [`PortDescriptor::index`].
+    ///
+    /// [`output_position`]: Self::output_position
+    pub fn input_position(&self, name: &str, index: usize) -> Option<usize> {
+        self.inputs.iter().position(|p| p.name == name && p.index == index)
+    }
+
     // ── Port builder methods (generated) ────────────────────────────────────
 
     port_builder!(mono_in,         mono_in_multi,         inputs,
@@ -491,6 +515,66 @@ mod tests {
         assert_eq!(m.inputs.len(), 6);
         assert_eq!(m.outputs.len(), 2);
         assert_eq!(m.realtime_params.len(), 8);
+    }
+
+    /// `output_position` / `input_position` map a `(name, index)` port
+    /// reference to its *slice position*, which diverges from the
+    /// user-visible `index` whenever a descriptor has more than one
+    /// port-name group. This is the distinction ticket 0974 got wrong; the
+    /// `Console`-like layout below (`out`/`send_a`/`send_b`, all `index 0`,
+    /// at positions 0/1/2) is exactly the shape that exposed it.
+    #[test]
+    fn port_position_distinguishes_slice_position_from_declared_index() {
+        let m = ModuleDescriptor {
+            module_name: "ConsoleLike",
+            shape: ModuleShape { channels: 1 },
+            inputs: vec![
+                PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "return_a", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "return_b", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            ],
+            outputs: vec![
+                PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "send_a", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+                PortDescriptor { name: "send_b", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            ],
+            realtime_params: vec![],
+            structural_params: vec![],
+        };
+
+        // Every output carries declared index 0, yet slice positions differ.
+        assert_eq!(m.output_position("out", 0), Some(0));
+        assert_eq!(m.output_position("send_a", 0), Some(1));
+        assert_eq!(m.output_position("send_b", 0), Some(2));
+        assert_eq!(m.input_position("in", 0), Some(0));
+        assert_eq!(m.input_position("return_a", 0), Some(1));
+        assert_eq!(m.input_position("return_b", 0), Some(2));
+
+        // Resolved positions agree with a plain enumerate over the slices.
+        for (pos, p) in m.outputs.iter().enumerate() {
+            assert_eq!(m.output_position(p.name, p.index), Some(pos));
+        }
+        for (pos, p) in m.inputs.iter().enumerate() {
+            assert_eq!(m.input_position(p.name, p.index), Some(pos));
+        }
+
+        // Unknown references resolve to None.
+        assert_eq!(m.output_position("send_b", 1), None);
+        assert_eq!(m.output_position("missing", 0), None);
+        assert_eq!(m.input_position("in", 9), None);
+    }
+
+    /// A multi-*index* group (`in[0]`, `in[1]`) resolves each index to its
+    /// own slice position, and here declared index and slice position
+    /// coincide because the group starts at position 0.
+    #[test]
+    fn port_position_handles_indexed_group() {
+        let m = ModuleDescriptor::new("Mixer", ModuleShape { channels: 2 })
+            .mono_in_multi("in", 2)
+            .mono_out("out");
+        assert_eq!(m.input_position("in", 0), Some(0));
+        assert_eq!(m.input_position("in", 1), Some(1));
+        assert_eq!(m.output_position("out", 0), Some(0));
     }
 
     #[test]

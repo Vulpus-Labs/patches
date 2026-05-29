@@ -383,6 +383,13 @@ fn ids(strs: &[&str]) -> Vec<NodeId> {
     strs.iter().map(|s| NodeId::from(*s)).collect()
 }
 
+/// Slice positions equal to each edge's `out_idx`, for the synthetic
+/// single-output graphs the pure `classify_producer_ports` tests use
+/// (no real descriptors, so slice position == declared index == 0).
+fn out_idx_positions(edges: &[Edge]) -> Vec<usize> {
+    edges.iter().map(|(_, _, out_idx, _, _, _, _)| *out_idx).collect()
+}
+
 fn pos_of(order: &[NodeId], n: &str) -> usize {
     order.iter().position(|x| x == &NodeId::from(n)).expect("node missing from order")
 }
@@ -559,7 +566,7 @@ fn classify_producer_ports_all_fused_consumers_yields_scratch() {
     let nodes = ids(&["src", "dst"]);
     let edges = vec![edge("src", "dst")];
     let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &fused);
+    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
     assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&false));
 }
 
@@ -571,7 +578,7 @@ fn classify_producer_ports_any_cyclic_consumer_yields_cycle() {
     let nodes = ids(&["a", "b"]);
     let edges = vec![edge("a", "b"), edge("b", "a")];
     let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &fused);
+    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
     assert_eq!(by_port.get(&(NodeId::from("a"), 0)), Some(&true));
     assert_eq!(by_port.get(&(NodeId::from("b"), 0)), Some(&true));
 }
@@ -595,7 +602,7 @@ fn classify_producer_ports_mixed_fanout_yields_cycle() {
         edge("loopA", "loopB"),
     ];
     let (_order, fused, _fas) = compute_order_with_fusion(&nodes, &edges);
-    let by_port = super::classify_producer_ports(&edges, &fused);
+    let by_port = super::classify_producer_ports(&edges, &out_idx_positions(&edges), &fused);
     // src→loopA is internal to the SCC, so src's output is consumed by
     // a delayed reader.
     assert_eq!(by_port.get(&(NodeId::from("src"), 0)), Some(&true));
@@ -608,9 +615,135 @@ fn classify_producer_ports_mixed_fanout_yields_cycle() {
 #[test]
 fn classify_producer_ports_unconsumed_port_is_absent() {
     let nodes = ids(&["src"]);
-    let by_port = super::classify_producer_ports(&[], &[]);
+    let by_port = super::classify_producer_ports(&[], &[], &[]);
     assert!(by_port.is_empty());
     assert!(!by_port.contains_key(&(NodeId::from(nodes[0].as_str()), 0)));
+}
+
+// ── ticket 0974: multi-output producer port in a feedback loop ───────────────
+
+/// A `Console`-shaped module: two outputs (`out` at slice position 0,
+/// `send` at slice position 1) that both carry user-visible `index = 0`
+/// (the index is scoped per port-name group), plus a `ret` input. This
+/// is the layout that exposed ticket 0974.
+fn console_like_desc() -> ModuleDescriptor {
+    ModuleDescriptor {
+        module_name: "ConsoleLike",
+        shape: ModuleShape { channels: 0 },
+        inputs: vec![
+            PortDescriptor { name: "ret", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+        ],
+        outputs: vec![
+            PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+            PortDescriptor { name: "send", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+        ],
+        realtime_params: vec![],
+        structural_params: vec![],
+    }
+}
+
+/// A delay-shaped module: one `in`, one `out`.
+fn delay_like_desc() -> ModuleDescriptor {
+    ModuleDescriptor {
+        module_name: "DelayLike",
+        shape: ModuleShape { channels: 0 },
+        inputs: vec![
+            PortDescriptor { name: "in", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+        ],
+        outputs: vec![
+            PortDescriptor { name: "out", index: 0, kind: CableKind::Mono, mono_layout: MonoLayout::Audio, poly_layout: PolyLayout::Audio },
+        ],
+        realtime_params: vec![],
+        structural_params: vec![],
+    }
+}
+
+/// Regression for ticket 0974. A non-first output port (`send`, slice
+/// position 1) whose user-visible `index` is 0 feeds a feedback loop, so
+/// its consumer reads through a non-fused edge. The port must therefore
+/// be classified cycle and allocated a cycle-region slot. Before the fix
+/// the classification keyed by the edge's `out_idx` (0), colliding with
+/// `out`'s slice-0 key, so `send` (slice 1) was absent from the map and
+/// allocated a *scratch* slot — which the consumer then read with
+/// `fused = false`, tripping the `CablePool::read_raw` debug assert.
+#[test]
+fn classify_producer_ports_later_output_slot_in_feedback_loop_is_cycle() {
+    let mut graph = ModuleGraph::new();
+    graph.add_module("con", console_like_desc(), &ParameterMap::new()).unwrap();
+    graph.add_module("del", delay_like_desc(), &ParameterMap::new()).unwrap();
+
+    // Feedback loop con ↔ del: con.send → del.in, del.out → con.ret.
+    graph
+        .connect(
+            &NodeId::from("con"),
+            PortRef { name: "send", index: 0 },
+            &NodeId::from("del"),
+            PortRef { name: "in", index: 0 },
+            1.0,
+        )
+        .unwrap();
+    graph
+        .connect(
+            &NodeId::from("del"),
+            p("out"),
+            &NodeId::from("con"),
+            PortRef { name: "ret", index: 0 },
+            1.0,
+        )
+        .unwrap();
+
+    let decisions = super::make_decisions(&graph, &PlannerState::empty(), 4096).unwrap();
+
+    let send_key = (NodeId::from("con"), 1);
+    assert_eq!(
+        decisions.producer_port_cycle.get(&send_key),
+        Some(&true),
+        "send port (slice position 1) feeds a non-fused consumer and must be classified cycle"
+    );
+    let slot = decisions
+        .buf_alloc
+        .output_buf
+        .get(&send_key)
+        .copied()
+        .expect("send port must have an allocated buffer slot");
+    assert!(
+        slot >= patches_core::cables::SCRATCH_CAPACITY,
+        "send port slot {slot} must live in the cycle region, not scratch (< {})",
+        patches_core::cables::SCRATCH_CAPACITY
+    );
+}
+
+/// The plan-build scratch invariant fires when a producer port sits in a
+/// scratch slot but one of its consuming edges is non-fused — the exact
+/// inconsistency ticket 0974 produced. This shape cannot arise from a
+/// correct `classify_producer_ports` + `allocate_buffers` pairing; the
+/// assert is a backstop for future planner bugs.
+#[test]
+#[should_panic(expected = "ADR 0072 phase-5 invariant violated")]
+fn validate_scratch_fused_consistency_panics_on_scratch_with_unfused_consumer() {
+    let edges = vec![edge("a", "b")];
+    let out_port_pos = vec![0];
+    // Edge is non-fused (consumer wants last-tick value)...
+    let cable_fused = vec![false];
+    // ...but the producer port was allocated a scratch slot.
+    let mut output_buf = std::collections::HashMap::new();
+    output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
+    super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
+}
+
+/// A scratch slot with an all-fused consumer, and a cycle slot with a
+/// non-fused consumer, are both consistent — no panic.
+#[test]
+fn validate_scratch_fused_consistency_accepts_consistent_allocation() {
+    let edges = vec![edge("a", "b"), edge("c", "d")];
+    let out_port_pos = vec![0, 0];
+    let cable_fused = vec![true, false];
+    let mut output_buf = std::collections::HashMap::new();
+    // Fused consumer → scratch slot: OK.
+    output_buf.insert((NodeId::from("a"), 0), patches_core::cables::RESERVED_SLOTS);
+    // Non-fused consumer → cycle slot: OK.
+    output_buf.insert((NodeId::from("c"), 0), patches_core::cables::SCRATCH_CAPACITY);
+    super::validate_scratch_fused_consistency(&edges, &out_port_pos, &cable_fused, &output_buf);
 }
 
 #[test]

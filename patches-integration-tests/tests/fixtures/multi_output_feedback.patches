@@ -1,0 +1,28 @@
+# Frozen regression fixture for ticket 0974 — DO NOT EDIT.
+#
+# A Console exposes several output ports in distinct name groups (out,
+# send_a, send_b), so send_b sits at a *slice position* past its
+# user-visible index 0. Routing send_b through a StereoDelay and back via
+# return_b forms a feedback loop through that later-positioned output port.
+# Before the fix the planner allocated send_b a same-tick scratch slot its
+# delayed consumer then read with fused=false, halting the engine.
+#
+# This is a stable known-good copy kept independent of the work-in-progress
+# examples/ tree, so the regression does not ride on example churn.
+patch {
+    module osc : Osc
+    module mix : Console(1) {
+        level[0]:  0.7,
+        send_b[0]: 0.4
+    }
+    module del : StereoDelay(1) {
+        delay_ms[0]: 200,
+        feedback[0]: 0.5
+    }
+    module out : AudioOut
+
+    osc.sine     -> mix.in[0]
+    mix.send_b   -> del.in
+    mix.return_b <- del.out
+    mix.out      -> out.in
+}

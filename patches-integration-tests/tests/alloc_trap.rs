@@ -102,6 +102,12 @@ fn sweep(path_rel: &str, warmup: usize, iters: usize) {
             engine.tick();
         }
     }
+    // A halted engine returns silence and may not allocate, so the
+    // no-alloc assertion below would pass even on a broken patch. Guard
+    // against measuring allocation of a dead engine (and against the
+    // class of bug in ticket 0974, where a planner fault halted the
+    // engine via the `CablePool::read_raw` debug assert).
+    assert!(engine.halt_info().is_none(), "{path_rel}: engine halted: {:?}", engine.halt_info());
     drop(engine);
     assert_eq!(trap_hits(), hits_before);
 }

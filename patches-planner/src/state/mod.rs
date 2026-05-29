@@ -176,10 +176,13 @@ pub struct PlanDecisions<'a> {
     /// engine continues to apply the delay to every cable.
     pub cable_fused: Vec<bool>,
     /// Per-producer-port cycle/scratch classification (ADR 0072 phase 3,
-    /// ticket 0850). Keyed by `(NodeId, output_port_idx)`. `true` means
-    /// the port has at least one delayed (non-fused) consumer and must
-    /// occupy a cycle pair slot. `false` means every consumer is fused
-    /// and the port may occupy a single-slot scratch entry.
+    /// ticket 0850). Keyed by `(NodeId, output-port slice position)` — the
+    /// position in the producer's `desc.outputs`, matching the keys used by
+    /// [`allocate_buffers`] and `build_input_buffer_map` (not the edge's
+    /// user-visible `out_idx`; ticket 0974). `true` means the port has at
+    /// least one delayed (non-fused) consumer and must occupy a cycle pair
+    /// slot. `false` means every consumer is fused and the port may occupy
+    /// a single-slot scratch entry.
     ///
     /// Producer ports with no consumers default to `false` (scratch),
     /// since there is no read path that needs the delay.
@@ -291,7 +294,8 @@ pub fn make_decisions<'a>(
     let node_ids = graph.node_ids();
     let (order, cable_fused, fas_size) = compute_order_with_fusion(&node_ids, &index.edges);
     validate_fused_invariant(&order, &index.edges, &cable_fused);
-    let producer_port_cycle = classify_producer_ports(&index.edges, &cable_fused);
+    let out_port_pos = resolve_output_port_positions(&index);
+    let producer_port_cycle = classify_producer_ports(&index.edges, &out_port_pos, &cable_fused);
     let buf_alloc = allocate_buffers(
         &index,
         &order,
@@ -299,6 +303,12 @@ pub fn make_decisions<'a>(
         &producer_port_cycle,
         pool_capacity,
     )?;
+    validate_scratch_fused_consistency(
+        &index.edges,
+        &out_port_pos,
+        &cable_fused,
+        &buf_alloc.output_buf,
+    );
     let decisions = classify_nodes(&index, &order, prev_state)?;
     Ok(PlanDecisions {
         index,
@@ -311,22 +321,57 @@ pub fn make_decisions<'a>(
     })
 }
 
+/// Resolve each edge's producer output port to its *slice position* in
+/// the producer's `desc.outputs` — the index that [`allocate_buffers`]
+/// and `build_input_buffer_map` key by. This is distinct from the edge's
+/// `out_idx`, which carries `PortDescriptor::index`: that field is scoped
+/// per port-name group, so `out`/`send_a`/`send_b` all report `index == 0`
+/// on a 1-channel `Console` even though they sit at slice positions
+/// 0/1/2. Returns a vector parallel to `index.edges`.
+///
+/// Falls back to the edge's `out_idx` only if the node or port is missing
+/// — an internal inconsistency the later `build_input_buffer_map` pass
+/// surfaces as a `PlanError`.
+fn resolve_output_port_positions(index: &GraphIndex<'_>) -> Vec<usize> {
+    index
+        .edges
+        .iter()
+        .map(|(from, out_name, out_idx, _, _, _, _)| {
+            index
+                .get_node(from)
+                .and_then(|node| node.module_descriptor.output_position(out_name, *out_idx))
+                .unwrap_or(*out_idx)
+        })
+        .collect()
+}
+
 /// Build per-producer-port cycle/scratch classification from the
 /// per-edge fused flag. A producer port is `cycle` iff at least one of
 /// its consuming edges is non-fused (the consumer needs last-tick's
 /// value via the ping-pong pair). Otherwise it is `scratch`.
+///
+/// The map is keyed by `(NodeId, output-port slice position)`, with
+/// `out_port_pos[i]` giving edge `i`'s producer-port slice position (see
+/// [`resolve_output_port_positions`]). Keying by slice position — rather
+/// than the edge's `out_idx` — keeps this classification aligned with
+/// [`allocate_buffers`] and `build_input_buffer_map`. Before ticket 0974
+/// this keyed by `out_idx`, so a later-positioned port (e.g. `Console`'s
+/// `send_b`) with a non-fused consumer was allocated a scratch slot the
+/// consumer then read with `fused = false`.
 ///
 /// Producer ports with zero consumers do not appear in the map; callers
 /// should treat absent keys as `scratch` (no read path requires the
 /// delay).
 fn classify_producer_ports(
     edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    out_port_pos: &[usize],
     cable_fused: &[bool],
 ) -> HashMap<(NodeId, usize), bool> {
     debug_assert_eq!(edges.len(), cable_fused.len());
+    debug_assert_eq!(edges.len(), out_port_pos.len());
     let mut by_port: HashMap<(NodeId, usize), bool> = HashMap::new();
-    for (i, (from, _, out_idx, _, _, _, _)) in edges.iter().enumerate() {
-        let key = (from.clone(), *out_idx);
+    for (i, (from, _, _, _, _, _, _)) in edges.iter().enumerate() {
+        let key = (from.clone(), out_port_pos[i]);
         let needs_cycle = !cable_fused[i];
         by_port
             .entry(key)
@@ -416,6 +461,43 @@ fn validate_fused_invariant(
                 "ADR 0072 invariant violated: fused cable {from} -> {to} references \
                  a node missing from active_indices",
             ),
+        }
+    }
+}
+
+/// Assert the ADR 0072 phase-5 scratch invariant at plan-build time: a
+/// producer port allocated a scratch slot (`cable_idx < SCRATCH_CAPACITY`)
+/// must have only fused consumers, since scratch slots are single-buffered
+/// and carry no last-tick value.
+///
+/// This is the build-time counterpart to the `CablePool::read_raw` debug
+/// assert. The runtime guard is the last line of defence, but it fires
+/// inside `tick()`, where the per-tick `catch_unwind` (ADR 0051) converts
+/// the panic into a silent engine halt — so tests that merely tick the
+/// engine pass unless they also inspect `halt_info()`. This check runs
+/// once per plan build on the control thread, off the audio hot path and
+/// outside any `catch_unwind`, so any divergence between the producer-port
+/// scratch/cycle classification and the per-edge `fused` flag fails the
+/// build directly (ticket 0974).
+fn validate_scratch_fused_consistency(
+    edges: &[(NodeId, &'static str, usize, NodeId, &'static str, usize, patches_core::cables::CableMap)],
+    out_port_pos: &[usize],
+    cable_fused: &[bool],
+    output_buf: &HashMap<(NodeId, usize), usize>,
+) {
+    debug_assert_eq!(edges.len(), cable_fused.len());
+    debug_assert_eq!(edges.len(), out_port_pos.len());
+    for (i, (from, _, _, to, _, _, _)) in edges.iter().enumerate() {
+        let key = (from.clone(), out_port_pos[i]);
+        let Some(&slot) = output_buf.get(&key) else { continue };
+        if slot < patches_core::cables::SCRATCH_CAPACITY {
+            assert!(
+                cable_fused[i],
+                "ADR 0072 phase-5 invariant violated: producer port {from}[slice {}] \
+                 occupies scratch slot {slot} but consumer {to} reads it with fused=false; \
+                 scratch implies all consumers fused (ticket 0974)",
+                out_port_pos[i],
+            );
         }
     }
 }
