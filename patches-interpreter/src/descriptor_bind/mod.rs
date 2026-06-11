@@ -30,8 +30,10 @@
 //! - Song/pattern shape checks, MasterSequencer song references.
 //! - Relative file-path resolution against the patch's base dir.
 //!
-//! Duplicate-input detection runs here too so the LSP (which stops at
-//! bind) flags `a.out -> c.in; b.out -> c.in` before the engine would.
+//! Fan-in to a single input is coalesced into an auto-sum node here
+//! (`coalesce_fan_in`), so `a.out -> c.in; b.out -> c.in` is merged, not
+//! rejected. (There is no duplicate-input error — see the retired BN0009
+//! in `errors.rs`.)
 
 pub mod connections;
 pub mod errors;

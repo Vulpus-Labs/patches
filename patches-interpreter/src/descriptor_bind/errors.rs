@@ -29,8 +29,10 @@ pub enum BindErrorCode {
     UnknownPort,
     /// Cable kind mismatch (mono ↔ poly) between connection endpoints.
     CableKindMismatch,
-    /// Two connections drive the same input port — only one source is allowed.
-    DuplicateInputConnection,
+    // BN0009 (DuplicateInputConnection) retired: fan-in to a single input
+    // is coalesced into an auto-sum (`coalesce_fan_in`), not rejected, so
+    // the code was never raised (ticket 0998). BN0010-11 likewise retired;
+    // number gaps are intentional, do not reuse.
     /// Poly layout mismatch between connection endpoints (ADR 0033).
     PolyLayoutMismatch,
     /// Mono layout mismatch (Audio ↔ Trigger) between connection endpoints
@@ -61,7 +63,6 @@ impl BindErrorCode {
             Self::UnknownModule => "BN0006",
             Self::UnknownPort => "BN0007",
             Self::CableKindMismatch => "BN0008",
-            Self::DuplicateInputConnection => "BN0009",
             Self::PolyLayoutMismatch => "BN0012",
             Self::MonoLayoutMismatch => "BN0013",
             Self::HeterogeneousFanIn => "BN0014",
@@ -80,7 +81,6 @@ impl BindErrorCode {
             Self::UnknownModule => "unknown module",
             Self::UnknownPort => "unknown port",
             Self::CableKindMismatch => "cable kind mismatch",
-            Self::DuplicateInputConnection => "duplicate input connection",
             Self::PolyLayoutMismatch => "poly layout mismatch",
             Self::MonoLayoutMismatch => "mono layout mismatch",
             Self::HeterogeneousFanIn => "heterogeneous fan-in",

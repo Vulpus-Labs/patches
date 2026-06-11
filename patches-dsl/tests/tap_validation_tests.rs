@@ -154,6 +154,37 @@ patch {
 }
 
 #[test]
+fn tap_as_cable_source_rejected() {
+    // A tap is an observation sink with no output; using it as a cable
+    // source previously panicked the stereo desugar's `as_port().expect`
+    // (ticket 0998). It must surface a structural diagnostic instead.
+    let src = "\
+patch {
+    module o : Osc
+    ~meter(level) -> o.fm
+}
+";
+    let err = validate_err(src);
+    assert_eq!(err.code, StructuralCode::TapAsSource);
+    assert!(err.message.contains("sink"));
+    assert_span_covers(src, err.span, "~meter(level)");
+}
+
+#[test]
+fn tap_as_source_via_backward_arrow_rejected() {
+    // `o.fm <- ~meter(level)` makes the tap the source on the RHS; the
+    // direction-normalised check must catch it too.
+    let src = "\
+patch {
+    module o : Osc
+    o.fm <- ~meter(level)
+}
+";
+    let err = validate_err(src);
+    assert_eq!(err.code, StructuralCode::TapAsSource);
+}
+
+#[test]
 fn stereo_meter_in_compound_tap_rejected() {
     // Compound taps stay mono-only (ADR 0059 §8).
     let src = "\

@@ -269,14 +269,31 @@ impl<'a> RewriteCtx<'a> {
             // so multiple consumers of the same source can each carry
             // their own scale while sharing the splitter via CSE.
             (EndpointKind::Plain, EndpointKind::StereoModBus { name: t, port: tp }) => {
-                let p = src.as_port().expect("Plain endpoint is a port ref");
-                let split = self.ensure_splitter(&p.module, &port_label_string(&p.port), src.span());
                 let lt = mono_endpoint(&suffix_name(t, SUFFIX_L), tp, tgt.span());
                 let rt = mono_endpoint(&suffix_name(t, SUFFIX_R), tp, tgt.span());
-                let split_l = mono_endpoint(&split, "out_left", tgt.span());
-                let split_r = mono_endpoint(&split, "out_right", tgt.span());
-                out.push(Statement::Connection(directed(c, split_l, lt)));
-                out.push(Statement::Connection(directed(c, split_r, rt)));
+                match src.as_port() {
+                    // Port source: insert a `StereoSplitter` (CSE per
+                    // source) so a mono port broadcasts L=R into the bus.
+                    Some(p) => {
+                        let split = self.ensure_splitter(
+                            &p.module,
+                            &port_label_string(&p.port),
+                            src.span(),
+                        );
+                        let split_l = mono_endpoint(&split, "out_left", tgt.span());
+                        let split_r = mono_endpoint(&split, "out_right", tgt.span());
+                        out.push(Statement::Connection(directed(c, split_l, lt)));
+                        out.push(Statement::Connection(directed(c, split_r, rt)));
+                    }
+                    // Non-port mono source (a host-control reference — taps
+                    // as sources are already rejected in `validate.rs`). No
+                    // port to split; broadcast the source directly to both
+                    // sides, matching the planner's mono→stereo rule.
+                    None => {
+                        out.push(Statement::Connection(directed(c, src.clone(), lt)));
+                        out.push(Statement::Connection(directed(c, src.clone(), rt)));
+                    }
+                }
             }
             // Side selector on stereo module → stereo bus on (another)
             // stereo module: rewrite the selector to its mono instance,
@@ -284,14 +301,28 @@ impl<'a> RewriteCtx<'a> {
             // so the splitter sees a mono source and broadcasts.
             (EndpointKind::StereoModSide { .. }, EndpointKind::StereoModBus { name: t, port: tp }) => {
                 let src_resolved = self.rewrite_selector(src);
-                let p = src_resolved.as_port().expect("rewritten selector is a port ref");
-                let split = self.ensure_splitter(&p.module, &port_label_string(&p.port), src.span());
                 let lt = mono_endpoint(&suffix_name(t, SUFFIX_L), tp, tgt.span());
                 let rt = mono_endpoint(&suffix_name(t, SUFFIX_R), tp, tgt.span());
-                let split_l = mono_endpoint(&split, "out_left", tgt.span());
-                let split_r = mono_endpoint(&split, "out_right", tgt.span());
-                out.push(Statement::Connection(directed(c, split_l, lt)));
-                out.push(Statement::Connection(directed(c, split_r, rt)));
+                // A side selector always rewrites to a mono port instance,
+                // so `as_port()` is `Some` here; fall back to a direct
+                // broadcast rather than panic if that ever stops holding.
+                match src_resolved.as_port() {
+                    Some(p) => {
+                        let split = self.ensure_splitter(
+                            &p.module,
+                            &port_label_string(&p.port),
+                            src.span(),
+                        );
+                        let split_l = mono_endpoint(&split, "out_left", tgt.span());
+                        let split_r = mono_endpoint(&split, "out_right", tgt.span());
+                        out.push(Statement::Connection(directed(c, split_l, lt)));
+                        out.push(Statement::Connection(directed(c, split_r, rt)));
+                    }
+                    None => {
+                        out.push(Statement::Connection(directed(c, src_resolved.clone(), lt)));
+                        out.push(Statement::Connection(directed(c, src_resolved, rt)));
+                    }
+                }
             }
             // Stereo-bus output → plain target: always insert a
             // `StereoJoiner` (CSE per origin port). If the target is mono,

@@ -80,11 +80,16 @@ structural_codes! {
     ArityMismatch           => ("ST0018", "arity mismatch"),
     InvalidCableScale       => ("ST0019", "invalid cable scale"),
     MissingDefaultParam     => ("ST0020", "missing default"),
-    MissingPatchBlock       => ("ST0021", "missing patch block"),
-    MultiplePatchBlocks     => ("ST0022", "multiple patch blocks"),
+    // ST0021 (MissingPatchBlock) / ST0022 (MultiplePatchBlocks) retired:
+    // the grammar requires exactly one `patch` block, so these were never
+    // reachable as structural errors (ticket 0998).
     TapNotYetDesugared      => ("ST0023", "tap target not yet supported"),
     TapInTemplate           => ("ST0024", "tap target inside template"),
-    TapDuplicateName        => ("ST0025", "duplicate tap name"),
+    // ST0025 (TapDuplicateName) retired: ADR 0059 §6 made tap identity
+    // (tap_type, name), so same-name taps coexist; the rule was never
+    // raised (ticket 0998).
+    // ST0026-28, ST0038-39 retired — number gaps are intentional; do not
+    // reuse.
     TapMixedCableKinds      => ("ST0029", "mixed cable kinds in compound tap"),
     TapUnknownComponent     => ("ST0030", "unknown tap component"),
     TapInvalidName          => ("ST0031", "invalid tap name"),
@@ -98,6 +103,7 @@ structural_codes! {
     StereoIdentClash        => ("ST0041", "module name clashes with synthesised stereo instance"),
     StereoBusToSide         => ("ST0042", "stereo bus source feeding a side-selector"),
     StereoMultiChannelType  => ("ST0043", "stereo module wraps a multi-channel type"),
+    TapAsSource             => ("ST0044", "tap target used as a cable source"),
     #[default]
     Other                   => ("ST9999", "structural error"),
 }

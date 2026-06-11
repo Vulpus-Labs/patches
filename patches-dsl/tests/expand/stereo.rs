@@ -221,6 +221,40 @@ fn mono_source_into_stereo_bus_routes_through_splitter() {
     assert!(find_connection(&flat, &split_id, "out_right", "crush__r", "rate_cv").is_some());
 }
 
+#[test]
+fn host_control_source_into_stereo_bus_broadcasts_without_splitter() {
+    // A host-control reference is a non-port mono source. It has no port
+    // to feed a `StereoSplitter`, so the desugar broadcasts it directly to
+    // both sides (ticket 0998 — previously this panicked the desugar's
+    // `as_port().expect`). The mono→stereo path needs no splitter node.
+    let src = "patch {
+        knob rate { low: 0.1, high: 0.9 }
+        stereo module crush : Bitcrusher
+        module out : AudioOut
+        ~rate -> crush.rate_cv
+        crush.out -> out.in
+    }";
+    let flat = parse_expand(src);
+    // No splitter is synthesised for the host-control source.
+    assert!(
+        !flat.modules.iter().any(|m| m.type_name == "StereoSplitter"),
+        "host-control source must broadcast directly, not via a splitter"
+    );
+    // Both sides receive a rate_cv input edge.
+    assert!(
+        flat.connections
+            .iter()
+            .any(|c| c.to_module == "crush__l" && c.to_port == "rate_cv"),
+        "crush__l.rate_cv must have an incoming edge"
+    );
+    assert!(
+        flat.connections
+            .iter()
+            .any(|c| c.to_module == "crush__r" && c.to_port == "rate_cv"),
+        "crush__r.rate_cv must have an incoming edge"
+    );
+}
+
 // ─── Bus expansion: stereo-module → stereo-module pair-direct ────────────────
 
 #[test]

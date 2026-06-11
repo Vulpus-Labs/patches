@@ -85,6 +85,20 @@ fn pattern_cv2_parsing() {
 }
 
 #[test]
+fn pattern_cv2_ramp_on_note_rejected() {
+    // The grammar accepts `value:cv2>target`, but a note's cv2 is a static
+    // value (StepKind::Note carries no cv2_end), so the ramp target used
+    // to be silently discarded (ticket 0998). It must now be a hard parse
+    // error rather than a silent drop of user intent.
+    let src = "pattern p { ch: x:0.5>0.7 . }\npatch { module o : AudioOut }";
+    let err = parse(src).expect_err("cv2 ramp on a note step must be rejected");
+    assert!(
+        err.to_string().contains("cv2 ramp"),
+        "error should mention the cv2 ramp, got: {err}"
+    );
+}
+
+#[test]
 fn pattern_repeat_parsing() {
     let src = "pattern p { ch: x*3 . }\npatch { module o : AudioOut }";
     let file = parse(src).unwrap();

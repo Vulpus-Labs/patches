@@ -1,5 +1,5 @@
 pattern slide_test {
-    note: C4>E4 . E4:0.5>0.8 .
+    note: C4>E4 . E4:0.5 .
     auto: 0.0> >_ >_ >1.0
 }
 

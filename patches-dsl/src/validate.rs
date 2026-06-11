@@ -22,9 +22,38 @@ use crate::tap_schema::{cable_kind, CableKind, TAP_SCHEMA};
 /// the first violation encountered.
 pub fn validate(file: &File) -> Result<(), ExpandError> {
     reject_taps_in_templates(file)?;
+    reject_taps_as_source(file)?;
     validate_top_level_taps(file)?;
     reject_host_controls_in_templates(file)?;
     validate_host_controls(file)?;
+    Ok(())
+}
+
+/// Taps are observation *sinks* (ADR 0054): a cable lands *on* a tap to
+/// observe a signal. The grammar permits `cable_endpoint = tap_target |
+/// host_control_ref | port_ref` on either side, so `~meter(x) -> mod.in`
+/// parses — but a tap has no output to source from. Left unrejected, the
+/// stereo desugar's `as_port().expect(...)` (a tap classifies as `Plain`)
+/// panics the compile pipeline mid-performance instead of producing a
+/// diagnostic. Reject tap-as-source structurally, before desugar runs.
+fn reject_taps_as_source(file: &File) -> Result<(), ExpandError> {
+    for stmt in &file.patch.body {
+        let Statement::Connection(c) = stmt else { continue };
+        // The source side depends on arrow direction: for `a <- b` the
+        // right endpoint is the source. Mirror the stereo desugar's
+        // direction-normalisation so this catches the panicking case.
+        let source = match c.arrow.direction {
+            crate::ast::Direction::Forward => &c.lhs,
+            crate::ast::Direction::Backward => &c.rhs,
+        };
+        if let CableEndpoint::Tap(t) = source {
+            return Err(ExpandError::new(
+                Code::TapAsSource,
+                t.span,
+                "a tap is an observation sink and has no output; it cannot be a cable source",
+            ));
+        }
+    }
     Ok(())
 }
 

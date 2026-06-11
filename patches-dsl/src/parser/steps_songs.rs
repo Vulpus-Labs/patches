@@ -213,15 +213,24 @@ fn build_step_valued_note(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
     for child in it {
         match child.as_rule() {
             Rule::step_cv2 => {
+                let cv2_span = span_of(&child);
                 let (v, end) = parse_step_cv2(child)?;
                 cv2 = v;
-                // step_valued_note disallows a cv1 slide target, but
-                // cv2 may still ramp (`:cv2>endpoint`); the cv2_end is
-                // currently unused for the note shape because runtime
-                // semantics treat note cv2 as a static value — fall
-                // back to ignoring the ramp here to preserve existing
-                // behaviour.
-                let _ = end;
+                // step_valued_note disallows a cv1 slide target. The
+                // grammar still accepts a cv2 ramp (`:cv2>endpoint`), but
+                // runtime semantics treat a note's cv2 as a static value:
+                // StepKind::Note carries no cv2_end, so the ramp target
+                // would be silently discarded. Reject it explicitly rather
+                // than drop user intent on the floor (ticket 0998). A cv2
+                // ramp belongs on a slide-shaped step (`a>b`), not a note.
+                if end.is_some() {
+                    return Err(ParseError {
+                        span: cv2_span,
+                        message: "cv2 ramp (`:cv2>target`) is not supported on a note step; \
+                                  a note's cv2 is a static value. Use a slide step (`a>b`) to ramp"
+                            .to_string(),
+                    });
+                }
             }
             Rule::step_repeat => {
                 let nat_pair = child.into_inner().next().unwrap();
