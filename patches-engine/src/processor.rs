@@ -44,7 +44,7 @@ use patches_planner::{ExecutionPlan, MonitorMeta};
 use crate::cleanup::CleanupAction;
 use crate::monitor::{MonitorAttach, MonitorMessage, MonitorState};
 use crate::execution_state::ReadyState;
-use crate::halt::{payload_summary, HaltHandle, HaltInfoSnapshot, HaltState};
+use crate::halt::{payload_summary, HaltHandle, HaltInfoSnapshot, HaltState, NO_SLOT};
 use crate::pool::ModulePool;
 
 /// Mask for wrapping `sample_count`.  2^16 = 65536, well within `f32`'s
@@ -244,6 +244,26 @@ impl PatchProcessor {
         self.halt.snapshot()
     }
 
+    /// Returns whether the engine is currently halted (ADR 0051). Cheap
+    /// `Acquire` load; safe from any thread.
+    pub fn is_halted(&self) -> bool {
+        self.halt.is_halted()
+    }
+
+    /// Record a panic caught by the host's audio-callback fence (E163 /
+    /// ticket 0996). Unlike the per-module tick fence, this covers panics
+    /// with no module breadcrumb — plan adoption, MIDI/record host paths —
+    /// so it records against [`NO_SLOT`]. Sticky, like the tick fence: once
+    /// set, `tick` returns silence and skips the module loop.
+    ///
+    /// Hosts wrap the entire audio callback in `catch_unwind` and call this
+    /// on `Err`, widening the ADR 0051 fence from `tick`-only to the whole
+    /// callback. The non-panic path is zero-cost (unwind tables; ADR 0051
+    /// mandates `panic = "unwind"`).
+    pub fn record_callback_halt(&self, payload: Box<dyn std::any::Any + Send>) {
+        self.halt.record(NO_SLOT, "<audio callback>", payload_summary(payload));
+    }
+
     /// Number of `CleanupAction`s dropped inline because the cleanup ring
     /// was full. Safe to call from any thread.
     pub fn cleanup_overflow_count(&self) -> u32 {
@@ -329,9 +349,18 @@ impl PatchProcessor {
         );
         let mut frames_iter = std::mem::take(&mut plan.param_frames).into_iter();
         for (idx, _params) in &mut plan.parameter_updates {
-            let (frame_idx, new_frame) = frames_iter.next().expect(
-                "adopt_plan: param_frames shorter than parameter_updates (planner bug)",
-            );
+            // Consistent with the debug_assert_eq! length checks above
+            // (ticket 0996): a planner-bug shortfall is a debug assert, and
+            // degrades to skipping the remaining updates in release rather
+            // than a bare `expect` that unwinds the audio callback. The
+            // whole callback is fenced regardless (ADR 0051 / E163).
+            let Some((frame_idx, new_frame)) = frames_iter.next() else {
+                debug_assert!(
+                    false,
+                    "adopt_plan: param_frames shorter than parameter_updates (planner bug)",
+                );
+                break;
+            };
             debug_assert_eq!(
                 frame_idx, *idx,
                 "adopt_plan: param_frames out of order vs parameter_updates",

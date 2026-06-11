@@ -32,6 +32,7 @@ use crate::types::{
     ABI_VERSION, FfiAudioEnvironment, FfiBytes, FfiPluginManifest,
     FfiPluginVTable, PREPARE_OK,
 };
+use patches_ffi_common::types::FFI_ENTRY_PANIC;
 use patches_ffi_common::structural_frame::pack_structural;
 
 // ── Host environment ─────────────────────────────────────────────────────────
@@ -73,6 +74,23 @@ impl Drop for DylibModule {
     }
 }
 
+impl DylibModule {
+    /// Re-raise a panic the plugin-side fence (ADR 0051) caught and signalled
+    /// via [`FFI_ENTRY_PANIC`]. The plugin's own `extern "C"` frame cannot
+    /// unwind into the host (Rust 1.81 aborts), so the fence returns a
+    /// sentinel and we re-panic *here*, on the host side of the boundary,
+    /// where the enclosing tick / audio-callback fence turns it into a clean
+    /// sticky halt (ticket 0995, E163).
+    #[cold]
+    #[inline(never)]
+    fn ffi_panic(&self, entry: &str) -> ! {
+        panic!(
+            "plugin module '{}' panicked in {entry} (caught by plugin-side fence)",
+            self.descriptor.module_name
+        );
+    }
+}
+
 impl Module for DylibModule {
     fn prepare(
         _audio_environment: &AudioEnvironment,
@@ -88,13 +106,16 @@ impl Module for DylibModule {
 
     fn update_validated_parameters(&mut self, params: &ParamView<'_>) {
         let bytes = params.wire_bytes();
-        unsafe {
+        let status = unsafe {
             (self.vtable.update_validated_parameters)(
                 self.handle.as_ptr() as Handle,
                 bytes.as_ptr(),
                 bytes.len(),
                 host_env() as *const HostEnv,
-            );
+            )
+        };
+        if status == FFI_ENTRY_PANIC {
+            self.ffi_panic("update_validated_parameters");
         }
     }
 
@@ -117,7 +138,7 @@ impl Module for DylibModule {
         let (scratch_ptr, scratch_len) = unsafe {
             (parts.scratch_ptr.add(BACKPLANE_SIZE), parts.scratch_len - BACKPLANE_SIZE)
         };
-        unsafe {
+        let status = unsafe {
             (self.vtable.process)(
                 self.handle.as_ptr(),
                 scratch_ptr, scratch_len,
@@ -125,6 +146,13 @@ impl Module for DylibModule {
                 parts.wi,
             )
         };
+        // ADR 0051 / ticket 0995: the plugin-side fence caught a panic and
+        // returned a sentinel rather than aborting across `extern "C"`.
+        // Re-raise it so the host tick fence (PatchProcessor::tick) records a
+        // clean halt against this module's breadcrumb slot.
+        if status == FFI_ENTRY_PANIC {
+            self.ffi_panic("process");
+        }
     }
 
     fn set_ports(&mut self, inputs: &[InputPort], outputs: &[OutputPort]) {
@@ -135,13 +163,16 @@ impl Module for DylibModule {
         pack_ports_into(0, inputs, outputs, BACKPLANE_SIZE, &mut self.port_frame)
             .expect("DylibModule::set_ports: shape mismatch vs. prepared PortLayout");
         let bytes = self.port_frame.bytes();
-        unsafe {
+        let status = unsafe {
             (self.vtable.set_ports)(
                 self.handle.as_ptr() as Handle,
                 bytes.as_ptr(),
                 bytes.len(),
                 host_env() as *const HostEnv,
-            );
+            )
+        };
+        if status == FFI_ENTRY_PANIC {
+            self.ffi_panic("set_ports");
         }
     }
 
@@ -163,7 +194,7 @@ impl Module for DylibModule {
         let (scratch_ptr, scratch_len) = unsafe {
             (parts.scratch_ptr.add(BACKPLANE_SIZE), parts.scratch_len - BACKPLANE_SIZE)
         };
-        unsafe {
+        let status = unsafe {
             (self.vtable.periodic_update)(
                 self.handle.as_ptr(),
                 scratch_ptr, scratch_len,
@@ -171,6 +202,9 @@ impl Module for DylibModule {
                 parts.wi,
             )
         };
+        if status == FFI_ENTRY_PANIC {
+            self.ffi_panic("periodic_update");
+        }
     }
 }
 

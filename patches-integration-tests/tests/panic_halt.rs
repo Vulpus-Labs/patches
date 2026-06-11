@@ -166,6 +166,37 @@ fn panic_in_periodic_halts_within_one_tick() {
 }
 
 #[test]
+fn panic_during_plan_adoption_halts_cleanly() {
+    // E163 ticket 0996: plan adoption runs on the audio callback *before*
+    // tick, outside tick's per-module fence. A panic here (here forced by an
+    // out-of-bounds `to_zero` cable index — a malformed plan) must be caught
+    // by the widened audio-callback fence and recorded as a clean halt, not
+    // abort the process.
+    let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, OversamplingFactor::None);
+
+    let mut plan = ExecutionPlan::empty();
+    // POOL_CAP (32) scratch slots exist; index 100 is < SCRATCH_CAPACITY so it
+    // takes the scratch branch and indexes out of bounds during adoption.
+    plan.to_zero.push(100);
+
+    engine.adopt_plan_guarded(plan);
+
+    let info = engine
+        .halt_info()
+        .expect("engine must halt cleanly after an adoption panic");
+    // No module breadcrumb during adoption.
+    assert_eq!(info.slot, usize::MAX);
+
+    // Process survived; ticks return silence and the halt is sticky.
+    for _ in 0..8 {
+        engine.tick();
+        assert_eq!(engine.last_left(), 0.0);
+        assert_eq!(engine.last_right(), 0.0);
+    }
+    assert!(engine.halt_info().is_some());
+}
+
+#[test]
 fn rebuild_clears_halt_state() {
     let mut engine = HeadlessEngine::new(POOL_CAP, MODULE_CAP, OversamplingFactor::None);
     engine.adopt_plan(single_active_plan(

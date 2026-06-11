@@ -165,15 +165,24 @@ pub unsafe fn prepare_dispatch<M: patches_core::Module + 'static>(
 
     let audio_env: patches_core::AudioEnvironment = env.into();
     let id = patches_core::modules::InstanceId::from_raw(instance_id);
-    let module = match <M as patches_core::Module>::prepare(
-        &audio_env,
-        descriptor,
-        id,
-        &structural,
-    ) {
-        Ok(m) => m,
-        Err(e) => {
+    // ADR 0051 plugin-side fence: `prepare` runs user code that may panic.
+    // `prepare` is not on the audio thread, so we surface a panic as a
+    // structured `PREPARE_ERR_PREPARE` (the host turns it into a
+    // `BuildError`) rather than letting it abort across `extern "C"`
+    // (ticket 0995).
+    let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        <M as patches_core::Module>::prepare(&audio_env, descriptor, id, &structural)
+    }));
+    let module = match prepared {
+        Ok(Ok(m)) => m,
+        Ok(Err(e)) => {
             return write_error(crate::types::PREPARE_ERR_PREPARE, format!("{e:?}"));
+        }
+        Err(_) => {
+            return write_error(
+                crate::types::PREPARE_ERR_PREPARE,
+                "module panicked during prepare".to_string(),
+            );
         }
     };
 
@@ -202,6 +211,183 @@ pub struct PluginInstance<M: patches_core::Module> {
     pub output_buf: Vec<patches_core::OutputPort>,
 }
 
+// ── plugin-side panic fence (ADR 0051 / ticket 0995) ─────────────────────────
+
+/// Run user `Module` code behind the plugin-side panic fence.
+///
+/// Since Rust 1.81 an unwind escaping an `extern "C"` function is a
+/// guaranteed process abort, so every generated audio-thread entry point
+/// routes its user-code call through here. Returns
+/// [`crate::types::FFI_ENTRY_OK`] on normal return and
+/// [`crate::types::FFI_ENTRY_PANIC`] if the closure unwound; the host
+/// re-raises the panic into its own tick / audio-callback fence so the
+/// existing halt machinery records a clean halt.
+///
+/// `AssertUnwindSafe` is sound here for the same reason as the host tick
+/// fence: a panicked instance is halted and its torn state never observed
+/// again (ADR 0051).
+#[inline]
+pub fn fence<R>(f: impl FnOnce() -> R) -> i32 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(_) => crate::types::FFI_ENTRY_OK,
+        Err(_) => crate::types::FFI_ENTRY_PANIC,
+    }
+}
+
+/// Fenced `module_template` body shared by the export macros. Returns the
+/// serialized template, or an empty buffer if `Module::template` panicked
+/// (the host then fails to deserialize and rejects the plugin at load —
+/// not a process abort).
+pub fn module_template_dispatch<M: patches_core::Module>() -> crate::types::FfiBytes {
+    match std::panic::catch_unwind(|| {
+        let template = <M as patches_core::Module>::template();
+        crate::json::serialize_module_descriptor_template(&template)
+    }) {
+        Ok(v) => crate::types::FfiBytes::from_vec(v),
+        Err(_) => crate::types::FfiBytes::empty(),
+    }
+}
+
+/// Fenced `patches_plugin_descriptor_hash_<name>` body shared by the export
+/// macros. Returns the descriptor hash, or `0` if the user code panicked
+/// (the host hash check then mismatches and rejects the plugin at load).
+pub fn descriptor_hash_dispatch<M: patches_core::Module>() -> u64 {
+    std::panic::catch_unwind(|| {
+        let template = <M as patches_core::Module>::template();
+        let desc =
+            template.build_channels(patches_core::ModuleShape::default().channels as u32);
+        crate::descriptor_hash(&desc)
+    })
+    .unwrap_or(0)
+}
+
+/// Fenced `update_validated_parameters` dispatch.
+///
+/// # Safety
+/// `handle` is a live `Box<PluginInstance<M>>`; `bytes` is valid for `len`.
+#[inline]
+pub unsafe fn update_validated_parameters_dispatch<M: patches_core::Module>(
+    handle: *mut std::ffi::c_void,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    let inst = unsafe { &mut *(handle as *mut PluginInstance<M>) };
+    let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
+    match decode_param_frame(slice, &inst.param_index) {
+        Ok(view) => fence(|| {
+            patches_core::Module::update_validated_parameters(&mut inst.module, &view)
+        }),
+        Err(_) => crate::types::FFI_ENTRY_OK,
+    }
+}
+
+/// Fenced `set_ports` dispatch.
+///
+/// # Safety
+/// `handle` is a live `Box<PluginInstance<M>>`; `bytes` is valid for `len`.
+#[inline]
+pub unsafe fn set_ports_dispatch<M: patches_core::Module>(
+    handle: *mut std::ffi::c_void,
+    bytes: *const u8,
+    len: usize,
+) -> i32 {
+    let inst = unsafe { &mut *(handle as *mut PluginInstance<M>) };
+    let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
+    let view = match decode_port_frame(slice, &inst.port_layout) {
+        Ok(v) => v,
+        Err(_) => return crate::types::FFI_ENTRY_OK,
+    };
+    // Decoding the host's port frame into the reusable buffers is infallible
+    // non-user code; only the user `set_ports` call needs the fence.
+    inst.input_buf.clear();
+    inst.output_buf.clear();
+    for i in 0..view.input_count() {
+        inst.input_buf.push(view.input(i).into());
+    }
+    for i in 0..view.output_count() {
+        inst.output_buf.push(view.output(i).into());
+    }
+    // `view` (a Copy borrow of inst.port_layout) and the &mut borrows of
+    // inst.{input_buf,output_buf,module} below are disjoint fields, so they
+    // coexist; the fence wraps only the user `set_ports` call.
+    fence(|| {
+        patches_core::Module::set_ports(&mut inst.module, &inst.input_buf, &inst.output_buf)
+    })
+}
+
+/// Fenced `process` dispatch.
+///
+/// # Safety
+/// `handle` is a live `Box<PluginInstance<M>>`; the scratch/cycle pointers
+/// are valid and exclusively borrowed for this call (ABI v10+).
+#[inline]
+pub unsafe fn process_dispatch<M: patches_core::Module>(
+    handle: *mut std::ffi::c_void,
+    scratch_ptr: *mut patches_core::cables::CableValue,
+    scratch_len: usize,
+    cycle_ptr: *mut [patches_core::cables::CableValue; 2],
+    cycle_len: usize,
+    write_index: usize,
+) -> i32 {
+    let inst = unsafe { &mut *(handle as *mut PluginInstance<M>) };
+    let scratch = unsafe { std::slice::from_raw_parts_mut(scratch_ptr, scratch_len) };
+    let cycle = unsafe { std::slice::from_raw_parts_mut(cycle_ptr, cycle_len) };
+    let mut pool = patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
+    fence(|| patches_core::Module::process(&mut inst.module, &mut pool))
+}
+
+/// Fenced `periodic_update` dispatch. Returns `0` (module declined), `1`
+/// (ran), or [`crate::types::FFI_ENTRY_PANIC`] on a caught panic.
+///
+/// # Safety
+/// `handle` is a live `Box<PluginInstance<M>>`; the (read-only) scratch and
+/// cycle pointers are valid for this call.
+#[inline]
+pub unsafe fn periodic_update_dispatch<M: patches_core::Module>(
+    handle: *mut std::ffi::c_void,
+    scratch_ptr: *const patches_core::cables::CableValue,
+    scratch_len: usize,
+    cycle_ptr: *const [patches_core::cables::CableValue; 2],
+    cycle_len: usize,
+    write_index: usize,
+) -> i32 {
+    let inst = unsafe { &mut *(handle as *mut PluginInstance<M>) };
+    let scratch = unsafe {
+        std::slice::from_raw_parts_mut(
+            scratch_ptr as *mut patches_core::cables::CableValue,
+            scratch_len,
+        )
+    };
+    let cycle = unsafe {
+        std::slice::from_raw_parts_mut(
+            cycle_ptr as *mut [patches_core::cables::CableValue; 2],
+            cycle_len,
+        )
+    };
+    let pool = patches_core::cable_pool::CablePool::new(scratch, cycle, write_index);
+    if !patches_core::Module::wants_periodic(&inst.module) {
+        return 0;
+    }
+    match fence(|| patches_core::Module::periodic_update(&mut inst.module, &pool)) {
+        crate::types::FFI_ENTRY_PANIC => crate::types::FFI_ENTRY_PANIC,
+        _ => 1,
+    }
+}
+
+/// Fenced instance drop. Catches a panic in the user `Drop` impl so it
+/// cannot abort across `extern "C"`. `handle` came from `Box::into_raw`.
+///
+/// # Safety
+/// `handle` is null or a live `Box<PluginInstance<M>>`, dropped exactly once.
+#[inline]
+pub unsafe fn drop_dispatch<M: patches_core::Module>(handle: *mut std::ffi::c_void) {
+    if handle.is_null() {
+        return;
+    }
+    let boxed = unsafe { Box::from_raw(handle as *mut PluginInstance<M>) };
+    let _ = fence(move || drop(boxed));
+}
+
 /// Emit the eight ABI symbols the `FfiPluginVTable` expects plus
 /// `patches_plugin_init` and `patches_plugin_descriptor_hash_<name>`.
 ///
@@ -218,10 +404,7 @@ macro_rules! export_plugin {
     ($module:ty, $name:literal) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
-            let template = <$module as $crate::Module>::template();
-            $crate::types::FfiBytes::from_vec(
-                $crate::json::serialize_module_descriptor_template(&template),
-            )
+            $crate::sdk::module_template_dispatch::<$module>()
         }
 
         #[unsafe(no_mangle)]
@@ -255,21 +438,13 @@ macro_rules! export_plugin {
             bytes: *const u8,
             len: usize,
             _env: *const $crate::abi::HostEnv,
-        ) {
-            // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer.
-            let inst = unsafe {
-                &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-            };
-            // SAFETY: host promises `bytes/len` is a valid slice for the
-            // duration of the call.
-            let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
-            if let ::std::result::Result::Ok(view) =
-                $crate::sdk::decode_param_frame(slice, &inst.param_index)
-            {
-                $crate::Module::update_validated_parameters(
-                    &mut inst.module,
-                    &view,
-                );
+        ) -> i32 {
+            // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer;
+            // host promises `bytes/len` is a valid slice for the call.
+            unsafe {
+                $crate::sdk::update_validated_parameters_dispatch::<$module>(
+                    handle, bytes, len,
+                )
             }
         }
 
@@ -279,31 +454,10 @@ macro_rules! export_plugin {
             bytes: *const u8,
             len: usize,
             _env: *const $crate::abi::HostEnv,
-        ) {
-            // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer.
-            let inst = unsafe {
-                &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-            };
-            // SAFETY: valid slice for the call.
-            let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
-            let view =
-                match $crate::sdk::decode_port_frame(slice, &inst.port_layout) {
-                    ::std::result::Result::Ok(v) => v,
-                    ::std::result::Result::Err(_) => return,
-                };
-            inst.input_buf.clear();
-            inst.output_buf.clear();
-            for i in 0..view.input_count() {
-                inst.input_buf.push(view.input(i).into());
-            }
-            for i in 0..view.output_count() {
-                inst.output_buf.push(view.output(i).into());
-            }
-            $crate::Module::set_ports(
-                &mut inst.module,
-                &inst.input_buf,
-                &inst.output_buf,
-            );
+        ) -> i32 {
+            // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer;
+            // bytes/len is a valid slice for the call.
+            unsafe { $crate::sdk::set_ports_dispatch::<$module>(handle, bytes, len) }
         }
 
         #[unsafe(no_mangle)]
@@ -314,22 +468,15 @@ macro_rules! export_plugin {
             cycle_ptr: *mut [$crate::cables::CableValue; 2],
             cycle_len: usize,
             write_index: usize,
-        ) {
+        ) -> i32 {
             // SAFETY: handle is a live `Box<PluginInstance<M>>` raw pointer;
             // host supplies valid scratch and cycle pool slices exclusively
             // borrowed for this call (ABI v10, ticket 0850).
-            let inst = unsafe {
-                &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-            };
-            let scratch = unsafe {
-                ::std::slice::from_raw_parts_mut(scratch_ptr, scratch_len)
-            };
-            let cycle = unsafe {
-                ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
-            };
-            let mut pool =
-                $crate::cable_pool::CablePool::new(scratch, cycle, write_index);
-            $crate::Module::process(&mut inst.module, &mut pool);
+            unsafe {
+                $crate::sdk::process_dispatch::<$module>(
+                    handle, scratch_ptr, scratch_len, cycle_ptr, cycle_len, write_index,
+                )
+            }
         }
 
         #[unsafe(no_mangle)]
@@ -341,45 +488,18 @@ macro_rules! export_plugin {
             cycle_len: usize,
             write_index: usize,
         ) -> i32 {
-            // SAFETY: see __patches_process. Read-only access only; we cast
-            // via mut-slice and immediately re-borrow immutably through
-            // `&pool`.
-            let inst = unsafe {
-                &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-            };
-            let scratch = unsafe {
-                ::std::slice::from_raw_parts_mut(
-                    scratch_ptr as *mut $crate::cables::CableValue,
-                    scratch_len,
+            // SAFETY: see __patches_process. Read-only access only.
+            unsafe {
+                $crate::sdk::periodic_update_dispatch::<$module>(
+                    handle, scratch_ptr, scratch_len, cycle_ptr, cycle_len, write_index,
                 )
-            };
-            let cycle = unsafe {
-                ::std::slice::from_raw_parts_mut(
-                    cycle_ptr as *mut [$crate::cables::CableValue; 2],
-                    cycle_len,
-                )
-            };
-            let pool =
-                $crate::cable_pool::CablePool::new(scratch, cycle, write_index);
-            if $crate::Module::wants_periodic(&inst.module) {
-                $crate::Module::periodic_update(&mut inst.module, &pool);
-                1
-            } else {
-                0
             }
         }
 
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn __patches_drop(handle: *mut ::std::ffi::c_void) {
-            if handle.is_null() {
-                return;
-            }
             // SAFETY: handle came from `Box::into_raw` in __patches_prepare.
-            let _ = unsafe {
-                ::std::boxed::Box::from_raw(
-                    handle as *mut $crate::sdk::PluginInstance<$module>,
-                )
-            };
+            unsafe { $crate::sdk::drop_dispatch::<$module>(handle) }
         }
 
         #[unsafe(no_mangle)]
@@ -422,9 +542,7 @@ macro_rules! export_plugin {
 
         #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
         pub extern "C" fn __patches_plugin_descriptor_hash() -> u64 {
-            let template = <$module as $crate::Module>::template();
-            let desc = template.build_channels($crate::ModuleShape::default().channels as u32);
-            $crate::descriptor_hash(&desc)
+            $crate::sdk::descriptor_hash_dispatch::<$module>()
         }
     };
 }
@@ -438,10 +556,7 @@ macro_rules! export_plugin_with_hash_override {
     ($module:ty, $name:literal, $hash:expr) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn __patches_module_template() -> $crate::types::FfiBytes {
-            let template = <$module as $crate::Module>::template();
-            $crate::types::FfiBytes::from_vec(
-                $crate::json::serialize_module_descriptor_template(&template),
-            )
+            $crate::sdk::module_template_dispatch::<$module>()
         }
 
         #[unsafe(no_mangle)]
@@ -472,7 +587,8 @@ macro_rules! export_plugin_with_hash_override {
             _b: *const u8,
             _l: usize,
             _e: *const $crate::abi::HostEnv,
-        ) {
+        ) -> i32 {
+            $crate::types::FFI_ENTRY_OK
         }
 
         #[unsafe(no_mangle)]
@@ -481,7 +597,8 @@ macro_rules! export_plugin_with_hash_override {
             _b: *const u8,
             _l: usize,
             _e: *const $crate::abi::HostEnv,
-        ) {
+        ) -> i32 {
+            $crate::types::FFI_ENTRY_OK
         }
 
         #[unsafe(no_mangle)]
@@ -492,7 +609,8 @@ macro_rules! export_plugin_with_hash_override {
             _cp: *mut [$crate::cables::CableValue; 2],
             _cl: usize,
             _w: usize,
-        ) {
+        ) -> i32 {
+            $crate::types::FFI_ENTRY_OK
         }
 
         #[unsafe(no_mangle)]
@@ -586,10 +704,7 @@ macro_rules! export_modules {
                 use super::*;
 
                 pub extern "C" fn module_template() -> $crate::types::FfiBytes {
-                    let template = <$module as $crate::Module>::template();
-                    $crate::types::FfiBytes::from_vec(
-                        $crate::json::serialize_module_descriptor_template(&template),
-                    )
+                    $crate::sdk::module_template_dispatch::<$module>()
                 }
 
                 pub unsafe extern "C" fn prepare(
@@ -621,20 +736,13 @@ macro_rules! export_modules {
                     bytes: *const u8,
                     len: usize,
                     _env: *const $crate::abi::HostEnv,
-                ) {
-                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr.
-                    let inst = unsafe {
-                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-                    };
-                    // SAFETY: host promises bytes/len is a valid slice.
-                    let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
-                    if let ::std::result::Result::Ok(view) =
-                        $crate::sdk::decode_param_frame(slice, &inst.param_index)
-                    {
-                        $crate::Module::update_validated_parameters(
-                            &mut inst.module,
-                            &view,
-                        );
+                ) -> i32 {
+                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr;
+                    // bytes/len is a valid slice for the call.
+                    unsafe {
+                        $crate::sdk::update_validated_parameters_dispatch::<$module>(
+                            handle, bytes, len,
+                        )
                     }
                 }
 
@@ -643,31 +751,10 @@ macro_rules! export_modules {
                     bytes: *const u8,
                     len: usize,
                     _env: *const $crate::abi::HostEnv,
-                ) {
-                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr.
-                    let inst = unsafe {
-                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-                    };
-                    // SAFETY: valid slice for the call.
-                    let slice = unsafe { ::std::slice::from_raw_parts(bytes, len) };
-                    let view =
-                        match $crate::sdk::decode_port_frame(slice, &inst.port_layout) {
-                            ::std::result::Result::Ok(v) => v,
-                            ::std::result::Result::Err(_) => return,
-                        };
-                    inst.input_buf.clear();
-                    inst.output_buf.clear();
-                    for i in 0..view.input_count() {
-                        inst.input_buf.push(view.input(i).into());
-                    }
-                    for i in 0..view.output_count() {
-                        inst.output_buf.push(view.output(i).into());
-                    }
-                    $crate::Module::set_ports(
-                        &mut inst.module,
-                        &inst.input_buf,
-                        &inst.output_buf,
-                    );
+                ) -> i32 {
+                    // SAFETY: handle is a live `Box<PluginInstance<M>>` raw ptr;
+                    // bytes/len is a valid slice for the call.
+                    unsafe { $crate::sdk::set_ports_dispatch::<$module>(handle, bytes, len) }
                 }
 
                 pub unsafe extern "C" fn process(
@@ -677,22 +764,15 @@ macro_rules! export_modules {
                     cycle_ptr: *mut [$crate::cables::CableValue; 2],
                     cycle_len: usize,
                     write_index: usize,
-                ) {
+                ) -> i32 {
                     // SAFETY: see export_modules! docs; host supplies valid
                     // exclusive scratch and cycle pool slices (ABI v10).
-                    let inst = unsafe {
-                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-                    };
-                    let scratch = unsafe {
-                        ::std::slice::from_raw_parts_mut(scratch_ptr, scratch_len)
-                    };
-                    let cycle = unsafe {
-                        ::std::slice::from_raw_parts_mut(cycle_ptr, cycle_len)
-                    };
-                    let mut pool = $crate::cable_pool::CablePool::new(
-                        scratch, cycle, write_index,
-                    );
-                    $crate::Module::process(&mut inst.module, &mut pool);
+                    unsafe {
+                        $crate::sdk::process_dispatch::<$module>(
+                            handle, scratch_ptr, scratch_len, cycle_ptr, cycle_len,
+                            write_index,
+                        )
+                    }
                 }
 
                 pub unsafe extern "C" fn periodic_update(
@@ -704,42 +784,17 @@ macro_rules! export_modules {
                     write_index: usize,
                 ) -> i32 {
                     // SAFETY: same contract as process; read-only use.
-                    let inst = unsafe {
-                        &mut *(handle as *mut $crate::sdk::PluginInstance<$module>)
-                    };
-                    let scratch = unsafe {
-                        ::std::slice::from_raw_parts_mut(
-                            scratch_ptr as *mut $crate::cables::CableValue,
-                            scratch_len,
+                    unsafe {
+                        $crate::sdk::periodic_update_dispatch::<$module>(
+                            handle, scratch_ptr, scratch_len, cycle_ptr, cycle_len,
+                            write_index,
                         )
-                    };
-                    let cycle = unsafe {
-                        ::std::slice::from_raw_parts_mut(
-                            cycle_ptr as *mut [$crate::cables::CableValue; 2],
-                            cycle_len,
-                        )
-                    };
-                    let pool = $crate::cable_pool::CablePool::new(
-                        scratch, cycle, write_index,
-                    );
-                    if $crate::Module::wants_periodic(&inst.module) {
-                        $crate::Module::periodic_update(&mut inst.module, &pool);
-                        1
-                    } else {
-                        0
                     }
                 }
 
                 pub unsafe extern "C" fn drop_handle(handle: *mut ::std::ffi::c_void) {
-                    if handle.is_null() {
-                        return;
-                    }
                     // SAFETY: handle came from Box::into_raw in prepare.
-                    let _ = unsafe {
-                        ::std::boxed::Box::from_raw(
-                            handle as *mut $crate::sdk::PluginInstance<$module>,
-                        )
-                    };
+                    unsafe { $crate::sdk::drop_dispatch::<$module>(handle) }
                 }
 
                 pub extern "C" fn free_bytes(bytes: $crate::types::FfiBytes) {
@@ -770,9 +825,7 @@ macro_rules! export_modules {
 
                 #[unsafe(export_name = concat!("patches_plugin_descriptor_hash_", $name))]
                 pub extern "C" fn descriptor_hash() -> u64 {
-                    let template = <$module as $crate::Module>::template();
-                    let desc = template.build_channels($crate::ModuleShape::default().channels as u32);
-                    $crate::descriptor_hash(&desc)
+                    $crate::sdk::descriptor_hash_dispatch::<$module>()
                 }
             }
         )+

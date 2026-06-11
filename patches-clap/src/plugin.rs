@@ -441,29 +441,55 @@ unsafe extern "C" fn plugin_process(
         dlog!("process: null process ptr");
         return CLAP_PROCESS_CONTINUE;
     }
-    let p = plugin_mut(plugin);
-    let Some(proc) = p.processor.as_mut() else {
-        dlog!("process: no processor");
-        return CLAP_PROCESS_CONTINUE;
-    };
 
-    try_adopt_pending(p.plan_rx.as_mut(), proc);
+    // ADR 0051 / E163 ticket 0996: fence the *entire* CLAP process callback —
+    // plan adoption (`try_adopt_pending`, which drives the FFI `set_ports`
+    // path), event ingest, transport, and the tick loop — not just
+    // `PatchProcessor::tick`. An unwind escaping this `extern "C"` frame is a
+    // process abort (Rust 1.81), which would take the host DAW down. On a
+    // caught panic we record a clean sticky halt and report CONTINUE; the
+    // engine then produces silence. Zero-cost on the happy path (unwind
+    // tables; `panic = "unwind"` mandated by ADR 0051). `plugin` / `process`
+    // are raw pointers (Copy) captured by value; the closure re-derives the
+    // processor borrow internally to avoid a cross-closure borrow tangle.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        let p = plugin_mut(plugin);
+        let Some(proc) = p.processor.as_mut() else {
+            dlog!("process: no processor");
+            return CLAP_PROCESS_CONTINUE;
+        };
 
-    let pr = &*process;
-    let frames = pr.frames_count as usize;
-    if frames == 0 {
-        return CLAP_PROCESS_CONTINUE;
+        try_adopt_pending(p.plan_rx.as_mut(), proc);
+
+        let pr = &*process;
+        let frames = pr.frames_count as usize;
+        if frames == 0 {
+            return CLAP_PROCESS_CONTINUE;
+        }
+        let Some(out_buf) = output_buffer(pr) else {
+            return CLAP_PROCESS_CONTINUE;
+        };
+        let (in_l, in_r) = read_input_ptrs(pr);
+
+        ingest_events(proc, pr.in_events, frames);
+        write_transport_state(&mut p.prev_beat, &mut p.prev_bar, proc, pr.transport);
+        run_sample_loop(proc, &p.meter, in_l, in_r, out_buf, frames);
+
+        CLAP_PROCESS_CONTINUE
+    }));
+
+    match result {
+        Ok(status) => status,
+        Err(payload) => {
+            // Re-derive the processor to record the halt; the closure's
+            // borrow has ended.
+            let p = plugin_mut(plugin);
+            if let Some(proc) = p.processor.as_mut() {
+                proc.record_callback_halt(payload);
+            }
+            CLAP_PROCESS_CONTINUE
+        }
     }
-    let Some(out_buf) = output_buffer(pr) else {
-        return CLAP_PROCESS_CONTINUE;
-    };
-    let (in_l, in_r) = read_input_ptrs(pr);
-
-    ingest_events(proc, pr.in_events, frames);
-    write_transport_state(&mut p.prev_beat, &mut p.prev_bar, proc, pr.transport);
-    run_sample_loop(proc, &p.meter, in_l, in_r, out_buf, frames);
-
-    CLAP_PROCESS_CONTINUE
 }
 
 /// Resolve the primary output buffer if the host provided a usable one.

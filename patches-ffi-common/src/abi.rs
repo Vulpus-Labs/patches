@@ -20,21 +20,29 @@ pub type Handle = *mut c_void;
 /// Delivers a complete snapshot of the module's parameters in the wire
 /// format dictated by the module's `ParamLayout`. Pointers are valid only
 /// for the duration of the call; scalars must be copied if kept.
+///
+/// Returns [`crate::types::FFI_ENTRY_OK`], or
+/// [`crate::types::FFI_ENTRY_PANIC`] if the plugin-side fence caught a
+/// panic in the module's `update_validated_parameters` (ticket 0995).
 pub type UpdateValidatedParametersFn = unsafe extern "C" fn(
     handle: Handle,
     bytes: *const u8,
     len: usize,
     env: *const HostEnv,
-);
+) -> i32;
 
 /// Packed port frame entry: `set_ports`. Same lifetime rules as
 /// [`UpdateValidatedParametersFn`]; no allocation or blocking permitted.
+///
+/// Returns [`crate::types::FFI_ENTRY_OK`], or
+/// [`crate::types::FFI_ENTRY_PANIC`] if the plugin-side fence caught a
+/// panic in the module's `set_ports` (ticket 0995).
 pub type SetPortsFn = unsafe extern "C" fn(
     handle: Handle,
     bytes: *const u8,
     len: usize,
     env: *const HostEnv,
-);
+) -> i32;
 
 /// Audio-thread process entry: one tick of sample work.
 ///

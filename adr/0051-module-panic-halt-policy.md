@@ -98,3 +98,54 @@ Concretely:
 - **Automatic rebuild on panic.** A deterministically-panicking module
   would trigger a rebuild loop at sample rate. Rejected; recovery is a
   user action.
+
+---
+
+## Amendment — 2026-06-11 (E163): fence boundary = the whole audio callback
+
+The original decision fenced `PatchProcessor::tick` only, and assumed the
+unwind would reach the host-side `catch_unwind`. Two gaps surfaced in the
+2026-06 holistic review:
+
+1. **Plan adoption runs outside the tick fence.** `adopt_plan_with_meta`
+   executes on the same audio callback *before* `tick` — it installs
+   modules, calls their `set_ports`, and drops tombstoned modules. A panic
+   there (a panicking plugin `Drop`/`set_ports`, or a planner-invariant
+   failure) unwound uncaught through the CPAL closure / CLAP `extern "C"`
+   frame: abort, not clean halt.
+
+2. **An unwind never crosses an `extern "C"` boundary.** Since Rust 1.81 an
+   unwind escaping an `extern "C"` function is a guaranteed process abort.
+   A panic inside a plugin's own `process` aborts in the *plugin's* frame,
+   before control returns to the host — so the host-side `tick` fence can
+   never see it. The plugin needs its own fence.
+
+The fence boundary is therefore redefined as **the entire audio callback**,
+with two cooperating layers:
+
+1. **Host-side callback fence (ticket 0996).** `patches-cpal` and
+   `patches-clap` wrap their whole audio callback — plan adoption, MIDI
+   ingest, the tick loop, and the record/meter flush — in
+   `catch_unwind`. On `Err` they call
+   `PatchProcessor::record_callback_halt`, which records a sticky halt
+   against `NO_SLOT` (there is no per-module breadcrumb during adoption).
+   The inner `tick` fence (point 2 of the original decision) is retained,
+   nested, for per-module attribution; the outer fence is the backstop for
+   everything else. Both are zero-cost on the happy path with unwind
+   tables. `adopt_plan_with_meta`'s invariant checks are now uniform
+   `debug_assert`s (no bare release `expect`), degrading to skipped work in
+   release under the fence.
+
+2. **Plugin-side SDK fence (ticket 0995).** The `export_plugin!` /
+   `export_modules!` / `export_plugin_with_hash_override!` macros route every
+   user-code call (`process`, `set_ports`, `update_validated_parameters`,
+   `periodic_update`, `prepare`, `template`) through
+   `patches_ffi_common::sdk::fence`, a `catch_unwind` inside the plugin.
+   The audio-thread entry points return `FFI_ENTRY_OK` / `FFI_ENTRY_PANIC`
+   (ABI v13); on `FFI_ENTRY_PANIC` the host loader re-raises a panic on the
+   host side of the boundary (`DylibModule::ffi_panic`), where the tick /
+   callback fence above turns it into a clean halt. `prepare` panics are
+   surfaced as a `PREPARE_ERR_PREPARE` build error instead. This is the
+   per-path fence the original ADR rejected for *native* modules — but FFI
+   leaves no choice, since the abort happens before the host regains
+   control.

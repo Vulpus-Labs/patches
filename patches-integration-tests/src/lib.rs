@@ -328,6 +328,23 @@ impl HeadlessEngine {
         self.processor.adopt_plan(plan);
     }
 
+    /// Adopt a plan behind the host-style audio-callback panic fence
+    /// (ADR 0051 / E163 ticket 0996). A panic during adoption is caught and
+    /// recorded as a clean halt via the same public API the CPAL/CLAP
+    /// callbacks now use (`catch_unwind` + `PatchProcessor::record_callback_halt`),
+    /// rather than unwinding — which in a real `extern "C"` host callback is a
+    /// process abort. Lets headless tests exercise the widened fence without a
+    /// live audio device.
+    pub fn adopt_plan_guarded(&mut self, plan: ExecutionPlan) {
+        let proc = &mut self.processor;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            proc.adopt_plan(plan);
+        }));
+        if let Err(payload) = result {
+            proc.record_callback_halt(payload);
+        }
+    }
+
     /// Write a MIDI event to the GLOBAL_MIDI backplane slot.
     pub fn send_midi(&mut self, event: MidiEvent) {
         self.processor.prepare_midi_block(1);

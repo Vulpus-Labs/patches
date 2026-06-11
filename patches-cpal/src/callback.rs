@@ -193,63 +193,77 @@ impl AudioCallback {
         // Per-callback because some hosts reset MXCSR between calls. See E134.
         let _ftz_guard = patches_engine::FtzGuard::enable();
 
-        let playback_time = Instant::now();
+        // ADR 0051 / E163 ticket 0996: fence the *entire* audio callback —
+        // plan adoption, MIDI ingest, the tick loop, and the record flush —
+        // not just `PatchProcessor::tick`. Plan adoption (`receive_plan`) and
+        // the FFI `set_ports` it triggers run here, outside `tick`'s
+        // per-module catch; an unwind escaping this CPAL closure would abort
+        // the host. On a caught panic we record a clean halt and return
+        // silence-equivalent output (the tick loop already wrote zeros up to
+        // the panic point). Zero-cost on the happy path with unwind tables.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let playback_time = Instant::now();
 
-        self.receive_plan();
+            self.receive_plan();
 
-        self.record_scratch.clear();
+            self.record_scratch.clear();
 
-        let frames = if self.channels > 0 {
-            data.len() >> self.channel_shift
-        } else {
-            0
-        };
-        let mut remaining = frames;
-        let mut out_i: usize = 0;
+            let frames = if self.channels > 0 {
+                data.len() >> self.channel_shift
+            } else {
+                0
+            };
+            let mut remaining = frames;
+            let mut out_i: usize = 0;
 
-        while remaining > 0 {
-            if self.samples_until_next_midi == SUB_BLOCK_SIZE as usize {
-                // Block-rate MIDI ingest (ADR 0069). One drain per
-                // sub-block; events stamped at their sub-block-relative
-                // inner-tick offset rather than collapsed to row 0.
-                self.processor
-                    .prepare_midi_block(self.control_period as usize);
-                if let Some(eq) = self.event_queue.as_mut() {
-                    for (offset, event) in
-                        eq.drain_window(self.sample_counter, self.control_period)
-                    {
-                        self.processor.write_midi_event(offset as u16, event);
+            while remaining > 0 {
+                if self.samples_until_next_midi == SUB_BLOCK_SIZE as usize {
+                    // Block-rate MIDI ingest (ADR 0069). One drain per
+                    // sub-block; events stamped at their sub-block-relative
+                    // inner-tick offset rather than collapsed to row 0.
+                    self.processor
+                        .prepare_midi_block(self.control_period as usize);
+                    if let Some(eq) = self.event_queue.as_mut() {
+                        for (offset, event) in
+                            eq.drain_window(self.sample_counter, self.control_period)
+                        {
+                            self.processor.write_midi_event(offset as u16, event);
+                        }
+                    }
+                }
+
+                let chunk = self.samples_until_next_midi.min(remaining);
+
+                self.process_chunk(data, &mut out_i, chunk);
+
+                self.samples_until_next_midi -= chunk;
+                remaining -= chunk;
+
+                if self.samples_until_next_midi == 0 {
+                    self.sample_counter += self.control_period;
+                    self.samples_until_next_midi = SUB_BLOCK_SIZE as usize;
+                }
+            }
+
+            if let Some(ref mut tx) = self.record_tx {
+                let muted = self
+                    .record_muted
+                    .as_ref()
+                    .is_some_and(|m| m.load(Ordering::Relaxed));
+                if !muted {
+                    for &frame in &self.record_scratch {
+                        let _ = tx.push(frame);
                     }
                 }
             }
 
-            let chunk = self.samples_until_next_midi.min(remaining);
+            // SAFETY: see field doc.
+            unsafe { &*self.clock }.publish(self.sample_counter, playback_time);
+        }));
 
-            self.process_chunk(data, &mut out_i, chunk);
-
-            self.samples_until_next_midi -= chunk;
-            remaining -= chunk;
-
-            if self.samples_until_next_midi == 0 {
-                self.sample_counter += self.control_period;
-                self.samples_until_next_midi = SUB_BLOCK_SIZE as usize;
-            }
+        if let Err(payload) = result {
+            self.processor.record_callback_halt(payload);
         }
-
-        if let Some(ref mut tx) = self.record_tx {
-            let muted = self
-                .record_muted
-                .as_ref()
-                .is_some_and(|m| m.load(Ordering::Relaxed));
-            if !muted {
-                for &frame in &self.record_scratch {
-                    let _ = tx.push(frame);
-                }
-            }
-        }
-
-        // SAFETY: see field doc.
-        unsafe { &*self.clock }.publish(self.sample_counter, playback_time);
     }
 }
 

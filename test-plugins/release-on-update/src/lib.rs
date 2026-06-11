@@ -18,7 +18,7 @@ use patches_sdk::port_frame::PortLayout;
 use patches_sdk::sdk::{decode_param_frame, PluginInstance};
 use patches_sdk::types::{
     FfiAudioEnvironment, FfiBytes, FfiPluginManifest, FfiPluginVTable,
-    ABI_VERSION,
+    ABI_VERSION, FFI_ENTRY_OK,
 };
 use patches_sdk::{StructuralParams, BuildError};
 use patches_sdk::{descriptor_hash, json};
@@ -123,14 +123,15 @@ pub unsafe extern "C" fn __rop_update(
     bytes: *const u8,
     len: usize,
     env: *const HostEnv,
-) {
+) -> i32 {
     let inst = unsafe { &mut *(handle as *mut PluginInstance<Stub>) };
     let slice = unsafe { std::slice::from_raw_parts(bytes, len) };
     let _view = match decode_param_frame(slice, &inst.param_index) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return FFI_ENTRY_OK,
     };
     let _ = env;
+    FFI_ENTRY_OK
 }
 
 #[unsafe(no_mangle)]
@@ -139,7 +140,8 @@ pub extern "C" fn __rop_set_ports(
     _b: *const u8,
     _l: usize,
     _e: *const HostEnv,
-) {
+) -> i32 {
+    FFI_ENTRY_OK
 }
 
 #[unsafe(no_mangle)]
@@ -150,7 +152,8 @@ pub extern "C" fn __rop_process(
     _cp: *mut [CableValue; 2],
     _cl: usize,
     _w: usize,
-) {
+) -> i32 {
+    FFI_ENTRY_OK
 }
 
 #[unsafe(no_mangle)]

@@ -23,7 +23,12 @@ use patches_core::cables::CableValue;
 /// numeric values shift. Precondition for ticket 0870, which will
 /// cut the backplane out of the plugin-visible scratch view so
 /// future backplane reorgs no longer force ABI bumps.
-pub const ABI_VERSION: u32 = 12;
+/// v13: `FfiBytes` gained a `cap` field so `reclaim` can rebuild the
+/// `Vec` with its original capacity (ticket 0994, E163). Deallocating
+/// with `capacity == len` when the source `Vec` had spare capacity is
+/// UB per the `GlobalAlloc` contract; the field closes that gap. The
+/// struct layout changed, so stale plugins must rebuild.
+pub const ABI_VERSION: u32 = 13;
 
 // ── prepare status codes ─────────────────────────────────────────────────────
 
@@ -37,6 +42,21 @@ pub const PREPARE_ERR_DESCRIPTOR_JSON: i32 = 2;
 /// The structural blob was malformed (wrong slot count, bad tag, etc.).
 pub const PREPARE_ERR_STRUCTURAL_BLOB: i32 = 3;
 
+// ── audio-thread entry-point status codes ─────────────────────────────────────
+
+/// User module code ran to completion without panicking. The normal
+/// return of every audio-thread entry point (`process`, `set_ports`,
+/// `update_validated_parameters`).
+pub const FFI_ENTRY_OK: i32 = 0;
+/// User module code panicked and the plugin-side fence (ADR 0051) caught
+/// the unwind, returning this sentinel instead of letting it cross the
+/// `extern "C"` boundary — a guaranteed process abort since Rust 1.81.
+/// The host re-raises a panic into its own tick / audio-callback fence so
+/// the existing halt machinery records a clean halt (ticket 0995, E163).
+///
+/// Distinct from `periodic_update`'s `0` (did-not-run) / `1` (ran) codes.
+pub const FFI_ENTRY_PANIC: i32 = -1;
+
 // ── FfiBytes ─────────────────────────────────────────────────────────────────
 
 /// An owned byte buffer allocated by the plugin side.
@@ -45,10 +65,17 @@ pub const PREPARE_ERR_STRUCTURAL_BLOB: i32 = 3;
 /// plugin deallocate. This avoids cross-allocator double-free issues.
 ///
 /// A null `ptr` with `len == 0` represents an empty / absent buffer.
+///
+/// `cap` carries the source `Vec`'s capacity so [`reclaim`](Self::reclaim)
+/// can rebuild it with the exact `Layout` the allocator handed out.
+/// Reclaiming with `cap == len` when the original `Vec` had spare capacity
+/// deallocates with the wrong layout — UB per the `GlobalAlloc` contract
+/// (ticket 0994).
 #[repr(C)]
 pub struct FfiBytes {
     pub ptr: *mut u8,
     pub len: usize,
+    pub cap: usize,
 }
 
 impl FfiBytes {
@@ -58,12 +85,12 @@ impl FfiBytes {
     /// [`FfiBytes::reclaim`] or the vtable's `free_bytes`.
     pub fn from_vec(v: Vec<u8>) -> Self {
         let mut v = std::mem::ManuallyDrop::new(v);
-        Self { ptr: v.as_mut_ptr(), len: v.len() }
+        Self { ptr: v.as_mut_ptr(), len: v.len(), cap: v.capacity() }
     }
 
     /// An empty (null) buffer.
     pub fn empty() -> Self {
-        Self { ptr: std::ptr::null_mut(), len: 0 }
+        Self { ptr: std::ptr::null_mut(), len: 0, cap: 0 }
     }
 
     /// Read the contents as a byte slice without taking ownership.
@@ -87,7 +114,7 @@ impl FfiBytes {
         if self.ptr.is_null() {
             Vec::new()
         } else {
-            unsafe { Vec::from_raw_parts(self.ptr, self.len, self.len) }
+            unsafe { Vec::from_raw_parts(self.ptr, self.len, self.cap) }
         }
     }
 }
@@ -355,6 +382,10 @@ pub struct FfiPluginVTable {
     /// Scratch cable indices delivered via `set_ports` are pre-
     /// translated into plugin-relative space (see [`crate::pack_ports_into`]);
     /// cycle indices pass through unchanged.
+    /// Returns [`FFI_ENTRY_OK`], or [`FFI_ENTRY_PANIC`] if the plugin-side
+    /// fence (ADR 0051) caught a panic in the module's `process` (ticket
+    /// 0995). The host re-raises the panic into its tick fence on
+    /// `FFI_ENTRY_PANIC`.
     pub process: unsafe extern "C" fn(
         handle: *mut c_void,
         scratch_ptr: *mut CableValue,
@@ -362,13 +393,16 @@ pub struct FfiPluginVTable {
         cycle_ptr: *mut [CableValue; 2],
         cycle_len: usize,
         write_index: usize,
-    ),
+    ) -> i32,
 
     /// Audio-thread: packed `PortFrame` wire bytes (see ADR 0045 §5).
     pub set_ports: crate::abi::SetPortsFn,
 
     /// Periodic non-audio update path. Same scratch+cycle split as
-    /// `process` but `*const` pointers (read-only).
+    /// `process` but `*const` pointers (read-only). Returns `0`
+    /// (module declined — `wants_periodic` was false), `1` (ran), or
+    /// [`FFI_ENTRY_PANIC`] if the plugin-side fence caught a panic
+    /// (ticket 0995).
     pub periodic_update: unsafe extern "C" fn(
         handle: *mut c_void,
         scratch_ptr: *const CableValue,
@@ -530,11 +564,31 @@ mod tests {
         assert_eq!(reclaimed, data);
     }
 
+    /// The UB case ticket 0994 fixes: a `Vec` with `capacity > len` must
+    /// reclaim with its original capacity, not `len`, or the allocator
+    /// frees with the wrong `Layout`. Run under Miri to actually exercise
+    /// the dealloc-layout check (`cargo +nightly miri test -p
+    /// patches-ffi-common ffi_bytes_capacity`).
+    #[test]
+    fn ffi_bytes_capacity_gt_len_round_trip() {
+        let mut data: Vec<u8> = Vec::with_capacity(64);
+        data.extend_from_slice(&[1, 2, 3]);
+        assert!(data.capacity() >= 64);
+        let orig_cap = data.capacity();
+        let ffi = FfiBytes::from_vec(data);
+        assert_eq!(ffi.len, 3);
+        assert_eq!(ffi.cap, orig_cap);
+        let reclaimed = unsafe { ffi.reclaim() };
+        assert_eq!(reclaimed, vec![1, 2, 3]);
+        assert_eq!(reclaimed.capacity(), orig_cap);
+    }
+
     #[test]
     fn ffi_bytes_empty() {
         let ffi = FfiBytes::empty();
         assert!(ffi.ptr.is_null());
         assert_eq!(ffi.len, 0);
+        assert_eq!(ffi.cap, 0);
         let slice = unsafe { ffi.as_slice() };
         assert!(slice.is_empty());
     }
@@ -547,16 +601,16 @@ mod tests {
     ) -> i32 { PREPARE_ERR_PREPARE }
     unsafe extern "C" fn stub_uvp(
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
-    ) {}
+    ) -> i32 { FFI_ENTRY_OK }
     unsafe extern "C" fn stub_process(
         _h: *mut c_void,
         _sp: *mut CableValue, _sl: usize,
         _cp: *mut [CableValue; 2], _cl: usize,
         _w: usize,
-    ) {}
+    ) -> i32 { FFI_ENTRY_OK }
     unsafe extern "C" fn stub_set_ports(
         _h: crate::abi::Handle, _b: *const u8, _l: usize, _e: *const crate::abi::HostEnv,
-    ) {}
+    ) -> i32 { FFI_ENTRY_OK }
     unsafe extern "C" fn stub_periodic(
         _h: *mut c_void,
         _sp: *const CableValue, _sl: usize,
