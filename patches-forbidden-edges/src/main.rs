@@ -19,6 +19,25 @@ const FORBIDDEN: &[(&str, &str, &str)] = &[
     ("patches-lsp", "patches-modules", "LSP must stay shape-only via patches-manifest"),
 ];
 
+/// Crates whose *normal* (non-dev, non-build) direct dependency set is
+/// restricted to an allowlist. Any normal dep not in the allowlist is a
+/// violation — this turns a documented layering claim into an enforced
+/// one. Additions to an allowlist must be deliberate (and ADR-worthy).
+///
+/// Format: (crate, allowed-normal-deps, reason).
+const DEP_ALLOWLIST: &[(&str, &[&str], &str)] = &[
+    (
+        // CLAUDE.md's load-bearing leaf claim: patches-dsp has no
+        // patches-core / CPAL / serde footprint. rtrb (lock-free ring
+        // buffers) is the only permitted dep. Previously true only by
+        // luck (ticket 1002).
+        "patches-dsp",
+        &["rtrb"],
+        "DSP leaf crate must stay free of patches-core / CPAL / serde \
+         (CLAUDE.md); only rtrb is permitted",
+    ),
+];
+
 /// Leaf crates that must not appear as a direct dep of any other crate.
 const LEAF_CRATES: &[&str] = &[
     "patches-player",
@@ -87,6 +106,20 @@ fn main() -> ExitCode {
                 violations.push(format!(
                     "  {name} -> {dep_name}\n      reason: leaf crate `{dep_name}` must not appear as a dep"
                 ));
+            }
+
+            // Allowlist enforcement on normal deps only — dev / build
+            // dependencies (tests, build scripts) are exempt. `kind` is
+            // absent / null for a normal dependency.
+            let is_normal = dep.get("kind").and_then(Value::as_str).is_none();
+            if is_normal {
+                for (crate_name, allowed, reason) in DEP_ALLOWLIST {
+                    if name == *crate_name && !allowed.contains(&dep_name) {
+                        violations.push(format!(
+                            "  {name} -> {dep_name}\n      reason: {reason}"
+                        ));
+                    }
+                }
             }
         }
     }

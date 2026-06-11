@@ -11,9 +11,15 @@
 //! - `arb_graph` — builds a [`ModuleGraph`] of 1–10 nodes with edges that
 //!   respect [`ModuleGraph::connect`]'s kind rules, so every generated
 //!   graph is plan-buildable (no `CableKindMismatch`).
-//! - `arb_edit` / `arb_history` — variants spanning `AddNode | RemoveNode |
-//!   AddEdge | RemoveEdge | ChangeParam | ChangeStructural`, capped at 20
-//!   edits per history (small counter-examples shrink readably).
+//! - `arb_edit` / `arb_history` — structural-edit variants spanning
+//!   `AddNode | RemoveNode | AddEdge | RemoveEdge`, capped at 20 edits per
+//!   history (small counter-examples shrink readably). Param / structural
+//!   *value* edits are deliberately absent: `ModuleGraph` exposes no
+//!   mutate-in-place API, so they could only ever be no-ops here. The
+//!   param-diff / structural-change classification they would have
+//!   exercised is covered directly by the `classify_nodes` fixture tests
+//!   in `src/state/tests.rs` (ticket 1002). Re-add value edits here once a
+//!   ModuleGraph mutation API lands (0982/0983).
 //! - `registry()` — a minimal [`Registry`] mirroring the descriptor pool so
 //!   `PatchBuilder::build_patch` succeeds on every generated graph.
 //!
@@ -492,8 +498,6 @@ pub enum Edit {
     RemoveNode { idx: usize },
     AddEdge { from: usize, out_slot: usize, to: usize, in_slot: usize },
     RemoveEdge { to: usize, in_slot: usize },
-    ChangeParam { idx: usize, value_bits: u32 },
-    ChangeStructural { idx: usize, value: u32 },
 }
 
 /// One edit. Indices are unbounded `usize` from the strategy; appliers
@@ -510,11 +514,6 @@ pub fn arb_edit() -> impl Strategy<Value = Edit> {
                 in_slot,
             }),
         (0usize..16, 0usize..3).prop_map(|(to, in_slot)| Edit::RemoveEdge { to, in_slot }),
-        (0usize..16, any::<u32>()).prop_map(|(idx, bits)| Edit::ChangeParam {
-            idx,
-            value_bits: bits,
-        }),
-        (0usize..16, any::<u32>()).prop_map(|(idx, value)| Edit::ChangeStructural { idx, value }),
     ]
 }
 
@@ -614,13 +613,6 @@ pub fn apply_history(seed_plan: &GraphPlan, history: &[Edit]) -> ModuleGraph {
                         PortRef { name: edge.4, index: edge.5 },
                     );
                 }
-            }
-            Edit::ChangeParam { .. } | Edit::ChangeStructural { .. } => {
-                // ParameterMap / StructuralParams are stored on the
-                // graph node but `ModuleGraph` exposes no mutate-in-place
-                // API yet; treating these as no-ops keeps the variant
-                // present in the history for 0982/0983 to upgrade once
-                // the API lands. Shrinker behaviour is unaffected.
             }
         }
     }

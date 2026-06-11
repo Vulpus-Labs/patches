@@ -27,12 +27,17 @@ push:
     ./tools/run-push.sh
     @just _sweep
 
-# Smoke: push + slow / integration / plugin scanner / LSP / CLAP suites.
-# No doctests anywhere.
+# Smoke: push + expensive suites push doesn't run. No doctests anywhere.
+#
+# `push` already runs `cargo test --workspace --tests` (see run-push.sh),
+# which covers integration-tests / clap / lsp with default features — so
+# re-running them here added nothing (ticket 1002). ADR 0067 defines smoke
+# as push + *extra*. The genuine extra is the allocator-trap run: the
+# integration suite with `audio-thread-allocator-trap` armed, which aborts
+# if any module allocates on the audio thread (ticket 0997). This is the
+# only tier that self-detects that defect class.
 smoke: push
-    cargo test --tests -p patches-integration-tests
-    cargo test --tests -p patches-clap
-    cargo test --tests -p patches-lsp
+    cargo test --tests -p patches-integration-tests --features audio-thread-allocator-trap
     @just _sweep
 
 # Mutation testing on patches-planner (E161 / 0984). Wrapper traps

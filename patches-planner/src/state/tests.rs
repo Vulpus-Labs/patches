@@ -207,6 +207,39 @@ fn classify_surviving_param_changed_produces_diff() {
     }
 }
 
+// Covers the `prev_ns.structural == new_structural` survival guard: a node
+// whose structural params changed must reinstall, not update. This is the
+// regression class the `ChangeStructural` proptest history arm stubbed
+// (ticket 1002).
+#[test]
+fn classify_structural_changed_node_is_install() {
+    let desc = osc_desc();
+    let mut new_structural = patches_core::StructuralParams::new();
+    new_structural.insert("table_size", 0, patches_core::StructuralValue::Int(2048));
+
+    let mut graph = ModuleGraph::new();
+    graph
+        .add_module_with_structural("osc", desc.clone(), &ParameterMap::new(), &new_structural)
+        .unwrap();
+
+    // prev had empty structural — `prev_with_node` seeds StructuralParams::new().
+    let prev = prev_with_node(
+        &NodeId::from("osc"),
+        desc.module_name,
+        desc.shape,
+        ParameterMap::new(),
+        PortConnectivity::new(desc.inputs.len(), desc.outputs.len()),
+    );
+
+    let order = vec![NodeId::from("osc")];
+    let index = GraphIndex::build(&graph);
+    let decisions = classify_nodes(&index, &order, &prev).unwrap();
+    assert!(
+        matches!(decisions[0].1, NodeDecision::Install { .. }),
+        "structural change must force a fresh install"
+    );
+}
+
 #[test]
 fn classify_surviving_edge_added_connectivity_changed() {
     let od = osc_desc();

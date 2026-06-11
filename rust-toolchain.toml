@@ -1,2 +1,10 @@
+# Pinned to a specific stable rather than the floating `stable` channel.
+#
+# With `channel = "stable"`, CI resolves whatever stable is newest at run
+# time while local checkouts stay on the last `rustup update` — so a new
+# clippy release can fail CI while passing locally (and vice versa). An
+# explicit version makes CI and local lint with the identical toolchain.
+# Bump deliberately (and re-run `just push`) when adopting a newer stable.
+# Ticket 1002 / ADR 0067.
 [toolchain]
-channel = "stable"
+channel = "1.95.0"
