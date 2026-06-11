@@ -37,6 +37,15 @@ use patches_core::{
     HostControlEvent, HostControlLaneKind, MAX_HOST_CONTROLS, MAX_HOST_CONTROL_BLOCK,
 };
 
+/// Hard cap on per-block host-control events. The event buffer is
+/// pre-allocated to this capacity, so `push_event` never reallocates on
+/// the audio thread (ticket 0997). CLAP's `in_events.size` is
+/// host-controlled, so without this cap a flood of automation events in
+/// one block would grow the `Vec` past capacity and allocate. 256 ≈ four
+/// events per lane at `MAX_HOST_CONTROLS = 64`, far above any realistic
+/// per-block automation density; excess events are dropped and counted.
+pub const MAX_HOST_CONTROL_EVENTS: usize = 256;
+
 /// Time constant (seconds) for the smoothed-lane one-pole filter
 /// (ADR 0068 §2.4). Hard-coded; per-control overrides can ship later
 /// via the manifest k/v map without grammar changes.
@@ -112,6 +121,10 @@ pub struct HostControlScratch {
     block_size: usize,
     /// Index of the next sample row to consume.
     sample_idx: usize,
+    /// Count of events dropped because the per-block buffer was already
+    /// at [`MAX_HOST_CONTROL_EVENTS`]. Monotonic diagnostic; non-zero
+    /// means a host exceeded the event-density cap (ticket 0997).
+    dropped_events: u64,
 }
 
 impl HostControlScratch {
@@ -131,11 +144,12 @@ impl HostControlScratch {
             last_smoothed: [0.0; MAX_HOST_CONTROLS],
             lane_kinds: [HostControlLaneKind::Smoothed; MAX_HOST_CONTROLS],
             smooth_alpha: smooth_alpha(sample_rate),
-            events: Vec::with_capacity(256),
+            events: Vec::with_capacity(MAX_HOST_CONTROL_EVENTS),
             active_smoothing_mask: 0,
             pending_smooth_mask: 0,
             block_size: 0,
             sample_idx: 0,
+            dropped_events: 0,
         }
     }
 
@@ -166,10 +180,25 @@ impl HostControlScratch {
         if ch >= MAX_HOST_CONTROLS {
             return;
         }
+        // Drop past the pre-allocated cap rather than reallocate on the
+        // audio thread (ticket 0997). `events` was reserved to exactly
+        // MAX_HOST_CONTROL_EVENTS, so this guard keeps `push` realloc-free.
+        if self.events.len() >= MAX_HOST_CONTROL_EVENTS {
+            self.dropped_events = self.dropped_events.saturating_add(1);
+            return;
+        }
         if self.lane_kinds[ch].smoothed() {
             self.active_smoothing_mask |= 1u64 << ch;
         }
         self.events.push(event);
+    }
+
+    /// Number of events dropped because the per-block buffer hit
+    /// [`MAX_HOST_CONTROL_EVENTS`]. Non-zero indicates the host exceeded
+    /// the event-density cap; the dropped automation is lost for that
+    /// block (ticket 0997). Monotonic across the scratch's lifetime.
+    pub fn dropped_events(&self) -> u64 {
+        self.dropped_events
     }
 
     /// Run the step-fill / transpose / smooth pipeline for a host
@@ -554,6 +583,27 @@ mod tests {
         let mut s = HostControlScratch::new(SR);
         s.push_event(ev(255, 0, 1.0));
         assert_eq!(s.pending_event_count(), 0);
+    }
+
+    #[test]
+    fn events_past_cap_dropped_not_reallocated() {
+        // Ticket 0997: a host flooding automation events must not grow the
+        // pre-allocated buffer (which would allocate on the audio thread).
+        let mut s = HostControlScratch::new(SR);
+        s.set_lane_kinds(&[HostControlLaneKind::Latched; MAX_HOST_CONTROLS]);
+        let cap_before = s.events.capacity();
+
+        for i in 0..(MAX_HOST_CONTROL_EVENTS + 50) {
+            s.push_event(ev(0, (i % 64) as u16, 1.0));
+        }
+
+        assert_eq!(s.events.len(), MAX_HOST_CONTROL_EVENTS, "buffer capped");
+        assert_eq!(s.dropped_events(), 50, "overflow events counted");
+        assert_eq!(
+            s.events.capacity(),
+            cap_before,
+            "buffer must not reallocate past its pre-allocated capacity"
+        );
     }
 
     #[test]

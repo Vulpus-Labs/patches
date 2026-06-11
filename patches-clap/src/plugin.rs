@@ -438,7 +438,8 @@ unsafe extern "C" fn plugin_process(
     let _ftz_guard = patches_engine::FtzGuard::enable();
 
     if process.is_null() {
-        dlog!("process: null process ptr");
+        // No file I/O here: this guard runs on the audio thread (a host may
+        // call `process` before `activate`). Ticket 0997.
         return CLAP_PROCESS_CONTINUE;
     }
 
@@ -455,7 +456,7 @@ unsafe extern "C" fn plugin_process(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         let p = plugin_mut(plugin);
         let Some(proc) = p.processor.as_mut() else {
-            dlog!("process: no processor");
+            // Audio-thread guard — no file I/O (ticket 0997).
             return CLAP_PROCESS_CONTINUE;
         };
 

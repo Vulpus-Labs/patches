@@ -13,6 +13,14 @@ use patches_engine::processor::PatchProcessor;
 
 use crate::engine::EngineError;
 
+/// Pre-allocated frame capacity of the WAV-record scratch buffer. A host
+/// buffer larger than this in one callback would otherwise grow the `Vec`
+/// and allocate on the audio thread; past the cap, record frames are
+/// dropped (the recording truncates; audio output is unaffected). 8192
+/// frames is ~170 ms at 48 kHz — far beyond any real host period
+/// (ticket 0997).
+const RECORD_SCRATCH_FRAMES: usize = 8192;
+
 /// CPAL output callback.
 ///
 /// Wraps a [`PatchProcessor`] (the backend-agnostic engine core) with
@@ -100,7 +108,7 @@ impl AudioCallback {
             decimator_l: Decimator::new(factor_enum),
             decimator_r: Decimator::new(factor_enum),
             record_tx,
-            record_scratch: Vec::with_capacity(8192),
+            record_scratch: Vec::with_capacity(RECORD_SCRATCH_FRAMES),
             record_muted,
             input_rx,
             prev_input_frame: [0.0, 0.0],
@@ -159,7 +167,10 @@ impl AudioCallback {
                 }
             }
 
-            if self.record_tx.is_some() {
+            if self.record_tx.is_some() && self.record_scratch.len() < RECORD_SCRATCH_FRAMES {
+                // Truncate rather than reallocate on the audio thread for an
+                // over-large host buffer (ticket 0997). The buffer was
+                // reserved to exactly RECORD_SCRATCH_FRAMES.
                 self.record_scratch.push([out_l, out_r]);
             }
 
