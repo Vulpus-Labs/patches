@@ -9,8 +9,8 @@
 //!
 //! Synthesised by the DSL desugarer; never named directly in user
 //! source. Replaces `AudioTap` and `TriggerTap` from ADR 0054 §4. Stereo
-//! channels currently write only the L lane to the backplane; the
-//! width-2 stereo path lands in ticket 0740.
+//! channels currently write only the L lane to the backplane; a width-2
+//! stereo path is future work (no ticket filed yet).
 
 use patches_core::{
     params_enum,

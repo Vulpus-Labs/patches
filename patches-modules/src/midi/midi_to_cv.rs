@@ -79,7 +79,7 @@ impl NoteStack {
 /// | Port | Kind | Description |
 /// |------|------|-------------|
 /// | `voct` | mono | V/oct pitch (MIDI note 0 = 0 V, 1/12 V per semitone) |
-/// | `trigger` | mono | 1.0 for one sample after each note-on, then 0.0 |
+/// | `trigger` | trigger | 1.0 for one sample after each note-on, then 0.0 |
 /// | `gate` | mono | 1.0 while any note is held or sustain (CC 64) is active |
 /// | `mod` | mono | CC 1 (mod wheel) normalised to \[0.0, 1.0\] |
 /// | `pitch` | mono | Pitchbend normalised to \[-1.0, 1.0\] |

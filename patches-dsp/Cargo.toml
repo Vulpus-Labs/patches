@@ -16,4 +16,6 @@ path = "src/lib.rs"
 doctest = false
 
 [dependencies]
-rtrb = "0.3"
+# (none) — patches-dsp is the workspace's pure-DSP leaf crate. Keep it
+# dependency-free; the patches-forbidden-edges allowlist permits only
+# `rtrb` should a lock-free ring buffer ever be needed here (ticket 1001).

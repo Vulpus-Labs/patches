@@ -42,9 +42,11 @@ const DRIVE: usize = 2;
 /// Filter order (output tap + feedback tap).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OtaPoles {
-    /// 12 dB/oct: feedback and output from stage 1.
+    /// 12 dB/oct: output tapped from stage 1. The resonance feedback loop
+    /// always comes from stage 3 regardless of pole count (see module docs
+    /// and [`OtaPoles::k_max`]); only the output slope changes.
     Two,
-    /// 24 dB/oct: feedback and output from stage 3.
+    /// 24 dB/oct: output and feedback both from stage 3.
     Four,
 }
 

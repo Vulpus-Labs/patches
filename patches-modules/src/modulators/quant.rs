@@ -42,7 +42,7 @@ use crate::utils::quant_util::{parse_pitches, quantise_note};
 /// | Port | Kind | Description |
 /// |------|------|-------------|
 /// | `out` | mono | Quantised V/OCT pitch |
-/// | `trig_out` | mono | One-sample pulse on pitch change |
+/// | `trig_out` | trigger | One-sample pulse on pitch change |
 ///
 /// # Parameters
 ///

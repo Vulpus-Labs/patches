@@ -8,6 +8,6 @@ target/
 .claude
 mutants.out/
 mutants.out.old/
-**/.DS_STORE
+**/.DS_Store
 node_modules/
 .cargo/config.toml

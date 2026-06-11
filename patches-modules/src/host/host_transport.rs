@@ -25,8 +25,8 @@ use patches_core::param_frame::ParamView;
 /// | `tempo` | mono | Host tempo in BPM |
 /// | `beat` | mono | Fractional beat position |
 /// | `bar` | mono | Bar number |
-/// | `beat_trigger` | mono | 1.0 pulse on beat boundary |
-/// | `bar_trigger` | mono | 1.0 pulse on bar boundary |
+/// | `beat_trigger` | trigger | 1.0 pulse on beat boundary |
+/// | `bar_trigger` | trigger | 1.0 pulse on bar boundary |
 /// | `tsig_num` | mono | Time signature numerator |
 /// | `tsig_denom` | mono | Time signature denominator |
 pub struct HostTransport {

@@ -48,9 +48,10 @@ impl<'a> Expander<'a> {
         };
 
         // Tap-endpoint cables are sugar (ADR 0054): the desugarer (ticket
-        // 0697) rewrites them onto synthetic `~audio_tap` / `~trigger_tap`
-        // module instances before they reach this expander. Until that
-        // pass lands, encountering a tap endpoint here is a hard error.
+        // 0697, landed) rewrites them onto synthetic `~audio_tap` /
+        // `~trigger_tap` module instances before they reach this expander.
+        // A tap endpoint surviving to here means desugar was bypassed —
+        // defensive hard error.
         let (from_ref, to_ref) = match (from_endpoint, to_endpoint) {
             (CableEndpoint::Port(f), CableEndpoint::Port(t)) => (f, t),
             _ => {

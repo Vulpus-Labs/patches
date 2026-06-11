@@ -13,20 +13,33 @@ The two key concerns are:
 
 ```text
 patches-core/              Core types, traits, and execution plan runtime
-patches-dsp/               Pure DSP kernels (filters, delay, noise, ADSR)
+patches-dsp/               Pure DSP kernels (filters, delay, noise, ADSR) — dependency-free leaf
 patches-dsl/               PEG parser and template expander for the .patches DSL format
 patches-interpreter/       Validates FlatPatch against module registry; builds ModuleGraph
 patches-modules/           Module implementations (oscillators, filters, effects, etc.)
-patches-engine/            Patch builder, sound engine, CPAL integration
+patches-planner/           Pure plan/decision phase: graph → ExecutionPlan + buffer layout (ADR 0081)
+patches-engine/            Sound engine: PatchProcessor, tick loop, oversampling, hot-reload adoption
+patches-cpal/              CPAL audio backend (output callback, recording, MIDI sub-blocks)
+patches-host/              Shared composition for binaries driving an engine (DSL→plan→adopt)
 patches-player/            patch_player: play, hot-reload, WAV record
 patches-clap/              CLAP audio plugin (wry webview GUI)
 patches-plugin-common/     GUI-toolkit-agnostic plugin state/helpers
+patches-observation/       Observer-side runtime for tap observation (meters/scopes; ADR 0056)
+patches-io-ring/           Cross-thread/cross-crate lock-free ring transports
+patches-alloc-trap/        Audio-thread allocator trap (ADR 0045 spike 4; opt-in feature)
 patches-lsp/               Language Server Protocol for .patches files (used by VS Code extension)
+patches-manifest/          Owned serde mirror of module descriptor templates (shape-only, for LSP/SVG)
+patches-svg/               SVG renderer for FlatPatch graphs (being retired, ADR 0079)
+patches-graph-json/        JSON serializer for the port-kind-resolved DSL graph (ADR 0079)
+patches-diagnostics/       Presentation-neutral structured form for author-facing diagnostics
+patches-sdk/               External SDK surface for authoring modules (Module trait, descriptors, export_modules!)
 patches-ffi/               FFI bindings for loading native module plugins
 patches-ffi-common/        Shared types for FFI plugin interface
+patches-forbidden-edges/   cargo-metadata dep-edge lint (executable form of ADR 0067)
+patches-tools/             Dev/CI helper binaries
 patches-profiling/         Profiling utilities
 patches-integration-tests/ Cross-crate integration tests (publish = false)
-test-plugins/              Example native plugins (gain, conv-reverb) for FFI testing
+test-plugins/              Example native plugins (gain, panic-on-process, etc.) for FFI testing
 patches-vscode/            VS Code extension: syntax highlighting + LSP client (TypeScript)
 docs/                      mdBook manual (source in docs/src/)
 tickets/                   Work tracking (see Ticket workflow below)
@@ -34,7 +47,7 @@ epics/                     Epics grouping related tickets
 adr/                       Architecture decision records
 ```
 
-`patches-dsl` has no audio or module dependencies (only `pest`). `patches-dsp` is the workspace's leaf DSP crate — depends only on `rtrb` (lock-free ring buffers), with no `patches-core`, CPAL, or serde footprint — and is the home for reusable DSP building blocks (biquad and SVF filter kernels, halfband interpolator/decimator, delay buffer, peak window, phase accumulator, ADSR core, noise PRNG and spectral shaping filters). `patches-modules` depends on `patches-core` and `patches-dsp`. `patches-interpreter` depends on `patches-core`, `patches-dsl`, and `patches-modules`. `patches-engine` depends on `patches-core` and `patches-dsp`. `patches-player` (the binary) depends on all crates and is where the DSL pipeline meets the engine. `patches-lsp` provides diagnostics, hover, and go-to-definition for `.patches` files; it is bundled into the VS Code extension as a platform-specific binary. `patches-integration-tests` depends on `patches-core`, `patches-engine`, and `patches-modules`; it is never published. New audio modules should live in `patches-modules`; pure DSP algorithms with no module protocol concerns belong in `patches-dsp`.
+`patches-dsl` depends on `pest` and `patches-core` (it produces core AST/provenance types). `patches-dsp` is the workspace's pure-DSP leaf crate — no `patches-core`, CPAL, or serde footprint (enforced by `patches-forbidden-edges`) — and is the home for reusable DSP building blocks (biquad and SVF filter kernels, halfband interpolator/decimator, delay buffer, peak window, phase accumulator, ADSR core, noise PRNG and spectral shaping filters). `patches-modules` depends on `patches-core` and `patches-dsp`. `patches-interpreter` depends on `patches-core`, `patches-dsl`, and `patches-modules`. The build pipeline splits across crates: `patches-planner` is the pure decision phase (graph → `ExecutionPlan` + buffer layout, ADR 0081), `patches-engine` owns the runtime processor and tick loop, and `patches-cpal` is the CPAL backend (builder + CPAL were lifted out of `patches-engine`; a few `temporary` re-exports remain in `patches-engine/src/lib.rs`). `patches-player` (the binary) depends on the full stack and is where the DSL pipeline meets the engine, composed via `patches-host`. `patches-lsp` provides diagnostics, hover, and go-to-definition for `.patches` files (shape-only via `patches-manifest`); it is bundled into the VS Code extension as a platform-specific binary. `patches-integration-tests` is never published. New audio modules should live in `patches-modules`; pure DSP algorithms with no module protocol concerns belong in `patches-dsp`.
 
 ## Commands
 
@@ -110,13 +123,13 @@ When adding or changing a module, keep the comment in this form:
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `name` | mono/poly | What it does |
+/// | `name` | mono/poly/stereo/trigger | What it does |
 ///
 /// # Outputs
 ///
 /// | Port | Kind | Description |
 /// |------|------|-------------|
-/// | `name` | mono/poly | What it does |
+/// | `name` | mono/poly/stereo/trigger | What it does |
 ///
 /// # Parameters
 ///
@@ -126,6 +139,10 @@ When adding or changing a module, keep the comment in this form:
 ```
 
 - Port names must match the strings in the module's `ModuleDescriptor`.
+- The `Kind` column must match the descriptor's port kind: a
+  `PortTemplate::trigger` port is documented `trigger`, not `mono`; a
+  `PortTemplate::stereo` port is `stereo`; poly ports are `poly`. Mismatches
+  are doc drift (ticket 1001).
 - For indexed ports use `port[i]` notation with a note on the range
   (e.g. "i in 0..N−1, N = `channels`").
 - Omit sections that don't apply (e.g. no Parameters table if none exist).

@@ -23,7 +23,8 @@ pub use patches_io_ring::{tap_ring, TapRingConsumer, TapRingProducer, TapRingSha
 
 // ── Re-exports from patches-planner ──
 // Kept temporarily to ease the kernel carve migration; downstream crates
-// should import from `patches_planner` directly.
+// should import from `patches_planner` directly. Retirement tracked in
+// ticket 1004.
 pub use patches_planner::{
     build_patch, BuildError, BufferAllocState, ExecutionPlan, ModuleAllocState, ModuleSlot,
     NodeState, PatchBuilder, MonitorMeta, Planner, PlannerState,

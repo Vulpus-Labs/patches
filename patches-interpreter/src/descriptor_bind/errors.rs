@@ -6,11 +6,12 @@ use patches_dsl::ast::Span;
 
 /// Classification for a [`BindError`] — descriptor-level binding failures.
 ///
-/// These codes share their `BN####` wire format with [`crate::InterpretErrorCode`]
-/// so diagnostics consumers can treat both error families uniformly. Codes
-/// covering runtime-only concerns (orphan-port graph lookup, tracker shape,
-/// sequencer/song mismatch) are **not** present here — they stay in
-/// [`crate::InterpretError`].
+/// These codes use the `BN####` wire format; the sibling
+/// [`crate::InterpretErrorCode`] uses `RT####`. Both are surfaced as
+/// diagnostic `code` strings so consumers can treat the two error families
+/// uniformly. Codes covering runtime-only concerns (orphan-port graph
+/// lookup, tracker shape, sequencer/song mismatch) are **not** present
+/// here — they stay in [`crate::InterpretError`] under `RT####`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindErrorCode {
     /// Module type name not present in the registry.

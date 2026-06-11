@@ -9,10 +9,10 @@
 //!
 //! | Port | Kind | Description |
 //! |------|------|-------------|
-//! | `bar` | mono | 1.0 trigger pulse at each bar boundary |
-//! | `beat` | mono | 1.0 trigger pulse at each beat boundary |
-//! | `quaver` | mono | 1.0 trigger pulse at each quaver (eighth-note) boundary |
-//! | `semiquaver` | mono | 1.0 trigger pulse at each semiquaver (sixteenth-note) boundary |
+//! | `bar` | trigger | 1.0 trigger pulse at each bar boundary |
+//! | `beat` | trigger | 1.0 trigger pulse at each beat boundary |
+//! | `quaver` | trigger | 1.0 trigger pulse at each quaver (eighth-note) boundary |
+//! | `semiquaver` | trigger | 1.0 trigger pulse at each semiquaver (sixteenth-note) boundary |
 //!
 //! # Parameters
 //!

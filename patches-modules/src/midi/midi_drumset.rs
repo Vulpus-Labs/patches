@@ -7,41 +7,41 @@
 ///
 /// # Outputs
 ///
-/// | Port                 | Kind | Description                                |
-/// |----------------------|------|--------------------------------------------|
-/// | `kick_trigger`       | mono | 1.0 pulse on note 35 or 36                 |
-/// | `kick_velocity`      | mono | Velocity of last kick note-on (0.0–1.0)    |
-/// | `snare_trigger`      | mono | 1.0 pulse on note 38                       |
-/// | `snare_velocity`     | mono | Velocity of last snare note-on             |
-/// | `clap_trigger`       | mono | 1.0 pulse on note 39                       |
-/// | `clap_velocity`      | mono | Velocity of last clap note-on              |
-/// | `closed_hh_trigger`  | mono | 1.0 pulse on note 42                       |
-/// | `closed_hh_velocity` | mono | Velocity of last closed hi-hat note-on     |
-/// | `pedal_hh_trigger`   | mono | 1.0 pulse on note 44                       |
-/// | `pedal_hh_velocity`  | mono | Velocity of last pedal hi-hat note-on      |
-/// | `open_hh_trigger`    | mono | 1.0 pulse on note 46                       |
-/// | `open_hh_velocity`   | mono | Velocity of last open hi-hat note-on       |
-/// | `tom_low_trigger`    | mono | 1.0 pulse on note 41                       |
-/// | `tom_low_velocity`   | mono | Velocity of last low tom note-on           |
-/// | `tom_mid_trigger`    | mono | 1.0 pulse on note 45                       |
-/// | `tom_mid_velocity`   | mono | Velocity of last mid tom note-on           |
-/// | `tom_high_trigger`   | mono | 1.0 pulse on note 48                       |
-/// | `tom_high_velocity`  | mono | Velocity of last high tom note-on          |
-/// | `crash_trigger`      | mono | 1.0 pulse on note 49                       |
-/// | `crash_velocity`     | mono | Velocity of last crash note-on             |
-/// | `ride_trigger`       | mono | 1.0 pulse on note 51                       |
-/// | `ride_velocity`      | mono | Velocity of last ride note-on              |
-/// | `claves_trigger`     | mono | 1.0 pulse on note 75                       |
-/// | `claves_velocity`    | mono | Velocity of last claves note-on            |
-/// | `cowbell_trigger`    | mono | 1.0 pulse on note 56                       |
-/// | `cowbell_velocity`   | mono | Velocity of last cowbell note-on           |
-/// | `rimshot_trigger`    | mono | 1.0 pulse on note 37                       |
-/// | `rimshot_velocity`   | mono | Velocity of last rimshot note-on           |
+/// | Port                 | Kind    | Description                             |
+/// |----------------------|---------|-----------------------------------------|
+/// | `kick_trigger`       | trigger | 1.0 pulse on note 35 or 36              |
+/// | `kick_velocity`      | mono    | Velocity of last kick note-on (0.0–1.0) |
+/// | `snare_trigger`      | trigger | 1.0 pulse on note 38                    |
+/// | `snare_velocity`     | mono    | Velocity of last snare note-on          |
+/// | `clap_trigger`       | trigger | 1.0 pulse on note 39                    |
+/// | `clap_velocity`      | mono    | Velocity of last clap note-on           |
+/// | `closed_hh_trigger`  | trigger | 1.0 pulse on note 42                    |
+/// | `closed_hh_velocity` | mono    | Velocity of last closed hi-hat note-on  |
+/// | `pedal_hh_trigger`   | trigger | 1.0 pulse on note 44                    |
+/// | `pedal_hh_velocity`  | mono    | Velocity of last pedal hi-hat note-on   |
+/// | `open_hh_trigger`    | trigger | 1.0 pulse on note 46                    |
+/// | `open_hh_velocity`   | mono    | Velocity of last open hi-hat note-on    |
+/// | `tom_low_trigger`    | trigger | 1.0 pulse on note 41                    |
+/// | `tom_low_velocity`   | mono    | Velocity of last low tom note-on        |
+/// | `tom_mid_trigger`    | trigger | 1.0 pulse on note 45                    |
+/// | `tom_mid_velocity`   | mono    | Velocity of last mid tom note-on        |
+/// | `tom_high_trigger`   | trigger | 1.0 pulse on note 48                    |
+/// | `tom_high_velocity`  | mono    | Velocity of last high tom note-on       |
+/// | `crash_trigger`      | trigger | 1.0 pulse on note 49                    |
+/// | `crash_velocity`     | mono    | Velocity of last crash note-on          |
+/// | `ride_trigger`       | trigger | 1.0 pulse on note 51                    |
+/// | `ride_velocity`      | mono    | Velocity of last ride note-on           |
+/// | `claves_trigger`     | trigger | 1.0 pulse on note 75                    |
+/// | `claves_velocity`    | mono    | Velocity of last claves note-on         |
+/// | `cowbell_trigger`    | trigger | 1.0 pulse on note 56                    |
+/// | `cowbell_velocity`   | mono    | Velocity of last cowbell note-on        |
+/// | `rimshot_trigger`    | trigger | 1.0 pulse on note 37                    |
+/// | `rimshot_velocity`   | mono    | Velocity of last rimshot note-on        |
 ///
 /// # Parameters
 ///
-/// | Name      | Type | Range | Default | Description                                            |
-/// |-----------|------|-------|---------|--------------------------------------------------------|
+/// | Name      | Type | Range | Default | Description                                             |
+/// |-----------|------|-------|---------|---------------------------------------------------------|
 /// | `channel` | int  | 0–16  | 0       | MIDI channel filter (1–16); 0 = respond to all channels |
 use patches_core::{
     AudioEnvironment, CablePool, CountAxis, InputPort, InstanceId, MidiInput, MidiMessage, Module,

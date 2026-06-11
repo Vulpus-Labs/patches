@@ -510,7 +510,7 @@ unsafe extern "C" fn gui_create(
 
 unsafe extern "C" fn gui_destroy(plugin: *const clap_plugin) {
     let p = plugin::plugin_mut_pub(plugin);
-    p.gui_handle.take(); // Drop closes the vizia window.
+    p.gui_handle.take(); // Drop closes the wry webview window.
 }
 
 unsafe extern "C" fn gui_set_scale(
@@ -807,7 +807,7 @@ unsafe extern "C" fn params_flush(
     // Split-borrow so we can drive both the processor and mirror into
     // the registry without aliasing.
     //
-    // TODO(0825?): when flush is invoked on the audio thread (active &
+    // TODO(1003): when flush is invoked on the audio thread (active &
     // not-processing), `host_control_registry.record_value` races with
     // main-thread mutations from `on_main_thread`. Move the registry
     // mirror onto a SPSC drained by main-thread to remove the hazard.
