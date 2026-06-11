@@ -11,6 +11,21 @@
 //!    (empty path → gain 1.0).
 
 use std::io::Write;
+use std::sync::Mutex;
+
+// The plugin's debug accessors (`structural_string_last_gain` /
+// `structural_string_last_path`) read process-global state in the dylib.
+// Both tests dlopen the same image, so that state is shared. Serialize the
+// prepare→read critical section across tests so one test's `prepare` can't
+// clobber the global another test is about to read.
+static GLOBAL_PROBE: Mutex<()> = Mutex::new(());
+
+fn lock_probe() -> std::sync::MutexGuard<'static, ()> {
+    // Tolerate poisoning: a failing test leaves the lock poisoned, but the
+    // guarded data is the plugin's global, not ours — the next test
+    // overwrites it in its own `prepare` regardless.
+    GLOBAL_PROBE.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 use patches_core::modules::{InstanceId, ModuleShape, StructuralParams, StructuralValue};
 use patches_core::AudioEnvironment;
@@ -72,6 +87,8 @@ fn structural_string_round_trip() {
 
     let desc_json = json::serialize_module_descriptor(&descriptor);
 
+    // Hold the probe lock across prepare → accessor read.
+    let _probe = lock_probe();
     let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let mut err = FfiBytes::empty();
     let status = unsafe {
@@ -129,6 +146,8 @@ fn structural_default_when_blob_uses_descriptor_default() {
     let blob = pack_structural(&descriptor, &StructuralParams::new());
     let desc_json = json::serialize_module_descriptor(&descriptor);
 
+    // Hold the probe lock across prepare → accessor read.
+    let _probe = lock_probe();
     let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
     let mut err = FfiBytes::empty();
     let status = unsafe {
