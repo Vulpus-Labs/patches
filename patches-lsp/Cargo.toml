@@ -16,6 +16,7 @@ patches-interpreter = { path = "../patches-interpreter" }
 patches-manifest = { path = "../patches-manifest" }
 patches-ffi = { path = "../patches-ffi" }
 patches-svg = { path = "../patches-svg" }
+patches-graph-json = { path = "../patches-graph-json" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
 tree-sitter = "0.24"

@@ -27,6 +27,7 @@ async fn main() {
 
     let (service, socket) = LspService::build(PatchesLanguageServer::new)
         .custom_method("patches/renderSvg", PatchesLanguageServer::render_svg)
+        .custom_method("patches/graphJson", PatchesLanguageServer::graph_json)
         .custom_method("patches/rescanModules", PatchesLanguageServer::rescan_modules)
         .finish();
 

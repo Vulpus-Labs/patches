@@ -300,6 +300,24 @@ pub struct RenderSvgDiagnostic {
     pub span: Option<(u32, u32)>,
 }
 
+// ─── Custom request: patches/graphJson ─────────────────────────────────────
+
+/// Params for `patches/graphJson`.
+#[derive(Debug, Deserialize)]
+pub struct GraphJsonParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+}
+
+/// Result of `patches/graphJson`: the patch-graph JSON document (ADR 0079,
+/// ticket 0963) plus any parse/expand diagnostics. Mirrors the shape of
+/// [`RenderSvgResult`] so the webview can consume either uniformly.
+#[derive(Debug, Serialize)]
+pub struct GraphJsonResult {
+    pub json: String,
+    pub diagnostics: Vec<RenderSvgDiagnostic>,
+}
+
 // ─── Module-path configuration + rescan ─────────────────────────────────────
 
 fn extract_module_paths(value: &serde_json::Value) -> Option<Vec<PathBuf>> {
@@ -406,6 +424,85 @@ impl PatchesLanguageServer {
         let sources = self.workspace.sources_snapshot();
         Ok(render_svg_pipeline(&master_path, &sources))
     }
+
+    /// Handle `patches/graphJson`. Same source-snapshot machinery as
+    /// `render_svg`, returning the patch-graph JSON instead of SVG
+    /// (ticket 0966). `patches/renderSvg` stays in place until the JS
+    /// renderer reaches parity (ticket 0967/0968).
+    pub async fn graph_json(&self, params: GraphJsonParams) -> Result<GraphJsonResult> {
+        let uri = params.text_document.uri;
+        let master_path = uri
+            .to_file_path()
+            .map_err(|_| tower_lsp::jsonrpc::Error::invalid_params("uri is not a file path"))?;
+        let sources = self.workspace.sources_snapshot();
+        Ok(graph_json_pipeline(&master_path, &sources))
+    }
+}
+
+/// Pure pipeline: master path + in-memory sources → patch-graph JSON +
+/// diagnostics. Mirrors [`render_svg_pipeline`]; extracted for testability.
+/// Parse/expand errors return as a diagnostic alongside an empty graph
+/// document rather than a hard error, so a partial/invalid patch still
+/// yields a useful result.
+pub(crate) fn graph_json_pipeline(
+    master_path: &Path,
+    sources: &HashMap<PathBuf, String>,
+) -> GraphJsonResult {
+    let read_file = |p: &Path| -> std::io::Result<String> {
+        if let Some(src) = sources.get(p) {
+            return Ok(src.clone());
+        }
+        if let Ok(canon) = p.canonicalize() {
+            if let Some(src) = sources.get(&canon) {
+                return Ok(src.clone());
+            }
+        }
+        std::fs::read_to_string(p)
+    };
+
+    let load_result = match patches_dsl::load_with(master_path, read_file) {
+        Ok(r) => r,
+        Err(e) => return graph_json_error(e.to_string()),
+    };
+
+    let expanded = match patches_dsl::expand(&load_result.file) {
+        Ok(r) => r,
+        Err(e) => return graph_json_error(e.to_string()),
+    };
+
+    let registry = crate::manifest_source::registry_from_manifest(
+        crate::manifest_source::bundled_manifest(),
+    );
+    let doc = patches_graph_json::graph_doc(&expanded.patch, &registry);
+    match patches_graph_json::to_json_pretty(&doc) {
+        Ok(json) => GraphJsonResult { json, diagnostics: vec![] },
+        Err(e) => graph_json_error(format!("graph JSON serialisation failed: {e}")),
+    }
+}
+
+/// Empty-graph result carrying a single error diagnostic.
+fn graph_json_error(message: String) -> GraphJsonResult {
+    GraphJsonResult {
+        json: empty_graph_json(),
+        diagnostics: vec![RenderSvgDiagnostic {
+            message,
+            severity: RenderSvgSeverity::Error,
+            span: None,
+        }],
+    }
+}
+
+fn empty_graph_json() -> String {
+    // Serialise a real empty `GraphDoc` so the shape can never skew from
+    // the schema. Falls back to a minimal literal only if serialisation
+    // itself fails (it cannot, for an empty doc).
+    let doc = patches_graph_json::GraphDoc {
+        version: patches_graph_json::SCHEMA_VERSION,
+        modules: Vec::new(),
+        connections: Vec::new(),
+    };
+    patches_graph_json::to_json_pretty(&doc)
+        .unwrap_or_else(|_| String::from(r#"{"version":1,"modules":[],"connections":[]}"#))
 }
 
 /// Pure pipeline: master path + in-memory sources → SVG + diagnostics.
@@ -613,6 +710,47 @@ mod tests {
         let result = render_svg_pipeline(&tmp, &sources);
         assert!(!result.diagnostics.is_empty());
         assert!(result.svg.starts_with("<svg"), "should emit placeholder svg");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn graph_json_pipeline_returns_json_for_valid_patch() {
+        let tmp = std::env::temp_dir().join(format!(
+            "patches_lsp_graphjson_{}.patches",
+            std::process::id()
+        ));
+        std::fs::write(
+            &tmp,
+            "patch { module osc : Osc\nmodule vca : Vca\nosc.out -> vca.in }\n",
+        )
+        .unwrap();
+        let mut sources = HashMap::new();
+        sources.insert(tmp.clone(), std::fs::read_to_string(&tmp).unwrap());
+        let result = graph_json_pipeline(&tmp, &sources);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        // The JSON parses and contains the two declared modules.
+        let v: serde_json::Value = serde_json::from_str(&result.json).expect("valid JSON");
+        let mods = v["modules"].as_array().expect("modules array");
+        let ids: Vec<&str> = mods.iter().filter_map(|m| m["id"].as_str()).collect();
+        assert!(ids.contains(&"osc"), "expected osc in {ids:?}");
+        assert!(ids.contains(&"vca"), "expected vca in {ids:?}");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn graph_json_pipeline_returns_diagnostic_on_parse_error() {
+        let tmp = std::env::temp_dir().join(format!(
+            "patches_lsp_graphjson_bad_{}.patches",
+            std::process::id()
+        ));
+        std::fs::write(&tmp, "patch { module osc : }").unwrap();
+        let mut sources = HashMap::new();
+        sources.insert(tmp.clone(), std::fs::read_to_string(&tmp).unwrap());
+        let result = graph_json_pipeline(&tmp, &sources);
+        assert!(!result.diagnostics.is_empty());
+        // Still returns a valid (empty) graph document, not a hard error.
+        let v: serde_json::Value = serde_json::from_str(&result.json).expect("valid JSON");
+        assert!(v["modules"].as_array().expect("modules array").is_empty());
         let _ = std::fs::remove_file(&tmp);
     }
 

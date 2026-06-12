@@ -35,3 +35,26 @@ the LSP's existing document/include source map — mirroring how
 - ADR 0079 (Phase 2), Epic E158. Depends on 0963.
 - Don't remove `patches-svg` from the LSP here — that's 0968, gated on JS-render
   parity (0967).
+
+## Resolution (2026-06-11)
+
+- `patches-lsp` now depends on `patches-graph-json`; the custom method
+  `patches/graphJson` is registered in `main.rs` alongside
+  `patches/renderSvg` and `patches/rescanModules`.
+- `graph_json` handler + `graph_json_pipeline` mirror `render_svg` /
+  `render_svg_pipeline`: same `sources_snapshot` + `read_file` machinery
+  (in-memory docs first, disk fallback), `load_with` → `expand` →
+  `graph_doc` → `to_json_pretty`.
+- Parse/expand (and serialise) errors return as an error diagnostic
+  alongside an empty-but-valid `GraphDoc` JSON (built from a real
+  `GraphDoc`, so the shape can't skew), not a hard LSP error — partial /
+  invalid patches still yield a usable result.
+- `GraphJsonResult { json, diagnostics }` reuses the SVG path's diagnostic
+  shape; serialised over the custom-method channel.
+- Tests `graph_json_pipeline_returns_json_for_valid_patch` (asserts osc +
+  vca modules present) and `graph_json_pipeline_returns_diagnostic_on_parse_error`
+  (diagnostic + empty graph), mirroring the SVG pipeline tests.
+- `patches/renderSvg` and `patches-svg` left in place (removal is 0968,
+  gated on 0967 parity).
+
+`just commit -p patches-lsp` green; clippy clean.
