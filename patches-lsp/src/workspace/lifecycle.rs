@@ -185,9 +185,12 @@ impl DocumentWorkspace {
             Ok(new_source) => {
                 let tree = self.parse(&new_source);
                 let line_index = lsp_util::build_line_index(&new_source);
-                // Placeholder model; reanalyse_cached below overwrites it.
-                let (file, _) = ast_builder::build_ast(&tree, &new_source);
-                let model = analysis::analyse_with_env(&file, &self.registry_read(), &HashMap::new());
+                // Seed with an empty placeholder model — `reanalyse_cached`
+                // below rebuilds the real model from `source` + `tree` with
+                // the proper template env and overwrites this. Running a
+                // full `analyse_with_env` here was pure waste: a second
+                // analysis per `didChangeWatchedFiles` (ticket 0999).
+                let model = analysis::SemanticModel::empty();
                 state.documents.insert(
                     uri.clone(),
                     DocumentState {

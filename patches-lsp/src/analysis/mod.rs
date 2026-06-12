@@ -44,10 +44,26 @@ pub(crate) struct SemanticModel {
 }
 
 impl SemanticModel {
+    /// An empty placeholder model — no declarations, descriptors, or
+    /// navigation. Used to seed a freshly-parsed `DocumentState` whose real
+    /// model is built moments later by `reanalyse_cached`, so the expensive
+    /// full analysis isn't run twice per change (ticket 0999).
+    pub(crate) fn empty() -> Self {
+        SemanticModel {
+            declarations: types::DeclarationMap::default(),
+            descriptors: HashMap::new(),
+            unscoped_index: HashMap::new(),
+            diagnostics: Vec::new(),
+            navigation: crate::navigation::FileNavigation::default(),
+        }
+    }
+
     /// Look up a descriptor by module-instance name.
     ///
     /// First tries the top-level scope (`scope == ""`); on miss, falls back
-    /// through the unscoped secondary index.
+    /// through the unscoped secondary index. A name shared by instances in
+    /// more than one template scope is ambiguous and is **not** served by
+    /// the fallback — better no answer than the wrong one (ticket 0999).
     pub fn get_descriptor(&self, name: &str) -> Option<&ResolvedDescriptor> {
         let top_key = patches_core::QName::bare(name);
         self.descriptors
@@ -146,11 +162,21 @@ pub(crate) fn analyse_with_env(
     // Build secondary index: unscoped instance name -> full scope key.
     // Only scoped entries (scope != "") need an index entry — top-level
     // lookups hit the primary map directly.
+    //
+    // A leaf name shared across two templates (e.g. both define `osc`) is
+    // *ambiguous*: a bare-name lookup can't tell which scope is meant, so
+    // serving either descriptor risks the wrong hover/completion. Drop
+    // ambiguous names from the index entirely — the fallback then misses
+    // and the caller gets no answer rather than a wrong one (ticket 0999).
     let mut unscoped_index: HashMap<String, ScopeKey> = HashMap::new();
+    let mut ambiguous: std::collections::HashSet<String> = std::collections::HashSet::new();
     for key in descriptors.keys() {
-        if !key.is_bare() {
-            unscoped_index.insert(key.name.clone(), key.clone());
+        if !key.is_bare() && unscoped_index.insert(key.name.clone(), key.clone()).is_some() {
+            ambiguous.insert(key.name.clone());
         }
+    }
+    for name in &ambiguous {
+        unscoped_index.remove(name);
     }
 
     SemanticModel {

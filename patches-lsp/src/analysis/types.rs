@@ -96,7 +96,7 @@ pub(crate) struct SongCellInfo {
 }
 
 /// All declarations extracted from a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct DeclarationMap {
     pub modules: Vec<ModuleInfo>,
     pub templates: HashMap<String, TemplateInfo>,

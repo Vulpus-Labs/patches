@@ -65,6 +65,6 @@ patch {}
 
 === ok repeat anchor with cv2 plus slide plus tie
 pattern p {
-    bass: A3:0.5>B3 x*3 _
+    bass: A3:0.5> /B3 x*3 _
 }
 patch {}

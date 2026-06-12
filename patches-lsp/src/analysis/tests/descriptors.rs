@@ -9,7 +9,7 @@ fn descriptors_for_known_modules() {
 patch {
 module osc : Osc
 module out : AudioOut
-osc.sine -> out.in_left
+osc.sine -> out.in
 }
 "#,
     );
@@ -22,6 +22,36 @@ osc.sine -> out.in_left
         .filter(|d| d.message.contains("unknown module type"))
         .collect();
     assert!(type_diags.is_empty(), "unexpected: {type_diags:?}");
+}
+
+#[test]
+fn ambiguous_unscoped_name_not_served_by_fallback() {
+    // Two templates each define an inner module named `osc` (different
+    // types). A bare-name lookup can't pick a scope, so `get_descriptor`
+    // must refuse the unscoped fallback rather than serve an arbitrary
+    // (possibly wrong) descriptor (ticket 0999).
+    let model = analyse_source(
+        r#"
+template a {
+out: o
+module osc : Osc
+}
+
+template b {
+out: o
+module osc : Lowpass
+}
+
+patch {
+module ia : a
+module ib : b
+}
+"#,
+    );
+    assert!(
+        model.get_descriptor("osc").is_none(),
+        "ambiguous leaf name must not resolve through the unscoped fallback"
+    );
 }
 
 #[test]
@@ -56,7 +86,7 @@ module osc : Osc
 patch {
 module v : voice
 module out : AudioOut
-v.audio -> out.in_left
+v.audio -> out.in
 }
 "#,
     );

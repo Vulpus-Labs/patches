@@ -80,8 +80,9 @@ impl DocumentWorkspace {
 
     /// Ensure a pipeline run has been cached for `uri`. Returns `true`
     /// if the resulting artifact contains a `FlatPatch` (i.e. stages 1–3
-    /// completed without short-circuit errors). Used by tests and by
-    /// hover to decide whether expansion-aware rendering can proceed.
+    /// completed without short-circuit errors). Test-only today (hence
+    /// `allow(dead_code)`): feature handlers read the cached artifact via
+    /// `with_expansion_context` instead of forcing a flatten here.
     #[allow(dead_code)]
     pub(crate) fn ensure_flat(&self, uri: &Url) -> bool {
         let mut state = self.state.lock().expect("lock workspace state");

@@ -63,3 +63,26 @@ patch {
 knob cutoff { low: 500Hz, high: 2000Hz }
 module filt : Svf
 ~cutoff -> filt.cutoff
+
+=== ts_error tap source endpoint with unclosed paren
+# Tree-sitter must flag the unterminated tap component list as an ERROR.
+# Guards against the parser drifting to silently accept a truncated tap.
+module osc : Osc
+osc.out -> ~meter(level
+
+=== ts_error cable arrow with no target endpoint
+# A dangling arrow with no right-hand endpoint must parse to an ERROR.
+module a : Osc
+module b : Osc
+a.out ->
+
+=== ts_error module decl missing type after colon
+# `module name :` with no type is incomplete; tree-sitter must ERROR.
+module osc :
+
+=== expand_error ST0044 tap used as a cable source
+# pest + tree-sitter both accept tap-as-source syntactically; the
+# structural validator rejects it (ticket 0998). Exercises the
+# expand_error quadrant (ticket 0999).
+module osc : Osc
+~meter(level) -> osc.fm

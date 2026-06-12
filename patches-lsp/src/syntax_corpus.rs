@@ -209,17 +209,13 @@ fn syntax_corpus_drives_pest_and_treesitter() {
                     }
                 };
                 let result = expand(file);
+                // `expand` is fail-fast: it returns the first structural
+                // error, classified by a `StructuralCode`. Read the code
+                // string directly rather than scraping it out of the Debug
+                // output (the Debug prints the variant name, not `ST####`).
                 let codes: Vec<String> = match &result {
                     Ok(_) => Vec::new(),
-                    Err(err) => format!("{err:?}")
-                        .split_whitespace()
-                        .filter(|s| {
-                            s.len() >= 6
-                                && s.chars().take(2).all(|c| c.is_ascii_uppercase())
-                                && s.chars().skip(2).take(4).all(|c| c.is_ascii_digit())
-                        })
-                        .map(|s| s[..6].to_string())
-                        .collect(),
+                    Err(err) => vec![err.code.as_str().to_string()],
                 };
                 for want in &entry.args {
                     if !codes.contains(want) {

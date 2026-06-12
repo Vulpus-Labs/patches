@@ -9,7 +9,7 @@ fn scan_no_templates() {
 patch {
 module osc : Osc
 module out : AudioOut
-osc.sine -> out.in_left
+osc.sine -> out.in
 }
 "#,
     );

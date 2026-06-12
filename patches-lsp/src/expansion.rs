@@ -2,9 +2,11 @@
 //! [`FlatPatch`]es per root, with a [`PatchReferences`] index over the
 //! flattened structure for feature lookups.
 //!
-//! Separate from the tolerant tree-sitter pipeline. Pest parse runs only when
-//! tree-sitter reports a clean tree; expansion runs lazily when a feature
-//! handler calls [`super::workspace::DocumentWorkspace::ensure_flat`].
+//! Separate from the tolerant tree-sitter pipeline. The pest parse +
+//! expansion run inside `run_pipeline_locked`, which caches a
+//! `StagedArtifact` per root during analysis; feature handlers read that
+//! cache via `with_expansion_context` rather than triggering expansion on
+//! demand.
 
 use std::collections::HashMap;
 

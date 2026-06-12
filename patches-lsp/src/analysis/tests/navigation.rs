@@ -62,7 +62,7 @@ osc.sine -> $.audio
 patch {
 module v : voice
 module out : AudioOut
-v.audio -> out.in_left
+v.audio -> out.in
 }
 "#,
     );
@@ -108,7 +108,7 @@ module osc : Osc
 patch {
 module v : voice
 module out : AudioOut
-v.audio -> out.in_left
+v.audio -> out.in
 }
 "#;
     let file = parse(source);
