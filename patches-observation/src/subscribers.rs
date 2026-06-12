@@ -37,29 +37,42 @@ impl LatestValues {
         }
     }
 
-    /// Publish a new scalar for `(slot, id)`. Lock-free.
+    /// Publish a new scalar for `(slot, id)`. Lock-free. No-op for
+    /// vector-stream ids (`Spectrum` / `Scope`), which have no scalar cell.
     pub fn publish(&self, slot: usize, id: ProcessorId, value: f32) {
-        self.cells[slot][id.index()].store(value.to_bits(), Ordering::Relaxed);
+        if let Some(i) = id.index() {
+            self.cells[slot][i].store(value.to_bits(), Ordering::Relaxed);
+        }
     }
 
-    /// Read the latest scalar for `(slot, id)`. Lock-free.
+    /// Read the latest scalar for `(slot, id)`. Lock-free. Returns `0.0`
+    /// for vector-stream ids, which have no scalar cell.
     pub fn read(&self, slot: usize, id: ProcessorId) -> f32 {
-        f32::from_bits(self.cells[slot][id.index()].load(Ordering::Relaxed))
+        match id.index() {
+            Some(i) => f32::from_bits(self.cells[slot][i].load(Ordering::Relaxed)),
+            None => 0.0,
+        }
     }
 
     /// Clear the cell for `(slot, id)` back to zero. Used when the
     /// observer drops a slot on replan so stale values don't linger.
+    /// No-op for vector-stream ids.
     pub fn clear(&self, slot: usize, id: ProcessorId) {
-        self.cells[slot][id.index()].store(0, Ordering::Relaxed);
+        if let Some(i) = id.index() {
+            self.cells[slot][i].store(0, Ordering::Relaxed);
+        }
     }
 
     /// Atomic swap-to-zero. Returns the previous bits as `f32`. Used by
     /// latching one-shot streams (e.g. trigger LEDs) where the audio
     /// side stores 1.0 on fire and the consumer claims-and-clears in a
-    /// single step so events are never lost between polls.
+    /// single step so events are never lost between polls. Returns `0.0`
+    /// for vector-stream ids.
     pub fn take(&self, slot: usize, id: ProcessorId) -> f32 {
-        let prev = self.cells[slot][id.index()].swap(0, Ordering::Relaxed);
-        f32::from_bits(prev)
+        match id.index() {
+            Some(i) => f32::from_bits(self.cells[slot][i].swap(0, Ordering::Relaxed)),
+            None => 0.0,
+        }
     }
 }
 

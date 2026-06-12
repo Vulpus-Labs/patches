@@ -1,6 +1,7 @@
 use super::mono::{MonoInput, MonoOutput};
 use super::poly::{PolyInput, PolyOutput};
 use super::stereo::{StereoInput, StereoOutput};
+use crate::invariant::ExpectInvariant;
 
 /// Heterogeneous input-port wrapper used by the planner to deliver ports to
 /// `Module::set_ports` without boxing.
@@ -33,7 +34,7 @@ impl InputPort {
     /// `Module::set_ports` matches the descriptor's declared kind, so this
     /// is infallible at audio-thread call sites.
     pub fn expect_mono(&self) -> MonoInput {
-        self.as_mono().expect("expected mono input port")
+        self.as_mono().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     pub fn as_poly(&self) -> Option<PolyInput> {
@@ -51,7 +52,7 @@ impl InputPort {
     /// for the planner-time type-check guarantee that makes this infallible
     /// in module `set_ports` implementations.
     pub fn expect_poly(&self) -> PolyInput {
-        self.as_poly().expect("expected poly input port")
+        self.as_poly().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     pub fn as_stereo(&self) -> Option<StereoInput> {
@@ -69,7 +70,7 @@ impl InputPort {
     /// for the planner-time type-check guarantee that makes this infallible
     /// in module `set_ports` implementations.
     pub fn expect_stereo(&self) -> StereoInput {
-        self.as_stereo().expect("expected stereo input port")
+        self.as_stereo().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono
@@ -119,7 +120,7 @@ impl OutputPort {
     /// type checking (ADR 0047 / ADR 0033) makes this infallible in module
     /// `set_ports` implementations.
     pub fn expect_mono(&self) -> MonoOutput {
-        self.as_mono().expect("expected mono output port")
+        self.as_mono().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     pub fn as_poly(&self) -> Option<PolyOutput> {
@@ -135,7 +136,7 @@ impl OutputPort {
     ///
     /// Panics if the variant is not `Poly`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_poly(&self) -> PolyOutput {
-        self.as_poly().expect("expected poly output port")
+        self.as_poly().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     pub fn as_stereo(&self) -> Option<StereoOutput> {
@@ -151,7 +152,7 @@ impl OutputPort {
     ///
     /// Panics if the variant is not `Stereo`. See [`expect_mono`](Self::expect_mono).
     pub fn expect_stereo(&self) -> StereoOutput {
-        self.as_stereo().expect("expected stereo output port")
+        self.as_stereo().expect_invariant("port kind guaranteed by planner connection-time type check (ADR 0047/0033)")
     }
 
     /// Alias for [`expect_mono`](Self::expect_mono): trigger ports are mono

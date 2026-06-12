@@ -54,21 +54,18 @@ impl ProcessorId {
         ProcessorId::TriggerLed,
     ];
 
-    /// Index into the scalar cell array. Panics for non-scalar variants
-    /// (e.g. `Spectrum`); callers must route by stream variant before
-    /// reaching this.
-    pub fn index(self) -> usize {
+    /// Index into the scalar cell array, or `None` for the vector-stream
+    /// variants (`Spectrum`, `Scope`) which have no scalar cell. Returning
+    /// `Option` rather than panicking removes the API trap reachable
+    /// through the `LatestValues` scalar surface (ticket 1000).
+    pub fn index(self) -> Option<usize> {
         match self {
-            ProcessorId::MeterPeak => 0,
-            ProcessorId::MeterRms => 1,
-            ProcessorId::GateLed => 2,
-            ProcessorId::TriggerLed => 3,
-            ProcessorId::Spectrum => {
-                panic!("ProcessorId::Spectrum is a vector stream, not a scalar cell")
-            }
-            ProcessorId::Scope => {
-                panic!("ProcessorId::Scope is a vector stream, not a scalar cell")
-            }
+            ProcessorId::MeterPeak => Some(0),
+            ProcessorId::MeterRms => Some(1),
+            ProcessorId::GateLed => Some(2),
+            ProcessorId::TriggerLed => Some(3),
+            // Vector streams: no scalar cell.
+            ProcessorId::Spectrum | ProcessorId::Scope => None,
         }
     }
 

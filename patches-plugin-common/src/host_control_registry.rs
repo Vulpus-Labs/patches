@@ -29,6 +29,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use patches_core::ExpectInvariant;
 use patches_dsl::host_control_manifest::{
     HostControlDescriptor, HostControlKind, HostControlManifest, HostControlParamMap,
 };
@@ -171,7 +172,7 @@ impl StandardHostControlRegistry {
 
     fn allocate_id(&mut self) -> ParamId {
         let id = self.next_id;
-        self.next_id = self.next_id.checked_add(1).expect("ParamId space exhausted");
+        self.next_id = self.next_id.checked_add(1).expect_invariant("ParamId is u32; exhausting the space would require 4B host controls");
         id
     }
 
@@ -185,7 +186,7 @@ impl StandardHostControlRegistry {
                 .iter()
                 .min_by_key(|(name, t)| (t.epoch, (*name).clone()))
                 .map(|(name, _)| name.clone())
-                .expect("non-empty checked");
+                .expect_invariant("loop guard checked tombstones is non-empty before min_by_key");
             self.tombstones.remove(&victim);
             evicted.push(victim);
         }
@@ -212,7 +213,7 @@ impl HostControlRegistry for StandardHostControlRegistry {
         if !to_remove.is_empty() {
             self.evict_tombstones_if_full(to_remove.len(), &mut out.evicted_tombstones);
             for name in &to_remove {
-                let entry = self.live.remove(name).expect("live");
+                let entry = self.live.remove(name).expect_invariant("name drawn from self.live keys just above");
                 self.tombstones.insert(
                     name.clone(),
                     Tombstone {

@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use patches_core::InstanceId;
+use patches_core::{ExpectInvariant, InstanceId};
 
 /// Per-instance timing record returned by [`TimingCollector::report`].
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ impl TimingCollector {
 
     /// Record one `process()` call of `nanos` wall-clock nanoseconds.
     pub fn record_process(&self, id: InstanceId, name: &'static str, nanos: u64) {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock().expect_invariant("timing collector mutex poisoned");
         let e = map.entry((id, name)).or_insert_with(|| Entry {
             module_name: name,
             ..Entry::default()
@@ -58,7 +58,7 @@ impl TimingCollector {
 
     /// Record one `periodic_update()` call of `nanos` wall-clock nanoseconds.
     pub fn record_periodic(&self, id: InstanceId, name: &'static str, nanos: u64) {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock().expect_invariant("timing collector mutex poisoned");
         let e = map.entry((id, name)).or_insert_with(|| Entry {
             module_name: name,
             ..Entry::default()
@@ -70,7 +70,7 @@ impl TimingCollector {
     /// Return one [`TimingRecord`] per `(InstanceId, name)` pair, sorted by
     /// combined total time descending.
     pub fn report(&self) -> Vec<TimingRecord> {
-        let map = self.inner.lock().unwrap();
+        let map = self.inner.lock().expect_invariant("timing collector mutex poisoned");
         let mut records: Vec<TimingRecord> = map
             .iter()
             .map(|(&(id, _), e)| TimingRecord {

@@ -104,6 +104,7 @@ impl Default for TapBlockFrame {
 pub mod test_support;
 
 pub mod audio_environment;
+pub mod invariant;
 pub mod param_frame;
 pub mod param_layout;
 pub mod build_error;
@@ -132,6 +133,7 @@ pub mod source_span;
 // ── Public API ────────────────────────────────────────────────────────────────
 pub use audio_environment::AudioEnvironment;
 pub use build_error::BuildError;
+pub use invariant::ExpectInvariant;
 pub use cable_pool::CablePool;
 pub use cables::{CableKind, CableMap, CableValue, InputPort, MonoInput, MonoLayout, MonoOutput, OutputPort, PolyInput, PolyLayout, PolyOutput, StereoInput, StereoOutput, StereoSample};
 pub use cables::{GateEdge, GateInput, PolyGateInput, PolyTriggerInput, TriggerInput, TRIGGER_THRESHOLD};

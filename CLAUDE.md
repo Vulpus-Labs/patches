@@ -184,7 +184,20 @@ unwinding. Do not add `panic = "abort"` to workspace or plugin profiles.
 
 ## General conventions
 
-- No `unwrap()` or `expect()` in library code — use proper error propagation.
+- No plain `unwrap()` or `expect()` in library code — use proper error
+  propagation. The one sanctioned exception is a panic guarding a
+  *documented invariant* that genuinely cannot fail (a planner-time type
+  check, a just-verified non-emptiness, a counter that cannot overflow).
+  Those must use a **named** form so `\.unwrap(`/`\.expect(` greps stay
+  meaningful (ADR/ticket 1000):
+  - `value.expect_invariant("why it holds")` (the
+    `patches_core::ExpectInvariant` trait, on `Option`/`Result`) for
+    unwrapping, or
+  - `assert!`/`debug_assert!`/`panic!` for assertion-style checks.
+  Where the failure is actually reachable (I/O, OS resources, user input),
+  propagate an error or degrade gracefully — don't reach for the invariant
+  form. Grammar-guaranteed parser internals (`pair.into_inner().next()`)
+  are a residual legacy class still migrating to `expect_invariant`.
 - Keep `patches-core` free of audio-backend dependencies so it can be tested without hardware.
 - Run `cargo clippy` and `cargo test` before considering any implementation ticket done.
 - Ask before adding new dependencies to `Cargo.toml`.

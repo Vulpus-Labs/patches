@@ -246,6 +246,10 @@ pub fn spawn_observer(
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
 
+    // Observation (meters / scopes) is a non-essential subsystem. If the
+    // OS refuses the thread, degrade to a no-op observer (`thread: None`)
+    // rather than panicking and taking the host down — the audio engine is
+    // unaffected, meters just stay dark (ticket 1000).
     let thread = thread::Builder::new()
         .name("patches-observer".into())
         .spawn(move || {
@@ -272,12 +276,12 @@ pub fn spawn_observer(
                 }
             }
         })
-        .expect("spawn observer thread");
+        .ok();
 
     (
         ObserverHandle {
             stop,
-            thread: Some(thread),
+            thread,
             subscribers: handle,
             replans: Some(replan_tx),
         },

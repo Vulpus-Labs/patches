@@ -111,7 +111,13 @@ impl MidiDelay {
         if self.count == 0 {
             return;
         }
-        let entry = self.buf[self.head].take().unwrap();
+        // The loop above advanced `head` past any `None` slots, so with
+        // `count > 0` this slot is `Some`. Use `let-else` rather than
+        // `unwrap` to keep the audio path panic-free regardless (ticket
+        // 1000).
+        let Some(entry) = self.buf[self.head].take() else {
+            return;
+        };
         self.head = (self.head + 1) % MAX_EVENTS;
         self.count -= 1;
 

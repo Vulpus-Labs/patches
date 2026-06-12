@@ -653,10 +653,15 @@ impl PatchBuilder {
                 node_structural,
             ) = match decision {
                 NodeDecision::Install { structural, .. } => {
-                    let inst = install_iter.next().expect(
-                        "PlanDecisions install branch outruns Instantiated.installs — \
-                         planner invariant violated",
-                    );
+                    // ADR 0081: surface builder invariant violations as a
+                    // structured `BuildError`, not a panic (ticket 1000).
+                    let inst = install_iter.next().ok_or_else(|| {
+                        BuildError::new(BuildErrorKind::InternalError(
+                            "PlanDecisions install branch outruns \
+                             Instantiated.installs — planner invariant violated"
+                                .to_string(),
+                        ))
+                    })?;
                     let InstalledNode { meta: meta_i, module, param_state } = inst;
                     let periodic = meta_i.wants_periodic;
                     if periodic { periodic_indices.push(pool_index); }
