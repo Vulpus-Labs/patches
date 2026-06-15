@@ -753,7 +753,7 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
             let needs_seed = p
                 .host_control_registry
                 .live_by_id(*id)
-                .map(|(_, e)| e.last_value == 0.0)
+                .map(|(_, e)| e.last_value.load() == 0.0)
                 .unwrap_or(false);
             if needs_seed {
                 p.host_control_registry.record_value(*id, dflt as f32);

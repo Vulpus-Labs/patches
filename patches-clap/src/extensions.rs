@@ -161,7 +161,7 @@ pub(crate) fn collect_host_controls_for_save(
 ) -> std::collections::HashMap<String, f32> {
     let mut hc = cache.clone();
     for (name, entry) in registry.live_sorted_by_id() {
-        hc.insert(name.to_string(), entry.last_value);
+        hc.insert(name.to_string(), entry.last_value.load());
     }
     hc
 }
@@ -738,7 +738,7 @@ unsafe extern "C" fn params_get_value(
     let p = plugin::plugin_ref_pub(plugin);
     match p.host_control_registry.live_by_id(param_id) {
         Some((_, e)) => {
-            *out_value = e.last_value as f64;
+            *out_value = e.last_value.load() as f64;
             true
         }
         None => false,
@@ -804,18 +804,18 @@ unsafe extern "C" fn params_flush(
     // is single-writer; CLAP forbids overlap with process(), so the
     // mutation is safe under the host's own threading contract.
     let p = plugin::plugin_mut_pub(plugin);
-    // Split-borrow so we can drive both the processor and mirror into
-    // the registry without aliasing.
-    //
-    // TODO(1003): when flush is invoked on the audio thread (active &
-    // not-processing), `host_control_registry.record_value` races with
-    // main-thread mutations from `on_main_thread`. Move the registry
-    // mirror onto a SPSC drained by main-thread to remove the hazard.
+    // Split-borrow so we can drive the processor while mirroring values
+    // into the registry. The processor needs `&mut`; the registry only
+    // needs `&` because `record_value` writes `last_value` via an atomic
+    // store (ticket 1003) — so a flush on the audio thread (active &
+    // not-processing) and a main-thread `record_value` no longer race on
+    // the value bits.
     let plugin::PatchesClapPlugin {
         processor,
         host_control_registry,
         ..
     } = p;
+    let host_control_registry: &_ = host_control_registry;
     let Some(proc) = processor.as_mut() else {
         return;
     };

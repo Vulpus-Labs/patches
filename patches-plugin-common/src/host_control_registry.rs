@@ -28,6 +28,7 @@
 //! per-plan `(param_id → slot)` snapshot to the audio thread separately.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use patches_core::ExpectInvariant;
 use patches_dsl::host_control_manifest::{
@@ -36,6 +37,40 @@ use patches_dsl::host_control_manifest::{
 
 /// CLAP parameter identifier. CLAP itself uses `clap_id = u32`.
 pub type ParamId = u32;
+
+/// An `f32` stored as its `u32` bit pattern in an [`AtomicU32`], so the
+/// value can be read and written from both the audio and main threads
+/// without a data race (ticket 1003). `record_value` is called on the
+/// audio thread from `params.flush` (active & not processing) and on the
+/// main thread otherwise; a plain `f32` field would be a torn-access
+/// hazard. All access is `Relaxed`: the field is an advisory cache (last
+/// observed value), with no ordering relationship to other state.
+#[derive(Debug)]
+pub struct AtomicF32(AtomicU32);
+
+impl AtomicF32 {
+    pub fn new(v: f32) -> Self {
+        Self(AtomicU32::new(v.to_bits()))
+    }
+    pub fn load(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+    pub fn store(&self, v: f32) {
+        self.0.store(v.to_bits(), Ordering::Relaxed);
+    }
+}
+
+impl Clone for AtomicF32 {
+    fn clone(&self) -> Self {
+        Self::new(self.load())
+    }
+}
+
+impl PartialEq for AtomicF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.load() == other.load()
+    }
+}
 
 /// One currently-published host control.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +85,9 @@ pub struct LiveEntry {
     /// Last value observed on this control. Updated by
     /// [`HostControlRegistry::record_value`]; preserved across replans
     /// when the entry stays live, copied into the tombstone on remove.
-    pub last_value: f32,
+    /// Atomic because `record_value` runs on both the audio and main
+    /// threads (ticket 1003).
+    pub last_value: AtomicF32,
 }
 
 /// One historically-live host control whose name has been removed from
@@ -138,8 +175,10 @@ pub trait HostControlRegistry {
     fn id_to_slot(&self) -> Vec<(ParamId, usize)>;
 
     /// Update the cached `last_value` for the live entry holding `id`.
-    /// No-op if `id` isn't currently live.
-    fn record_value(&mut self, id: ParamId, value: f32);
+    /// No-op if `id` isn't currently live. Takes `&self`: the write is an
+    /// atomic store, so this is sound to call concurrently from the audio
+    /// and main threads (ticket 1003).
+    fn record_value(&self, id: ParamId, value: f32);
 
     fn live_len(&self) -> usize;
     fn tombstone_len(&self) -> usize;
@@ -219,7 +258,7 @@ impl HostControlRegistry for StandardHostControlRegistry {
                     Tombstone {
                         id: entry.id,
                         kind: entry.kind,
-                        last_value: entry.last_value,
+                        last_value: entry.last_value.load(),
                         epoch: self.epoch,
                     },
                 );
@@ -250,9 +289,9 @@ impl HostControlRegistry for StandardHostControlRegistry {
         v
     }
 
-    fn record_value(&mut self, id: ParamId, value: f32) {
-        if let Some(e) = self.live.values_mut().find(|e| e.id == id) {
-            e.last_value = value;
+    fn record_value(&self, id: ParamId, value: f32) {
+        if let Some(e) = self.live.values().find(|e| e.id == id) {
+            e.last_value.store(value);
         }
     }
 
@@ -298,7 +337,7 @@ impl StandardHostControlRegistry {
                     Tombstone {
                         id: old.id,
                         kind: old.kind,
-                        last_value: old.last_value,
+                        last_value: old.last_value.load(),
                         epoch: self.epoch,
                     },
                 );
@@ -310,7 +349,7 @@ impl StandardHostControlRegistry {
                         kind: desc.kind,
                         slot: desc.slot,
                         params: desc.params.clone(),
-                        last_value: 0.0,
+                        last_value: AtomicF32::new(0.0),
                     },
                 );
                 out.kind_changed.push(name.clone());
@@ -345,7 +384,7 @@ impl StandardHostControlRegistry {
                         kind: desc.kind,
                         slot: desc.slot,
                         params: desc.params.clone(),
-                        last_value: 0.0,
+                        last_value: AtomicF32::new(0.0),
                     },
                 );
                 out.added.push(name.clone());
@@ -360,7 +399,7 @@ impl StandardHostControlRegistry {
                     kind: desc.kind,
                     slot: desc.slot,
                     params: desc.params.clone(),
-                    last_value: t.last_value,
+                    last_value: AtomicF32::new(t.last_value),
                 },
             );
             out.reborn.push(name.clone());
@@ -377,7 +416,7 @@ impl StandardHostControlRegistry {
                 kind: desc.kind,
                 slot: desc.slot,
                 params: desc.params.clone(),
-                last_value: 0.0,
+                last_value: AtomicF32::new(0.0),
             },
         );
         out.added.push(name.clone());
@@ -529,7 +568,7 @@ mod tests {
         let out = r.apply(&manifest_alpha(vec![desc(0, "k", HostControlKind::Knob)]));
         assert_eq!(out.reborn, vec!["k".to_string()]);
         assert_eq!(r.id_of("k"), Some(id));
-        assert_eq!(r.live("k").unwrap().last_value, 0.7);
+        assert_eq!(r.live("k").unwrap().last_value.load(), 0.7);
         assert!(r.tombstone("k").is_none());
         // No new IDs minted.
         assert_eq!(r.next_id(), 1);
@@ -620,12 +659,12 @@ mod tests {
         r.apply(&Vec::new());
         assert_eq!(r.tombstone("k").unwrap().last_value, 0.31);
         r.apply(&manifest_alpha(vec![desc(0, "k", HostControlKind::Knob)]));
-        assert_eq!(r.live("k").unwrap().last_value, 0.31);
+        assert_eq!(r.live("k").unwrap().last_value.load(), 0.31);
     }
 
     #[test]
     fn record_value_on_unknown_id_is_noop() {
-        let mut r = StandardHostControlRegistry::new(64);
+        let r = StandardHostControlRegistry::new(64);
         r.record_value(999, 1.0);  // does not panic, no state mutation.
         assert_eq!(r.live_len(), 0);
     }
