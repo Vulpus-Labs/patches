@@ -20,9 +20,8 @@ static A: patches_alloc_trap::TrappingAllocator = patches_alloc_trap::TrappingAl
 use std::sync::Arc;
 
 use patches_alloc_trap::{trap_hits, NoAllocGuard};
-use patches_engine::{
-    build_patch, ExecutionPlan, OversamplingFactor, PlannerState,
-};
+use patches_engine::OversamplingFactor;
+use patches_planner::{build_patch, ExecutionPlan, PlannerState};
 use patches_ffi::loader::load_plugin;
 use patches_integration_tests::{
     dylib_path, env, HeadlessEngine, MODULE_CAP, POOL_CAP,

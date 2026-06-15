@@ -21,14 +21,6 @@ pub use processor::PatchProcessor;
 pub use patches_dsp::FtzGuard;
 pub use patches_io_ring::{tap_ring, TapRingConsumer, TapRingProducer, TapRingShared};
 
-// ── Re-exports from patches-planner ──
-// Kept temporarily to ease the kernel carve migration; downstream crates
-// should import from `patches_planner` directly. Retirement tracked in
-// ticket 1004.
-pub use patches_planner::{
-    build_patch, BuildError, BufferAllocState, ExecutionPlan, ModuleAllocState, ModuleSlot,
-    NodeState, PatchBuilder, MonitorMeta, Planner, PlannerState,
-};
 pub use monitor::{
     monitor_channel, MonitorAttach, MonitorBlock, MonitorConfig, MonitorMessage, MonitorState,
     DEFAULT_MONITOR_BLOCK_SAMPLES, DEFAULT_MONITOR_CAPACITY, DEFAULT_MONITOR_DECIMATION_K,

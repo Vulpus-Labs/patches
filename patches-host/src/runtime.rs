@@ -11,9 +11,9 @@ use patches_core::{
     MAX_HOST_CONTROLS,
 };
 use patches_dsl::host_control_manifest::{HostControlKind, HostControlManifest};
-use patches_engine::{HaltHandle, PatchProcessor, Planner};
+use patches_engine::{HaltHandle, PatchProcessor};
 use patches_observation::{ManifestPublication, ReplanProducer};
-use patches_planner::{ExecutionPlan, MonitorMeta};
+use patches_planner::{ExecutionPlan, MonitorMeta, Planner};
 use patches_core::registry::Registry;
 use rtrb::{Consumer, Producer};
 

@@ -1,7 +1,8 @@
 //! Shared helpers for tracker integration tests.
 
 use patches_core::AudioEnvironment;
-use patches_engine::{OversamplingFactor, Planner};
+use patches_engine::OversamplingFactor;
+use patches_planner::Planner;
 use patches_integration_tests::{MODULE_CAP, POOL_CAP};
 
 pub fn env() -> AudioEnvironment {

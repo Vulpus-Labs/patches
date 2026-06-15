@@ -1,7 +1,7 @@
 //! Backend-agnostic cleanup action type.
 //!
 //! Used by the audio thread to send evicted modules and replaced
-//! [`ExecutionPlan`](crate::ExecutionPlan)s to a background cleanup thread
+//! [`ExecutionPlan`](patches_planner::ExecutionPlan)s to a background cleanup thread
 //! for deallocation off the real-time path. The concrete cleanup-thread
 //! spawn lives in [`crate::kernel`].
 

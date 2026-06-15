@@ -10,10 +10,10 @@
 use patches_core::modules::{InstanceId, ModuleShape, ParameterMap, StructuralParams};
 use patches_core::registry::ModuleBuilder;
 use patches_core::AudioEnvironment;
-use patches_engine::{ExecutionPlan, OversamplingFactor};
+use patches_engine::OversamplingFactor;
 use patches_ffi::loader::load_plugin;
 use patches_integration_tests::{dylib_path, HeadlessEngine};
-use patches_planner::ParamState;
+use patches_planner::{ExecutionPlan, ParamState};
 
 const POOL_CAP: usize = 256;
 const MODULE_CAP: usize = 8;

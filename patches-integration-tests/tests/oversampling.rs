@@ -8,7 +8,8 @@
 
 use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_engine::{build_patch, OversamplingFactor, PlannerState};
+use patches_engine::OversamplingFactor;
+use patches_planner::{build_patch, PlannerState};
 use patches_integration_tests::{HeadlessEngine, POOL_CAP, MODULE_CAP};
 use patches_modules::{AudioOut, Oscillator};
 

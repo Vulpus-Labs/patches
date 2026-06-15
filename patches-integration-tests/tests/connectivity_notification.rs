@@ -1,7 +1,7 @@
 use patches_core::{AudioEnvironment, ModuleGraph, ModuleShape, NodeId, PortRef};
 use patches_core::registry::Registry;
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
-use patches_engine::{build_patch, PlannerState};
+use patches_planner::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator, Tuner};
 
 const POOL_CAP: usize = 256;

@@ -17,7 +17,7 @@ use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::{ParameterMap, ParameterValue};
 use patches_core::param_frame::ParamView;
 use patches_core::params::FloatParamName;
-use patches_engine::{build_patch, PlannerState};
+use patches_planner::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator, PolyResonantLowpass};
 
 use patches_integration_tests::HeadlessEngine;

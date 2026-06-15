@@ -10,7 +10,7 @@ use patches_core::{StructuralParams, BuildError};
 use patches_core::registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::parameter_map::ParameterMap;
-use patches_engine::{build_patch, PlannerState};
+use patches_planner::{build_patch, PlannerState};
 use patches_modules::{AudioOut, Oscillator};
 use patches_integration_tests::{p, env, POOL_CAP, MODULE_CAP};
 

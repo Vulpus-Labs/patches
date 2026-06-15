@@ -9,11 +9,9 @@ use patches_core::registry::Registry;
 use patches_core::cables::{InputPort, OutputPort};
 use patches_core::param_frame::ParamView;
 use patches_core::params::FloatParamName;
-use patches_engine::{
-    CleanupAction, ExecutionPlan, OversamplingFactor,
-    PatchProcessor, PlannerState, build_patch,
-};
+use patches_engine::{CleanupAction, OversamplingFactor, PatchProcessor};
 use patches_engine::kernel::spawn_cleanup_thread;
+use patches_planner::{ExecutionPlan, PlannerState, build_patch};
 
 // ── Common constants ─────────────────────────────────────────────────────────
 

@@ -8,8 +8,8 @@ use patches_core::{
 use patches_core::{StructuralParams, BuildError};
 use patches_core::parameter_map::ParameterMap;
 use patches_core::param_frame::ParamView;
-use patches_engine::{ExecutionPlan, OversamplingFactor};
-use patches_planner::ParamState;
+use patches_engine::OversamplingFactor;
+use patches_planner::{ExecutionPlan, ParamState};
 use patches_integration_tests::HeadlessEngine;
 
 const POOL_CAP: usize = 32;
