@@ -19,6 +19,8 @@
 //! `(kind, name)` collapse onto one channel; the first source
 //! occurrence determines its slot.
 
+use patches_core::ExpectInvariant;
+
 use crate::ast::*;
 use crate::manifest::{Manifest, TapDescriptor, TapType};
 use crate::provenance::Provenance;
@@ -197,7 +199,7 @@ pub fn desugar_taps(mut file: File) -> (File, Manifest) {
         let components: Vec<TapType> = tap
             .components
             .iter()
-            .map(|c| TapType::from_ast_name(&c.name).expect("validated component"))
+            .map(|c| TapType::from_ast_name(&c.name).expect_invariant("tap component name validated upstream"))
             .collect();
         match kinds[i] {
             Kind::Stereo => {
@@ -307,7 +309,7 @@ fn rewrite_endpoint(
             let key = (classify(t).as_enum_str(), t.name.name.clone());
             let (port_name, alias) = target_for
                 .get(&key)
-                .expect("tap (kind, name) was collected; lookup must succeed");
+                .expect_invariant("tap (kind, name) was collected into target_for; lookup is total");
             CableEndpoint::Port(PortRef {
                 module: SYNTH_TAP.to_owned(),
                 port: PortLabel::Literal((*port_name).to_owned()),

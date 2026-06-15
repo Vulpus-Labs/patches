@@ -4,6 +4,7 @@ use patches_manifest::{
     GeneratorInfo, ModuleManifest, ModuleManifestEntry, OwnedTemplate, SCHEMA_VERSION,
 };
 use patches_core::registry::Registry;
+use patches_core::ExpectInvariant;
 
 /// Build a [`ModuleManifest`] from every registered module in `registry`.
 /// Modules are emitted in deterministic (sorted-name) order so the JSON
@@ -22,7 +23,7 @@ pub fn build_manifest(registry: &Registry, generator: GeneratorInfo) -> ModuleMa
         .map(|name| {
             let template = registry
                 .template(name)
-                .expect("registry.template() must succeed for a name from module_names()");
+                .expect_invariant("name came from registry.module_names(), so template() resolves");
             ModuleManifestEntry {
                 name: name.to_string(),
                 template: OwnedTemplate::from(template),
@@ -49,7 +50,7 @@ pub fn deterministic_generator() -> GeneratorInfo {
 /// Pretty-print a manifest as JSON with a trailing newline.
 pub fn manifest_to_json(manifest: &ModuleManifest) -> String {
     let mut s = serde_json::to_string_pretty(manifest)
-        .expect("ModuleManifest serialization is infallible");
+        .expect_invariant("ModuleManifest serialization is infallible");
     s.push('\n');
     s
 }

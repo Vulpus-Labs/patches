@@ -30,6 +30,8 @@
 
 use std::collections::HashMap;
 
+use patches_core::ExpectInvariant;
+
 use crate::ast::*;
 use crate::expand::ExpandError;
 use crate::host_control_manifest::{
@@ -232,7 +234,9 @@ fn rewrite_endpoint(
         CableEndpoint::HostControlRef(id) => {
             // Every bare ref has an explicit or synthesised implicit
             // declaration by this point, so the lookup is total.
-            let kind = *lookup.get(&id.name).expect("ref resolved by decl synthesis");
+            let kind = *lookup
+                .get(&id.name)
+                .expect_invariant("every bare host-control ref resolved by decl synthesis");
             CableEndpoint::Port(PortRef {
                 module: SYNTH_HOST_CONTROL.to_owned(),
                 port: PortLabel::Literal(out_port(kind).to_owned()),

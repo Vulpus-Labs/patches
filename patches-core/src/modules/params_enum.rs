@@ -78,7 +78,10 @@ macro_rules! params_enum {
                     .unwrap_or_else(|bad| {
                         debug_assert!(false, "ParamEnum::from_variant: out-of-range {} for {}", bad, ::core::stringify!($Name));
                         // Fall back to variant 0 in release.
-                        <$Name as ::core::convert::TryFrom<u32>>::try_from(0).ok().expect("enum has at least one variant")
+                        $crate::ExpectInvariant::expect_invariant(
+                            <$Name as ::core::convert::TryFrom<u32>>::try_from(0).ok(),
+                            "ParamEnum has a variant with discriminant 0",
+                        )
                     })
             }
             #[inline]

@@ -4,6 +4,7 @@
 //! `song_row`/`row_group`/`repeat_group`/`row_seq`, and the
 //! play-expression hierarchy plus `song_block`.
 
+use patches_core::ExpectInvariant;
 use pest::iterators::Pair;
 
 use crate::ast::{
@@ -33,7 +34,10 @@ fn parse_cv1_value(pair: &Pair<'_, Rule>) -> Result<f32, ParseError> {
 
 /// Parse a slide target value from a step_slide_target's inner pair.
 fn parse_slide_target_value(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees step_slide_target has an inner value");
     let span = span_of(&inner);
     match inner.as_rule() {
         Rule::step_note => parse_step_note(inner.as_str(), span),
@@ -46,7 +50,10 @@ fn parse_slide_target_value(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
 /// Parse the `:value` cv2 tail on a slide cell (`step_cv2_tail`).
 /// Inner pair is `float_unit | float_lit | int_lit`.
 fn parse_cv2_tail(pair: Pair<'_, Rule>) -> Result<f32, ParseError> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees step_cv2_tail has an inner value");
     let span = span_of(&inner);
     match inner.as_rule() {
         Rule::float_lit | Rule::int_lit => parse_step_float(inner.as_str(), span),
@@ -72,7 +79,9 @@ fn parse_cv2_primary(pair: &Pair<'_, Rule>) -> Result<f32, ParseError> {
 /// `step_valued_*` arms.
 fn parse_step_cv2(child: Pair<'_, Rule>) -> Result<(f32, Option<f32>), ParseError> {
     let mut cv2_it = child.into_inner();
-    let cv2_val_pair = cv2_it.next().unwrap();
+    let cv2_val_pair = cv2_it
+        .next()
+        .expect_invariant("grammar guarantees step_cv2 has a primary value");
     let cv2 = parse_cv2_primary(&cv2_val_pair)?;
     let cv2_end = match cv2_it.next() {
         Some(slide_pair) => Some(parse_slide_target_value(slide_pair)?),
@@ -83,7 +92,10 @@ fn parse_step_cv2(child: Pair<'_, Rule>) -> Result<(f32, Option<f32>), ParseErro
 
 fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
     // pair.as_rule() == Rule::step
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees step has an inner step shape");
     match inner.as_rule() {
         Rule::step_rest => Ok(Step::default()),
         Rule::step_tie => Ok(Step {
@@ -99,7 +111,9 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
         Rule::step_step_to => {
             // step_step_to = ${ "/" ~ primary ~ step_slide_target? ~ step_cv2_tail? }
             let mut it = inner.into_inner();
-            let val_pair = it.next().unwrap();
+            let val_pair = it
+                .next()
+                .expect_invariant("grammar guarantees step_step_to has a primary");
             let cv1 = parse_cv1_value(&val_pair)?;
             let mut cv1_end: Option<f32> = None;
             let mut cv2: Option<f32> = None;
@@ -129,7 +143,9 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
         Rule::step_slide_close => {
             // step_slide_close = ${ ">" ~ primary ~ step_cv2_tail? }
             let mut it = inner.into_inner();
-            let val_pair = it.next().unwrap();
+            let val_pair = it
+                .next()
+                .expect_invariant("grammar guarantees step_slide_close has a primary");
             let cv1 = parse_cv1_value(&val_pair)?;
             let cv2 = match it.next() {
                 Some(tail) => Some(parse_cv2_tail(tail)?),
@@ -146,7 +162,9 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
         Rule::step_slide_open => {
             // step_slide_open = ${ primary ~ step_cv2_tail? ~ ">" ~ !primary }
             let mut it = inner.into_inner();
-            let val_pair = it.next().unwrap();
+            let val_pair = it
+                .next()
+                .expect_invariant("grammar guarantees step_slide_open has a primary");
             let cv1 = parse_cv1_value(&val_pair)?;
             let cv2 = match it.next() {
                 Some(tail) => parse_cv2_tail(tail)?,
@@ -166,7 +184,10 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
             // grammar level (ticket 0950), so no post-hoc
             // classification or defensive `cv1_end + repeat` check is
             // needed here — the inner rule names the shape.
-            let inner = inner.into_inner().next().unwrap();
+            let inner = inner
+                .into_inner()
+                .next()
+                .expect_invariant("grammar guarantees step_valued has an inner alternative");
             match inner.as_rule() {
                 Rule::step_valued_slide => build_step_valued_slide(inner),
                 Rule::step_valued_note => build_step_valued_note(inner),
@@ -181,9 +202,13 @@ fn build_step(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
 fn build_step_valued_slide(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
     // step_valued_slide = ${ primary ~ step_slide_target ~ step_cv2? }
     let mut it = pair.into_inner();
-    let cv1_pair = it.next().unwrap();
+    let cv1_pair = it
+        .next()
+        .expect_invariant("grammar guarantees step_valued_slide has a primary");
     let cv1 = parse_cv1_value(&cv1_pair)?;
-    let slide_pair = it.next().unwrap();
+    let slide_pair = it
+        .next()
+        .expect_invariant("grammar guarantees step_valued_slide has a step_slide_target");
     debug_assert_eq!(slide_pair.as_rule(), Rule::step_slide_target);
     let cv1_end = parse_slide_target_value(slide_pair)?;
     let (cv2, cv2_end) = match it.next() {
@@ -206,7 +231,9 @@ fn build_step_valued_slide(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
 fn build_step_valued_note(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
     // step_valued_note = ${ primary ~ step_cv2? ~ step_repeat? }
     let mut it = pair.into_inner();
-    let cv1_pair = it.next().unwrap();
+    let cv1_pair = it
+        .next()
+        .expect_invariant("grammar guarantees step_valued_note has a primary");
     let cv1 = parse_cv1_value(&cv1_pair)?;
     let mut cv2: f32 = 0.0;
     let mut repeat: u8 = 1;
@@ -233,7 +260,10 @@ fn build_step_valued_note(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
                 }
             }
             Rule::step_repeat => {
-                let nat_pair = child.into_inner().next().unwrap();
+                let nat_pair = child
+                    .into_inner()
+                    .next()
+                    .expect_invariant("grammar guarantees step_repeat has a nat");
                 let span = span_of(&nat_pair);
                 repeat = nat_pair.as_str().parse::<u8>().map_err(|_| ParseError {
                     span,
@@ -255,7 +285,10 @@ fn build_step_valued_note(pair: Pair<'_, Rule>) -> Result<Step, ParseError> {
 fn build_channel_row(pair: Pair<'_, Rule>) -> Result<PatternChannel, ParseError> {
     // channel_row = { ident ~ ":" ~ step* ~ channel_row_cont* }
     let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees channel_row has an ident"),
+    );
     let mut steps: Vec<Step> = Vec::new();
 
     for child in it {
@@ -278,7 +311,10 @@ pub(super) fn build_pattern_block(pair: Pair<'_, Rule>) -> Result<PatternDef, Pa
     // pattern_block = { "pattern" ~ ident ~ "{" ~ channel_row+ ~ "}" }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees pattern_block has an ident"),
+    );
     let channels: Vec<PatternChannel> =
         it.map(build_channel_row).collect::<Result<_, _>>()?;
     Ok(PatternDef { name, channels, span })
@@ -286,13 +322,21 @@ pub(super) fn build_pattern_block(pair: Pair<'_, Rule>) -> Result<PatternDef, Pa
 
 fn build_row_cell(pair: Pair<'_, Rule>) -> SongCell {
     // row_cell = ${ song_silence | param_ref | ident }
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees row_cell has an inner alternative");
     match inner.as_rule() {
         Rule::song_silence => SongCell::Silence,
         Rule::ident => SongCell::Pattern(build_ident(inner)),
         Rule::param_ref => {
             let span = span_of(&inner);
-            let name = inner.into_inner().next().unwrap().as_str().to_owned();
+            let name = inner
+                .into_inner()
+                .next()
+                .expect_invariant("grammar guarantees param_ref has an ident")
+                .as_str()
+                .to_owned();
             SongCell::ParamRef { name, span }
         }
         _ => unreachable!("unexpected rule in row_cell: {:?}", inner.as_rule()),
@@ -312,7 +356,10 @@ fn build_song_row(pair: Pair<'_, Rule>) -> SongRow {
 
 fn build_row_group(pair: Pair<'_, Rule>) -> Result<RowGroup, ParseError> {
     // row_group = ${ repeat_group | song_row }
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees row_group has an inner alternative");
     match inner.as_rule() {
         Rule::song_row => Ok(RowGroup::Row(build_song_row(inner))),
         Rule::repeat_group => build_repeat_group(inner),
@@ -346,8 +393,8 @@ fn build_repeat_group(pair: Pair<'_, Rule>) -> Result<RowGroup, ParseError> {
         }
     }
     Ok(RowGroup::Repeat {
-        body: body.unwrap(),
-        count: count.unwrap(),
+        body: body.expect_invariant("grammar guarantees repeat_group has a row_seq"),
+        count: count.expect_invariant("grammar guarantees repeat_group has a nat count"),
         span,
     })
 }
@@ -372,7 +419,10 @@ fn build_play_term(pair: Pair<'_, Rule>) -> Result<PlayTerm, ParseError> {
     // play_term = { play_atom ~ ("*" ~ nat)? }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let atom = build_play_atom(it.next().unwrap())?;
+    let atom = build_play_atom(
+        it.next()
+            .expect_invariant("grammar guarantees play_term has a play_atom"),
+    )?;
     let repeat = if let Some(nat_pair) = it.next() {
         let n_span = span_of(&nat_pair);
         let n: u32 = nat_pair.as_str().parse().map_err(|_| ParseError {
@@ -394,11 +444,17 @@ fn build_play_term(pair: Pair<'_, Rule>) -> Result<PlayTerm, ParseError> {
 
 fn build_play_atom(pair: Pair<'_, Rule>) -> Result<PlayAtom, ParseError> {
     // play_atom = { play_atom_group | ident }
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees play_atom has an inner alternative");
     match inner.as_rule() {
         Rule::ident => Ok(PlayAtom::Ref(build_ident(inner))),
         Rule::play_atom_group => {
-            let expr_pair = inner.into_inner().next().unwrap();
+            let expr_pair = inner
+                .into_inner()
+                .next()
+                .expect_invariant("grammar guarantees play_atom_group has a play_expr");
             Ok(PlayAtom::Group(Box::new(build_play_expr(expr_pair)?)))
         }
         _ => unreachable!("unexpected rule in play_atom: {:?}", inner.as_rule()),
@@ -407,19 +463,31 @@ fn build_play_atom(pair: Pair<'_, Rule>) -> Result<PlayAtom, ParseError> {
 
 fn build_play_body(pair: Pair<'_, Rule>) -> Result<PlayBody, ParseError> {
     // play_body = { inline_block | named_inline | play_expr }
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees play_body has an inner alternative");
     match inner.as_rule() {
         Rule::inline_block => {
             let span = span_of(&inner);
-            let row_seq_pair = inner.into_inner().next().unwrap();
+            let row_seq_pair = inner
+                .into_inner()
+                .next()
+                .expect_invariant("grammar guarantees inline_block has a row_seq");
             let body = build_row_seq(row_seq_pair)?;
             Ok(PlayBody::Inline { body, span })
         }
         Rule::named_inline => {
             let span = span_of(&inner);
             let mut it = inner.into_inner();
-            let name = build_ident(it.next().unwrap());
-            let body = build_row_seq(it.next().unwrap())?;
+            let name = build_ident(
+                it.next()
+                    .expect_invariant("grammar guarantees named_inline has an ident"),
+            );
+            let body = build_row_seq(
+                it.next()
+                    .expect_invariant("grammar guarantees named_inline has a row_seq"),
+            )?;
             Ok(PlayBody::NamedInline { name, body, span })
         }
         Rule::play_expr => Ok(PlayBody::Expr(build_play_expr(inner)?)),
@@ -429,12 +497,18 @@ fn build_play_body(pair: Pair<'_, Rule>) -> Result<PlayBody, ParseError> {
 
 fn build_song_item(pair: Pair<'_, Rule>) -> Result<SongItem, ParseError> {
     // song_item = { section_def | pattern_block | play_stmt | loop_marker }
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees song_item has an inner alternative");
     match inner.as_rule() {
         Rule::section_def => Ok(SongItem::Section(build_section_def(inner)?)),
         Rule::pattern_block => Ok(SongItem::Pattern(build_pattern_block(inner)?)),
         Rule::play_stmt => {
-            let body_pair = inner.into_inner().next().unwrap();
+            let body_pair = inner
+                .into_inner()
+                .next()
+                .expect_invariant("grammar guarantees play_stmt has a play_body");
             Ok(SongItem::Play(build_play_body(body_pair)?))
         }
         Rule::loop_marker => Ok(SongItem::LoopMarker(span_of(&inner))),
@@ -446,9 +520,14 @@ pub(super) fn build_song_block(pair: Pair<'_, Rule>) -> Result<SongDef, ParseErr
     // song_block = { "song" ~ ident ~ song_lanes ~ "{" ~ song_item* ~ "}" }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees song_block has an ident"),
+    );
 
-    let lanes_pair = it.next().unwrap();
+    let lanes_pair = it
+        .next()
+        .expect_invariant("grammar guarantees song_block has song_lanes");
     let lanes: Vec<Ident> = lanes_pair.into_inner().map(build_ident).collect();
 
     let items: Result<Vec<SongItem>, ParseError> = it.map(build_song_item).collect();

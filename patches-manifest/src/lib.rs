@@ -16,6 +16,7 @@ pub mod static_registry;
 
 mod bundled {
     use super::ModuleManifest;
+    use patches_core::ExpectInvariant;
     use std::sync::OnceLock;
 
     const BUNDLED_MANIFEST_JSON: &str = include_str!("../data/module-manifest.json");
@@ -37,7 +38,7 @@ mod bundled {
         CACHE.get_or_init(|| {
             // SAFETY: panic contract documented on `bundled_manifest`.
             serde_json::from_str(BUNDLED_MANIFEST_JSON)
-                .expect("bundled module-manifest.json must deserialize")
+                .expect_invariant("bundled module-manifest.json is build-time-generated and must deserialize")
         })
     }
 }

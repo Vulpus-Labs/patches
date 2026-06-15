@@ -38,6 +38,7 @@
 use std::path::Path;
 
 use patches_core::source_span::Span;
+use patches_core::ExpectInvariant;
 
 use crate::expand::{expand as expand_fn, ExpandError, ExpandResult};
 use crate::flat::FlatPatch;
@@ -170,7 +171,7 @@ where
         }
     };
     run.loaded = Some(loaded);
-    let loaded_ref = run.loaded.as_ref().expect("just assigned");
+    let loaded_ref = run.loaded.as_ref().expect_invariant("run.loaded just assigned Some above");
 
     let expanded = match expand(loaded_ref) {
         Ok(r) => r,
@@ -182,7 +183,7 @@ where
     run.warnings = expanded.warnings;
     run.patch = Some(expanded.patch);
 
-    let patch_ref = run.patch.as_ref().expect("just assigned");
+    let patch_ref = run.patch.as_ref().expect_invariant("run.patch just assigned Some above");
     let bound = bind(patch_ref);
     run.layering_warnings = bound.layering_warnings();
     run.bound = Some(bound);

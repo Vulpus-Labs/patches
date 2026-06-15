@@ -2,6 +2,7 @@
 //! module_decl, param_decl, port_group_decl, section_def, and the
 //! include directive.
 
+use patches_core::ExpectInvariant;
 use pest::iterators::Pair;
 
 use crate::ast::{
@@ -19,7 +20,10 @@ use super::{current_source, span_of, Rule};
 
 pub(super) fn build_include_directive(pair: Pair<'_, Rule>) -> IncludeDirective {
     let span = span_of(&pair);
-    let string_pair = pair.into_inner().next().unwrap(); // grammar: include_directive = { "include" ~ string_lit }
+    let string_pair = pair
+        .into_inner()
+        .next()
+        .expect_invariant("grammar guarantees include_directive has a string_lit child");
     let raw = string_pair.as_str();
     let path = raw[1..raw.len() - 1].to_owned(); // strip surrounding quotes
     IncludeDirective { path, span }
@@ -73,7 +77,9 @@ pub(super) fn build_file(pair: Pair<'_, Rule>) -> Result<File, ParseError> {
         patterns: items.patterns,
         songs: items.songs,
         sections: items.sections,
-        patch: items.patch.unwrap(), // grammar: file = SOI ~ ... ~ patch ~ EOI
+        patch: items
+            .patch
+            .expect_invariant("grammar guarantees file = SOI ~ ... ~ patch ~ EOI"),
         span: items.span,
     })
 }
@@ -103,8 +109,14 @@ pub(super) fn build_module_decl(pair: Pair<'_, Rule>) -> Result<ModuleDecl, Pars
         it.next();
     }
 
-    let name = build_ident(it.next().unwrap());
-    let type_name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees module_decl has a name ident"),
+    );
+    let type_name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees module_decl has a type_name ident"),
+    );
     // Narrow span to `name : type_name` — tight enough that diagnostics like
     // BN0001 UnknownModuleType land on the offending tokens rather than the
     // whole declaration (which pest widens across trailing whitespace when
@@ -147,7 +159,10 @@ fn build_param_decl(pair: Pair<'_, Rule>) -> Result<ParamDecl, ParseError> {
     let span = span_of(&pair);
     let mut it = pair.into_inner();
 
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees param_decl has a name ident"),
+    );
 
     // Next pair is either an ident (arity annotation), type_name, or scalar.
     // We need to distinguish: if it's an ident AND followed by type_name, it's the arity ident.
@@ -195,7 +210,10 @@ fn build_port_group_decl(pair: Pair<'_, Rule>) -> PortGroupDecl {
     let span = span_of(&pair);
     let mut it = pair.into_inner();
 
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees port_group_decl has a name ident"),
+    );
 
     // Optional arity ident
     let arity = it.next().map(|arity_pair| arity_pair.as_str().to_owned());
@@ -207,7 +225,10 @@ pub(super) fn build_template(pair: Pair<'_, Rule>) -> Result<Template, ParseErro
     // pair.as_rule() == Rule::template
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees template has a name ident"),
+    );
 
     let mut params = Vec::new();
     let mut in_ports = Vec::new();
@@ -225,11 +246,17 @@ pub(super) fn build_template(pair: Pair<'_, Rule>) -> Result<Template, ParseErro
                 for decl in next.into_inner() {
                     match decl.as_rule() {
                         Rule::in_decl => {
-                            let ci = decl.into_inner().next().unwrap();
+                            let ci = decl
+                                .into_inner()
+                                .next()
+                                .expect_invariant("grammar guarantees in_decl has a comma_port_decls child");
                             in_ports = ci.into_inner().map(build_port_group_decl).collect();
                         }
                         Rule::out_decl => {
-                            let ci = decl.into_inner().next().unwrap();
+                            let ci = decl
+                                .into_inner()
+                                .next()
+                                .expect_invariant("grammar guarantees out_decl has a comma_port_decls child");
                             out_ports = ci.into_inner().map(build_port_group_decl).collect();
                         }
                         _ => unreachable!("unexpected rule in port_decls: {:?}", decl.as_rule()),
@@ -261,7 +288,13 @@ pub(super) fn build_section_def(pair: Pair<'_, Rule>) -> Result<SectionDef, Pars
     // section_def = { "section" ~ ident ~ "{" ~ row_seq ~ "}" }
     let span = span_of(&pair);
     let mut it = pair.into_inner();
-    let name = build_ident(it.next().unwrap());
-    let body = super::steps_songs::build_row_seq(it.next().unwrap())?;
+    let name = build_ident(
+        it.next()
+            .expect_invariant("grammar guarantees section_def has a name ident"),
+    );
+    let body = super::steps_songs::build_row_seq(
+        it.next()
+            .expect_invariant("grammar guarantees section_def has a row_seq body"),
+    )?;
     Ok(SectionDef { name, body, span })
 }

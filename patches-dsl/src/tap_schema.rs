@@ -6,6 +6,8 @@
 //! table now only carries the cable-kind tag used to reject mixed
 //! audio/trigger compound taps.
 
+use patches_core::ExpectInvariant;
+
 use crate::manifest::TapType;
 
 /// Cable kind a tap component consumes. Audio-rate components (meter,
@@ -40,6 +42,6 @@ pub fn cable_kind(ty: TapType) -> CableKind {
     TAP_SCHEMA
         .iter()
         .find(|s| s.ty == ty)
-        .expect("schema covers every TapType variant")
+        .expect_invariant("TAP_SCHEMA covers every TapType variant")
         .cable_kind
 }

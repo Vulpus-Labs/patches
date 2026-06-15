@@ -25,6 +25,7 @@
 use patches_core::modules::{
     ModuleDescriptor, ParameterDescriptor, ParameterKind, StructuralParams, StructuralValue,
 };
+use patches_core::ExpectInvariant;
 
 pub const TAG_BOOL: u8 = 0;
 pub const TAG_I64: u8 = 1;
@@ -254,9 +255,15 @@ pub fn decode_structural_params(
     let mut out = StructuralParams::new();
     for (i, slot) in descriptor.structural_params.iter().enumerate() {
         let value = match view.tag(i) {
-            TAG_BOOL => StructuralValue::Bool(view.get_bool(i).unwrap()),
-            TAG_I64 => StructuralValue::Int(view.get_i64(i).unwrap()),
-            TAG_F64 => StructuralValue::Float(view.get_f64(i).unwrap() as f32),
+            TAG_BOOL => StructuralValue::Bool(
+                view.get_bool(i).expect_invariant("tag is TAG_BOOL"),
+            ),
+            TAG_I64 => StructuralValue::Int(
+                view.get_i64(i).expect_invariant("tag is TAG_I64"),
+            ),
+            TAG_F64 => StructuralValue::Float(
+                view.get_f64(i).expect_invariant("tag is TAG_F64") as f32,
+            ),
             TAG_STRING => StructuralValue::String(
                 view.get_str(i)
                     .ok_or(StructuralDecodeError::InvalidUtf8)?

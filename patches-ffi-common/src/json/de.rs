@@ -89,7 +89,7 @@ impl<'a> JsonParser<'a> {
         Some(b)
     }
 
-    fn expect(&mut self, b: u8) -> Result<(), String> {
+    fn expect_byte(&mut self, b: u8) -> Result<(), String> {
         self.skip_whitespace();
         match self.advance() {
             Some(c) if c == b => Ok(()),
@@ -114,7 +114,7 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_string(&mut self) -> Result<String, String> {
-        self.expect(b'"')?;
+        self.expect_byte(b'"')?;
         let mut s = String::new();
         loop {
             match self.advance() {
@@ -176,14 +176,14 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_object(&mut self) -> Result<JsonValue, String> {
-        self.expect(b'{')?;
+        self.expect_byte(b'{')?;
         let mut pairs = Vec::new();
         self.skip_whitespace();
         if self.peek() == Some(b'}') { self.pos += 1; return Ok(JsonValue::Object(pairs)); }
         loop {
             self.skip_whitespace();
             let key = self.parse_string()?;
-            self.expect(b':')?;
+            self.expect_byte(b':')?;
             let value = self.parse_value()?;
             pairs.push((key, value));
             self.skip_whitespace();
@@ -196,7 +196,7 @@ impl<'a> JsonParser<'a> {
     }
 
     fn parse_array(&mut self) -> Result<JsonValue, String> {
-        self.expect(b'[')?;
+        self.expect_byte(b'[')?;
         let mut items = Vec::new();
         self.skip_whitespace();
         if self.peek() == Some(b']') { self.pos += 1; return Ok(JsonValue::Array(items)); }

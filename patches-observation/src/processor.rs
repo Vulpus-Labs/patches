@@ -17,6 +17,7 @@
 //! Identity is `(tap_name, kind)`; on replan, processors with matching
 //! identity are reused, the rest are rebuilt.
 
+use patches_core::ExpectInvariant;
 use patches_core::TAP_BLOCK;
 use patches_dsl::manifest::{TapDescriptor, TapType};
 
@@ -433,7 +434,7 @@ impl Spectrum {
     /// samples of the ring, applying the precomputed Hann window. The
     /// result lands in `self.mags[..n/2 + 1]`.
     fn compute(&mut self, n: usize) {
-        let idx = Self::fft_index(n).expect("validated fft_size");
+        let idx = Self::fft_index(n).expect_invariant("fft_size validated when scope was configured");
         // Assemble windowed input: oldest of the latest n samples first.
         let ring_len = self.ring.len();
         // The next-write slot points to the oldest sample in a fully-

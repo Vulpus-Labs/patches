@@ -12,6 +12,7 @@
 use std::mem::{align_of, size_of};
 
 use patches_core::cables::SCRATCH_CAPACITY;
+use patches_core::ExpectInvariant;
 use patches_core::{InputPort, OutputPort};
 
 use crate::types::{FfiInputPort, FfiOutputPort};
@@ -52,12 +53,12 @@ impl PortLayout {
         let in_bytes = checked_array_bytes::<FfiInputPort>(input_count);
         let after_inputs = in_off
             .checked_add(in_bytes)
-            .expect("PortLayout: input array size overflow");
+            .expect_invariant("PortLayout: input array size does not overflow usize");
         let out_off = align_up_checked(after_inputs, out_align);
         let out_bytes = checked_array_bytes::<FfiOutputPort>(output_count);
         let total = out_off
             .checked_add(out_bytes)
-            .expect("PortLayout: output array size overflow");
+            .expect_invariant("PortLayout: output array size does not overflow usize");
 
         Self {
             input_count,
@@ -73,14 +74,14 @@ fn align_up_checked(offset: usize, align: usize) -> usize {
     debug_assert!(align.is_power_of_two());
     offset
         .checked_add(align - 1)
-        .expect("PortLayout: alignment overflow")
+        .expect_invariant("PortLayout: alignment round-up does not overflow usize")
         & !(align - 1)
 }
 
 fn checked_array_bytes<T>(count: u32) -> usize {
     (count as usize)
         .checked_mul(size_of::<T>())
-        .expect("PortLayout: array size overflow")
+        .expect_invariant("PortLayout: array byte size does not overflow usize")
 }
 
 /// Owned, fixed-size packed port frame.
@@ -220,7 +221,7 @@ fn translate_cable_idx(cable_idx: usize, scratch_base_offset: usize) -> usize {
     if cable_idx < SCRATCH_CAPACITY {
         cable_idx
             .checked_sub(scratch_base_offset)
-            .expect("pack_ports_into: scratch cable_idx below scratch_base_offset (planner bug)")
+            .expect_invariant("pack_ports_into: planner guarantees scratch cable_idx >= scratch_base_offset")
     } else {
         cable_idx
     }
@@ -446,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "scratch cable_idx below scratch_base_offset")]
+    #[should_panic(expected = "planner guarantees scratch cable_idx >= scratch_base_offset")]
     fn pack_panics_on_backplane_cable_idx() {
         use patches_core::cables::BACKPLANE_SIZE;
         let layout = PortLayout::new(1, 0);

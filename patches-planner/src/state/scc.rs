@@ -15,6 +15,7 @@
 
 use std::collections::HashMap;
 
+use patches_core::ExpectInvariant;
 use patches_core::NodeId;
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ pub fn tarjan_scc(
                     let id = members_rev.len();
                     let mut group: Vec<usize> = Vec::new();
                     loop {
-                        let w = stack.pop().expect("Tarjan stack underflow");
+                        let w = stack.pop().expect_invariant("Tarjan: v is on the stack, so pop yields at least v");
                         on_stack[w] = false;
                         scc_id[w] = id;
                         group.push(w);

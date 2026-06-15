@@ -22,7 +22,7 @@ use patches_core::modules::{
 };
 use patches_core::param_frame::ParamView;
 use patches_core::param_layout::{compute_layout, ParamLayout};
-use patches_core::{AudioEnvironment, Module, ValidatedParamFrame};
+use patches_core::{AudioEnvironment, ExpectInvariant, Module, ValidatedParamFrame};
 use patches_ffi_common::abi::{Handle, HostEnv};
 use patches_ffi_common::port_frame::{pack_ports_into, PortFrame, PortLayout};
 use patches_core::registry::ModuleBuilder;
@@ -161,7 +161,7 @@ impl Module for DylibModule {
         // scratch-region cable_idx by BACKPLANE_SIZE into plugin-relative
         // space; cycle indices pass through (ticket 0870).
         pack_ports_into(0, inputs, outputs, BACKPLANE_SIZE, &mut self.port_frame)
-            .expect("DylibModule::set_ports: shape mismatch vs. prepared PortLayout");
+            .expect_invariant("DylibModule::set_ports: shape matches the prepared PortLayout");
         let bytes = self.port_frame.bytes();
         let status = unsafe {
             (self.vtable.set_ports)(

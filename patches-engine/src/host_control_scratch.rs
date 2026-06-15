@@ -34,7 +34,8 @@
 //! owned by the scratch struct, allocated once at activation.
 
 use patches_core::{
-    HostControlEvent, HostControlLaneKind, MAX_HOST_CONTROLS, MAX_HOST_CONTROL_BLOCK,
+    ExpectInvariant, HostControlEvent, HostControlLaneKind, MAX_HOST_CONTROLS,
+    MAX_HOST_CONTROL_BLOCK,
 };
 
 /// Hard cap on per-block host-control events. The event buffer is
@@ -323,7 +324,7 @@ impl HostControlScratch {
         // long; sample_idx < block_size <= MAX_HOST_CONTROL_BLOCK. The
         // slice has length MAX_HOST_CONTROLS by construction.
         let row = &self.frame_aos[s..s + MAX_HOST_CONTROLS];
-        Some(row.try_into().expect("MAX_HOST_CONTROLS row slice"))
+        Some(row.try_into().expect_invariant("row slice has length MAX_HOST_CONTROLS by construction"))
     }
 
     /// Per-lane last-smoothed snapshot (debug / test access). Equal to
